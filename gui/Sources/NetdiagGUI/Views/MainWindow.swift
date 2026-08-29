@@ -180,7 +180,7 @@ struct MainWindow: View {
             }
         case .live:     LiveView()
         case .activity: ActivityView()
-        case .trends:   HistoryView()
+        case .trends:   TrendsView()
         case .networks:
             // Keeps its own internal NavigationStack (Browse checks →
             // RunDetail) exactly as it was — see NetworksView's header.

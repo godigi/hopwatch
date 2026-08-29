@@ -29,24 +29,32 @@ struct LiveView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                purposeSubtitle
                 stateBanner
                 currentValues
                 let samples = samples
                 chart(title: "Router round-trip",
-                      subtitle: "Gateway ping, every cycle of the fast tier.",
+                      titleHelpKey: "router",
+                      subtitle: subtitle(catalogKey: "monitor_gateway_rtt",
+                                        fallback: Self.routerSubtitleFallback),
                       series: MonitorSeries.build(samples, tier: "fast") {
                           $0.gateway.rttAvgMs
                       },
                       absent: "No router round-trip has been measured in the last hour.",
                       unit: "ms")
                 chart(title: "Internet round-trip",
-                      subtitle: internetSubtitle,
+                      titleHelpKey: "internet",
+                      subtitle: subtitle(catalogKey: "monitor_internet_tcp",
+                                        fallback: Self.internetSubtitleFallback),
+                      caption: internetHostsCaption,
                       series: MonitorSeries.build(samples, tier: "medium",
                                                   value: Self.internetMs),
                       absent: "No internet round-trip has been measured in the last hour.",
                       unit: "ms")
                 chart(title: "Router packet loss",
-                      subtitle: "Share of the gateway ping's packets that got no reply.",
+                      titleHelpKey: "packet_loss",
+                      subtitle: subtitle(catalogKey: "monitor_gateway_loss",
+                                        fallback: Self.lossSubtitleFallback),
                       series: MonitorSeries.build(samples, tier: "fast") {
                           $0.gateway.lossPct
                       },
@@ -56,6 +64,19 @@ struct LiveView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: - Purpose
+
+    /// Wayfinding copy about this screen itself, not a claim about the CLI
+    /// — permanent, unlike everything below it that depends on state. See
+    /// `TrendsView.purposeSubtitle` for the same split applied to the
+    /// other tab.
+    private var purposeSubtitle: some View {
+        Text("What your connection is doing right now — small probes every few seconds, kept for an hour, never saved.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - State
@@ -92,7 +113,45 @@ struct LiveView: View {
             }
             .padding(12)
             .cardStyle()
+        } else {
+            connectedCard
         }
+    }
+
+    /// Monitoring on, not paused, not errored, not bursting — the state
+    /// this chart-only screen used to say nothing about at all. Reads
+    /// `coordinator.headline` and `coordinator.currentHealth` verbatim,
+    /// the exact path `HomeView`'s header and the dropdown's stage card
+    /// already read, so this card can never describe the moment
+    /// differently than either of them — no verdict is composed here.
+    /// The caption is the newest CLI-reported change this app has logged,
+    /// if any; it is not a claim that nothing has happened, only what the
+    /// event log knows about.
+    private var connectedCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(coordinator.currentHealth.tint)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(coordinator.headline)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let latest = coordinator.eventLog.events.first {
+                    HStack(spacing: 4) {
+                        Text(latest.summary)
+                        Text("·")
+                        RelativeTimeText(date: latest.date)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .cardStyle()
     }
 
     private func banner(_ title: String, _ detail: String,
@@ -172,27 +231,64 @@ struct LiveView: View {
         sample.tcp.targets.filter(\.ok).compactMap(\.elapsedMs).min()
     }
 
-    private var internetSubtitle: String {
+    /// "Currently: host1, host2" — which hosts the medium tier is actually
+    /// probing right now, separated out from the subtitle so the subtitle
+    /// itself can be catalog prose (a fixed sentence about the
+    /// *measurement*) rather than a sentence that has to be rebuilt around
+    /// live data. Same host-naming logic the old inline subtitle used:
+    /// named hosts when the latest sample has them, else the generic
+    /// "well-known hosts".
+    private var internetHostsCaption: String {
         let hosts = monitor.latest?.tcp.targets.compactMap(\.host) ?? []
         let named = hosts.isEmpty ? "well-known hosts" : hosts.joined(separator: ", ")
-        return "Time to open a TCP connection to \(named). Measured on the medium tier, so it is sparser than the router line."
+        return "Currently: \(named)"
+    }
+
+    // These three are what each subtitle read, verbatim, before the rules
+    // catalog carried this prose — kept as named fallback constants so an
+    // old CLI whose catalog doesn't yet have `monitor_gateway_rtt` /
+    // `monitor_internet_tcp` / `monitor_gateway_loss` still gets the exact
+    // sentence this screen has always shown, byte-for-byte. The internet
+    // one is the empty-hosts case of the old computed `internetSubtitle`
+    // (the caption above now owns the live host list; this fallback never
+    // names specific hosts, matching the catalog's own host-agnostic
+    // wording for the same key).
+    private static let routerSubtitleFallback = "Gateway ping, every cycle of the fast tier."
+    private static let internetSubtitleFallback =
+        "Time to open a TCP connection to well-known hosts. Measured on the medium tier, so it is sparser than the router line."
+    private static let lossSubtitleFallback = "Share of the gateway ping's packets that got no reply."
+
+    /// The catalog's own `help` text for a `monitor_*` glossary key,
+    /// verbatim, or the byte-for-byte fallback above when the catalog
+    /// hasn't loaded, predates schema `4`, or doesn't recognise the key.
+    private func subtitle(catalogKey: String, fallback: String) -> String {
+        guard let help = coordinator.rulesCatalog.catalog?.metric(catalogKey)?.help,
+              !help.isEmpty else { return fallback }
+        return help
     }
 
     // MARK: - Charts
 
     @ViewBuilder
-    private func chart(title: String, subtitle: String,
+    private func chart(title: String, titleHelpKey: String, subtitle: String,
+                       caption: String? = nil,
                        series: MonitorSeries.Result, absent: String,
                        unit: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.headline)
+                // Existing glossary keys only — see this file's header for
+                // why no new catalog entries were needed for these three.
+                HelpHint(key: titleHelpKey)
                 Text(sampleLabel(series.points.count)).font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
             }
             Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let caption {
+                Text(caption).font(.caption2).foregroundStyle(.tertiary)
+            }
 
             if series.isEmpty {
                 empty(absent)

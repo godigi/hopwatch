@@ -67,6 +67,14 @@ struct RulesCatalog: Decodable, Sendable {
         let key: String
         var label: String?
         var help: String?
+        /// Why this metric is typically absent from a run, in schema `4` —
+        /// e.g. "only measured by a full check". `nil` for the great
+        /// majority of metrics and for every metric against a CLI too old
+        /// to emit it. The GUI's own empty-state prose reads this verbatim
+        /// (per CLAUDE.md, a claim about *why the CLI* skipped something
+        /// belongs in the catalog, not authored in Swift) and supplies its
+        /// own "Full check" button alongside it.
+        var whyAbsent: String?
     }
 
     /// Rule lookup by id, built once when the catalog decodes rather than
@@ -113,7 +121,8 @@ extension RulesCatalog {
         let rawMetrics = c.lenient(.metrics, [RawMetric]())
         metrics = rawMetrics.compactMap { entry in
             guard let key = entry.key, !key.isEmpty else { return nil }
-            return Metric(key: key, label: entry.label, help: entry.help)
+            return Metric(key: key, label: entry.label, help: entry.help,
+                          whyAbsent: entry.whyAbsent)
         }
         metricsByKey = Dictionary(metrics.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -158,14 +167,22 @@ extension RulesCatalog {
         var key: String?
         var label: String?
         var help: String?
+        var whyAbsent: String?
 
-        enum CodingKeys: String, CodingKey { case key, label, help }
+        enum CodingKeys: String, CodingKey {
+            case key, label, help
+            case whyAbsent = "why_absent"
+        }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             key = c.lenient(.key)
             label = c.lenient(.label)
             help = c.lenient(.help)
+            // Absent on most metrics, and on every metric at all against a
+            // pre-schema-4 CLI. `lenient` already yields nil for a missing
+            // key, same as `Rule.also` above.
+            whyAbsent = c.lenient(.whyAbsent)
         }
     }
 }

@@ -67,6 +67,28 @@ struct HistoryDocument: Decodable, Sendable {
         enum CodingKeys: String, CodingKey { case median, p10, p90 }
     }
 
+    /// One network's verdict, from `--history` schema `2`'s `judged`
+    /// block: `helpers/judgement.py` judging the median of that network's
+    /// already-emitted `metric_stats`, mirroring `--summary` exactly. Not
+    /// computed here — CLAUDE.md's "the GUI holds no diagnostic logic"
+    /// means this type only carries the CLI's own conclusion.
+    ///
+    /// `metrics` carries the per-metric-key verdict, with a `null` value
+    /// for every metric this network has too few samples to judge — the
+    /// same `[String: T?]` shape, and the same "null means unjudged, not
+    /// healthy", that `Network.metricStats` already decodes. No view reads
+    /// the map today: Trends renders `overall` and `summary` verbatim, and
+    /// per-metric detail is a later task. It is decoded anyway rather than
+    /// declared and skipped, because a property that silently never
+    /// decodes is the exact bug `tests/test_gui_decoding.bats` exists for.
+    struct Judged: Decodable, Sendable {
+        var overall: String?
+        var summary: String?
+        var metrics: [String: String?]?
+
+        enum CodingKeys: String, CodingKey { case overall, summary, metrics }
+    }
+
     /// Label, unit and direction all come from the CLI. A chart needs to
     /// know whether up is good to colour a trend, and that is a property of
     /// the metric, not of the view.
@@ -116,9 +138,15 @@ struct HistoryDocument: Decodable, Sendable {
         /// is the one place this app reads it.
         var metricStats: [String: MetricStat?]?
         var severityCounts: [String: Int] = [:]
+        /// This network's verdict, from `--history` schema `2`'s `judged`
+        /// sibling of `metric_stats` — `nil` (never a decode failure)
+        /// against a CLI old enough to predate it, same nullability
+        /// discipline as `metricStats`. See `Judged`'s header for the
+        /// judging rule.
+        var judged: Judged?
 
         enum CodingKeys: String, CodingKey {
-            case id, label, synthesized, gateways, isps, ssids
+            case id, label, synthesized, gateways, isps, ssids, judged
             case bridgedFrom = "bridged_from"
             case firstSeen = "first_seen"
             case lastSeen = "last_seen"

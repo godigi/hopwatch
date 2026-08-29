@@ -1,7 +1,7 @@
 import Foundation
 
 /// Loads and holds `netdiag --history`, applies the user's renames and
-/// manual merges, and answers the questions HistoryView and NetworksView
+/// manual merges, and answers the questions TrendsView and NetworksView
 /// ask of it.
 ///
 /// The grouping itself is not decided here — helpers/history.py does that,
@@ -381,5 +381,42 @@ final class HistoryStore {
         let mid = values.count / 2
         return values.count.isMultiple(of: 2)
             ? (values[mid - 1] + values[mid]) / 2 : values[mid]
+    }
+
+    // MARK: - Stats and verdicts
+
+    /// The raw `--history` network groups a canonical id currently stands
+    /// for. Shared by `stat(metric:networkID:)` and `judged(networkID:)`,
+    /// which both need `computeMedian`'s single-raw-group rule above but
+    /// — unlike `median(metric:networkID:)` — have no local-computation
+    /// fallback to reach for when a merge or an old CLI leaves that rule
+    /// unmet: p10/p90 and a verdict are not something this app is allowed
+    /// to derive itself (CLAUDE.md: no diagnostic logic in the GUI), so
+    /// both methods below can only hand back what the CLI already computed
+    /// for exactly one group, or nothing.
+    private func singleRawGroup(for networkID: String) -> HistoryDocument.Network? {
+        let key = canonicalID(networkID)
+        let raw = document.networks.filter { canonicalID($0.id) == key }
+        return raw.count == 1 ? raw[0] : nil
+    }
+
+    /// This network's population summary for one metric, read straight
+    /// from the CLI's own `metric_stats` — see `singleRawGroup`'s header
+    /// for the single-raw-group rule and why there is no local fallback.
+    /// `nil` for a manually merged network, for a metric below the CLI's
+    /// sample floor, and against a CLI old enough to omit `metric_stats`
+    /// entirely — three different "no answer"s this method does not try to
+    /// tell apart, the same flattening `Network.stat(for:)` already does
+    /// for the single-group case.
+    func stat(metric: String, networkID: String) -> HistoryDocument.MetricStat? {
+        singleRawGroup(for: networkID)?.stat(for: metric)
+    }
+
+    /// This network's verdict, read straight from the CLI's `judged`
+    /// block — same single-raw-group rule and no-fallback reasoning as
+    /// `stat(metric:networkID:)`. `nil` for a manual merge, and against a
+    /// CLI old enough to predate `judged`.
+    func judged(networkID: String) -> HistoryDocument.Judged? {
+        singleRawGroup(for: networkID)?.judged
     }
 }

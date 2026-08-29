@@ -6,6 +6,80 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Live and Trends now say what they are, and Trends says what a network is usually like
+
+The app's two chart tabs were its most confusing corner, for novices and
+experts alike: neither said what it was for, both drew similar lines of
+similar-sounding metrics, and the difference that actually matters was
+never stated on screen. Live is the `--monitor` stream — small probes
+every few seconds, an hour deep, held in memory, never written down.
+Trends is the stored-run store — one point per saved check, per network,
+over weeks. Live's samples never reach Trends, and "internet" is a TCP
+connect in one and a ping in the other. Someone comparing the two
+numbers was comparing two different measurements and was told nothing.
+
+Both tabs now open with one plain line about themselves, and each grows
+a card that says something about the state it is actually in.
+
+- **Live gets a status line for the ordinary case.** The screen used to
+  say nothing at all while monitoring was simply running — the banner
+  only appeared when something was off. It now shows
+  `NetdiagCoordinator.headline` verbatim with the `currentHealth` dot,
+  captioned with the newest change the app has logged and how long ago.
+  That property is the one the menu-bar dropdown already reads, so this
+  card and the dropdown cannot describe the same moment differently; no
+  verdict is composed in Swift here. It also inherits headline's
+  existing honesty about a reading it doesn't have — a sample with no
+  measurement reads "Checking…", never all-clear.
+- **Trends gets the CLI's own verdict.** `judged.summary` from
+  `--history` schema `2`, rendered verbatim, tinted from
+  `judged.overall`, captioned "Judged by netdiag, not the app". Shown
+  only when the selected network maps onto exactly one raw `--history`
+  group: a manually merged network gets no card, because re-deriving a
+  verdict for a group the CLI never judged is precisely the diagnostic
+  logic CLAUDE.md forbids the GUI. "All networks" gets a wayfinding line
+  instead, and the network picker now defaults to the network you are on.
+- **A typical-range band behind the line.** p10–p90 from the same
+  `metric_stats` the CLI already emits, drawn as a neutral rectangle with
+  a dashed median rule, captioned "Shaded: this network's typical range,
+  from its saved checks." Same single-group rule as the verdict card, and
+  no percentile arithmetic in Swift — the app draws numbers the CLI
+  computed or draws nothing.
+- **The empty state stops being Swift-authored.** `HistoryView.hint(for:)`
+  — a Swift `switch` making claims about which check modes measure what,
+  the clearest violation of the no-prose rule in the app — is deleted.
+  The no-data panel now renders the catalog's `why_absent` verbatim and
+  supplies its own "Full check" button; with no catalog entry, or against
+  a CLI too old to carry one, the neutral sample-count sentence stands
+  alone.
+- **Live's chart subtitles come from the catalog too**
+  (`monitor_gateway_rtt`, `monitor_internet_tcp`, `monitor_gateway_loss`),
+  falling back byte-for-byte to the sentences the screen has always shown
+  when the running CLI doesn't have them. The live host list moved out of
+  the subtitle into a caption of its own — "Currently: …" — because a
+  sentence describing the measurement should not have to be rebuilt
+  around whichever hosts the last sample happened to probe.
+- **`HelpHint` popovers** beside every chart title on both tabs, using
+  glossary keys that already exist, so the help is there for a novice and
+  out of the way for everyone else.
+
+`Views/HistoryView.swift` is now `Views/TrendsView.swift`: it was named
+after the CLI command it reads rather than the tab it draws, which is why
+every discussion of the two views had to disambiguate the name first.
+
+`HistoryDocument.Judged.metrics` — the per-metric verdict map — is
+decoded even though no view reads it yet, rather than declared and
+skipped: a property that silently never decodes is the exact bug
+`tests/test_gui_decoding.bats` exists to catch, and `metric_stats` next
+to it already proves a `[String: T?]` dictionary decodes JSON nulls
+without a hand-written initialiser.
+
+Every addition gates on data being present. No new
+`CapabilityStore.Feature`, no new "your CLI is too old" path: against a
+netdiag that predates `judged` and `why_absent`, the verdict card and the
+band do not appear, popovers render nothing, empty states fall back to
+the count sentence, and Live reads exactly as it did before.
+
 ### Added — netdiag judges the record, not just the moment [AV-1, AV-2]
 
 The verdict layer over the event journal, and the half `helpers/events.py`

@@ -13,7 +13,7 @@ import Charts
 /// empty axis. An empty axis is indistinguishable from a flat line at
 /// zero — which, for a download-speed chart, reads as two months of a dead
 /// connection.
-struct HistoryView: View {
+struct TrendsView: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
 
     // Gateway RTT and incident count are the defaults because they are the
@@ -27,7 +27,11 @@ struct HistoryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controls
+            VStack(alignment: .leading, spacing: 8) {
+                controls
+                purposeSubtitle
+                verdictCard
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -38,7 +42,98 @@ struct HistoryView: View {
                 .padding(16)
             }
         }
-        .task { if store.document.runs.isEmpty { await store.load() } }
+        .task {
+            if store.document.runs.isEmpty { await store.load() }
+            // Default to the current network, once, on open — never
+            // overriding a choice the user makes afterward within this
+            // same view lifetime, since this only runs at first appear.
+            // Falls back to "All networks" (`networkID` stays `nil`) when
+            // there is no live sample yet or its network hasn't reached
+            // the store.
+            if networkID == nil, let current = defaultNetworkID { networkID = current }
+        }
+    }
+
+    // MARK: - Purpose
+
+    /// Wayfinding copy about this screen itself — permanent, not tied to
+    /// any state, per the redesign's split (CLAUDE.md: claims about *CLI*
+    /// behavior belong in the rules catalog; what this app's own view is
+    /// for is fine to say in Swift).
+    private var purposeSubtitle: some View {
+        Text("What this network is usually like — one point per saved check, over weeks. Live samples are not stored here.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+    }
+
+    /// The current network, canonicalized, for defaulting `networkID` when
+    /// the picker first appears — the same monitor→history join
+    /// `NetdiagCoordinator.wifiDisplayName` and `AlertEngine.networkChanged`
+    /// use (`historyJoinID`), passed through `canonicalID` so a manually
+    /// merged network resolves to the group the user actually merged it
+    /// into. `nil` before any monitor sample has landed, or when that
+    /// network hasn't appeared in the loaded store yet — both cases the
+    /// picker already handles by staying on "All networks".
+    private var defaultNetworkID: String? {
+        guard let raw = coordinator.monitor.latest?.network.historyJoinID else { return nil }
+        let canonical = store.canonicalID(raw)
+        return store.mergedNetworks.contains(where: { $0.id == canonical }) ? canonical : nil
+    }
+
+    // MARK: - Verdict
+
+    /// The CLI's own verdict for the selected network — `judged.summary`
+    /// verbatim, tinted from `judged.overall`. Shown only for a single
+    /// selected network that maps onto exactly one raw `--history` group
+    /// (`HistoryStore.judged(networkID:)` already encodes that rule); "All
+    /// networks" gets a plain wayfinding line instead, and a network with
+    /// no verdict (a manual merge, or an old CLI) gets neither — this app
+    /// does not compose a substitute verdict of its own.
+    @ViewBuilder
+    private var verdictCard: some View {
+        if let networkID {
+            if let judged = store.judged(networkID: networkID),
+               let summary = judged.summary, !summary.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(verdictHealth(judged.overall)?.tint ?? .secondary)
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(summary)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Judged by netdiag, not the app")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(12)
+                .cardStyle()
+                .padding(.horizontal, 12)
+            }
+        } else {
+            Text("Pick a network to see what it's usually like.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+        }
+    }
+
+    /// `judged.overall`'s three CLI-defined values, translated to a colour
+    /// — the same string-to-`Health` mapping `HistoryDocument.Run.health`
+    /// already does, not a judgement of this view's own. `nil` for the
+    /// insufficient-data case (`overall == nil`), which the caller renders
+    /// in a neutral tint rather than guessing a severity.
+    private func verdictHealth(_ overall: String?) -> Health? {
+        switch overall {
+        case "critical": return .critical
+        case "warn":     return .warning
+        case "ok":       return .healthy
+        default:         return nil
+        }
     }
 
     // MARK: - Controls
@@ -92,6 +187,12 @@ struct HistoryView: View {
         let descriptor = store.metric(metricKey)
         let points = store.series(metric: metricKey, networkID: networkID, window: window)
         let count = points.count
+        // Only for a single selected network — the same gate as
+        // `verdictCard` — and only when the CLI actually had enough
+        // samples to compute one (`stat` is `nil` below the sample floor,
+        // for a manual merge, and against an old CLI).
+        let stat = networkID.flatMap { store.stat(metric: metricKey, networkID: $0) }
+        let hasBand = stat?.p10 != nil && stat?.p90 != nil
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -99,6 +200,7 @@ struct HistoryView: View {
                 // (ms) · 2027 samples" — not on the sample count, where
                 // "(ms)" reads as the unit of "samples".
                 Text(chartTitle).font(.headline)
+                HelpHint(key: metricKey)
                 Text(sampleLabel(count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -113,64 +215,78 @@ struct HistoryView: View {
             if count == 0 {
                 noData(descriptor)
             } else {
-                Chart(points, id: \.0) { point in
-                    LineMark(x: .value("When", point.0),
-                             y: .value(descriptor?.label ?? "", point.1))
-                        .interpolationMethod(.monotone)
-                    // Points as well as a line: with 38 samples spread over
-                    // two months, a line alone implies a continuous
-                    // measurement that was never taken.
-                    PointMark(x: .value("When", point.0),
-                              y: .value(descriptor?.label ?? "", point.1))
-                        .symbolSize(count > 200 ? 4 : 18)
+                Chart {
+                    // Drawn first, so the line and points sit on top of it.
+                    if hasBand, let p10 = stat?.p10, let p90 = stat?.p90,
+                       let first = points.first?.0, let last = points.last?.0 {
+                        RectangleMark(xStart: .value("From", first), xEnd: .value("To", last),
+                                     yStart: .value("Typical low", p10),
+                                     yEnd: .value("Typical high", p90))
+                            .foregroundStyle(.quaternary.opacity(0.5))
+                        if let median = stat?.median {
+                            RuleMark(y: .value("Typical median", median))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    ForEach(points, id: \.0) { point in
+                        LineMark(x: .value("When", point.0),
+                                 y: .value(descriptor?.label ?? "", point.1))
+                            .interpolationMethod(.monotone)
+                        // Points as well as a line: with 38 samples spread
+                        // over two months, a line alone implies a
+                        // continuous measurement that was never taken.
+                        PointMark(x: .value("When", point.0),
+                                  y: .value(descriptor?.label ?? "", point.1))
+                            .symbolSize(count > 200 ? 4 : 18)
+                    }
                 }
                 .chartYAxis { AxisMarks(position: .leading) }
                 .frame(height: 220)
+
+                if hasBand {
+                    Text("Shaded: this network's typical range, from its saved checks.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
     }
 
     /// The explicit empty state. Says which metric has no data, in this
-    /// window, and — where it is knowable — why.
+    /// window, and — where the catalog can say why — hands off to its
+    /// `why_absent` prose verbatim rather than composing a claim about CLI
+    /// behavior itself (CLAUDE.md). No catalog entry, or an old CLI whose
+    /// catalog doesn't carry one at all, leaves the neutral count sentence
+    /// standing alone.
     private func noData(_ descriptor: HistoryDocument.MetricDescriptor?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let whyAbsent = descriptor.flatMap { coordinator.rulesCatalog.catalog?.metric($0.key)?.whyAbsent }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        return VStack(alignment: .leading, spacing: 6) {
             Label("No data for this metric in this window",
                   systemImage: "chart.line.downtrend.xyaxis")
                 .font(.callout)
             if let descriptor {
                 Text(descriptor.samples == 0
-                     ? "No run in your history has ever recorded \(descriptor.label.lowercased()). \(hint(for: descriptor.key))"
+                     ? "No run in your history has ever recorded \(descriptor.label.lowercased())."
                      : "\(descriptor.samples) run\(descriptor.samples == 1 ? "" : "s") elsewhere in your history recorded it — try a longer window or a different network.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if descriptor.samples == 0, let whyAbsent {
+                    Text(whyAbsent)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Full check") { coordinator.runFullCheck() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
         .padding(14)
         .cardStyle()
-    }
-
-    /// Why a metric is empty is usually a fact about how netdiag is being
-    /// run, and saying so turns a dead chart into an instruction. Since a
-    /// full check became reachable from Home and the menu bar, the
-    /// instruction is a button rather than a terminal — except for RSSI,
-    /// which still genuinely needs a privileged run.
-    private func hint(for key: String) -> String {
-        switch key {
-        case "speed_down_mbps", "speed_up_mbps":
-            return "Speed is only measured by a full check. Press \"Full check\" on Home, or join a new network — netdiag runs one automatically the first time."
-        case "wifi_rssi_dbm", "wifi_snr_db":
-            return "Signal strength needs sudo: run `sudo netdiag` in a terminal to record it."
-        case "bufferbloat_gw_ms", "bufferbloat_inet_ms":
-            return "Latency under load is only measured by a full check, and is skipped entirely while a connection is already failing."
-        case "mtu_effective":
-            return "Path MTU is only measured by a full check — the quick check and the background watcher both skip it."
-        case "inet_rtt_ms", "inet_loss_pct":
-            return "The internet loss probe is skipped by the quick check that the background watcher runs."
-        default:
-            return "It may be skipped by the check mode you normally run."
-        }
     }
 
     private var chartTitle: String {
