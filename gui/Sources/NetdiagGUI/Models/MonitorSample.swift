@@ -404,12 +404,22 @@ extension MonitorSample.Status {
 /// that matters.
 enum Health: Sendable {
     case healthy, warning, critical
+    /// Nobody is watching — monitoring is switched off or held. Distinct
+    /// from `.healthy` on purpose: the dot's job is to answer "is my
+    /// connection OK", and the honest answer while paused is "I don't
+    /// know", not the last answer from before we stopped looking.
+    /// `MonitorStream.stop()` deliberately keeps its final sample (the
+    /// dropdown still shows those readings, correctly labelled as stale),
+    /// so without this case `currentHealth` fell through to it and left a
+    /// green dot in the menu bar over a "Monitoring paused" card.
+    case paused
 
     var symbol: String {
         switch self {
         case .healthy:  return "circle.fill"
         case .warning:  return "exclamationmark.circle.fill"
         case .critical: return "xmark.circle.fill"
+        case .paused:   return "pause.circle.fill"
         }
     }
 
@@ -420,6 +430,7 @@ enum Health: Sendable {
         case .healthy:  return "Network healthy"
         case .warning:  return "Network warning"
         case .critical: return "Network problem"
+        case .paused:   return "Monitoring paused"
         }
     }
 }

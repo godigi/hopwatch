@@ -97,8 +97,8 @@ final class NetdiagCoordinator {
         alerts.inNetworkGracePeriod = { [weak events] in
             events?.withinGracePeriod() ?? false
         }
-        alerts.onAlertFired = { [weak self] def in
-            self?.handleAlertFired(def)
+        alerts.onAlertFired = { [weak self] def, firingRules in
+            self?.handleAlertFired(def, firingRules: firingRules)
         }
         monitor.onSample = { [weak self] sample in
             self?.handleSample(sample)
@@ -502,12 +502,19 @@ final class NetdiagCoordinator {
     /// An alert fired. Run a scan so the notification can be replaced with
     /// the CLI's own explanation — that in-place update is the entire point
     /// of the trigger.
-    private func handleAlertFired(_ def: AlertDefinition) {
+    private func handleAlertFired(_ def: AlertDefinition, firingRules: Set<String>) {
         // Recorded regardless of scanOnAlert: the timeline's job is to
-        // show every alert that fired, not just the ones the auto-scan
-        // preference happened to act on.
+        // show every *live* alert that fired, not just the ones the
+        // auto-scan preference happened to act on. (Scan-only alerts never
+        // reach here — see the `!def.scanOnly` guard in `AlertEngine.step`
+        // — so the five of those are absent from the timeline by design.)
+        //
+        // `firingRules.sorted().first`, never `def.rules.first`: the latter
+        // reads an arbitrary element of an unordered Set of everything the
+        // alert *listens* for, which is why one L2 condition was logged as
+        // "rule=L1" and the next identical one as "rule=L2".
         eventLog.record(kind: "alert", summary: def.title,
-                        ruleID: def.rules.first)
+                        ruleID: firingRules.sorted().first)
         guard Defaults.scanOnAlert else { return }
         // Loop guard, two clauses. A scan started by an alert never starts
         // another, and no scan starts while one is running. Between them
@@ -671,11 +678,17 @@ final class NetdiagCoordinator {
         return nil
     }
 
+    /// The menu-bar dot. Thin wrapper over `HealthResolver.resolve` — see
+    /// that file for the precedence and for why a paused app no longer
+    /// reports the last reading from before it stopped looking.
     var currentHealth: Health {
-        if Defaults.monitoringEnabled && !monitor.isRunning { return .warning }
-        if let sample = monitor.latest { return sample.health }
-        if let run = latestRun { return run.snapshot.worstSeverity }
-        return .warning
+        HealthResolver.resolve(.init(
+            isScanning: isScanning,
+            monitoringEnabled: Defaults.monitoringEnabled,
+            isPausedForAnyReason: monitor.isPausedForAnyReason,
+            monitorRunning: monitor.isRunning,
+            sampleHealth: monitor.latest?.health,
+            runHealth: latestRun?.snapshot.worstSeverity))
     }
 
     /// The CLI's severity for one rule ID, ranked so the worst of a set can

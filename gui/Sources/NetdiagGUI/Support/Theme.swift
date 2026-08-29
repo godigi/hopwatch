@@ -116,6 +116,7 @@ extension Health {
         case .healthy:  return .green
         case .warning:  return .yellow
         case .critical: return .red
+        case .paused:   return .secondary
         }
     }
 
@@ -127,6 +128,11 @@ extension Health {
         case .healthy:  return .systemGreen
         case .warning:  return .systemYellow
         case .critical: return .systemRed
+        // Not a status colour: a paused dot is furniture, and colouring it
+        // would put it back in the same visual family as the three that do
+        // mean something. `secondaryLabelColor` reads as "off" in both
+        // light and dark menu bars.
+        case .paused:   return .secondaryLabelColor
         }
     }
 }

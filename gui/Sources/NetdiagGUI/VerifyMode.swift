@@ -62,6 +62,8 @@ private enum VerifyHarness {
         // policy consistent and run the checks.
         NSApp?.setActivationPolicy(.accessory)
         runStageTests()
+        runHealthResolverTests()
+        runAlertAttributionTests()
         runFullCheckPolicyTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
@@ -73,6 +75,82 @@ private enum VerifyHarness {
             print("\(failures.count) check(s) failed: \(failures.joined(separator: ", "))")
         }
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    // MARK: - Menu-bar dot
+
+    /// The dot is the app's single most consequential claim — one glyph
+    /// asserting "your connection is fine" — and until `HealthResolver`
+    /// existed it was unreachable from any check. The first case below is
+    /// the regression that motivated it.
+    static func runHealthResolverTests() {
+        print("HealthResolver (menu-bar dot)")
+        func at(_ h: HealthResolver.Inputs) -> Health { HealthResolver.resolve(h) }
+        func inputs(isScanning: Bool = false, monitoringEnabled: Bool = true,
+                    isPausedForAnyReason: Bool = false, monitorRunning: Bool = true,
+                    sampleHealth: Health? = .healthy,
+                    runHealth: Health? = nil) -> HealthResolver.Inputs {
+            .init(isScanning: isScanning, monitoringEnabled: monitoringEnabled,
+                  isPausedForAnyReason: isPausedForAnyReason,
+                  monitorRunning: monitorRunning,
+                  sampleHealth: sampleHealth, runHealth: runHealth)
+        }
+
+        // `MonitorStream.stop()` keeps its final sample on purpose, so
+        // "monitoring off" used to fall straight through to it and leave a
+        // green dot over a "Monitoring paused" card, indefinitely.
+        equal(at(inputs(monitoringEnabled: false, monitorRunning: false)), .paused,
+              "monitoring switched off → paused, not the stale sample's green")
+        equal(at(inputs(isPausedForAnyReason: true)), .paused,
+              "held by display sleep / battery → paused")
+        equal(at(inputs(isScanning: true, isPausedForAnyReason: true,
+                        sampleHealth: .critical)), .critical,
+              "scanning holds the last reading rather than greying out")
+        equal(at(inputs(monitorRunning: false)), .warning,
+              "supposed to be monitoring but the child is dead → warning")
+        equal(at(inputs(sampleHealth: .critical)), .critical,
+              "a live sample's own severity wins")
+        equal(at(inputs(sampleHealth: nil, runHealth: .warning)), .warning,
+              "no sample yet → the newest run's severity")
+        equal(at(inputs(sampleHealth: nil, runHealth: nil)), .warning,
+              "nothing measured at all → warning, never green")
+        check(Health.paused.symbol != Health.healthy.symbol,
+              "paused is distinguishable from healthy without colour")
+        print("")
+    }
+
+    // MARK: - Alert attribution
+
+    /// An alert stores the rules that *fired*, not the whole set it listens
+    /// for. Getting this wrong is invisible in the UI right up until it
+    /// isn't: `internet-degraded` listens for L1 (critical) and L2 (warn),
+    /// so storing the listen-set made every moderate-loss episode rank and
+    /// read as a severe one.
+    static func runAlertAttributionTests() {
+        print("Alert attribution")
+        guard let degraded = AlertDefinition.byID("internet-degraded") else {
+            check(false, "internet-degraded definition exists"); return
+        }
+        check(degraded.rules.isSuperset(of: ["L1", "L2"]),
+              "internet-degraded listens for both L1 and L2")
+
+        // What `AlertEngine.evaluate(sample:)` now computes.
+        let firing = degraded.rules.intersection(Set(["L2"]))
+        equal(firing, ["L2"], "an L2-only sample fires L2, not the listen-set")
+        equal(firing.sorted().first, "L2",
+              "the timeline records the rule that fired, not Set.first of the listen-set")
+
+        let snapshot = StageResolver.AlertSnapshot(
+            title: degraded.title, body: "", raisedAt: Date(), rules: firing,
+            severityRank: NetdiagCoordinator.severityRank("warn"))
+        equal(snapshot.severityRank, 2, "an L2-only alert ranks warn, not critical")
+
+        // The duplicate the dropdown's timeline now filters: the event an
+        // alert writes carries the alert's own title verbatim, which is
+        // also what the stage card renders.
+        equal(degraded.title, snapshot.title,
+              "the alert event's summary is the very string the stage card shows")
+        print("")
     }
 
     // MARK: - Tiny assert helpers (no XCTest available at runtime on CLT)
@@ -443,10 +521,14 @@ private enum VerifyHarness {
                         tertiary: critical ? "Confirming before notifying you…" : "Will alert if this keeps up.")
                     .background((critical ? Color.red : Color.orange).opacity(0.08),
                                 in: RoundedRectangle(cornerRadius: 10))
-            case .alerted:
-                content(icon: "exclamationmark.triangle.fill", tint: .red,
-                        title: "No internet connection", tertiary: "rule P1 · 3m ago")
-                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .alerted(let alert):
+                // Never a stand-in: the alerted card is the one whose
+                // colour was wrong, so this arm defers to the real view
+                // rather than keeping a second copy of it that could
+                // agree with the bug. (`runSnapshots` renders these
+                // directly, once per severity — this arm exists so the
+                // switch stays exhaustive and honest.)
+                AlertStageCard(alert: alert)
             case .testing:
                 content(icon: "circle.dashed", tint: .accentColor,
                         title: "Checking…", tertiary: "pinging the gateway")
@@ -506,15 +588,46 @@ private enum VerifyHarness {
             ("healthy",           .healthy,                                  "Watching for changes."),
             ("watching-warn",     .watching(severity: .warn),                "You're losing a few packets to your router."),
             ("watching-critical", .watching(severity: .critical),            "Your Mac has no internet connection at all."),
-            ("alerted",           .alerted(.init(title: "No internet connection",
-                                                  body: "Checking what happened…",
-                                                  raisedAt: Date(), rules: ["P1"])),
-                                                                     "Checking what happened…"),
+            // `.alerted` is deliberately absent: it is rendered above from
+            // the real `AlertStageCard`, once per severity band.
             ("paused",            .paused("display sleeping"),               "Monitoring is off while the display sleeps."),
             ("skewed",            .skewed("netdiag CLI is too old"),         "The bundled netdiag is older than this app expects."),
             ("testing",           .testing,                                  "Running a full check…"),
             ("checking",          .checking,                                 "Waiting for a live reading…"),
         ]
+        // The alerted stage is rendered from `AlertStageCard` — the real
+        // view the dropdown and Activity both use — rather than from the
+        // stand-in below, and once per severity band. The stand-in only
+        // ever drew the critical case, which is exactly how every alert
+        // wearing critical-red survived unnoticed: a warn-severity BL-1
+        // and a rule-less "public IP changed" looked identical to a dead
+        // connection, while the lower-priority `.watching` card rendered
+        // the same warn condition in amber two lines up.
+        let alertCases: [(String, StageResolver.AlertSnapshot)] = [
+            ("alert-critical", .init(title: "No internet connection",
+                                     body: "Checking what happened…",
+                                     raisedAt: Date(), rules: ["P1"], severityRank: 3)),
+            ("alert-warn",     .init(title: "Slower than usual",
+                                     body: "Download is well below this network's usual range.",
+                                     raisedAt: Date(), rules: ["BL-1"], severityRank: 2)),
+            ("alert-info",     .init(title: "Your public IP address changed",
+                                     body: "", raisedAt: Date(), rules: [], severityRank: 0)),
+            ("alert-unranked", .init(title: "Connection is unstable",
+                                     body: "Checking whether it's your Wi-Fi or your router…",
+                                     raisedAt: Date(), rules: ["G2"], severityRank: 0)),
+        ]
+        for (name, alert) in alertCases {
+            guard let image = renderImage(
+                AlertStageCard(alert: alert, moreCount: 0, onOpen: {})
+                    .frame(width: 340).padding(4),
+                size: NSSize(width: 348, height: 88)) else {
+                print("  \u{2718} \(name) — could not allocate bitmap representation")
+                failures.append("render-\(name)")
+                continue
+            }
+            writePNG(image, to: "\(dir)/stage-\(name).png", name: name)
+        }
+
         for (name, stage, body) in cases {
             guard let image = renderImage(StageCardSnapshot(stage: stage, bodyText: body),
                                           size: NSSize(width: 340, height: 80)) else {
@@ -522,21 +635,25 @@ private enum VerifyHarness {
                 failures.append("render-\(name)")
                 continue
             }
-            let url = URL(fileURLWithPath: "\(dir)/stage-\(name).png")
-            do {
-                if let tiff = image.tiffRepresentation,
-                   let rep = NSBitmapImageRep(data: tiff),
-                   let png = rep.representation(using: .png, properties: [:]) {
-                    try png.write(to: url)
-                    print("  \u{2714} wrote \(url.path)")
-                } else {
-                    print("  \u{2718} \(name) — could not produce PNG bytes")
-                    failures.append("render-\(name)")
-                }
-            } catch {
-                print("  \u{2718} \(name) — \(error.localizedDescription)")
+            writePNG(image, to: "\(dir)/stage-\(name).png", name: name)
+        }
+    }
+
+    private static func writePNG(_ image: NSImage, to path: String, name: String) {
+        let url = URL(fileURLWithPath: path)
+        do {
+            if let tiff = image.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try png.write(to: url)
+                print("  \u{2714} wrote \(url.path)")
+            } else {
+                print("  \u{2718} \(name) — could not produce PNG bytes")
                 failures.append("render-\(name)")
             }
+        } catch {
+            print("  \u{2718} \(name) — \(error.localizedDescription)")
+            failures.append("render-\(name)")
         }
     }
 }

@@ -48,10 +48,23 @@ enum StageResolver {
         let title: String
         let body: String
         let raisedAt: Date
+        /// The rules that actually fired — see `AlertEngine.ActiveAlert.rules`.
         let rules: Set<String>
-        init(title: String, body: String, raisedAt: Date, rules: Set<String>) {
+        /// The CLI catalog's severity for the worst of `rules`, ranked by
+        /// `NetdiagCoordinator.severityRank` (3 critical / 2 warn / 1 info,
+        /// 0 = unrankable). Carried on the snapshot because the card's whole
+        /// visual weight now depends on it: before this existed, `alertStage`
+        /// hardcoded critical-red for all twelve alerts, so a warn-severity
+        /// BL-1 ("Slower than usual") and a rule-less "Your public IP address
+        /// changed" wore the same treatment as a dead connection — while the
+        /// *lower*-priority `.watching` card two lines up correctly rendered
+        /// the identical warn condition in amber.
+        let severityRank: Int
+        init(title: String, body: String, raisedAt: Date, rules: Set<String>,
+             severityRank: Int = 0) {
             self.title = title; self.body = body
             self.raisedAt = raisedAt; self.rules = rules
+            self.severityRank = severityRank
         }
     }
 

@@ -16,6 +16,7 @@ struct ActivityView: View {
             heading
             Divider()
             List {
+                activeSection
                 if days.isEmpty {
                     emptyState
                 } else {
@@ -39,6 +40,38 @@ struct ActivityView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(12)
+    }
+
+    // MARK: - Active now
+
+    /// What is firing *right now*, above the history.
+    ///
+    /// This view previously rendered `eventLog` and nothing else, while
+    /// `MainWindow` badged its sidebar row with `alerts.activeSorted.count`
+    /// and the dropdown's alert card offered "See full report (+2)" pointing
+    /// here — a badge counting something the screen never showed, and a
+    /// button promising two more findings at a destination that listed
+    /// neither. An `alert` event does appear in the history below once an
+    /// alert fires, but that is a record of a past moment; it says nothing
+    /// about whether the condition still holds now.
+    ///
+    /// Reuses `AlertStageCard`, the dropdown's own card, so an alert reads
+    /// identically wherever it appears — including its severity colour.
+    @ViewBuilder
+    private var activeSection: some View {
+        let active = coordinator.alerts.activeSorted
+        if !active.isEmpty {
+            Section("Active now") {
+                ForEach(active) { alert in
+                    AlertStageCard(alert: .init(
+                        title: alert.title, body: alert.body,
+                        raisedAt: alert.raisedAt, rules: alert.rules,
+                        severityRank: alert.rules
+                            .map(coordinator.severityRank(forRuleID:)).max() ?? 0))
+                    .listRowSeparator(.hidden)
+                }
+            }
+        }
     }
 
     // MARK: - Empty state
