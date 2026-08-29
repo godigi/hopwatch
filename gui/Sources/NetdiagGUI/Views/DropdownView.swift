@@ -81,8 +81,15 @@ struct DropdownView: View {
             lastError: coordinator.monitor.lastError,
             monitorRunning: coordinator.monitor.isRunning,
             activeAlert: coordinator.alerts.activeSorted.first.map {
-                StageResolver.AlertSnapshot(title: $0.title, body: $0.body,
-                                            raisedAt: $0.raisedAt, rules: $0.rules)
+                StageResolver.AlertSnapshot(
+                    title: $0.title, body: $0.body,
+                    raisedAt: $0.raisedAt, rules: $0.rules,
+                    // Worst of the rules that actually fired, ranked by the
+                    // CLI's own catalog — the same call `activeSorted` uses
+                    // to order alerts, so the card's colour and the choice
+                    // of *which* alert to show can't disagree.
+                    severityRank: $0.rules
+                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0)
             },
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
             linkUp: coordinator.monitor.latest?.link.up ?? true,
@@ -220,53 +227,10 @@ struct DropdownView: View {
     }
 
     private func alertStage(_ alert: StageResolver.AlertSnapshot) -> some View {
-        // Folded into the CTA's own label rather than a second caption
-        // beside it — one more active alert is a fact about *this*
-        // button's destination (the full report lists all of them), not a
-        // second thing on the stage competing for the same attention the
-        // worst alert already has.
-        let moreCount = max(coordinator.alerts.activeSorted.count - 1, 0)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                Text(alert.title)
-                    .font(.callout).fontWeight(.semibold)
-                    .lineLimit(2)
-            }
-            // CLI prose verbatim — the interim body until a scan
-            // enriches it, then diagnosis[].summary.
-            Text(alert.body)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text(attributionText(for: alert))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                Button(moreCount > 0 ? "See full report (+\(moreCount))" : "See full report") {
-                    openActivity()
-                }
-                .buttonStyle(.link)
-                .font(.caption)
-            }
-        }
-        .padding(Theme.Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
-    }
-
-    /// "rule G2 · 3m ago" — the attribution line the spec calls for. Omits
-    /// the rule segment cleanly for the four event-driven alerts (VPN
-    /// dropped, public IP changed, ...) that carry no rule at all, rather
-    /// than printing "rule  · 3m ago".
-    private func attributionText(for alert: StageResolver.AlertSnapshot) -> String {
-        guard let rule = alert.rules.sorted().first else {
-            return RelativeTime.string(from: alert.raisedAt)
-        }
-        return "rule \(rule) · \(RelativeTime.string(from: alert.raisedAt))"
+        AlertStageCard(
+            alert: alert,
+            moreCount: max(coordinator.alerts.activeSorted.count - 1, 0),
+            onOpen: openActivity)
     }
 
     private var testingStage: some View {
@@ -560,7 +524,7 @@ struct DropdownView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
             }
-            let recent = Array(coordinator.eventLog.within(hours: 24).prefix(3))
+            let recent = Array(timelineEvents.prefix(3))
             if recent.isEmpty {
                 Text("No changes in the last 24 hours")
                     .font(.caption)
@@ -571,6 +535,30 @@ struct DropdownView: View {
                 ForEach(recent) { EventRow(event: $0) }
             }
         }
+    }
+
+    /// The last 24 hours, minus whatever the stage card directly above is
+    /// already saying.
+    ///
+    /// `AlertEngine` firing writes an `alert` event whose summary is the
+    /// alert's own title (`NetdiagCoordinator.handleAlertFired`), and the
+    /// stage card renders that same title. Unfiltered, one incident
+    /// therefore printed twice on one 360pt panel — "Internet connection
+    /// degraded" as a red card, and "Internet connection degraded" again as
+    /// a red timeline row 150pt below, carrying a *different* timestamp
+    /// (the event is stamped when the dwell elapses, the card counts from
+    /// `raisedAt`). Two areas, two ages, one problem.
+    ///
+    /// Only the exact echo is dropped, and only from this three-row teaser:
+    /// the `rule-fired` row beneath it is the CLI's own words for what
+    /// fired ("Moderate internet packet loss") and says something the
+    /// category label does not, and Activity still lists every event
+    /// including this one. Nothing is deleted — this is a rendering rule,
+    /// not a change to what gets recorded.
+    private var timelineEvents: [NetworkEvent] {
+        let events = coordinator.eventLog.within(hours: 24)
+        guard case .alerted(let alert) = stage else { return events }
+        return events.filter { !($0.kind == "alert" && $0.summary == alert.title) }
     }
 
     // MARK: - The one CTA

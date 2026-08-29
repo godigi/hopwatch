@@ -6,6 +6,69 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — the menu says one thing once, and means it [GUI]
+
+Four ways the dropdown misrepresented what the CLI had actually decided.
+The prompt was a user's observation that "in the menu, we can have two
+alert areas"; the audit that followed found the duplicate plus three
+neighbours, all in the same seam — the app had no idea *which* rule inside
+an alert had fired, so everything downstream that asked "how bad is this?"
+got the wrong answer.
+
+- **An alert stored the rules it listens for, not the ones that fired.**
+  `AlertEngine.ActiveAlert.rules` was assigned `def.rules` — its own
+  doc comment already said "the exact set that fired", so this was a bug
+  against stated intent, not a design choice. `internet-degraded` listens
+  for `L1` (critical) and `L2` (warn), so a moderate-loss episode was
+  ranked critical by `activeSorted`, attributed to "rule L1" on the card,
+  and written to the event log as whichever of the two `Set.first`
+  happened to yield — recorded as `L1` on 2026-08-29 01:52 and `L2` on a
+  later identical run. `evaluate(sample:)` and `evaluate(run:)` now pass
+  the intersection with the CLI's reported rules, and `onAlertFired`
+  carries it through to the timeline entry.
+- **Every alert wore critical-red.** `alertStage` hardcoded
+  `exclamationmark.triangle.fill` in red for all twelve, so warn-severity
+  `BL-1` ("Slower than usual"), `DH-1` and `NAT-1` — and the rule-less
+  "Your public IP address changed" — looked exactly like a dead
+  connection, while the *lower*-priority `.watching` card two lines up
+  correctly rendered the same warn condition in amber. The card now tints
+  from the catalog's severity for the firing rule: red at critical, amber
+  at warn, blue at info and for the four event-driven alerts that carry no
+  rule by construction. A rule-backed alert that cannot be ranked — the
+  catalog still loading, or a rule this build has never heard of — keeps
+  red, because there rank 0 means "unknown", not "harmless".
+- **One incident printed twice on one 360pt panel.** Firing writes an
+  event whose summary is the alert's own title, and the stage card renders
+  that same title, with a different timestamp — the card counts from
+  `raisedAt`, the event is stamped when the dwell elapses. The dropdown's
+  three-row teaser now drops the exact echo of the alert already on the
+  stage. Only that row, and only in the teaser: the `rule-fired` row below
+  it is the CLI's own words for what fired ("Moderate internet packet
+  loss") and says something the category label does not, and Activity
+  still lists every event. Nothing is deleted; this is a rendering rule.
+- **"See full report (+2)" led to a view with neither.** It opened
+  Activity, which rendered `eventLog` and nothing else — while
+  `MainWindow` badged that same row with `alerts.activeSorted.count`.
+  Activity grows an "Active now" section listing what is firing, so the
+  badge counts something visible and the button's "+2" lands where those
+  two are; the label is now "See all alerts". It also sat beside an
+  "Activity" button calling the identical `openActivity()`.
+- **A green dot over "Monitoring paused".** `currentHealth` fell through
+  to `monitor.latest`, and `MonitorStream.stop()` keeps its final sample
+  on purpose, so switching monitoring off left the last pre-pause reading
+  asserting a healthy network indefinitely. `Health` gains a `.paused`
+  case (grey `pause.circle.fill`, distinguishable from healthy without
+  colour) and the decision moves into `HealthResolver` — a pure function
+  mirroring `StageResolver`, with the same precedence so the dot and the
+  card cannot disagree. Scanning deliberately holds the last reading
+  rather than greying out: a scan is the app looking harder, not away.
+
+The alert card is now one view, `AlertStageCard`, shared by the dropdown
+and Activity. `--verify` renders *it* once per severity band instead of
+the hand-written stand-in that only ever drew the critical case — which is
+exactly how the uniform red survived — and gains 13 asserts across
+`HealthResolver` and alert attribution.
+
 ### Added — netdiag judges the record, not just the moment [AV-1, AV-2]
 
 The verdict layer over the event journal, and the half `helpers/events.py`

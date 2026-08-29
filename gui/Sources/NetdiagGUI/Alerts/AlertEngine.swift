@@ -30,11 +30,19 @@ final class AlertEngine {
         /// Set once a triggered scan lands and replaces the holding text
         /// with the CLI's own prose.
         var enrichedByScan: Bool = false
-        /// The rule IDs from `AlertDefinition.rules` that back this alert —
-        /// empty for the four event-driven alerts (VPN dropped, public IP
-        /// changed, ...) that have no rule at all. Carried here rather than
-        /// looked up again at render time so the dropdown's attribution
-        /// line and `activeSorted`'s ranking read the exact set that fired.
+        /// The rule IDs that **actually fired**, not the whole set this
+        /// alert listens for — empty for the four event-driven alerts (VPN
+        /// dropped, public IP changed, ...) that have no rule at all.
+        ///
+        /// The distinction is load-bearing and used to be wrong: this was
+        /// assigned `def.rules`, so `internet-degraded` (which listens for
+        /// L1 *and* L2) always reported L1. That made the attribution line
+        /// name a critical rule for a warn condition, made `activeSorted`
+        /// rank every such alert critical, and — via `def.rules.first` on
+        /// an unordered Set — recorded the same alert in the event log as
+        /// L1 on one run and L2 on the next. Everything downstream that
+        /// asks "how bad is this?" reads these IDs, so they have to be the
+        /// ones the CLI actually reported.
         var rules: Set<String> = []
     }
 
@@ -58,7 +66,10 @@ final class AlertEngine {
 
     /// Raised when an alert fires and the user has auto-scan on. The app
     /// wires this to NetdiagRunner; the loop guard lives there.
-    var onAlertFired: ((AlertDefinition) -> Void)?
+    /// Carries the *firing* rule IDs alongside the definition, so the
+    /// timeline entry the app writes names the rule the CLI reported rather
+    /// than an arbitrary member of the listen-set. See `ActiveAlert.rules`.
+    var onAlertFired: ((AlertDefinition, Set<String>) -> Void)?
 
     private var conditionSince: [String: Date] = [:]
     private var lastNotifiedAt: [String: Date] = [:]
@@ -120,9 +131,11 @@ final class AlertEngine {
         let now = Date()
         let networkKey = sample.network.id ?? "unknown"
 
+        let firing = Set(sample.status.rules)
         for def in AlertDefinition.liveAlerts {
             let holds = conditionHolds(def, sample: sample, previous: previousSample)
-            step(def, holds: holds, now: now, networkKey: networkKey, sample: sample)
+            step(def, holds: holds, now: now, networkKey: networkKey, sample: sample,
+                 firingRules: def.rules.intersection(firing))
         }
     }
 
@@ -175,7 +188,8 @@ final class AlertEngine {
         for def in AlertDefinition.scanAlerts {
             step(def, holds: !def.rules.isDisjoint(with: firedRules),
                  now: now, networkKey: networkKey, sample: nil,
-                 bodyOverride: bestSummary(for: def, in: run))
+                 bodyOverride: bestSummary(for: def, in: run),
+                 firingRules: def.rules.intersection(firedRules))
         }
 
         // The point of the alert-triggered scan: "Connection is unstable"
@@ -209,9 +223,13 @@ final class AlertEngine {
 
     // MARK: - The state machine
 
+    /// `firingRules` is the subset of `def.rules` the CLI reported on this
+    /// observation. Empty is legitimate — the four event-driven alerts have
+    /// no rules at all — and is distinct from "we didn't look".
     private func step(_ def: AlertDefinition, holds: Bool, now: Date,
                       networkKey: String, sample: MonitorSample?,
-                      bodyOverride: String? = nil) {
+                      bodyOverride: String? = nil,
+                      firingRules: Set<String> = []) {
         guard holds else {
             conditionSince.removeValue(forKey: def.id)
             if def.resolves, let alert = active.removeValue(forKey: def.id) {
@@ -269,14 +287,14 @@ final class AlertEngine {
             // dropdown shows it, but do not interrupt again.
             active[def.id] = ActiveAlert(id: def.id, title: def.title,
                                          body: bodyOverride ?? def.interimBody, raisedAt: now,
-                                         rules: def.rules)
+                                         rules: firingRules)
             return
         }
 
         let body = bodyOverride ?? def.interimBody
         active[def.id] = ActiveAlert(id: def.id, title: def.title, body: body,
                                      raisedAt: now, enrichedByScan: bodyOverride != nil,
-                                     rules: def.rules)
+                                     rules: firingRules)
         lastNotifiedAt[def.id] = now
         deliver(id: def.id, title: def.title, body: body, replacing: false)
         log.info("alert fired: \(def.id, privacy: .public)")
@@ -284,7 +302,7 @@ final class AlertEngine {
         // Only live alerts trigger a scan. A scan-only alert was produced
         // *by* a scan, and scanning again to explain it is the loop the
         // guard in NetdiagCoordinator exists to prevent.
-        if !def.scanOnly { onAlertFired?(def) }
+        if !def.scanOnly { onAlertFired?(def, firingRules) }
     }
 
     // MARK: - Delivery

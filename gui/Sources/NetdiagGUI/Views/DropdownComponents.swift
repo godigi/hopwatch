@@ -5,6 +5,99 @@ import AppKit
 /// CLI-sourced values: anything resembling a verdict arrived here as a
 /// rule ID, a severity, or CLI prose.
 
+// MARK: - Alert stage card
+
+/// The dropdown's stage card for an alert that has crossed its dwell.
+///
+/// Lives here rather than inline in `DropdownView` so the `--verify`
+/// harness can render *this exact view* for each severity instead of a
+/// hand-maintained stand-in — the previous snapshot only ever drew the
+/// critical case, which is precisely why every alert wearing critical-red
+/// went unnoticed.
+struct AlertStageCard: View {
+    let alert: StageResolver.AlertSnapshot
+    /// How many *other* alerts are active. Folded into the button's label
+    /// rather than shown as a second caption: one more active alert is a
+    /// fact about this button's destination, not a second thing competing
+    /// for the attention the worst alert already has.
+    var moreCount: Int = 0
+    /// Nil where the card is already at the destination the button would
+    /// navigate to — Activity's "Active now" list renders the same card and
+    /// a "See all alerts" link pointing at itself would be furniture.
+    var onOpen: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: look.icon)
+                    .foregroundStyle(look.tint)
+                Text(alert.title)
+                    .font(.callout).fontWeight(.semibold)
+                    .lineLimit(2)
+            }
+            // CLI prose verbatim — the interim body until a scan enriches
+            // it, then diagnosis[].summary.
+            if !alert.body.isEmpty {
+                Text(alert.body)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Text(attribution)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                // "See all alerts", not "See full report": the destination
+                // is the Activity view, which lists what is firing now and
+                // the change history behind it. It is not the report card
+                // — that lives on Home — and a button promising "+2" more
+                // findings has to land somewhere those two are actually
+                // listed.
+                if let onOpen {
+                    Button(moreCount > 0 ? "See all alerts (+\(moreCount))" : "See all alerts",
+                           action: onOpen)
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(Theme.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(look.tint.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+    }
+
+    /// Icon and tint from the CLI's own severity for the firing rule.
+    ///
+    /// The `rules.isEmpty` branch is load-bearing: rank 0 means two
+    /// different things, and only one of them is "not serious". The four
+    /// event-driven alerts (VPN dropped, public IP changed, captive
+    /// portal, different network) carry no rule *by construction* and are
+    /// genuinely informational. A rule-backed alert can also rank 0 —
+    /// transiently, before the rules catalog finishes loading, or for a
+    /// rule this build has never heard of — and there the safe reading is
+    /// the severe one, so it keeps the red it has always had.
+    private var look: (icon: String, tint: Color) {
+        if alert.rules.isEmpty { return ("info.circle.fill", .blue) }
+        switch alert.severityRank {
+        case 3:  return ("exclamationmark.triangle.fill", .red)
+        case 2:  return ("exclamationmark.triangle", .orange)
+        case 1:  return ("info.circle.fill", .blue)
+        default: return ("exclamationmark.triangle.fill", .red)
+        }
+    }
+
+    /// "rule G2 · 3m ago". Omits the rule segment cleanly for the alerts
+    /// that carry none, rather than printing "rule  · 3m ago".
+    private var attribution: String {
+        guard let rule = alert.rules.sorted().first else {
+            return RelativeTime.string(from: alert.raisedAt)
+        }
+        return "rule \(rule) · \(RelativeTime.string(from: alert.raisedAt))"
+    }
+}
+
 // MARK: - Instrument grid cell
 
 struct InstrumentCell: View {
