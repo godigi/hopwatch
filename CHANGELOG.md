@@ -6,6 +6,43 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — one long ISP name was deciding whether the window kept its sidebar
+
+Trends looked wrong in a narrow window: select it and the sidebar
+collapses. The cause is not in Trends' own logic but in how much width it
+*asks* for. None of this app's views declares a minimum width — measured
+offscreen with `NSHostingView`, every one of them reports `min = 0` and
+will shrink to nothing — so the only number `NavigationSplitView` has to
+weigh, when deciding whether the sidebar still fits beside the detail, is
+the detail's **ideal** width. And an ideal width is assembled from things
+nobody thinks of as layout: an uncapped `Text` asks for the width of its
+whole sentence on one line, and a macOS pop-up asks for the width of its
+widest menu item.
+
+Trends asked for 699pt. All 699 of it came from two places that had
+nothing to do with charts: the coverage note's paragraph of prose at the
+very bottom of the scroll view, and the Network picker, whose items are
+ISP-derived names — so joining a network called "SOMOS NETWORKS COLOMBIA
+S.A.S. BIC via 192.168.68.1" quietly widened the window at which the app
+keeps its sidebar. A layout that changes because of who your ISP is, is a
+layout with an input nobody declared.
+
+Prose blocks now go through one `View.proseWidth()` modifier that caps
+them at a readable measure, and the three Trends pickers are sized to the
+room their values need rather than left to whichever network has the
+longest name. Trends now asks for 593pt (was 699) and Home for 659pt (was
+709) — Trends, the tab that prompted this, is now the narrowest of the
+three main views rather than the widest. The cap is also just better
+typography: a sentence set 700pt wide is hard to track from one line to
+the next, and these screens are mostly explanation.
+
+Not a regression from the Live/Trends work below — the view it replaced
+asked for the same 699pt — and the sidebar behaviour itself is AppKit's,
+so this widens the margin rather than proving a fix. Measured, not
+eyeballed: `screencapture` is blocked without Screen Recording
+permission, so the numbers come from rendering each view offscreen and
+reading `fittingSize`.
+
 ### Added — Live and Trends now say what they are, and Trends says what a network is usually like
 
 The app's two chart tabs were its most confusing corner, for novices and

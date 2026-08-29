@@ -180,6 +180,7 @@ struct HomeView: View {
                     Text("macOS requires Location Services to display your network name and diagnose local radio strength. Basic fault isolation (Router vs ISP) remains active.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .proseWidth(520)
                 }
 
                 Spacer(minLength: 8)
@@ -242,6 +243,11 @@ struct HomeView: View {
                 Text(coordinator.headline)
                     .font(.title3)
                     .fixedSize(horizontal: false, vertical: true)
+                    // The widest thing on Home, and so the view's ideal
+                    // width — see `View.proseWidth`. The longest headline
+                    // the coordinator can produce still fits on two lines
+                    // here; most fit on one.
+                    .proseWidth()
                 if let caption = lastCheckedCaption {
                     Text(caption)
                         .font(.caption)
@@ -342,6 +348,7 @@ struct HomeView: View {
             Text("netdiag is watching your connection continuously in the background. Run a full check to see the detail behind it.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .proseWidth()
         }
         .padding(.top, 24)
     }

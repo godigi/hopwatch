@@ -65,6 +65,7 @@ struct TrendsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            .proseWidth()
             .padding(.horizontal, 12)
     }
 
@@ -138,6 +139,19 @@ struct TrendsView: View {
 
     // MARK: - Controls
 
+    /// The three filters plus reload.
+    ///
+    /// The widths are deliberately tighter than the values they hold. A
+    /// macOS pop-up reports the width of its widest menu item as its
+    /// ideal, so the Network picker alone — whose items are ISP-derived
+    /// names like "SOMOS NETWORKS COLOMBIA S.A.S. BIC via 192.168.68.1" —
+    /// would otherwise set this row's ideal width from whichever network
+    /// happens to have the longest name. That number feeds the window
+    /// width at which the sidebar collapses (see `View.proseWidth`), so
+    /// an unlucky ISP name was a layout input. Network keeps the most
+    /// room of the three because its values are the longest and the least
+    /// guessable when truncated; Window needs least, its four values are
+    /// fixed and short.
     private var controls: some View {
         HStack {
             Picker("Metric", selection: $metricKey) {
@@ -148,12 +162,12 @@ struct TrendsView: View {
                     Text("\(m.label) (\(m.samples))").tag(m.key)
                 }
             }
-            .frame(maxWidth: 260)
+            .frame(maxWidth: 220)
 
             Picker("Window", selection: $window) {
                 ForEach(HistoryWindow.allCases) { Text($0.rawValue).tag($0) }
             }
-            .frame(maxWidth: 160)
+            .frame(maxWidth: 130)
 
             Picker("Network", selection: $networkID) {
                 Text("All networks").tag(String?.none)
@@ -403,5 +417,9 @@ struct TrendsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // The widest prose on this screen, and — before this cap — the
+        // single view setting the whole tab's ideal width. See
+        // `proseWidth`.
+        .proseWidth(520)
     }
 }

@@ -76,6 +76,32 @@ extension View {
         background(.quaternary.opacity(Theme.cardOpacity),
                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
     }
+
+    /// Caps a block of running prose at a readable measure.
+    ///
+    /// Two reasons, one of them structural. The typographic one is
+    /// ordinary: a sentence set 700pt wide is hard to track back to the
+    /// start of the next line, and these views hold whole paragraphs of
+    /// explanation.
+    ///
+    /// The structural one is why this is a shared modifier rather than a
+    /// per-view judgement call. An uncapped `Text` reports its *ideal*
+    /// width as the width of the whole sentence on one line, and a
+    /// view's ideal width is what `NavigationSplitView` weighs when it
+    /// decides whether the sidebar still fits beside the detail. One long
+    /// unbroken sentence in a corner of a screen was therefore setting
+    /// the width at which the whole window drops its sidebar: measured
+    /// offscreen with `NSHostingView`, Trends' ideal width was 699pt, and
+    /// 699 of that was the coverage note's prose. None of these views
+    /// declares a hard minimum width — they all shrink to zero — so the
+    /// ideal is the only number in play.
+    ///
+    /// The default is a measure, not a magic number: ~560pt is roughly 90
+    /// characters at this app's body size, the upper end of what reads
+    /// comfortably. Pass a narrower one for captions.
+    func proseWidth(_ measure: CGFloat = 560) -> some View {
+        frame(maxWidth: measure, alignment: .leading)
+    }
 }
 
 // MARK: - Severity colour
