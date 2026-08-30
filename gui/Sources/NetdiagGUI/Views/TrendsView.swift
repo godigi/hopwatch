@@ -64,7 +64,21 @@ struct TrendsView: View {
         Text("What this network is usually like — one point per saved check, over weeks. Live samples are not stored here.")
             .font(.caption)
             .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            // Deliberately NOT `.fixedSize(horizontal: false, vertical: true)`,
+            // which every other block of prose in this app carries.
+            //
+            // This one is different because it sits *outside* the ScrollView
+            // below it, so its ideal height is the detail column's ideal
+            // height, and a fixed-size Text asked for its ideal height at an
+            // unconstrained width answers with a many-line one. The window
+            // then sized the whole NavigationSplitView to 1274pt inside a
+            // 707pt window and centred it — pushing the controls, the first
+            // chart, and the sidebar's own rows above the top of the window.
+            // On screen that reads as "opening Trends hides the sidebar",
+            // which is why it was hunted as a split-view bug for a while;
+            // nothing was ever collapsed. Text wraps by itself here, and
+            // nothing is constraining its height, so the modifier bought
+            // nothing even before it cost this.
             .proseWidth()
             .padding(.horizontal, 12)
     }

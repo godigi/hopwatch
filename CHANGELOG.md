@@ -6,6 +6,40 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — opening Trends did not hide the sidebar; it pushed the whole window off the top
+
+The report was "click Trends and the sidebar disappears, and things are
+missing". Both halves are the same bug, and neither is about the sidebar.
+
+Since `screencapture` needs Screen Recording permission this process
+doesn't have, the app was made to describe its own window instead: walk
+the real view tree a few seconds after launch and print what AppKit
+actually did. On four tabs the `NavigationSplitView` host measured
+945×707 at y=0 — exactly the window. On Trends it measured **945×1274 at
+y = −257.5**: nearly twice the window's height, centred, so the top 257pt
+sat above the title bar. That is one view sized to an ideal height it
+should never have been given, taking everything with it — the filter row,
+the purpose line, the verdict card, the first chart's heading, *and* the
+sidebar's five rows, which live in the same over-tall column. The
+sidebar's split item reported `collapsed=false` and its table still held
+five rows the whole time. Nothing was ever hidden; the window was showing
+the middle of a view twice its size.
+
+The cause was one modifier on one line of text: `.fixedSize(horizontal:
+false, vertical: true)` on Trends' purpose subtitle. That modifier is
+correct and used throughout this app — but everywhere else the prose it
+marks sits *inside* a `ScrollView`, which absorbs whatever height it asks
+for. This one line sits outside the scroll view, in the header, where its
+ideal height *is* the detail column's ideal height; asked for that ideal
+at an unconstrained width, a fixed-size `Text` answers with a many-line
+one. Removing it puts every tab back to 945×707 at y=0. Text wraps by
+itself there, so the modifier was buying nothing even before it cost
+this.
+
+Introduced by the Live/Trends work below — the view it replaced had no
+such line — and shipped because that work was verified by building, by
+`--verify` and by bats, none of which lay out a window.
+
 ### Fixed — the menu says one thing once, and means it [GUI]
 
 Four ways the dropdown misrepresented what the CLI had actually decided.
