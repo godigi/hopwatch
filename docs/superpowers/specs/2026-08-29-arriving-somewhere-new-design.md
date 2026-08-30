@@ -77,8 +77,18 @@ thing you can look at first.
 ]
 ```
 
-Four activities, chosen 2026-08-29: `calls` (video & voice), `streaming`,
-`gaming`, `browsing` (ordinary web).
+Five activities, chosen 2026-08-29 and amended 2026-08-30: `calls` (video &
+voice), `streaming`, `gaming`, `vpn` (VPN & remote access), `browsing`
+(ordinary web).
+
+`vpn` earns its place on evidence rather than intuition: six existing rules
+bear on it and nothing else in the report projects them onto a single
+answer — `M1` (path MTU too small, the classic VPN killer), `PX-1` (traffic
+configured through a proxy), `FW-1` (network filtering software in the
+path), `NAT-1` / `NAT-1b` (double NAT, ISP-side private routing — both break
+inbound reach), and `D4` (DNS searches intercepted). It is also the activity
+hotel and airport networks block most often, which is the whole reason this
+spec exists.
 
 **The verdict is derived from which rules fired, never from re-reading the
 metrics.** This is the load-bearing decision in the whole spec. A
@@ -108,11 +118,17 @@ Mechanically:
 
 ### A.3 `unmeasured` is a first-class verdict
 
-A `--quick` run skips bufferbloat, speed, and the loss probe, so `calls`
-genuinely cannot be judged. The row still renders, saying so, with the
-reason: *"Not measured — run a full check."* Hiding the row instead would
-make the panel grow and shrink between depths, which reads as the app
-losing information it never had.
+A `--quick` run skips bufferbloat, speed, the loss probe **and the MTU
+probe** — `bin/netdiag:559` refuses `--mtu-only --quick` in as many words —
+so on a quick check four of the five activities genuinely cannot be judged.
+Only `browsing` can. The rows still render, saying so, with the reason:
+*"Not measured — run a full check."*
+
+This is why `unmeasured` is a verdict rather than a hidden row. Hiding them
+would leave a quick check showing a one-row panel and a full check showing
+five, which reads as the app losing information it never had — and it would
+silently turn "we didn't look" into "nothing's wrong", which is the failure
+this whole project is organised against.
 
 The measured test is the schema's existing contract: a metric is `null`
 when its probe did not run (`docs/JSON-SCHEMA.md:36`). Each activity
@@ -125,7 +141,7 @@ down at any depth.
 `--rules-catalog` goes `schema: 4` → `5`, adding `impacts` as an optional
 per-rule field. Additive, per the guarantee at `docs/JSON-SCHEMA.md`'s
 rules-catalog section. `tests/test_rules_catalog.bats` gains an assertion
-that every activity key in every `impacts` map is one of the four, and that
+that every activity key in every `impacts` map is one of the five, and that
 every impact value is one of `broken` / `degraded`.
 
 ---
@@ -392,7 +408,10 @@ Five parts, three phases, each shippable:
 3. **Journal growth.** `events.jsonl` plus its archive on a machine that
    now always writes it. Needs a size check and the existing archive
    rotation confirmed, in Phase 3.
-4. **VPN & remote access was considered and dropped** from the activity
-   list on 2026-08-29. It is the activity most often broken outright by
-   hotel and airport networks, and the CLI already detects VPN state. If it
-   returns, it is one more entry in the same table — no structural change.
+4. **`vpn` is the activity most likely to be judged wrong**, because the
+   rules that bear on it (`PX-1`, `FW-1`, `NAT-1`) describe the *path*, and
+   a path that breaks one corporate VPN can carry another perfectly well.
+   Mitigation: `degraded` rather than `broken` wherever the rule shows an
+   obstacle rather than a proven failure — the row says "may not connect",
+   names the rule, and lets the reader judge. Reviewed once the `impacts`
+   table is written, not deferred past it.
