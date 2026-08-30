@@ -110,6 +110,56 @@ a default:
    rows, because there is only one place either could have read them
    from.
 
+## Seeing and checking the GUI without Xcode (v0.12.0)
+
+This machine has only the Command Line Tools, which costs the app two
+things most SwiftUI projects take for granted: **previews**, and a runnable
+**test target**. Both are replaced by launch modes on the app itself, for
+the same underlying reason — the app bundle is the only artifact on this
+toolchain that has both the code and a process to run it in. (SwiftPM does
+not export an executable target's symbols to importers, so a separate test
+executable cannot link against `NetdiagGUI`; and `swift test` compiles but
+executes nothing, because Swift Testing's runner needs the `xctest` host the
+CLT does not ship.)
+
+```
+netdiag.app --verify           asserts, exits non-zero on failure
+netdiag.app --gallery[=DIR]    renders every screen to PNG, light and dark
+```
+
+- **`--verify` is the test suite.** Pure functions with real consequences —
+  `StageResolver` (which card the dropdown shows), `HealthResolver` (the
+  menu-bar dot), `FullCheckPolicy`, `ActivityEntry.fold` — are driven with
+  constructed inputs and asserted. It exits before any scene is created, so
+  it never starts the monitor.
+
+- **`--gallery` is the preview.** It hosts the *real* views against the
+  *real* on-disk state in an ordinary `NSWindow` and asks them to draw
+  themselves. Two constraints shaped it, and both are easy to get wrong in
+  a way that yields a plausible-but-false picture:
+
+  - **No screen capture.** `screencapture` and `CGWindowListCreateImage`
+    need the Screen Recording TCC grant, which is per-binary and cannot be
+    granted non-interactively. Drawing the view into a bitmap needs no
+    permission, and reaches what capture cannot: `DropdownView` lives in a
+    `MenuBarExtra` panel, which is not in the window list at all.
+  - **AppKit's event loop must actually run.** `NSApp.run()` drives the
+    window update cycle that SwiftUI's `List` builds its `NSTableView` rows
+    from. A first version did its work in `applicationWillFinishLaunching`
+    and never returned — spinning a nested `RunLoop` so no scene would be
+    created — and produced screens that laid out correctly and were empty.
+    So the app launches normally and `bootstrap()`'s `--gallery` guard is
+    what keeps the monitor from starting; hydration is reads only.
+
+  Known limit: `MainWindow`'s `NavigationSplitView` sidebar does not render
+  in the borderless host window, so `main-window.png` is evidence about the
+  content column only. The five destinations are each rendered standalone,
+  which is where their content can be trusted.
+
+Both modes are debug surfaces on the app, not CLI surface: they are not in
+`netdiag --help`, not in `docs/JSON-SCHEMA.md`, and nothing ships depending
+on them.
+
 ## Bash vs Python helper — decision (v0.2.0, amended v0.8.0)
 
 Bash for orchestration + per-check probes; Python helpers under

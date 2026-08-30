@@ -79,6 +79,11 @@ extension NetdiagApp {
         // could fire; this guard is belt-and-suspenders so a verify launch
         // can never start the monitor child.
         if CommandLine.arguments.contains("--verify") { return }
+        // `--gallery` does launch scenes (it needs AppKit's event loop), so
+        // unlike `--verify` this guard is the *only* thing standing between
+        // a screenshot run and a spawned monitor child. It builds its own
+        // coordinator and hydrates it read-only.
+        if GalleryMode.isRequested { return }
         coordinator.start()
 
         // `--open=<tab>` — the self-service verification hook. Opens the
@@ -132,6 +137,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `applicationWillFinishLaunching` precedes scene setup entirely.
     @MainActor
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // `--gallery` queues its render and lets the app launch normally —
+        // unlike `--verify`, which exits before any scene exists. It needs
+        // the real `NSApp.run()` loop, because that is what drives the
+        // window update cycle SwiftUI's `List` populates from; see
+        // `GalleryMode.scheduleIfRequested`. `bootstrap()` is what keeps it
+        // from starting the monitor.
+        if GalleryMode.scheduleIfRequested() { return }
         if runVerifyIfNeeded() {
             // `runVerifyIfNeeded`'s harness exits the process itself; this
             // is reached only if it somehow returned, in which case stop

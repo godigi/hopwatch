@@ -524,7 +524,16 @@ struct DropdownView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
             }
-            let recent = Array(timelineEvents.prefix(3))
+            // Folded into episodes before being truncated to three, for the
+            // same reason Activity folds: unfolded, a single flapping rule
+            // ate all three rows of the app's most space-constrained
+            // surface — "Minor packet loss to router", "Resolved: Minor
+            // packet loss to router", "Minor packet loss to router" — three
+            // lines that between them said one thing and never said how
+            // long it lasted. Folded, that is one line carrying the count
+            // and the duration, and the other two rows go to the next two
+            // things that actually happened.
+            let recent = Array(ActivityEntry.fold(timelineEvents).prefix(3))
             if recent.isEmpty {
                 Text("No changes in the last 24 hours")
                     .font(.caption)
@@ -532,7 +541,7 @@ struct DropdownView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 2)
             } else {
-                ForEach(recent) { EventRow(event: $0) }
+                ForEach(recent) { ActivityRow(entry: $0) }
             }
         }
     }

@@ -230,7 +230,11 @@ final class NetdiagCoordinator {
     /// regardless of which of the two was written last, so a hydrated
     /// report landing a moment after a real one is inert, not a race worth
     /// closing.
-    private func hydrateFromHistoryIfNeeded() async {
+    /// Internal rather than private only so `GalleryMode` can reproduce the
+    /// same state `start()` reaches without also starting the monitor —
+    /// this is a read, and the screenshot harness needs Home to render the
+    /// report a real launch would show rather than its empty state.
+    func hydrateFromHistoryIfNeeded() async {
         if latestRun == nil, hydratedReport == nil {
             if let id = history.recentChecks(limit: 1).compactMap(\.runID).first {
                 do {

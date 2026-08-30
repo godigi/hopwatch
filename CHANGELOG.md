@@ -6,6 +6,131 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — ND-1 accused a watcher that was working perfectly [CLI]
+
+Found by looking at the app: the Home report showed one warning, "netdiag's
+background watcher is installed but isn't running: launchd reports that its
+last run exited 1", while `~/net-diag` was filling with successful watcher
+runs exactly 15 minutes apart.
+
+`watchdog_run` classified the watcher as `failing` whenever its last launchd
+exit was non-zero. That reads netdiag's own exit-code contract backwards.
+`bin/netdiag` documents `0` healthy · `1` warnings only · `2` critical
+diagnosis · `3` script error, and its EXIT trap deliberately remaps any
+unplanned abort to `3` *precisely so* a broken script cannot masquerade as
+"warnings only". Exits 1 and 2 are successful runs that found something —
+which is the watcher's entire job.
+
+The consequence was a self-sustaining false alarm. Any single warning made a
+watcher run exit 1; the next run read that exit status, fired ND-1, and
+exited 1 because ND-1 is itself a warning — so once tripped it could never
+clear. On this machine a standing `G3` (minor packet loss to the router) had
+left ND-1 as the report's only warning, permanently. The check also sat
+*above* the heartbeat tests, so a perfectly fresh heartbeat could not
+override it.
+
+Only an off-contract exit now counts as failure: `3`, or anything that never
+reached the trap at all (126, 127, a signal). Verified on this machine — the
+Background watcher row went from "last run exited 1" to "last ran 6m ago",
+ND-1 stopped firing, and the run's own exit code went from 1 to 0.
+
+### Changed — history as episodes, not transitions [GUI]
+
+The prompt was a screenshot of the Activity screen and one question: is it
+helpful to have all those alerts in the history? It was not. The screen
+held 329 rows, of which 61 said "Severe internet packet loss" and 53 said
+"Resolved: Severe internet packet loss".
+
+The first hypothesis was that the app was diagnosing its own test traffic —
+that the launchd watcher's 15-minute scan was loading the link and the
+monitor was recording the result as a fault. **That was wrong, and is worth
+recording as wrong**: correlating all 329 stored events against the 198
+scan start times on disk put 22% within 90s of a scan, against a ~20%
+baseline for the watcher's cadence. There is no relationship. The packet
+loss is real and genuinely flapping; the defect was entirely in how it was
+presented.
+
+- **Fired and cleared are one row now, with a duration.** `EventStore`
+  records one entry per transition, which is the right thing to store and
+  the wrong thing to show: it throws away the two facts a reader wants —
+  how long it lasted, and how often it has happened. `ActivityEntry.fold`
+  pairs each `rule-fired` with its `rule-cleared` and groups a day's
+  episodes per rule, so twelve rows about one afternoon's flapping become
+  one reading "Minor packet loss to router · 6 times · 47s+ total". On this
+  machine's real store: 329 rows → 62.
+- **It reproduces `helpers/events.py`'s honest cases**, because they are
+  properties of transition logs rather than of that file. A second `fired`
+  with no `cleared` between means the monitor restarted and the gap went
+  unobserved, so that episode closes where it was last seen and its
+  duration is marked a floor (`47s+`, not `47s`). An orphan `cleared` whose
+  `fired` predates the store's 500-entry cap describes an end with no
+  beginning and contributes no row. And nothing here judges a duration:
+  whether four minutes of loss is acceptable is `lib/diagnosis.sh`'s to say
+  against `lib/thresholds.sh`, exactly as that helper's header records.
+- **An unpaired episode no longer claims the fault is still running.** The
+  first draft appended "still active" whenever an episode had no recorded
+  end, which put that phrase on three rows at once including one two days
+  old — the usual reason a clear never arrives is that the monitor stopped,
+  not that the condition persisted. What is happening *now* is the "Active
+  now" section's claim, made from live alert state.
+- **Timeline rows wore critical-red regardless of severity.**
+  `EventStyle.tint(for:)` keyed only on `kind`, so warn-level `G3` "Minor
+  packet loss to router" was indistinguishable from critical `P1` "No
+  network connection at all", and a history of the former read as a history
+  of outages. It now tints from the catalog's severity for the rule behind
+  the event. This is the same defect fixed for `AlertStageCard` in the
+  entry below; the timeline rows kept it. An unknown severity stays red —
+  the catalog resolving late is the common case at launch, and greying out
+  a real fault until a fetch completes is the worse error.
+- **The dropdown's 24-hour teaser folds too.** Unfolded, one flapping rule
+  ate all three rows of the app's most space-constrained surface, saying
+  one thing three times and never saying for how long.
+
+Twenty asserts covering the fold run in `--verify`, which is where this
+project's Swift logic is checked (`swift test` cannot execute on a CLT-only
+machine — see `VerifyMode.swift`'s header).
+
+### Added — `--gallery`, so the app can be looked at without a screen [GUI]
+
+There is no Xcode on this machine and therefore no SwiftUI previews, so the
+only way to see a change was `make run` and a pair of human eyes. Two
+earlier attempts at closing that gap fell short in the same way:
+`--verify`'s `runSnapshots()` renders a hand-written *stand-in* of the
+dropdown's stage card, and its own header admits it is not a snapshot of
+`DropdownView` — a stand-in cannot show a layout bug, because the layout it
+draws is not the one that ships. A temporary `TempLayoutDump` walked the
+real window's `NSView` tree and printed frames: numbers about a picture,
+in place of the picture. It is removed here, superseded.
+
+`netdiag.app --gallery[=DIR]` renders the **real** views — the ones
+`NetdiagApp` instantiates — against the **real on-disk state**, in light and
+dark, at the app's own sizes, to PNG. That includes `DropdownView`, which
+no capture tool can reach: a `MenuBarExtra` panel is not in the window list.
+`--gallery-only=NAME` narrows the run; `--gallery-debug` dumps the view tree.
+
+Three findings from the first honest render are fixed above. Two notes on
+getting there, because each failure produced a *plausible* screenshot
+rather than an obviously broken one, which is the dangerous kind of wrong
+for a tool whose purpose is to be believed:
+
+- **Screen capture is not an option and was not used.**
+  `screencapture`/`CGWindowListCreateImage` need the Screen Recording TCC
+  grant, which is per-binary and cannot be granted non-interactively;
+  `screencapture -x` here fails with "could not create image from display".
+  The harness asks the view to draw itself instead, and needs no permission.
+- **The renderer must let `NSApp.run()` actually run.** The obvious
+  shape — do the work in `applicationWillFinishLaunching` and never return,
+  spinning a nested `RunLoop` so no scene is created and no monitor spawns
+  — silently produced empty screens. `NSApp.run()` is not merely a run
+  loop; it drives the window update cycle SwiftUI's `List` builds its
+  `NSTableView` rows from. With AppKit's loop never entered, `ActivityView`
+  laid out at the right size, drew its heading, and reported
+  `numberOfRows == 0` against a store holding 329 events. The app now
+  launches for real and `bootstrap()`'s `--gallery` guard is what keeps the
+  monitor from starting. Hydration is reads only — deliberately skipping
+  the one write `start()` does at that point, so a screenshot run leaves
+  `events.json` alone.
+
 ### Fixed — the menu says one thing once, and means it [GUI]
 
 Four ways the dropdown misrepresented what the CLI had actually decided.

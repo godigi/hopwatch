@@ -1,15 +1,29 @@
 import SwiftUI
 
-/// Every CLI-reported change and fired alert, newest first, grouped by
-/// calendar day — the full list the dropdown's three-row timeline teases.
+/// What has happened on this Mac's networks, as episodes rather than
+/// transitions — the full history the dropdown's three-row timeline teases.
+///
 /// Reads `coordinator.eventLog` (the durable `EventStore`, not
-/// `coordinator.events`, the unrelated CoreWLAN/NWPath watcher) and renders
-/// with `EventRow`, the same building block the dropdown uses, so a change
-/// reads identically in both places.
+/// `coordinator.events`, the unrelated CoreWLAN/NWPath watcher).
+///
+/// ── Why this is not a straight list of `eventLog.events` ───────────────
+/// It was, and on a flapping link that made it useless. The store holds one
+/// row per transition, so a fault that came and went six times in an
+/// afternoon printed twelve rows — six "Minor packet loss to router" and
+/// six "Resolved: Minor packet loss to router" — none of which said how
+/// long any of them lasted. Twelve days of that is 329 rows and no
+/// answer to "is this network bad?".
+///
+/// `ActivityEntry.fold` pairs each fired with its cleared and groups the
+/// day's episodes per rule, so those twelve rows become one that reads
+/// "Minor packet loss to router · 6 times · over 4m total". See that type's
+/// header for the pairing rules and for why it states durations but judges
+/// none of them.
 struct ActivityView: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
 
     private var events: [NetworkEvent] { coordinator.eventLog.events }
+    private var entries: [ActivityEntry] { ActivityEntry.fold(events) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,7 +36,7 @@ struct ActivityView: View {
                 } else {
                     ForEach(days) { day in
                         Section(day.label) {
-                            ForEach(day.events) { EventRow(event: $0) }
+                            ForEach(day.entries) { ActivityRow(entry: $0) }
                         }
                     }
                 }
@@ -32,10 +46,16 @@ struct ActivityView: View {
 
     // MARK: - Heading
 
+    /// Counts episodes, not stored rows. "329 events" was technically true
+    /// and told the reader nothing except that the list would be long; the
+    /// number that matters is how many distinct things happened.
     private var heading: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let count = entries.count
+        return VStack(alignment: .leading, spacing: 2) {
             Text("Activity").font(.headline)
-            Text(events.isEmpty ? "No events yet" : "\(events.count) event\(events.count == 1 ? "" : "s")")
+            Text(count == 0
+                 ? "Nothing recorded yet"
+                 : "\(count) event\(count == 1 ? "" : "s") in the last \(days.count) day\(days.count == 1 ? "" : "s")")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -90,23 +110,23 @@ struct ActivityView: View {
     private struct Day: Identifiable {
         let id: String
         let label: String
-        let events: [NetworkEvent]
+        let entries: [ActivityEntry]
     }
 
-    /// One section per calendar day, newest first. `events` is already in
-    /// that order (`EventStore`'s invariant), so the days come out of it in
-    /// order too.
+    /// One section per calendar day, newest first. `fold` returns entries
+    /// newest-first, so the days come out of it in order too.
     private var days: [Day] {
         let calendar = Calendar.current
         var order: [Date] = []
-        var buckets: [Date: [NetworkEvent]] = [:]
-        for event in events {
-            let day = calendar.startOfDay(for: event.date)
+        var buckets: [Date: [ActivityEntry]] = [:]
+        for entry in entries {
+            let day = calendar.startOfDay(for: entry.latest)
             if buckets[day] == nil { order.append(day) }
-            buckets[day, default: []].append(event)
+            buckets[day, default: []].append(entry)
         }
         return order.map {
-            Day(id: "\($0.timeIntervalSince1970)", label: dayLabel($0), events: buckets[$0] ?? [])
+            Day(id: "\($0.timeIntervalSince1970)", label: dayLabel($0),
+                entries: buckets[$0] ?? [])
         }
     }
 
