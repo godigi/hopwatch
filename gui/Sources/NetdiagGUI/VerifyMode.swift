@@ -67,6 +67,7 @@ private enum VerifyHarness {
         runFullCheckPolicyTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
+        runSuitabilityAndFixFieldTests()
         runSnapshots()
         print("")
         if failures.isEmpty {
@@ -491,6 +492,113 @@ private enum VerifyHarness {
         // mean of those plus 395 (228) the wrapper would have produced.
         equal(fallbackSnapshot.fraction, 518.0 / 691.0,
               "an overlapping phase's samples stay out of the fallback estimate")
+    }
+
+    // MARK: - Suitability rows and rules-catalog fix fields
+    //
+    // Both decode leniently, for the reason the commit that added them
+    // states: the app bundles its own CLI but can be pointed at an older
+    // one via `netdiagBinaryPath`, and a report missing a block must cost
+    // one panel, never the whole run. These checks are what makes that a
+    // guarantee rather than an intention — a document with no `suitability`
+    // key, or a verdict string this build has never seen, has to come out
+    // the other side as a normal (if partial) run, not a decode failure.
+
+    private static func runSuitabilityAndFixFieldTests() {
+        print("\nSuitability rows + rules-catalog fix fields")
+
+        func decodeSnapshot(_ json: String) -> RunSnapshot? {
+            guard let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(RunSnapshot.self, from: data)
+        }
+        func decodeCatalog(_ json: String) -> RulesCatalog? {
+            guard let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(RulesCatalog.self, from: data)
+        }
+
+        // 1. A `broken` row and an `unmeasured` row decode: verdicts map
+        // correctly, `because` survives, `unmeasuredReason` is non-nil on
+        // the unmeasured row and nil on the other.
+        let withRows = decodeSnapshot("""
+        {"suitability": [
+          {"activity": "calls", "label": "Video & voice calls", "verdict": "broken",
+           "because": ["G2"], "unmeasured_reason": null},
+          {"activity": "streaming", "label": "Streaming", "verdict": "unmeasured",
+           "because": [], "unmeasured_reason": "This check didn't run the speed test."}
+        ]}
+        """)
+        equal(withRows?.suitability.count, 2, "two suitability rows decode")
+        equal(withRows?.suitability.first?.verdict, .broken, "broken verdict maps correctly")
+        equal(withRows?.suitability.first?.because, ["G2"], "because survives decode")
+        equal(withRows?.suitability.first?.unmeasuredReason, nil,
+              "a measured row's unmeasuredReason is nil")
+        equal(withRows?.suitability.last?.verdict, .unmeasured, "unmeasured verdict maps correctly")
+        equal(withRows?.suitability.last?.unmeasuredReason,
+              "This check didn't run the speed test.",
+              "unmeasuredReason is non-nil on the unmeasured row")
+
+        // 2. No `suitability` key at all decodes as an empty array, not a
+        // throw — the missing-block case an older bundled CLI produces.
+        let noSuitability = decodeSnapshot("{\"version\": \"0.9.0\"}")
+        check(noSuitability != nil, "a document with no suitability key still decodes")
+        check(noSuitability?.suitability.isEmpty ?? false,
+              "missing suitability key decodes as [], not a throw")
+
+        // 3. An unrecognised verdict string does not throw the whole decode.
+        let unknownVerdict = decodeSnapshot("""
+        {"suitability": [
+          {"activity": "gaming", "label": "Gaming", "verdict": "excellent",
+           "because": [], "unmeasured_reason": null}
+        ]}
+        """)
+        equal(unknownVerdict?.suitability.count, 1,
+              "a row with an unrecognised verdict still decodes")
+        equal(unknownVerdict?.suitability.first?.verdict, .unknown,
+              "an unrecognised verdict maps to .unknown rather than throwing")
+
+        // 4. A catalog rule decodes fix, fixAway, fixTarget; a rule with no
+        // fix_away leaves it nil.
+        let catalog = decodeCatalog("""
+        {"schema": 5, "rules": [
+          {"id": "G2", "title": "Router dropping packets",
+           "impacts": {"calls": "broken", "browsing": "degraded"},
+           "fix": "Reboot the router: unplug it, wait ten seconds, plug it back in.",
+           "fix_away": "Ask whoever runs this network to restart the router.",
+           "fix_target": "your_router"},
+          {"id": "VPN-1", "title": "VPN active",
+           "fix": "Nothing to do — this is expected.", "fix_target": "nobody"}
+        ]}
+        """)
+        equal(catalog?["G2"]?.fix,
+              "Reboot the router: unplug it, wait ten seconds, plug it back in.",
+              "a rule decodes fix")
+        equal(catalog?["G2"]?.fixAway,
+              "Ask whoever runs this network to restart the router.",
+              "a rule decodes fix_away")
+        equal(catalog?["G2"]?.fixTarget, "your_router", "a rule decodes fix_target")
+        equal(catalog?["G2"]?.impacts?["calls"], "broken", "a rule decodes impacts")
+        equal(catalog?["VPN-1"]?.fix, "Nothing to do — this is expected.",
+              "a rule with fix_target nobody still has a fix")
+        equal(catalog?["VPN-1"]?.fixAway, nil,
+              "a rule with no fix_away leaves it nil rather than a fabricated default")
+
+        // 5. A catalog from an older CLI with none of the three fields (and
+        // no `impacts`) still decodes.
+        let oldCatalog = decodeCatalog("""
+        {"schema": 3, "rules": [
+          {"id": "G2", "title": "Router dropping packets", "category": "router",
+           "severity": "critical", "scope": "both",
+           "blurb": "Packets are being dropped between your Mac and your router.",
+           "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi"}
+        ]}
+        """)
+        check(oldCatalog != nil, "a pre-schema-5 catalog still decodes")
+        equal(oldCatalog?["G2"]?.title, "Router dropping packets",
+              "a pre-schema-5 catalog keeps decoding its existing fields")
+        equal(oldCatalog?["G2"]?.fix, nil, "fix is nil against a pre-schema-5 catalog")
+        equal(oldCatalog?["G2"]?.fixAway, nil, "fix_away is nil against a pre-schema-5 catalog")
+        equal(oldCatalog?["G2"]?.fixTarget, nil, "fix_target is nil against a pre-schema-5 catalog")
+        equal(oldCatalog?["G2"]?.impacts, nil, "impacts is nil against a pre-schema-5 catalog")
     }
 
     // MARK: - 2. Stage-card visual contract (offscreen render → PNG)
