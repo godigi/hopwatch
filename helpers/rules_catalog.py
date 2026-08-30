@@ -70,7 +70,10 @@ import sys
 # v3 → v4: added the optional per-metric `why_absent` field, plus 16 new
 # `metrics` entries — the 13 `--history` metric keys and 3 for the live
 # monitor's chart measurements.
-SCHEMA_RULES_CATALOG = 4
+# v4 → v5: added the optional per-rule `impacts` map (see ACTIVITIES /
+# IMPACT_LEVELS) — which activities a fired rule breaks or degrades, for
+# helpers/suitability.py to project without re-judging any metric itself.
+SCHEMA_RULES_CATALOG = 5
 
 # The measurement family each rule judges — the GUI tints a report-card
 # row by this, not by severity, so a "varies"-severity rule like B1 still
@@ -131,6 +134,17 @@ SEVERITIES = frozenset({"info", "warn", "critical", "varies"})
 # both    — evaluated in both places, on whichever inputs that mode has.
 SCOPES = frozenset({"scan", "monitor", "both"})
 
+# The activities `helpers/suitability.py` projects rules onto. Five, and
+# closed: a sixth means a new row on every report card and in the arrival
+# card, which is a product decision, not a data one.
+ACTIVITIES = frozenset({"calls", "streaming", "gaming", "vpn", "browsing"})
+
+# How badly a rule hits an activity. Deliberately two levels, not three:
+# "good" is the absence of any impact, and a third middle grade would be a
+# judgement about magnitude — which lives in diagnosis[].severity, decided
+# against lib/thresholds.sh, and must not be re-decided here.
+IMPACT_LEVELS = frozenset({"degraded", "broken"})
+
 # One entry per rule the engine can emit. Order follows
 # docs/DIAGNOSIS-RULES.md's own reading order rather than rule-ID sort,
 # except that a rule's variants sit beside it (N1b after N1, DI-2 after
@@ -141,7 +155,7 @@ SCOPES = frozenset({"scan", "monitor", "both"})
 # reserved (the Report card already shows UPnP state directly; no
 # add_diag call exists anywhere for it) — see tests/test_rules_catalog.bats
 # for the explicit exclusion this drives.
-RULES: list[dict[str, str]] = [
+RULES: list[dict[str, object]] = [
     {
         "id": "N1",
         "title": "No network connection at all",
@@ -156,6 +170,8 @@ RULES: list[dict[str, str]] = [
             "at both ends."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1--no-network-at-all",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "N1b",
@@ -171,6 +187,8 @@ RULES: list[dict[str, str]] = [
             "out whether the problem is the router, the ISP, or DNS."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1b--router-present-nothing-public-responds",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "N1c",
@@ -187,6 +205,8 @@ RULES: list[dict[str, str]] = [
             "without a working route, which only its owner can fix."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1c--joined-with-no-route-out",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "W1",
@@ -200,6 +220,8 @@ RULES: list[dict[str, str]] = [
             "switching to a nearer access point or band usually helps."
         ),
         "doc": "DIAGNOSIS-RULES.md#w1--weak-wifi-signal",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "W2",
@@ -213,6 +235,8 @@ RULES: list[dict[str, str]] = [
             "sources can improve it."
         ),
         "doc": "DIAGNOSIS-RULES.md#w2--low-wifi-snr",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "WS-1",
@@ -226,6 +250,8 @@ RULES: list[dict[str, str]] = [
             "inconsistent; a less busy channel may help."
         ),
         "doc": "DIAGNOSIS-RULES.md#ws-1--wifi-channel-is-congested",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded"},
     },
     {
         "id": "G1",
@@ -248,6 +274,8 @@ RULES: list[dict[str, str]] = [
             "the router or switching to a closer access point clears this."
         ),
         "doc": "DIAGNOSIS-RULES.md#g1--gateway-loss--weak-wifi",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded", "browsing": "degraded"},
     },
     {
         "id": "G2",
@@ -263,6 +291,8 @@ RULES: list[dict[str, str]] = [
             "most cases. On ethernet, check the cable."
         ),
         "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi",
+        "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",
+                    "vpn": "degraded", "browsing": "degraded"},
     },
     {
         "id": "G3",
@@ -280,6 +310,7 @@ RULES: list[dict[str, str]] = [
             "ethernet, suspect the cable or the switch port."
         ),
         "doc": "DIAGNOSIS-RULES.md#g3--gateway-loss-below-the-critical-floor",
+        "impacts": {"calls": "degraded", "gaming": "degraded"},
     },
     {
         "id": "P1",
@@ -295,6 +326,8 @@ RULES: list[dict[str, str]] = [
             "it's the ISP."
         ),
         "doc": "DIAGNOSIS-RULES.md#p1--dns-down-public-unreachable",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "P2",
@@ -309,6 +342,8 @@ RULES: list[dict[str, str]] = [
             "or contact support."
         ),
         "doc": "DIAGNOSIS-RULES.md#p2--public-unreachable-dns-up",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "L1",
@@ -325,6 +360,8 @@ RULES: list[dict[str, str]] = [
             "trying before reporting the numbers to your ISP."
         ),
         "doc": "DIAGNOSIS-RULES.md#l1--severe-internet-side-packet-loss",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "degraded"},
     },
     {
         "id": "L2",
@@ -341,6 +378,8 @@ RULES: list[dict[str, str]] = [
             "re-running when it feels worst."
         ),
         "doc": "DIAGNOSIS-RULES.md#l2--moderate-internet-side-packet-loss",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded", "browsing": "degraded"},
     },
     {
         "id": "ICMP-1",
@@ -371,6 +410,7 @@ RULES: list[dict[str, str]] = [
             "network settings usually clears it up."
         ),
         "doc": "DIAGNOSIS-RULES.md#d1--partial-dns-internet-reachable",
+        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
     },
     {
         "id": "D2",
@@ -387,6 +427,8 @@ RULES: list[dict[str, str]] = [
             "Google in System Settings."
         ),
         "doc": "DIAGNOSIS-RULES.md#d2--no-name-lookups-working-at-all",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "D3",
@@ -402,6 +444,7 @@ RULES: list[dict[str, str]] = [
             "the delay."
         ),
         "doc": "DIAGNOSIS-RULES.md#d3--slow-dns-resolver-latency",
+        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
     },
     {
         "id": "D4",
@@ -417,6 +460,7 @@ RULES: list[dict[str, str]] = [
             "the redirection."
         ),
         "doc": "DIAGNOSIS-RULES.md#d4--dns-hijacking-and-search-redirection",
+        "impacts": {"vpn": "degraded", "browsing": "degraded"},
     },
     {
         "id": "B1",
@@ -433,6 +477,8 @@ RULES: list[dict[str, str]] = [
             "the underlying queueing problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#b1--bufferbloat-at-gateway-hop",
+        "impacts": {"calls": "broken", "streaming": "degraded",
+                    "gaming": "broken", "vpn": "degraded"},
     },
     {
         "id": "B2",
@@ -448,6 +494,8 @@ RULES: list[dict[str, str]] = [
             "responsibility to fix."
         ),
         "doc": "DIAGNOSIS-RULES.md#b2--bufferbloat-at-isp-hop-only",
+        "impacts": {"calls": "broken", "streaming": "degraded",
+                    "gaming": "broken", "vpn": "degraded"},
     },
     {
         "id": "M1",
@@ -463,6 +511,7 @@ RULES: list[dict[str, str]] = [
             "the router's WAN MTU or MSS-clamping setting."
         ),
         "doc": "DIAGNOSIS-RULES.md#m1--path-mtu-below-1500",
+        "impacts": {"vpn": "broken", "browsing": "degraded"},
     },
     {
         "id": "MT1",
@@ -478,6 +527,8 @@ RULES: list[dict[str, str]] = [
             "along — is the one to investigate."
         ),
         "doc": "DIAGNOSIS-RULES.md#mt1--first-lossy-hop-identified",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "V6-1",
@@ -494,6 +545,7 @@ RULES: list[dict[str, str]] = [
             "actually provisioned."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-1--ipv6-broken-while-ipv4-works",
+        "impacts": {"streaming": "degraded", "browsing": "degraded"},
     },
     {
         "id": "V6-2",
@@ -508,6 +560,7 @@ RULES: list[dict[str, str]] = [
             "falling back to IPv4."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-2--unresponsive-ipv6-dns-resolver",
+        "impacts": {"streaming": "degraded", "browsing": "degraded"},
     },
     {
         "id": "V6-3",
@@ -574,6 +627,8 @@ RULES: list[dict[str, str]] = [
             "points are actually set up as a proper mesh."
         ),
         "doc": "DIAGNOSIS-RULES.md#wd-1--wifi-link-is-flapping",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "WI-1",
@@ -642,6 +697,7 @@ RULES: list[dict[str, str]] = [
             "it, is the more likely cause."
         ),
         "doc": "DIAGNOSIS-RULES.md#px-1--a-proxy-or-pac-file-is-configured",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "FW-1",
@@ -658,6 +714,7 @@ RULES: list[dict[str, str]] = [
             "others, none of which would show up as a network problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#fw-1--network-filtering-software-is-in-the-path",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
     },
     {
         "id": "SP-1",
@@ -723,6 +780,8 @@ RULES: list[dict[str, str]] = [
             "first."
         ),
         "doc": "DIAGNOSIS-RULES.md#di-1--router-unreachable-at-the-hardware-arp-layer",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "DI-2",
@@ -738,6 +797,8 @@ RULES: list[dict[str, str]] = [
             "— find and renumber one of the offending devices."
         ),
         "doc": "DIAGNOSIS-RULES.md#di-2--duplicate-ip-on-the-lan",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "ETH-1",
@@ -770,6 +831,15 @@ RULES: list[dict[str, str]] = [
             "negotiation, usually because one end is pinned to a fixed "
             "speed instead of automatic."
         ),
+        # Collisions and heavy loss, which is why this is graded the same
+        # as a router dropping packets rather than as a slow link. ETH-1
+        # deliberately carries no impacts by contrast: a link negotiated
+        # below the port's ceiling is a cap, not a fault, and 100 Mb is
+        # ample for everything in this table — the same reason SP-1
+        # ("WiFi is the speed cap") carries none either.
+        "impacts": {"calls": "broken", "streaming": "degraded",
+                    "gaming": "broken", "vpn": "degraded",
+                    "browsing": "degraded"},
         "doc": "DIAGNOSIS-RULES.md#eth-2--ethernet-stuck-on-half-duplex",
     },
     {
@@ -802,6 +872,8 @@ RULES: list[dict[str, str]] = [
             "again; failing that, restart the router."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-3--self-assigned-address-dhcp-never-answered",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "DH-2",
@@ -817,6 +889,7 @@ RULES: list[dict[str, str]] = [
             "second look if it wasn't."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-2--dhcp-handed-dns-differs-from-system-resolver",
+        "impacts": {"vpn": "degraded", "browsing": "degraded"},
     },
     {
         "id": "WAN-1",
@@ -865,6 +938,7 @@ RULES: list[dict[str, str]] = [
             "or access-point mode usually fixes it."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1--double-nat-detected",
+        "impacts": {"gaming": "broken", "vpn": "degraded"},
     },
     {
         "id": "NAT-1b",
@@ -880,6 +954,7 @@ RULES: list[dict[str, str]] = [
             "shows private-network addresses partway along the path."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1b--isp-side-private-transit-not-your-double-nat",
+        "impacts": {"gaming": "broken", "vpn": "degraded"},
     },
     {
         "id": "BL-1",
@@ -917,6 +992,8 @@ RULES: list[dict[str, str]] = [
             "is only waiting to cut it off."
         ),
         "doc": "DIAGNOSIS-RULES.md#cp-1--captive-portal-blocking-real-access",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
     },
     {
         "id": "ND-1",
@@ -954,6 +1031,8 @@ RULES: list[dict[str, str]] = [
             "whoever runs the line."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-1--this-connection-keeps-dropping",
+        "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",
+                    "vpn": "broken", "browsing": "degraded"},
     },
     {
         "id": "AV-2",
@@ -970,6 +1049,7 @@ RULES: list[dict[str, str]] = [
             "continuous recorder can see them at all."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-2--the-connection-is-flapping",
+        "impacts": {"calls": "broken", "gaming": "broken", "vpn": "degraded"},
     },
     {
         "id": "TR-1",
@@ -1327,9 +1407,9 @@ METRICS: list[dict[str, str]] = [
 
 
 _FIELDS = frozenset({"id", "title", "category", "severity", "scope", "blurb", "doc"})
-# Optional, and the only optional field a rule has. See `also`'s note at
-# CATEGORIES for what it means and why exactly one is enough.
-_OPTIONAL_FIELDS = frozenset({"also"})
+# Optional. See `also`'s note at CATEGORIES for what it means and why
+# exactly one is enough, and ACTIVITIES / IMPACT_LEVELS above for `impacts`.
+_OPTIONAL_FIELDS = frozenset({"also", "impacts"})
 _METRIC_FIELDS = frozenset({"key", "label", "help"})
 # Optional, and the only optional field a metric has. Present on a metric
 # whose absence has a knowable cause (a check mode that skips it, a
@@ -1340,7 +1420,7 @@ _METRIC_FIELDS = frozenset({"key", "label", "help"})
 _METRIC_OPTIONAL_FIELDS = frozenset({"why_absent"})
 
 
-def _validate(rules: list[dict[str, str]]) -> None:
+def _validate(rules: list[dict[str, object]]) -> None:
     """Fail loud on a malformed entry rather than ship a silent typo.
 
     The bats suite re-checks all of this from the emitted JSON too, so
@@ -1354,7 +1434,23 @@ def _validate(rules: list[dict[str, str]]) -> None:
             f"entry has the wrong field set: {r}"
         )
         for k, v in r.items():
+            if k == "impacts":
+                continue
             assert isinstance(v, str) and v.strip(), f"{r.get('id')}.{k} is empty"
+        if "impacts" in r:
+            imp = r["impacts"]
+            assert isinstance(imp, dict) and imp, (
+                f"{r['id']}: impacts must be a non-empty object — omit the key "
+                f"rather than shipping an empty one, so 'no consequence' and "
+                f"'not yet classified' stay distinguishable"
+            )
+            for activity, level in imp.items():
+                assert activity in ACTIVITIES, (
+                    f"{r['id']}: bad activity {activity!r}"
+                )
+                assert level in IMPACT_LEVELS, (
+                    f"{r['id']}: bad impact level {level!r}"
+                )
         assert r["category"] in CATEGORIES, f"{r['id']}: bad category {r['category']!r}"
         if "also" in r:
             assert r["also"] in CATEGORIES, f"{r['id']}: bad also {r['also']!r}"

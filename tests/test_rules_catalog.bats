@@ -61,16 +61,17 @@ assert d['version'] == sys.argv[1], d['version']
 " "$VERSION"
 }
 
-@test "schema is 4" {
+@test "schema is 5" {
   # 1 -> 2 added the `metrics` glossary; 2 -> 3 added the optional
   # per-rule `also` category; 3 -> 4 added the optional per-metric
-  # `why_absent` field plus 16 new metrics entries. All additive, per
-  # this schema's own promise in docs/JSON-SCHEMA.md.
+  # `why_absent` field plus 16 new metrics entries; 4 -> 5 added the
+  # optional per-rule `impacts` map. All additive, per this schema's own
+  # promise in docs/JSON-SCHEMA.md.
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
-assert json.load(sys.stdin)['schema'] == 4
+assert json.load(sys.stdin)['schema'] == 5
 "
 }
 
@@ -162,20 +163,25 @@ assert not bad, bad
 # ── Every entry: complete, well-typed, closed-set fields ────────────────
 
 @test "every entry has all 7 required fields, non-empty" {
-  # `also` is the one optional field (schema 3) and is checked separately
-  # below. Everything else stays mandatory: this test is what stops a rule
-  # shipping with a blank blurb the GUI would render as an empty chip.
+  # `also` (schema 3) and `impacts` (schema 5) are the two optional fields,
+  # each checked in more depth elsewhere. Everything else stays mandatory:
+  # this test is what stops a rule shipping with a blank blurb the GUI
+  # would render as an empty chip. `impacts` is a dict, not a string, so
+  # it is excluded from the non-empty-string check below rather than
+  # asserted against it.
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 required = {'id', 'title', 'category', 'severity', 'scope', 'blurb', 'doc'}
-optional = {'also'}
+optional = {'also', 'impacts'}
 for r in d['rules']:
     keys = set(r.keys())
     assert keys - optional == required, (r.get('id'), sorted(keys))
     for k, v in r.items():
+        if k == 'impacts':
+            continue
         assert isinstance(v, str) and v.strip(), (r.get('id'), k, v)
 "
 }
@@ -512,4 +518,63 @@ for r in d['rules']:
     assert also != r['category'], f\"{r['id']}: also repeats category\"
     assert also in primaries, f\"{r['id']}: {also!r} is not a known category\"
 "
+}
+
+# ── Suitability impacts (schema 5) ───────────────────────────────────────
+
+@test "rules-catalog: every impacts entry uses known activities and levels" {
+  # Piping into `python3 - <<PY` doesn't work: the heredoc is consumed as
+  # the *script*, so sys.stdin is already at EOF by the time the script
+  # body runs — json.load(sys.stdin) sees nothing regardless of what was
+  # piped in. Using -c with a quoted script, like every other test in this
+  # file, keeps the pipe intact.
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+ACTIVITIES = {"calls", "streaming", "gaming", "vpn", "browsing"}
+LEVELS = {"degraded", "broken"}
+doc = json.load(sys.stdin)
+seen = 0
+for r in doc["rules"]:
+    imp = r.get("impacts")
+    if imp is None:
+        continue
+    seen += 1
+    rid = r["id"]
+    assert isinstance(imp, dict), f"{rid}: impacts is not an object"
+    assert imp, f"{rid}: impacts is empty - omit the key instead"
+    for activity, level in imp.items():
+        assert activity in ACTIVITIES, f"{rid}: bad activity {activity!r}"
+        assert level in LEVELS, f"{rid}: bad level {level!r}"
+assert seen, "no rule carries impacts at all"
+# Every critical rule must say what it breaks. A fault graded critical
+# that affects nothing a person actually does is a contradiction: the
+# severity claims the connection is unusable while the table claims
+# every activity is fine. Stated as an invariant rather than a count,
+# because a count is a magic number that goes stale the moment a rule
+# is added — and this caught ETH-2, which was critical and classified
+# as having no consequence at all.
+missing = [r["id"] for r in doc["rules"]
+           if r["severity"] == "critical" and not r.get("impacts")]
+assert not missing, f"critical rules with no impacts: {missing}"
+'
+}
+
+@test "rules-catalog: the rules that break everything say so" {
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+by_id = {r["id"]: r for r in json.load(sys.stdin)["rules"]}
+for rule in ("N1", "P1", "CP-1"):
+    imp = by_id[rule].get("impacts") or {}
+    assert set(imp) == {"calls", "streaming", "gaming", "vpn", "browsing"}, \
+        f"{rule}: expected all five activities, got {sorted(imp)}"
+    assert set(imp.values()) == {"broken"}, f"{rule}: expected all broken"
+b1 = by_id["B1"]["impacts"]
+assert b1["calls"] == "broken" and b1["gaming"] == "broken"
+assert b1["streaming"] == "degraded"
+assert "impacts" not in by_id["NT-1"], "NT-1 should carry no impacts"
+'
 }
