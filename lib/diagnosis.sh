@@ -15,8 +15,6 @@
 # discredits both.
 
 diagnosis_run() {
-  hdr "What we found"
-
   # N1 / N1c — no usable network. Every rule below keys off a measurement
   # that only exists once there IS a link, so without this the most basic
   # failure mode (WiFi off, cable unplugged) fired zero rules and the run
@@ -628,6 +626,31 @@ diagnosis_run() {
   if declare -f wan_diagnosis_run >/dev/null 2>&1; then
     wan_diagnosis_run
   fi
+
+  # "What should work here" leads the Diagnosis section rather than
+  # following it, and that ordering is why it is called from here —
+  # after every add_diag call above, not before — rather than from
+  # output_run() where the rest of lib/output.sh runs. suitability_run()
+  # (lib/output.sh) reads back the very rules this function just decided
+  # to fire, through the same build_json() the --json path emits, so it
+  # needs DIAGNOSIS_LINES complete before it can say anything honest. The
+  # "What we found" header used to open this function, before a single
+  # rule had been evaluated; it moves down to here, immediately after
+  # suitability_run(), so the two sections print in reading order and
+  # nothing between them changes: every diagnosis in this function prints
+  # below, exactly as before.
+  #
+  # Guarded exactly like wan_diagnosis_run above: the bats suite sources
+  # lib/diagnosis.sh directly, without lib/output.sh, to exercise the rule
+  # set on its own — a bare unguarded call would be "command not found"
+  # there, and under bats' own set -e (unlike the if-wrapped
+  # traffic_at_least call above, which set -e exempts) that kills the
+  # whole test instead of just skipping a section this context never asked
+  # to render.
+  if declare -f suitability_run >/dev/null 2>&1; then
+    suitability_run
+  fi
+  hdr "What we found"
 
   MOST_LIKELY_ROOT_CAUSE=""
   if [ "${#DIAG[@]}" -eq 0 ]; then

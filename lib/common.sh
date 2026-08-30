@@ -111,7 +111,7 @@ hdr() {
   # previous spinner before starting a new one.
   progress_spin_stop
   case "$*" in
-    Diagnosis*|Summary*|Report*|"What we found"*)
+    Diagnosis*|Summary*|Report*|"What we found"*|"What should work here"*)
       DIAGNOSIS_REACHED=1
       progress_clear
       ;;
