@@ -68,6 +68,7 @@ private enum VerifyHarness {
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runSuitabilityAndFixFieldTests()
+        runSuitabilityPanelTests()
         runSnapshots()
         print("")
         if failures.isEmpty {
@@ -503,6 +504,58 @@ private enum VerifyHarness {
     // guarantee rather than an intention — a document with no `suitability`
     // key, or a verdict string this build has never seen, has to come out
     // the other side as a normal (if partial) run, not a decode failure.
+
+    /// `SuitabilityPanel`'s three mappings. They are static on the view
+    /// precisely so they can be called here: this harness cannot construct
+    /// a SwiftUI view, so anything buried in a body is unreachable — the
+    /// same constraint that put `StageResolver` and `FullCheckPolicy` in
+    /// their own files.
+    private static func runSuitabilityPanelTests() {
+        print("\nSuitability panel mappings")
+
+        typealias V = RunSnapshot.SuitabilityRow.Verdict
+        let all: [V] = [.good, .degraded, .broken, .unmeasured, .unknown]
+
+        // Every verdict gets its own word and its own glyph. A duplicate
+        // in either would make two different answers look identical.
+        check(Set(all.map(SuitabilityPanel.word)).count == all.count,
+              "each verdict maps to a distinct word")
+        check(Set(all.map(SuitabilityPanel.symbol)).count == all.count,
+              "each verdict maps to a distinct symbol")
+
+        // Colour is never the only signal (see MenuBarLabel.dot). The two
+        // verdicts that share a tint — unmeasured and unknown — must still
+        // differ in shape, and the three coloured ones must differ from
+        // each other in shape too, so the panel reads in monochrome.
+        check(SuitabilityPanel.symbol(.unmeasured) != SuitabilityPanel.symbol(.unknown),
+              "the two secondary-tinted verdicts still differ in shape")
+
+        // The reason line: the CLI's own sentence wins; otherwise the
+        // rules that decided it; otherwise nothing at all.
+        var row = RunSnapshot.SuitabilityRow()
+        row.unmeasuredReason = "This check didn't run the speed test."
+        row.because = ["B1"]
+        check(SuitabilityPanel.detail(row) == "This check didn't run the speed test.",
+              "an unmeasured reason outranks the rule list")
+
+        row.unmeasuredReason = nil
+        check(SuitabilityPanel.detail(row) == "because B1",
+              "a fired rule is cited when there is no unmeasured reason")
+
+        row.because = ["G3", "G2"]
+        check(SuitabilityPanel.detail(row) == "because G3, G2",
+              "several rules are joined in the order the CLI gave them")
+
+        row.because = []
+        check(SuitabilityPanel.detail(row) == nil,
+              "a good row with nothing to cite gets no reason line")
+
+        // An empty reason string is not a reason. The CLI emits null, but
+        // a future one emitting "" must not produce a blank second line.
+        row.unmeasuredReason = ""
+        check(SuitabilityPanel.detail(row) == nil,
+              "an empty reason string is treated as absent, not printed blank")
+    }
 
     private static func runSuitabilityAndFixFieldTests() {
         print("\nSuitability rows + rules-catalog fix fields")

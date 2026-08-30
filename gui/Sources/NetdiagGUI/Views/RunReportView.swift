@@ -36,8 +36,27 @@ struct RunReportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             card
+            suitability
             copyRow
             diagnoses
+        }
+    }
+
+    // MARK: - What should work here
+
+    /// Above the diagnosis list, not below it, and mirroring the CLI's own
+    /// text report where "What should work here" prints immediately above
+    /// "What we found". The five activity rows are what a non-expert
+    /// reads; the rule-by-rule detail underneath is the expert's
+    /// follow-up. Renders nothing at all for a report from a CLI that
+    /// predates `suitability`.
+    @ViewBuilder
+    private var suitability: some View {
+        if !snapshot.suitability.isEmpty {
+            SuitabilityPanel(rows: snapshot.suitability)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
         }
     }
 

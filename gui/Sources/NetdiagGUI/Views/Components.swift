@@ -102,6 +102,128 @@ private struct RuleChipPopover: View {
     }
 }
 
+/// The five activity rows: "what should work here".
+///
+/// Shared rather than private to `RunReportView` because the menu-bar
+/// dropdown's arrival card renders the same five rows, and a user sees the
+/// two surfaces seconds apart — describing a verdict differently in each
+/// is how an app contradicts itself. Same reason `SignalScale.cellContent`
+/// and `AlertStageCard` are shared.
+///
+/// ── What this view is allowed to decide ────────────────────────────────
+/// A colour, a glyph, and a two-or-three-word category word. That is all.
+///
+/// The label ("Video & voice calls"), the ordering, the reason sentence and
+/// the verdict itself are the CLI's, from `helpers/suitability.py`, and are
+/// rendered verbatim. The category word is the same latitude
+/// `AlertDefinition.title` takes — see that file's header — and must stay a
+/// label rather than growing into a sentence about the network. If a future
+/// edit wants to explain *why* an activity won't work, that belongs in
+/// `helpers/rules_catalog.py`'s `impacts` table and its blurbs, not here.
+struct SuitabilityPanel: View {
+    let rows: [RunSnapshot.SuitabilityRow]
+    /// Drops the per-row reason line. The dropdown is 360pt wide and the
+    /// arrival card carries a fix and a memory line underneath, so the
+    /// reasons are the first thing that has to give there.
+    var compact: Bool = false
+
+    var body: some View {
+        // Nothing at all, rather than an empty card: a report from a CLI
+        // predating `suitability` has no answer to give, and a heading
+        // over blank space reads as a failure rather than an absence.
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("What should work here")
+                    .font(.headline)
+                    .padding(.bottom, Theme.Spacing.sm)
+                ForEach(rows) { row in
+                    rowView(row)
+                    if row.id != rows.last?.id { Divider() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: RunSnapshot.SuitabilityRow) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+            Image(systemName: Self.symbol(row.verdict))
+                .foregroundStyle(Self.tint(row.verdict))
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.label ?? row.id)
+                if !compact, let detail = Self.detail(row) {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: Theme.Spacing.sm)
+            Text(Self.word(row.verdict))
+                .font(.callout.weight(.medium))
+                .foregroundStyle(Self.tint(row.verdict))
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    // MARK: - Mappings
+    //
+    // Static and internal rather than private closures in the body, so
+    // `VerifyMode` can call them directly — the only runnable harness on
+    // this toolchain cannot construct a SwiftUI view. Same shape and same
+    // reason as `StageResolver` and `FullCheckPolicy`.
+
+    /// The sentence under a row: the CLI's own explanation of what wasn't
+    /// measured, or the rules that decided the verdict. Never a sentence
+    /// composed here.
+    static func detail(_ row: RunSnapshot.SuitabilityRow) -> String? {
+        if let reason = row.unmeasuredReason, !reason.isEmpty { return reason }
+        guard !row.because.isEmpty else { return nil }
+        return "because " + row.because.joined(separator: ", ")
+    }
+
+    /// Deliberately four distinct *shapes*, not four tints of one shape.
+    /// Colour is never the only signal — `MenuBarLabel.dot` follows the
+    /// same rule and explains why: a status a user cannot read without
+    /// distinguishing red from green is a status some users cannot read.
+    static func symbol(_ verdict: RunSnapshot.SuitabilityRow.Verdict) -> String {
+        switch verdict {
+        case .good:       return "checkmark.circle.fill"
+        case .degraded:   return "exclamationmark.triangle.fill"
+        case .broken:     return "xmark.octagon.fill"
+        case .unmeasured: return "minus.circle"
+        case .unknown:    return "questionmark.circle"
+        }
+    }
+
+    static func tint(_ verdict: RunSnapshot.SuitabilityRow.Verdict) -> Color {
+        switch verdict {
+        case .good:       return .green
+        case .degraded:   return .orange
+        case .broken:     return .red
+        case .unmeasured, .unknown: return .secondary
+        }
+    }
+
+    /// Category labels, matching the CLI text report's own wording so the
+    /// terminal and the app say the same thing about the same run.
+    ///
+    /// "Won't hold up" rather than "Broken" is deliberate and load-bearing:
+    /// the CLI only assigns `broken` to persistent, present-tense faults —
+    /// no route, no DNS, a captive portal — never to intermittent or
+    /// historical ones. The word has to carry that weight honestly.
+    static func word(_ verdict: RunSnapshot.SuitabilityRow.Verdict) -> String {
+        switch verdict {
+        case .good:       return "Fine"
+        case .degraded:   return "Rough"
+        case .broken:     return "Won't hold up"
+        case .unmeasured: return "Not measured"
+        case .unknown:    return "—"
+        }
+    }
+}
+
 /// A small "what does this mean?" affordance next to a jargon term —
 /// `RunReportView`'s answer to "When I see 'packets', 'size', and 'MTU', I
 /// have no idea what they mean." Looks `key` up in
