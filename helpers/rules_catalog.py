@@ -653,8 +653,15 @@ RULES: list[dict[str, object]] = [
             "the underlying queueing problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#b1--bufferbloat-at-gateway-hop",
-        "impacts": {"calls": "broken", "streaming": "degraded",
-                    "gaming": "broken", "vpn": "degraded"},
+        # Load-conditional, so not `broken`. Bufferbloat only bites while
+        # the link is saturated — this rule's own summary says calls will
+        # glitch "whenever someone's downloading or uploading", and on an
+        # idle link the same call is fine. That is the flapping case in a
+        # different costume: a fault that comes and goes cannot claim an
+        # activity "won't hold up", which a reader takes as a statement
+        # about right now.
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Turn on Smart Queue Management (SQM) or QoS in the router's "
             "admin page — that fixes the underlying queueing problem "
@@ -683,8 +690,15 @@ RULES: list[dict[str, object]] = [
             "responsibility to fix."
         ),
         "doc": "DIAGNOSIS-RULES.md#b2--bufferbloat-at-isp-hop-only",
-        "impacts": {"calls": "broken", "streaming": "degraded",
-                    "gaming": "broken", "vpn": "degraded"},
+        # Load-conditional, so not `broken`. Bufferbloat only bites while
+        # the link is saturated — this rule's own summary says calls will
+        # glitch "whenever someone's downloading or uploading", and on an
+        # idle link the same call is fine. That is the flapping case in a
+        # different costume: a fault that comes and goes cannot claim an
+        # activity "won't hold up", which a reader takes as a statement
+        # about right now.
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Call the ISP and ask about firmware updates for their "
             "equipment, or a plan with better latency under load. Quote "

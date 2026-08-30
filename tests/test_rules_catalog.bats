@@ -574,8 +574,9 @@ for rule in ("N1", "P1", "CP-1"):
         f"{rule}: expected all five activities, got {sorted(imp)}"
     assert set(imp.values()) == {"broken"}, f"{rule}: expected all broken"
 b1 = by_id["B1"]["impacts"]
-assert b1["calls"] == "broken" and b1["gaming"] == "broken"
-assert b1["streaming"] == "degraded"
+# bufferbloat is load-conditional, so degraded and never broken — see
+# the intermittent-or-historical test below.
+assert set(b1.values()) == {"degraded"}, b1
 assert "impacts" not in by_id["NT-1"], "NT-1 should carry no impacts"
 '
 }
@@ -595,7 +596,11 @@ assert "impacts" not in by_id["NT-1"], "NT-1 should carry no impacts"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c '
 import json, sys
-INTERMITTENT_OR_HISTORICAL = {"AV-1", "AV-2", "WD-1", "NAT-1", "NAT-1b"}
+INTERMITTENT_OR_HISTORICAL = {"AV-1", "AV-2", "WD-1", "NAT-1", "NAT-1b",
+                              # Load-conditional: bufferbloat only bites
+                              # while the link is saturated, and on an
+                              # idle link the same call is fine.
+                              "B1", "B2"}
 bad = []
 for r in json.load(sys.stdin)["rules"]:
     if r["id"] not in INTERMITTENT_OR_HISTORICAL:

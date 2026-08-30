@@ -28,13 +28,31 @@ PY
 import os, sys
 sys.path.insert(0, os.environ["HELPERS"])
 from suitability import project
-# G3 degrades calls; B1 breaks them. Broken must win.
+# G3 degrades calls; G2 breaks them. Broken must win.
+#
+# G2 rather than B1, which this used to pair with: bufferbloat is
+# load-conditional and was downgraded to `degraded` across the board,
+# so it is no longer an example of anything being broken. A fixture
+# that picks its "broken" rule at random goes stale the next time the
+# table is corrected — G2 (router dropping packets, persistent) is a
+# deliberate choice.
 out = {e["activity"]: e for e in project(
-    fired=["G3", "B1"],
+    fired=["G3", "G2"],
     measured={"bufferbloat", "loss", "speed", "mtu", "path"})}
 assert out["calls"]["verdict"] == "broken", out["calls"]
-assert set(out["calls"]["because"]) == {"G3", "B1"}, out["calls"]
-assert out["browsing"]["verdict"] == "good", out["browsing"]
+assert set(out["calls"]["because"]) == {"G3", "G2"}, out["calls"]
+# G2 reaches browsing too, but only as a degradation — the worst level
+# is per activity, not one verdict smeared across all five.
+assert out["browsing"]["verdict"] == "degraded", out["browsing"]
+
+# An activity no fired rule mentions stays good. G3 touches calls and
+# gaming and nothing else, so the other three must come back clean —
+# this is the half of the projection that the pairing above cannot show.
+only_g3 = {e["activity"]: e for e in project(
+    fired=["G3"], measured={"bufferbloat", "loss", "speed", "mtu", "path"})}
+assert only_g3["browsing"]["verdict"] == "good", only_g3["browsing"]
+assert only_g3["streaming"]["verdict"] == "good", only_g3["streaming"]
+assert only_g3["browsing"]["because"] == [], only_g3["browsing"]
 print("ok")
 PY
   [ "$status" -eq 0 ]
