@@ -277,7 +277,14 @@ for row in json.load(sys.stdin):
       broken)   bad  "$label: $word" ;;
       *)        info "$label: $word" ;;
     esac
-    [ -n "$reason" ] && info "$reason"
+    # The reason is subordinate to the verdict, and has to look it. Sent
+    # through `say` with a deeper indent and no glyph rather than through
+    # `info`, which prints the same "  · " prefix the unmeasured verdicts
+    # above already use: five activities rendered as nine identically
+    # bulleted lines, where a reason reads as a sixth activity. The
+    # dimming is the same treatment `info` gives its body, so this is a
+    # change of rank, not of palette.
+    [ -n "$reason" ] && say "      ${C_DIM}${reason}${C_RESET}"
   done <<<"$rows"
 }
 
