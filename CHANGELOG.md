@@ -6,6 +6,34 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-08-30
+
+### Added — the app shows what should work here [GUI]
+
+The five activity verdicts the CLI has been emitting since 0.13.0 now
+appear in the app's report card, above the diagnosis list, in the same
+order and with the same words the terminal uses.
+
+Built as a shared component rather than a view private to the report,
+because the arrival card lands next and renders the same five rows in the
+menu-bar dropdown. A user sees those two surfaces seconds apart, and
+describing a verdict differently in each is how an app contradicts
+itself — the same reason `SignalScale.cellContent` and `AlertStageCard`
+are shared.
+
+The panel decides a colour, a glyph and a two-word category label, and
+nothing else; the label, ordering, reason sentence and verdict are the
+CLI's, rendered verbatim. The four verdicts get four distinct *shapes*,
+not four tints of one shape, so the panel still reads for someone who
+cannot distinguish red from green.
+
+Also removes a dead `Suitability` type that had been sitting in
+`RunSnapshot` decoding a differently-shaped key (`web_browsing`,
+`video_calls`, `large_downloads`) that nothing in `helpers/` or `lib/`
+ever emitted, and that no view read. Its own comment called it a
+candidate for deletion. The idea had been started once and abandoned;
+this is the shape the CLI actually produces.
+
 ## [0.13.0] - 2026-08-30
 
 ### Added — the report says what this network is good for [`suitability`]
@@ -3042,7 +3070,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/godigi/netdiag/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/godigi/netdiag/compare/v0.10.0...v0.11.0
