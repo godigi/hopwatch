@@ -139,6 +139,29 @@ SCOPES = frozenset({"scan", "monitor", "both"})
 # card, which is a product decision, not a data one.
 ACTIVITIES = frozenset({"calls", "streaming", "gaming", "vpn", "browsing"})
 
+# ── Where the line between the two levels sits ────────────────────────
+# `broken` means the activity cannot function at all right now.
+# `degraded` means it functions, but unreliably or badly.
+#
+# Two consequences worth stating, because getting them wrong is how this
+# table turns into a scaremonger:
+#
+#   * An **intermittent** fault is never `broken`. A flapping link (AV-2)
+#     does end the call you are on, but the next one connects; `broken`
+#     renders as "won't hold up", which reads as "do not bother trying".
+#   * A **historical** fault is never `broken` either. AV-1 counts
+#     outages over the last day, and the rest of a report describes the
+#     link as it is at this instant. A red "video calls: won't hold up"
+#     on a connection that is fine right now, because of last night, is a
+#     claim the run has not established.
+#
+# The one that caught this: NAT-1 was `gaming: broken` because its own
+# prose says double NAT "breaks games". It does not — it breaks *inbound*
+# reach, and a game that connects outbound to a matchmaking server plays
+# fine, just with Strict NAT and worse matchmaking. What double NAT truly
+# breaks is port-forwarding-dependent (Plex, Steam in-home streaming,
+# doorbells), and none of those has a row here.
+#
 # How badly a rule hits an activity. Deliberately two levels, not three:
 # "good" is the absence of any impact, and a third middle grade would be a
 # judgement about magnitude — which lives in diagnosis[].severity, decided
@@ -1332,7 +1355,15 @@ RULES: list[dict[str, object]] = [
             "or access-point mode usually fixes it."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1--double-nat-detected",
-        "impacts": {"gaming": "broken", "vpn": "degraded"},
+        # Not "broken". Double NAT breaks *inbound* connections — port
+        # forwarding, UPnP, hosting — and modern multiplayer runs outbound
+        # to matchmaking servers, so it plays. What you get is Strict /
+        # Type-3 NAT: slower matchmaking, cannot host, some peers
+        # unreachable, party chat flaky. The rule's own prose says it
+        # "breaks games", which is loose — the things it truly breaks are
+        # the port-forwarding-dependent ones (Plex, Steam in-home
+        # streaming, doorbells) and those have no row here.
+        "impacts": {"gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Log into the outer router's admin page and switch it to "
             "\"bridge mode\" or \"access point mode\" so the inner "
@@ -1362,7 +1393,9 @@ RULES: list[dict[str, object]] = [
             "shows private-network addresses partway along the path."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1b--isp-side-private-transit-not-your-double-nat",
-        "impacts": {"gaming": "broken", "vpn": "degraded"},
+        # Same reasoning as NAT-1: inbound reach is what suffers, and a
+        # game that connects outbound still plays.
+        "impacts": {"gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Nothing to fix — this is normal for how your ISP built "
             "their own network, not a fault. It only explains why a "
@@ -1468,8 +1501,17 @@ RULES: list[dict[str, object]] = [
             "whoever runs the line."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-1--this-connection-keeps-dropping",
-        "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",
-                    "vpn": "broken", "browsing": "degraded"},
+        # All `degraded`, deliberately, even though the outages this rule
+        # counts were total while they lasted. AV-1 describes what this
+        # network *has been* like — the rule exists precisely because a
+        # snapshot taken at a good moment reports a healthy network
+        # truthfully and uselessly. Everything else in a report describes
+        # the link as it is right now, and a suitability row is read as a
+        # statement about now. "Video calls: won't hold up" on a link that
+        # is fine at this instant, because of last night, is a claim this
+        # run has not established.
+        "impacts": {"calls": "degraded", "streaming": "degraded", "gaming": "degraded",
+                    "vpn": "degraded", "browsing": "degraded"},
         "fix": (
             "If this keeps happening, raise it with your ISP and give "
             "them the exact times: run \"netdiag --events\" to print "
@@ -1493,7 +1535,12 @@ RULES: list[dict[str, object]] = [
             "continuous recorder can see them at all."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-2--the-connection-is-flapping",
-        "impacts": {"calls": "broken", "gaming": "broken", "vpn": "degraded"},
+        # A short drop does end a call and a match. But it ends *that*
+        # one; the next connects. "Won't hold up" reads as "do not bother
+        # trying", which is not what an intermittent fault means — and
+        # this rule is `info` precisely because the link works between
+        # the flaps.
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "If these short drops are actually causing trouble — a "
             "dropped call, a failed upload — run \"netdiag --events\" "

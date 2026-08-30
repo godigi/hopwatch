@@ -95,6 +95,24 @@ watcher that is not running) genuinely have no activity consequence and omit
 the key rather than carrying an empty object, so "no consequence" and "not yet
 classified" stay distinguishable.
 
+**Where the line between the two levels sits** turned out to matter more
+than the levels themselves. `broken` means the activity cannot function at
+all right now; `degraded` means it functions, but unreliably or badly. Two
+consequences, both of which the first draft of the table got wrong: an
+*intermittent* fault is never `broken` (a flapping link ends the call you
+are on, but the next one connects), and a *historical* one never is either
+(`AV-1` counts yesterday's outages, while the rest of a report describes the
+link at this instant — a red "video calls: won't hold up" on a connection
+that is currently fine is a claim the run has not established).
+
+The rule that exposed it: `NAT-1` was marked `gaming: broken` because its
+own prose says double NAT "breaks games". It does not. It breaks *inbound*
+reach, and a game connecting outbound to a matchmaking server plays fine,
+just with Strict NAT and worse matchmaking. What double NAT genuinely
+breaks is port-forwarding-dependent — Plex, Steam in-home streaming,
+doorbells — and none of those has a row here. A test now fails the build if
+`AV-1`, `AV-2`, `WD-1`, `NAT-1` or `NAT-1b` reaches for `broken` again.
+
 Nothing reads it yet. The point of putting it here is that the suitability
 layer being built on top can then be a **projection of which rules fired**
 rather than a second reading of the metrics. Four things already judge a

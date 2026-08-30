@@ -580,6 +580,33 @@ assert "impacts" not in by_id["NT-1"], "NT-1 should carry no impacts"
 '
 }
 
+@test "rules-catalog: an intermittent or historical fault is never 'broken'" {
+  # `broken` renders as "won't hold up", which reads as "do not bother
+  # trying". That is a claim about the connection as it is right now, so
+  # a rule describing something that comes and goes (AV-2, flapping) or
+  # something that already happened (AV-1, outages over the last day)
+  # must not use it — the link works between the flaps, and a good
+  # reading now is not undone by a bad night.
+  #
+  # This exists because the first draft of the table had both at
+  # `calls: broken`, alongside NAT-1 claiming double NAT breaks gaming
+  # outright when it only costs you inbound reach.
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+INTERMITTENT_OR_HISTORICAL = {"AV-1", "AV-2", "WD-1", "NAT-1", "NAT-1b"}
+bad = []
+for r in json.load(sys.stdin)["rules"]:
+    if r["id"] not in INTERMITTENT_OR_HISTORICAL:
+        continue
+    for activity, level in (r.get("impacts") or {}).items():
+        if level == "broken":
+            bad.append((r["id"], activity))
+assert not bad, bad
+'
+}
+
 # ── Remediation: fix / fix_away / fix_target (schema 5) ──────────────────
 
 @test "rules-catalog: every rule carries a fix with a valid target" {
