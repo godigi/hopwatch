@@ -102,7 +102,13 @@ and Activity. `--verify` renders *it* once per severity band instead of
 the hand-written stand-in that only ever drew the critical case — which is
 exactly how the uniform red survived — and gains 13 asserts across
 `HealthResolver` and alert attribution.
-### Fixed — one long ISP name was deciding whether the window kept its sidebar
+### Changed — prose and pickers stop setting how wide these views want to be
+
+**Correction:** this entry originally claimed to fix the "Trends hides
+the sidebar" report, and it did not. That was a wrong diagnosis, chased
+because the numbers below are real and pointed the right way; the actual
+cause is one modifier on one line of text, in the entry two above. What
+follows is true and worth keeping — it is a width change, not a fix.
 
 Trends looked wrong in a narrow window: select it and the sidebar
 collapses. The cause is not in Trends' own logic but in how much width it
@@ -133,11 +139,13 @@ typography: a sentence set 700pt wide is hard to track from one line to
 the next, and these screens are mostly explanation.
 
 Not a regression from the Live/Trends work below — the view it replaced
-asked for the same 699pt — and the sidebar behaviour itself is AppKit's,
-so this widens the margin rather than proving a fix. Measured, not
-eyeballed: `screencapture` is blocked without Screen Recording
-permission, so the numbers come from rendering each view offscreen and
-reading `fittingSize`.
+asked for the same 699pt — which, in hindsight, was the clue that this
+was not the reported bug's cause: the symptom was new and this number
+was not. Measured, not eyeballed: `screencapture` is blocked without
+Screen Recording permission, so the numbers come from rendering each
+view offscreen and reading `fittingSize`. That method is sound for
+measuring a view and useless for observing a window, which is why the
+real cause needed the app to report its own view tree instead.
 
 ### Added — Live and Trends now say what they are, and Trends says what a network is usually like
 
