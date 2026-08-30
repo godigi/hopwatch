@@ -1,6 +1,6 @@
 {
-  "version": "0.12.0",
-  "timestamp": "2026-08-29T00:00:47Z",
+  "version": "0.13.0",
+  "timestamp": "2026-08-30T21:58:54Z",
   "run_mode": "full",
   "run_id": null,
   "interface": {
@@ -41,16 +41,16 @@
   "gateway": {
     "ip": "192.168.60.1",
     "loss_pct": 0.0,
-    "rtt_avg_ms": 3.578,
-    "rtt_jitter_ms": 1.968
+    "rtt_avg_ms": 2.845,
+    "rtt_jitter_ms": 0.272
   },
   "internet_latency": {
     "target": "1.1.1.1",
-    "rtt_avg_ms": 52.675,
-    "rtt_jitter_ms": 0.935,
+    "rtt_avg_ms": 52.459,
+    "rtt_jitter_ms": 1.712,
     "loss_pct": 0.0,
     "target_alt": "8.8.8.8",
-    "rtt_avg_ms_alt": 54.686,
+    "rtt_avg_ms_alt": 53.279,
     "loss_pct_alt": 0.0
   },
   "public": {
@@ -90,13 +90,13 @@
     {
       "resolver": "1.1.1.1",
       "name": "cloudflare.com",
-      "answer": "104.16.133.229",
+      "answer": "104.16.132.229",
       "ok": true
     },
     {
       "resolver": "8.8.8.8",
       "name": "cloudflare.com",
-      "answer": "104.16.133.229",
+      "answer": "104.16.132.229",
       "ok": true
     }
   ],
@@ -107,19 +107,19 @@
         "n": 1,
         "ip": "192.168.60.1",
         "responded": true,
-        "rtt_ms": 2.988
+        "rtt_ms": 3.542
       },
       {
         "n": 2,
         "ip": "177.21.98.253",
         "responded": true,
-        "rtt_ms": 3.518
+        "rtt_ms": 3.905
       },
       {
         "n": 3,
         "ip": "177.21.96.1",
         "responded": true,
-        "rtt_ms": 3.639
+        "rtt_ms": 3.901
       },
       {
         "n": 4,
@@ -131,37 +131,37 @@
         "n": 5,
         "ip": "10.5.6.137",
         "responded": true,
-        "rtt_ms": 4.916
+        "rtt_ms": 6.098
       },
       {
         "n": 6,
         "ip": "10.5.3.126",
         "responded": true,
-        "rtt_ms": 5.534
+        "rtt_ms": 6.22
       },
       {
         "n": 7,
         "ip": "10.5.16.5",
         "responded": true,
-        "rtt_ms": 11.44
+        "rtt_ms": 6.266
       },
       {
         "n": 8,
         "ip": "10.5.4.178",
         "responded": true,
-        "rtt_ms": 10.895
+        "rtt_ms": 9.639
       },
       {
         "n": 9,
         "ip": "10.5.14.69",
         "responded": true,
-        "rtt_ms": 17.384
+        "rtt_ms": 9.859
       },
       {
         "n": 10,
         "ip": "10.5.9.42",
         "responded": true,
-        "rtt_ms": 51.696
+        "rtt_ms": 80.876
       },
       {
         "n": 11,
@@ -173,25 +173,25 @@
         "n": 12,
         "ip": "10.5.20.66",
         "responded": true,
-        "rtt_ms": 51.28
+        "rtt_ms": 60.699
       },
       {
         "n": 13,
-        "ip": null,
-        "responded": false,
-        "rtt_ms": null
+        "ip": "187.16.219.111",
+        "responded": true,
+        "rtt_ms": 60.987
       },
       {
         "n": 14,
-        "ip": "172.68.16.131",
+        "ip": "172.68.16.89",
         "responded": true,
-        "rtt_ms": 49.699
+        "rtt_ms": 48.533
       },
       {
         "n": 15,
         "ip": "1.1.1.1",
         "responded": true,
-        "rtt_ms": 52.514
+        "rtt_ms": 53.416
       }
     ]
   },
@@ -201,21 +201,21 @@
       "ip": "192.168.60.1",
       "responded": true,
       "loss_pct": 0.0,
-      "avg_ms": 3.599
+      "avg_ms": 3.245
     },
     {
       "n": 2,
       "ip": "177.21.98.253",
       "responded": true,
       "loss_pct": 0.0,
-      "avg_ms": 5.508
+      "avg_ms": 4.814
     },
     {
       "n": 3,
       "ip": "177.21.96.1",
       "responded": true,
       "loss_pct": 0.0,
-      "avg_ms": 6.808
+      "avg_ms": 7.06
     },
     {
       "n": 4,
@@ -268,26 +268,33 @@
     },
     {
       "n": 11,
-      "ip": "172.68.16.131",
+      "ip": "187.16.219.111",
       "responded": true,
       "loss_pct": 0.0,
-      "avg_ms": 49.324
+      "avg_ms": 64.121
     },
     {
       "n": 12,
+      "ip": "172.68.16.89",
+      "responded": true,
+      "loss_pct": 0.0,
+      "avg_ms": 51.371
+    },
+    {
+      "n": 13,
       "ip": "1.1.1.1",
       "responded": true,
       "loss_pct": 0.0,
-      "avg_ms": 51.826
+      "avg_ms": 52.962
     }
   ],
   "bufferbloat": {
-    "idle_gw_rtt_ms": 3.578,
-    "loaded_gw_rtt_ms": 3.527,
-    "idle_inet_rtt_ms": 51.945,
-    "loaded_inet_rtt_ms": 52.155,
-    "gw_delta_ms": -0.1,
-    "inet_delta_ms": 0.2,
+    "idle_gw_rtt_ms": 2.845,
+    "loaded_gw_rtt_ms": 3.114,
+    "idle_inet_rtt_ms": 51.88,
+    "loaded_inet_rtt_ms": 52.766,
+    "gw_delta_ms": 0.3,
+    "inet_delta_ms": 0.9,
     "gw_grade": "A",
     "inet_grade": "A"
   },
@@ -316,31 +323,31 @@
       "host": "1.1.1.1",
       "port": 443,
       "ok": true,
-      "elapsed_ms": 71.0
+      "elapsed_ms": 102.0
     },
     {
       "host": "1.1.1.1",
       "port": 53,
       "ok": true,
-      "elapsed_ms": 70.0
+      "elapsed_ms": 100.0
     },
     {
       "host": "8.8.8.8",
       "port": 443,
       "ok": true,
-      "elapsed_ms": 73.0
+      "elapsed_ms": 99.0
     },
     {
       "host": "github.com",
       "port": 443,
       "ok": true,
-      "elapsed_ms": 86.0
+      "elapsed_ms": 117.0
     },
     {
       "host": "apple.com",
       "port": 443,
       "ok": true,
-      "elapsed_ms": 72.0
+      "elapsed_ms": 164.0
     }
   ],
   "path_actors": {
@@ -360,39 +367,39 @@
   },
   "traffic": {
     "sampled_s": 2.0,
-    "down_mbps": 0.06,
-    "up_mbps": 0.56,
+    "down_mbps": 0.11,
+    "up_mbps": 0.01,
     "top_processes": [
       {
-        "name": "claude",
-        "down_mbps": 0.02,
-        "up_mbps": 0.42
-      },
-      {
-        "name": "Nimbalyst",
-        "down_mbps": 0.0,
-        "up_mbps": 0.07
+        "name": "mDNSResponder",
+        "down_mbps": 0.04,
+        "up_mbps": 0.01
       },
       {
         "name": "Google Chrome H",
-        "down_mbps": 0.0,
-        "up_mbps": 0.06
+        "down_mbps": 0.04,
+        "up_mbps": 0.0
+      },
+      {
+        "name": "Spotify",
+        "down_mbps": 0.03,
+        "up_mbps": 0.0
       }
     ]
   },
   "watcher": {
-    "state": "ok",
+    "state": "failing",
     "program": null,
     "interval_s": 900,
-    "last_exit": 0,
-    "last_run_age_s": 458,
-    "installed_age_s": 20067,
+    "last_exit": 1,
+    "last_run_age_s": 430,
+    "installed_age_s": 185552,
     "path_blocked": false
   },
   "wifi_scan": {
     "current_channel": "149",
     "current_band": "5GHz",
-    "neighbour_count": 7,
+    "neighbour_count": 6,
     "current_channel_neighbours": 1
   },
   "wifi_disconnects": {
@@ -401,23 +408,23 @@
     "events": []
   },
   "speedtest": {
-    "down_mbps": 18.9,
-    "up_mbps": 13.8,
-    "latency_ms": 6.096,
-    "jitter_ms": 0.154,
+    "down_mbps": 19.0,
+    "up_mbps": 14.1,
+    "latency_ms": 6.127,
+    "jitter_ms": 0.149,
     "server": "Cyber Info Servi\u00e7os de Telecomunica\u00e7\u00f5es Ltda"
   },
   "ntp": {
-    "drift_seconds": 0.042228,
+    "drift_seconds": 0.080672,
     "using_network_time": null,
     "server": null
   },
   "duplicate_ips": [],
   "dhcp": {
     "server": "192.168.60.1",
-    "lease_start": "08/28/2026 14:46:52",
-    "lease_end": "08/29/2026 14:46:52",
-    "time_remaining_s": 63960,
+    "lease_start": "08/30/2026 11:55:35",
+    "lease_end": "08/31/2026 11:55:35",
+    "time_remaining_s": 60996,
     "dns_servers": "192.168.60.1"
   },
   "mtr": {
@@ -429,21 +436,21 @@
         "ip": "192.168.60.1",
         "responded": true,
         "loss_pct": 0.0,
-        "avg_ms": 3.599
+        "avg_ms": 3.245
       },
       {
         "n": 2,
         "ip": "177.21.98.253",
         "responded": true,
         "loss_pct": 0.0,
-        "avg_ms": 5.508
+        "avg_ms": 4.814
       },
       {
         "n": 3,
         "ip": "177.21.96.1",
         "responded": true,
         "loss_pct": 0.0,
-        "avg_ms": 6.808
+        "avg_ms": 7.06
       },
       {
         "n": 4,
@@ -496,17 +503,24 @@
       },
       {
         "n": 11,
-        "ip": "172.68.16.131",
+        "ip": "187.16.219.111",
         "responded": true,
         "loss_pct": 0.0,
-        "avg_ms": 49.324
+        "avg_ms": 64.121
       },
       {
         "n": 12,
+        "ip": "172.68.16.89",
+        "responded": true,
+        "loss_pct": 0.0,
+        "avg_ms": 51.371
+      },
+      {
+        "n": 13,
         "ip": "1.1.1.1",
         "responded": true,
         "loss_pct": 0.0,
-        "avg_ms": 51.826
+        "avg_ms": 52.962
       }
     ],
     "first_lossy_hop": null
@@ -545,49 +559,91 @@
     "suspicious_redirects": []
   },
   "timings": {
-    "total_s": 64.35,
+    "total_s": 60.55,
     "budget_s": 30.0,
     "over_budget": true,
     "phases": {
-      "iface": 0.1,
-      "vpn": 0.03,
-      "wifi": 0.09,
-      "gateway": 3.91,
-      "arp": 0.03,
+      "iface": 0.14,
+      "vpn": 0.04,
+      "wifi": 0.08,
+      "gateway": 3.92,
+      "arp": 0.04,
       "netid": 0.0,
-      "dhcp": 0.05,
-      "public": 0.58,
-      "parallel_batch": 14.48,
-      "internet_ping": 3.98,
-      "bufferbloat": 11.11,
+      "dhcp": 0.07,
+      "public": 0.71,
+      "parallel_batch": 14.23,
+      "internet_ping": 4.01,
+      "bufferbloat": 11.1,
       "mtu": 0.48,
-      "traceroute": 6.31,
+      "traceroute": 4.4,
       "nat": 0.02,
-      "mtr": 4.36,
+      "mtr": 4.4,
       "watchdog": 0.06,
-      "availability": 0.07,
-      "speedtest": 18.31
+      "availability": 0.09,
+      "speedtest": 16.11
     }
   },
   "baseline": {
     "compared_runs": 10,
     "network_id": "wifi:mac=[redacted]",
-    "skipped_other_networks": 2077,
+    "skipped_other_networks": 1879,
     "regressions": []
   },
   "diagnosis": [
+    {
+      "severity": "warn",
+      "rule": "ND-1",
+      "summary": "netdiag's background watcher is installed but isn't running: launchd reports that its last run exited 1. Nothing about your network is wrong \u2014 but nothing has been recorded in the meantime either, so the history this report compares against has a hole in it. Re-install it with: netdiag --uninstall-watcher && netdiag --install-watcher, which now refuses to install a watcher somewhere it could never run."
+    },
     {
       "severity": "info",
       "rule": "WI-1",
       "summary": "macOS isn't telling netdiag which WiFi network you're on, so this check is labelled with a generic name instead of the real one. Nothing is broken and nothing is mis-filed \u2014 checks are grouped by your router's hardware address, not by its name \u2014 but every unnamed network looks alike in a list, so it's hard to tell one place from another later. Granting Location Services to whatever runs netdiag (System Settings \u2192 Privacy & Security \u2192 Location Services) fixes the name for future checks."
     }
   ],
-  "most_likely_root_cause": null,
+  "most_likely_root_cause": "netdiag's background watcher is installed but isn't running: launchd reports that its last run exited 1. Nothing about your network is wrong \u2014 but nothing has been recorded in the meantime either, so the history this report compares against has a hole in it. Re-install it with: netdiag --uninstall-watcher && netdiag --install-watcher, which now refuses to install a watcher somewhere it could never run.",
   "netdiag_extras": {
     "arp_gw_incomplete": false,
     "network_changed_mid_run": false,
     "target": null,
     "target_ping": null,
     "target_traceroute": null
-  }
+  },
+  "suitability": [
+    {
+      "activity": "calls",
+      "label": "Video & voice calls",
+      "verdict": "good",
+      "because": [],
+      "unmeasured_reason": null
+    },
+    {
+      "activity": "streaming",
+      "label": "Streaming",
+      "verdict": "good",
+      "because": [],
+      "unmeasured_reason": null
+    },
+    {
+      "activity": "gaming",
+      "label": "Gaming",
+      "verdict": "good",
+      "because": [],
+      "unmeasured_reason": null
+    },
+    {
+      "activity": "vpn",
+      "label": "VPN & remote access",
+      "verdict": "good",
+      "because": [],
+      "unmeasured_reason": null
+    },
+    {
+      "activity": "browsing",
+      "label": "Ordinary browsing",
+      "verdict": "good",
+      "because": [],
+      "unmeasured_reason": null
+    }
+  ]
 }

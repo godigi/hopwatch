@@ -8,6 +8,78 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [0.13.0] - 2026-08-30
 
+### Added — the report says what this network is good for [`suitability`]
+
+`netdiag --json` gains a `suitability` array and the text report gains a
+"What should work here" section: five verdicts — video calls, streaming,
+gaming, VPN & remote access, ordinary browsing — each `good`, `degraded`,
+`broken` or `unmeasured`, each naming the rule that decided it.
+
+This is the answer a non-expert can actually use. The report already said
+`Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of that fact most people can
+act on. On a real run of a network with `G2` firing, it now reads: video
+calls broken, gaming broken, streaming rough, browsing rough — because G2.
+
+**It is a projection, not a second opinion.** The verdict is the worst
+`impacts` level among the rules that fired. `helpers/suitability.py` reads
+no metrics and contains no numeric comparison at all — a test walks its AST
+and fails the build if one appears — so it cannot become a fifth judge next
+to `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py`, and it can never print a healthy activity above a
+firing rule that breaks it. Even the internals hold the line: the
+worst-of-N helper ranks by position in a table rather than by comparing
+numbers.
+
+**`unmeasured` is a verdict, not a hidden row.** `--quick` skips
+bufferbloat, the speed test, the loss probe *and* the MTU probe, so at that
+depth four of the five genuinely cannot be judged. The rows still print,
+saying what was not run. Dropping them would quietly convert "we did not
+look" into "nothing is wrong", which is the failure this whole project is
+organised against. A rule that fired outranks this: a connection that is
+down is down at any depth.
+
+Two implementation notes worth recording. `measured_families()` reads the
+*assembled document* rather than the environment, so what the verdict
+claims was measured cannot drift from what the report shows. And the one
+family with no natural null is `path`, which keys off
+`wan.upnp.state != "unknown"` — `wan` is present even on `--quick`, but its
+UPnP probe sits behind the same `--quick` gate as the rest of the path
+batch, making that string the honest signal.
+
+"What should work here" also joins Report / Summary / Diagnosis as a
+punchline section in `hdr()`. A headline answer suppressed in default mode
+is not a headline.
+
+### Added — the fix, lifted out of the paragraph [`fix`, `fix_away`, `fix_target`]
+
+Every catalog rule now carries `fix`, `fix_target`, and — where the advice
+genuinely changes when the equipment is not yours — `fix_away`.
+
+The advice already existed; it was just unreachable. `add_diag` takes the
+summary as one string, so "Fix: enable Smart Queue Management or QoS in
+your router's admin page" was a substring of a paragraph that nothing could
+rank, reorder or swap. `add_diag` is untouched: general advice about a rule
+is what the catalog already holds (`blurb`), not a fact about one incident.
+
+`fix_target` is the traveller-facing half. "Reboot your router" is sound at
+home and useless in a hotel, where the router is behind the front desk, so
+the target says which of the two the reader is in: `you`, `your_router`,
+`your_isp`, `network_operator`, `nobody`. Across 53 rules that lands as you
+21, nobody 12, your_router 10, your_isp 8, network_operator 2, with 12
+carrying a second `fix_away` sentence.
+
+`nobody` is a real answer rather than a gap — a VPN that is carrying
+traffic, an IPv6-only network that works, ping blocked while the connection
+is fine. Inventing an action to fill a required field would be worse than
+saying there is nothing to do.
+
+A test pins the thing that actually matters about `fix_away`: it may never
+open with an imperative. "Reboot the router", read by a guest, is an order
+they cannot carry out; "ask whoever runs this network to restart it" is one
+they can. An imperative opening is the signature of advice written for the
+wrong reader.
+
 ### Added — every rule says which activities it breaks [`impacts`, catalog schema 5]
 
 Groundwork for answering the question a non-expert actually has. The report
