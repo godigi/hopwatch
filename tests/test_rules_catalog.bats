@@ -162,7 +162,7 @@ assert not bad, bad
 
 # ── Every entry: complete, well-typed, closed-set fields ────────────────
 
-@test "every entry has all 7 required fields, non-empty" {
+@test "every entry has all 9 required fields, non-empty" {
   # `also` (schema 3) and `impacts` (schema 5) are the two optional fields,
   # each checked in more depth elsewhere. Everything else stays mandatory:
   # this test is what stops a rule shipping with a blank blurb the GUI
@@ -174,8 +174,9 @@ assert not bad, bad
   printf '%s' "$output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-required = {'id', 'title', 'category', 'severity', 'scope', 'blurb', 'doc'}
-optional = {'also', 'impacts'}
+required = {'id', 'title', 'category', 'severity', 'scope', 'blurb', 'doc',
+            'fix', 'fix_target'}
+optional = {'also', 'impacts', 'fix_away'}
 for r in d['rules']:
     keys = set(r.keys())
     assert keys - optional == required, (r.get('id'), sorted(keys))
@@ -576,5 +577,80 @@ b1 = by_id["B1"]["impacts"]
 assert b1["calls"] == "broken" and b1["gaming"] == "broken"
 assert b1["streaming"] == "degraded"
 assert "impacts" not in by_id["NT-1"], "NT-1 should carry no impacts"
+'
+}
+
+# ── Remediation: fix / fix_away / fix_target (schema 5) ──────────────────
+
+@test "rules-catalog: every rule carries a fix with a valid target" {
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+TARGETS = {"you", "your_router", "your_isp", "network_operator", "nobody"}
+for r in json.load(sys.stdin)["rules"]:
+    rid = r["id"]
+    assert "fix" in r, rid + ": no fix"
+    assert "fix_target" in r, rid + ": no fix_target"
+    target = r["fix_target"]
+    assert target in TARGETS, rid + ": bad target " + repr(target)
+    assert r["fix"].strip(), rid + ": empty fix"
+'
+}
+
+@test "rules-catalog: fix_away is present exactly where the advice changes" {
+  # `you` (something on this Mac) and `your_isp` (a phone call either way)
+  # read the same in a hotel as at home, so they carry one sentence. The
+  # other two targets are the whole reason this field exists.
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+NEEDS_AWAY = {"your_router", "network_operator"}
+for r in json.load(sys.stdin)["rules"]:
+    rid = r["id"]
+    has = "fix_away" in r
+    want = r["fix_target"] in NEEDS_AWAY
+    assert has == want, rid + ": target " + r["fix_target"] + " but fix_away " + ("present" if has else "absent")
+    if has:
+        assert r["fix_away"].strip(), rid + ": empty fix_away"
+        assert r["fix_away"] != r["fix"], rid + ": fix_away repeats fix"
+'
+}
+
+@test "rules-catalog: away advice never opens with an order the reader cannot carry out" {
+  # The whole point of fix_away. "Reboot the router", read by a hotel
+  # guest, is an instruction they cannot follow; "ask whoever runs this
+  # network to restart it" is one they can. An imperative opening is the
+  # signature of advice written for the wrong reader.
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, re, sys
+IMPERATIVE = re.compile(r"^(reboot|restart|unplug|power[- ]cycle|log in|log into|open the router|replace)", re.I)
+bad = []
+for r in json.load(sys.stdin)["rules"]:
+    away = r.get("fix_away")
+    if away and IMPERATIVE.match(away.strip()):
+        bad.append((r["id"], away[:60]))
+assert not bad, bad
+'
+}
+
+@test "rules-catalog: fix text embeds no numeric threshold" {
+  # Same discipline the blurbs already keep: a number belongs in
+  # lib/thresholds.sh, and `doc` is where the actual figure lives.
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, re, sys
+pattern = re.compile(r"[0-9](?:\s?(?:dbm|db|ms|%|mbps|seconds?|bytes?))", re.IGNORECASE)
+bad = []
+for r in json.load(sys.stdin)["rules"]:
+    for field in ("fix", "fix_away"):
+        text = r.get(field)
+        if text and pattern.search(text):
+            bad.append((r["id"], field, pattern.findall(text)))
+assert not bad, bad
 '
 }

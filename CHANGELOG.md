@@ -6,6 +6,48 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-30
+
+### Added — every rule says which activities it breaks [`impacts`, catalog schema 5]
+
+Groundwork for answering the question a non-expert actually has. The report
+says `Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of the answer most people can
+use.
+
+Each rule in `netdiag --rules-catalog` now carries an optional `impacts` map
+over five activities — video calls, streaming, gaming, VPN and remote access,
+ordinary browsing — saying which of them the rule breaks or merely degrades.
+36 of 53 rules carry one; the rest (a drifted clock, an expiring lease, a
+watcher that is not running) genuinely have no activity consequence and omit
+the key rather than carrying an empty object, so "no consequence" and "not yet
+classified" stay distinguishable.
+
+Nothing reads it yet. The point of putting it here is that the suitability
+layer being built on top can then be a **projection of which rules fired**
+rather than a second reading of the metrics. Four things already judge a
+network — `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py` — and CLAUDE.md exists to stop them drifting apart. A
+fifth judge that read `bufferbloat_gw_ms` for itself would, on its first
+disagreement, put a green "calls: fine" row directly above a red B1 paragraph.
+Deriving from the fired rule set makes that contradiction structurally
+impossible rather than merely unlikely.
+
+Two things this turned up that were not obvious going in:
+
+- `helpers/capabilities.py` mirrors `SCHEMA_RULES_CATALOG` and
+  `tests/test_capabilities.bats` compares the two, so the 4 → 5 bump had to
+  happen in both files or the suite fails. Not cosmetic.
+- The test asserts an invariant rather than a count: **every rule graded
+  `critical` must declare what it breaks.** A fault graded critical that
+  affects nothing a person actually does is a contradiction — the severity
+  claims the connection is unusable while the table claims every activity is
+  fine. That invariant immediately caught `ETH-2` (ethernet stuck on half
+  duplex), which was `critical` and classified as having no consequence at
+  all, despite causing collisions and heavy loss. `ETH-1` stays absent by
+  contrast: a link negotiated below the port's ceiling is a cap, not a fault,
+  the same reason `SP-1` ("WiFi is the speed cap") carries none.
+
 ### Fixed — the menu says one thing once, and means it [GUI]
 
 Four ways the dropdown misrepresented what the CLI had actually decided.
@@ -2910,7 +2952,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/godigi/netdiag/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/godigi/netdiag/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/godigi/netdiag/compare/v0.9.1...v0.10.0
