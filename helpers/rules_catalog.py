@@ -299,8 +299,13 @@ RULES: list[dict[str, object]] = [
             "inconsistent; a less busy channel may help."
         ),
         "doc": "DIAGNOSIS-RULES.md#ws-1--wifi-channel-is-congested",
+        # `vpn` included for the same reason W1 and W2 include it: all
+        # three are radio-quality rules, and channel contention produces
+        # the same jitter and loss a tunnel suffers from. Omitting it here
+        # while the other two carry it was an inconsistency, not a
+        # judgement that a congested channel spares a VPN.
         "impacts": {"calls": "degraded", "streaming": "degraded",
-                    "gaming": "degraded"},
+                    "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Log into the router's admin page and switch to a quieter "
             "WiFi channel, or let it choose one automatically — the "
