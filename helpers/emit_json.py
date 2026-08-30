@@ -188,6 +188,60 @@ def build_diagnosis() -> list[dict]:
     return out
 
 
+def measured_families(data: dict) -> set[str]:
+    """Which measurement families this run actually produced.
+
+    The rule is the schema's own contract, stated at docs/JSON-SCHEMA.md:
+    a field is `null` when its probe did not run, never `0` and never
+    `100`. So "did we measure it" is exactly "is the value non-null",
+    read here from the document already assembled rather than from a
+    second pass over the environment — one source, and it cannot drift
+    from what the report shows.
+
+    `path` reads `wan.upnp.state` rather than `wan` itself: `wan` is
+    always a populated dict, quick run or not, so its mere presence says
+    nothing. `wan_upnp_run` (lib/wan.sh) is gated by the same `--quick`
+    check as `wan_load_balancing_run` and `traceroute_run` — the probe
+    `wan_double_nat_run` walks — and `WAN_UPNP_STATE` starts life as
+    `"unknown"` (lib/globals.sh) and is set to `"enabled"` or `"disabled"`
+    on every code path through `wan_upnp_run` once it runs at all. So
+    `"unknown"` means exactly "the quick-gated WAN probes didn't run
+    this time", the same fact `--quick` skips for load-balancing and
+    double-NAT detection too.
+
+    This is not a judgement. It says what ran, never whether a number
+    that ran is good; that stays in lib/diagnosis.sh against
+    lib/thresholds.sh.
+    """
+    families: set[str] = set()
+    bufferbloat = data.get("bufferbloat") or {}
+    if bufferbloat.get("gw_delta_ms") is not None or bufferbloat.get("inet_delta_ms") is not None:
+        families.add("bufferbloat")
+    if (data.get("internet_latency") or {}).get("loss_pct") is not None:
+        families.add("loss")
+    speedtest = data.get("speedtest")
+    if speedtest is not None and speedtest.get("down_mbps") is not None:
+        families.add("speed")
+    if (data.get("mtu") or {}).get("effective") is not None:
+        families.add("mtu")
+    if ((data.get("wan") or {}).get("upnp") or {}).get("state") != "unknown":
+        families.add("path")
+    return families
+
+
+def build_suitability(data: dict) -> list[dict]:
+    """The `suitability` array — see helpers/suitability.py's header.
+
+    Takes the assembled document rather than the environment so the fired
+    rules it projects are exactly the ones `diagnosis` reports. Reading
+    NETDIAG_DIAGNOSIS_LINES a second time would let the two lists drift
+    apart on any future change to build_diagnosis's parsing.
+    """
+    from suitability import project
+    fired = [d["rule"] for d in data.get("diagnosis", []) if d.get("rule")]
+    return project(fired=fired, measured=measured_families(data))
+
+
 def build_baseline() -> dict | None:
     raw = os.environ.get("NETDIAG_BASELINE_JSON", "")
     if not raw.strip():
@@ -656,6 +710,14 @@ def main() -> None:
             } if target else None),
         },
     }
+
+    # After the literal, because it reads data["diagnosis"]; before
+    # redaction, because redaction walks the finished document and there
+    # is no reason for this block to be the one thing it never sees.
+    # Nothing in `suitability` is identifying — rule IDs and fixed labels
+    # — so redact() passes it through unchanged either way.
+    data["suitability"] = build_suitability(data)
+
     if _bool("REDACT"):
         data = redact(data)
         # run_id is a pointer into the *private* copy of this run that
