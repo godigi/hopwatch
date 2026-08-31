@@ -227,16 +227,23 @@ struct HeartbeatStrip: View {
 // MARK: - Event row
 
 struct EventRow: View {
+    @Environment(NetdiagCoordinator.self) private var coordinator
     let event: NetworkEvent
+
+    private var tint: Color {
+        EventStyle.tint(for: event.kind,
+                        severity: event.ruleID.flatMap {
+                            coordinator.rulesCatalog.catalog?[$0]?.severity
+                        })
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: EventStyle.symbol(for: event.kind))
                 .font(.system(size: 10))
-                .foregroundStyle(EventStyle.tint(for: event.kind))
+                .foregroundStyle(tint)
                 .frame(width: 18, height: 18)
-                .background(EventStyle.tint(for: event.kind).opacity(0.12),
-                            in: Circle())
+                .background(tint.opacity(0.12), in: Circle())
             Text(event.summary)
                 .font(.caption)
                 .lineLimit(1)
@@ -250,6 +257,54 @@ struct EventRow: View {
                 .foregroundStyle(.tertiary)
                 .layoutPriority(1)
         }
+    }
+}
+
+// MARK: - Activity row
+
+/// One folded episode, for the Activity screen.
+///
+/// The sibling of `EventRow`, not a replacement: the dropdown's teaser
+/// shows the last few *transitions* on a 360pt panel, where "it just
+/// cleared" is the useful thing. A full-screen history is read differently
+/// — the question there is how long and how often, which is what
+/// `ActivityEntry` folds for and this renders.
+struct ActivityRow: View {
+    @Environment(NetdiagCoordinator.self) private var coordinator
+    let entry: ActivityEntry
+
+    private var tint: Color {
+        EventStyle.tint(for: entry.kind,
+                        severity: entry.ruleID.flatMap {
+                            coordinator.rulesCatalog.catalog?[$0]?.severity
+                        })
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: EventStyle.symbol(for: entry.kind))
+                .font(.system(size: 10))
+                .foregroundStyle(tint)
+                .frame(width: 18, height: 18)
+                .background(tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.summary)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let detail = entry.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            RelativeTimeText(date: entry.latest)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .layoutPriority(1)
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -275,9 +330,28 @@ enum EventStyle {
         }
     }
 
-    static func tint(for kind: String) -> Color {
+    /// `severity` is the CLI's own word for the rule behind this event
+    /// (`RulesCatalog`'s `severity`), or nil when the event has no rule or
+    /// the catalog has not loaded.
+    ///
+    /// Keying colour on `kind` alone — which is all this did — painted
+    /// every `rule-fired` critical-red, so a warn-level "Minor packet loss
+    /// to router" was indistinguishable from a critical "No network
+    /// connection at all", and a history of the former read as a history
+    /// of outages. This is the same defect `VerifyMode`'s alert-attribution
+    /// note records fixing for `AlertStageCard`; the timeline rows kept it.
+    ///
+    /// An unknown severity stays red on purpose. The catalog resolving late
+    /// is the common case at launch, and quietly greying out a real fault
+    /// until a fetch completes is the worse of the two errors.
+    static func tint(for kind: String, severity: String? = nil) -> Color {
         switch kind {
-        case "rule-fired", "alert": return .red
+        case "rule-fired", "alert":
+            switch severity {
+            case "warn", "warning": return .orange
+            case "info": return .blue
+            default: return .red
+            }
         case "rule-cleared": return .green
         case "vpn-disconnected": return .orange
         default: return .secondary

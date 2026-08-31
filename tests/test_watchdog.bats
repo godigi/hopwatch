@@ -100,7 +100,9 @@ watchdog_state_for() {
   WATCHER_PLIST_INTERVAL_S="$THRESH_WATCHER_INTERVAL_S"
   local stale_s=$(( WATCHER_PLIST_INTERVAL_S * THRESH_WATCHER_STALE_FACTOR ))
   if [ "$WATCHER_PATH_BLOCKED" -eq 1 ]; then printf blocked
-  elif [ -n "$WATCHER_LAST_EXIT" ] && [ "$WATCHER_LAST_EXIT" != "0" ]; then printf failing
+  elif [ -n "$WATCHER_LAST_EXIT" ] && [ "$WATCHER_LAST_EXIT" != "0" ] \
+       && [ "$WATCHER_LAST_EXIT" != "1" ] && [ "$WATCHER_LAST_EXIT" != "2" ]
+  then printf failing
   elif [ -z "$WATCHER_HEARTBEAT_AGE_S" ]; then
     if [ -n "$WATCHER_INSTALLED_AGE_S" ] && [ "$WATCHER_INSTALLED_AGE_S" -gt "$stale_s" ]
     then printf never; else printf pending; fi
@@ -115,9 +117,26 @@ watchdog_state_for() {
   [ "$(watchdog_state_for 1 0 60 99999)" = blocked ]
 }
 
-@test "a non-zero launchd exit is failing, whatever the heartbeat says" {
+@test "an off-contract launchd exit is failing, whatever the heartbeat says" {
+  # 126/127 and signals never reached bin/netdiag's EXIT trap at all.
   [ "$(watchdog_state_for 0 126 60 99999)" = failing ]
-  [ "$(watchdog_state_for 0 1 "" 99999)" = failing ]
+  # 3 is the trap's own remap for an unplanned abort — the one exit code
+  # that actually means the run broke.
+  [ "$(watchdog_state_for 0 3 "" 99999)" = failing ]
+}
+
+@test "exit 1 and 2 are findings, not a broken watcher" {
+  # netdiag's exit-code contract: 1 is "warnings only", 2 is "a critical
+  # diagnosis". Both are successful runs that found something, which is
+  # the watcher's whole purpose. Treating them as failure made ND-1 accuse
+  # a healthy watcher on any network with a standing warning — and because
+  # the exit test precedes the heartbeat tests, a fresh heartbeat could
+  # not clear it.
+  [ "$(watchdog_state_for 0 1 60 99999)" = ok ]
+  [ "$(watchdog_state_for 0 2 60 99999)" = ok ]
+  # ...and a genuinely stale watcher is still caught when it exits 1.
+  local past=$(( THRESH_WATCHER_INTERVAL_S * THRESH_WATCHER_STALE_FACTOR + 1 ))
+  [ "$(watchdog_state_for 0 1 "$past" 99999)" = stale ]
 }
 
 @test "exit 0 with a recent run is ok" {

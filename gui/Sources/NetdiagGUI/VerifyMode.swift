@@ -67,6 +67,7 @@ private enum VerifyHarness {
         runFullCheckPolicyTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
+        runActivityFoldTests()
         runSnapshots()
         print("")
         if failures.isEmpty {
@@ -150,6 +151,102 @@ private enum VerifyHarness {
         // also what the stage card renders.
         equal(degraded.title, snapshot.title,
               "the alert event's summary is the very string the stage card shows")
+        print("")
+    }
+
+    // MARK: - Activity fold
+
+    /// The transition-log → episode fold behind the Activity screen.
+    ///
+    /// Worth asserting rather than eyeballing because every interesting
+    /// case is a *missing* event — a fault whose clear never arrived, a
+    /// clear whose fire predates the store's cap — and each one has a
+    /// plausible wrong answer that looks fine in a screenshot: a duration
+    /// invented across an unobserved gap, or an episode silently dropped.
+    static func runActivityFoldTests() {
+        print("Activity fold (episodes, not transitions)")
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        func event(_ kind: String, _ rule: String?, _ offset: TimeInterval,
+                   _ summary: String = "Minor packet loss to router") -> NetworkEvent {
+            NetworkEvent(date: day.addingTimeInterval(offset), kind: kind,
+                         summary: summary, ruleID: rule)
+        }
+
+        // One fired, one cleared → one row carrying the duration the two
+        // transitions imply and neither of them states.
+        let paired = ActivityEntry.fold([
+            event("rule-cleared", "G3", 120, "Resolved: Minor packet loss to router"),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(paired.count, 1, "a fired/cleared pair folds to one row")
+        equal(paired.first?.occurrences, 1, "and counts as one occurrence")
+        equal(paired.first?.totalDuration, 120, "carrying the 2-minute duration")
+        equal(paired.first?.detail, "lasted 2m", "rendered as a duration, not a count")
+
+        // Three pairs in a day → one row. This is the whole point: six
+        // stored rows, one line of history.
+        var flapping: [NetworkEvent] = []
+        for i in 0..<3 {
+            flapping.append(event("rule-fired", "G3", Double(i) * 600))
+            flapping.append(event("rule-cleared", "G3", Double(i) * 600 + 60,
+                                  "Resolved: Minor packet loss to router"))
+        }
+        let folded = ActivityEntry.fold(flapping)
+        equal(folded.count, 1, "three pairs in one day fold to one row")
+        equal(folded.first?.occurrences, 3, "counting all three")
+        equal(folded.first?.totalDuration, 180, "and summing their durations")
+        equal(folded.first?.detail, "3 times · 3m total", "read as count plus total")
+
+        // A second fire with no clear between: the monitor emits only on
+        // transition, so this means it restarted and the span in between
+        // went unobserved. The duration must be a floor, not a guess.
+        let restarted = ActivityEntry.fold([
+            event("rule-fired", "G3", 3600),
+            event("rule-cleared", "G3", 300, "Resolved: Minor packet loss to router"),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(restarted.count, 1, "a re-fire after a restart stays one row")
+        equal(restarted.first?.occurrences, 2, "as two observed occurrences")
+        check(restarted.first?.isOngoing == true,
+              "the unpaired last fire is marked open")
+        equal(restarted.first?.totalDuration, 300,
+              "only the observed span counts — the unobserved gap is not invented")
+
+        // ...and an open episode never claims the fault is still running,
+        // because the usual reason a clear is missing is that the monitor
+        // stopped, not that the condition persisted.
+        check(!(restarted.first?.detail?.contains("still active") ?? false),
+              "an open episode does not assert the fault is ongoing")
+
+        // A clear whose fire is older than the store's 500-entry cap
+        // describes an end with no beginning: no duration exists to state.
+        let orphan = ActivityEntry.fold([
+            event("rule-cleared", "G3", 0, "Resolved: Minor packet loss to router"),
+        ])
+        equal(orphan.count, 0, "an orphan clear contributes no row")
+
+        // Discrete facts have no duration and must never be paired.
+        let discrete = ActivityEntry.fold([
+            event("interface-changed", nil, 0, "Network interface changed: en7 → en0"),
+            event("alert", "L1", 60, "Internet connection degraded"),
+        ])
+        equal(discrete.count, 2, "non-rule events stay one row each")
+        check(discrete.allSatisfy { $0.totalDuration == nil },
+              "and carry no duration")
+
+        // Days are the grouping unit, so yesterday's flap and today's stay
+        // apart — collapsing them would hide a recurrence pattern.
+        let acrossDays = ActivityEntry.fold([
+            event("rule-fired", "G3", 0),
+            event("rule-cleared", "G3", 60, "Resolved: Minor packet loss to router"),
+            event("rule-fired", "G3", 86_400 * 2),
+            event("rule-cleared", "G3", 86_400 * 2 + 60, "Resolved: Minor packet loss to router"),
+        ])
+        equal(acrossDays.count, 2, "separate days stay separate rows")
+
+        equal(ActivityEntry.duration(45), "45s", "sub-minute durations read in seconds")
+        equal(ActivityEntry.duration(240), "4m", "a whole number of minutes drops seconds")
+        equal(ActivityEntry.duration(3600 * 2 + 720), "2h 12m", "hours keep minutes")
         print("")
     }
 

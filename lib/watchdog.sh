@@ -203,7 +203,30 @@ watchdog_run() {
   stale_s=$(( WATCHER_PLIST_INTERVAL_S * THRESH_WATCHER_STALE_FACTOR ))
   if [ "$WATCHER_PATH_BLOCKED" -eq 1 ]; then
     WATCHER_STATE=blocked
-  elif [ -n "$WATCHER_LAST_EXIT" ] && [ "$WATCHER_LAST_EXIT" != "0" ]; then
+  elif [ -n "$WATCHER_LAST_EXIT" ] \
+       && [ "$WATCHER_LAST_EXIT" != "0" ] \
+       && [ "$WATCHER_LAST_EXIT" != "1" ] \
+       && [ "$WATCHER_LAST_EXIT" != "2" ]; then
+    # Only an exit *outside the contract* means the run itself broke.
+    #
+    # This tested `!= 0`, which read netdiag's own exit-code contract
+    # backwards: 1 is "warnings only" and 2 is "a critical diagnosis" —
+    # both are successful runs that found something, and finding something
+    # is the watcher's entire job. So on any network with a standing
+    # warning, every watcher run exited 1, this branch called it `failing`,
+    # and ND-1 announced "the background watcher is installed but isn't
+    # running" about a watcher that was running perfectly every 15 minutes.
+    # Observed on this developer's machine: a persistent G3 (minor packet
+    # loss to the router) made ND-1 the only warning on the report, for
+    # days, while ~/net-diag filled with successful runs 15 minutes apart.
+    #
+    # Worse, the check sits above the heartbeat tests, so a perfectly fresh
+    # heartbeat could not clear it.
+    #
+    # 3 is the honest signal, and bin/netdiag guarantees it: its EXIT trap
+    # remaps any unplanned abort to 3 precisely so a broken script cannot
+    # masquerade as "warnings only". Anything else non-zero (126, 127, a
+    # signal) never reached that trap and is also a real failure.
     WATCHER_STATE=failing
   elif [ -z "$WATCHER_HEARTBEAT_AGE_S" ]; then
     if [ -n "$WATCHER_INSTALLED_AGE_S" ] \
