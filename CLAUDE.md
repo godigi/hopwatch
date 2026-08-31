@@ -30,6 +30,31 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
   decides: rule IDs come from `status.rules`, prose comes from
   `diagnosis[].summary` verbatim. If a change would put a threshold or a
   user-facing verdict string into Swift, it belongs in `lib/` instead.
+- **Three depths, and the app always says which one it is in.** This has
+  drifted more than once, so it is written down here rather than left to
+  be re-derived:
+
+  | | **Monitoring** | **Full check** | **Quick check** |
+  |---|---|---|---|
+  | Answers | *Is it still fine?* | *What is this network capable of?* | *What is wrong right now?* |
+  | When | continuous, every few seconds | on demand; automatically **once** per new network | on demand; on arrival when a full check is unsafe or unwise |
+  | Cost | negligible, no saturation | ~65–115 s, **saturates the link** | ~8 s, never saturates |
+  | Gives | one sample per cycle, alerts on transitions | bufferbloat, speed, path MTU, per-hop loss | everything else |
+
+  Two rules follow, and both are load-bearing:
+  1. **Every new network gets a check on arrival, and the arrival is a
+     state the UI renders** — not a fire-and-forget side effect that can
+     decline itself and never retry. A depth may be downgraded (an
+     unhealthy link, a metered hotspot), but then the app says so on
+     screen and offers the full check as a button. See
+     `docs/superpowers/specs/2026-08-31-arrival-and-the-three-modes-design.md`.
+  2. **Any Home surface reading history scopes to the current network, or
+     states its provenance.** An unlabelled report from the network you
+     were on an hour ago is indistinguishable from one about the network
+     you are on now, and users read it as the latter.
+
+  A full check is never on a timer — see the arrival spec and
+  `docs/ARCHITECTURE.md`.
 
 ## CLI surface
 
