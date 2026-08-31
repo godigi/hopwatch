@@ -4,17 +4,10 @@ import CoreWLAN
 /// Home: "is my internet OK, and why?" — the question the sidebar's first
 /// row answers. Hydrated from stored history on cold launch so this is
 /// never empty (see `NetdiagCoordinator.hydrateFromHistoryIfNeeded`), and
-/// it is the same report card the Networks section's stored runs use —
-/// `RunReportView` — plus the expert layer as a disclosure whose open/closed
-/// state persists rather than a mode chosen at first launch, because asking
-/// a user "are you technical?" gets the wrong answer in both directions.
-///
-/// Moved here from `DashboardWindow.swift` verbatim, plus
-/// one addition: the "Recent checks" card the redesign's mockup
-/// (`nimbalyst-local/mockups/netdiag-main-window.mockup.html`) puts in
-/// Home's right column. The expert disclosure moved to the bottom of the
-/// page, after that card, to match the mockup's order — previously it sat
-/// directly under the report card because nothing came after it.
+/// it leads with the same user-facing suitability verdict a stored report
+/// uses. Dense measurements are collapsed on this landing screen; Networks
+/// remains the place to browse past checks, and the expert layer remains a
+/// disclosure rather than a mode chosen at first launch.
 struct HomeView: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
@@ -49,7 +42,7 @@ struct HomeView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Button("Try Again") {
-                            coordinator.runScan(depth: .quick, reason: "retry after failure")
+                            coordinator.runFullCheck(reason: "retry after failure")
                         }
                         .controlSize(.small)
                     }
@@ -58,19 +51,19 @@ struct HomeView: View {
                 switch coordinator.reportSource {
                 case .live(let run):
                     RunReportView(snapshot: run.snapshot, rawJSON: run.rawJSON,
-                                  showRuleIDs: appSettings.expertExpanded)
+                                  showRuleIDs: appSettings.expertExpanded,
+                                  presentation: .home)
                 case .stored(let detail):
                     // Comparison chips come free: `detail` is a `--show`
                     // response, and RunReportView already knows how to
                     // render one — RunDetailView passes the identical pair.
                     RunReportView(snapshot: detail.run, comparison: detail.comparison,
                                   rawJSON: detail.asRunResult.rawJSON,
-                                  showRuleIDs: appSettings.expertExpanded)
+                                  showRuleIDs: appSettings.expertExpanded,
+                                  presentation: .home)
                 case nil:
                     emptyState
                 }
-
-                recentChecksCard
 
                 if let result = currentRunResult {
                     expertDisclosure(result)
@@ -108,9 +101,7 @@ struct HomeView: View {
             let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
             HStack(spacing: 10) {
                 Image(systemName: "wifi")
-                    // RSSI describes the radio leg only; it is not the
-                    // connection verdict, so keep the icon neutral.
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(cell.tint)
                     .frame(width: 18)
                 if let name = coordinator.wifiDisplayName {
                     Text(name).fontWeight(.medium)
@@ -130,7 +121,7 @@ struct HomeView: View {
                     .foregroundStyle(.tertiary)
                 Text(cell.value)
                     .fontWeight(.medium)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(cell.tint)
                 if let unit = cell.unit {
                     Text(unit)
                         .font(.caption)
@@ -274,23 +265,18 @@ struct HomeView: View {
                     Button("Cancel") { coordinator.cancelScan() }
                 }
             } else {
-                HStack(spacing: 8) {
-                    // Secondary, and second: the quick check answers "is it
-                    // broken right now" while the problem is still
-                    // happening, and that stays the default. This one is
-                    // the deliberate, slower question — the only depth that
-                    // measures throughput, latency under load and path MTU.
-                    Button(fullCheckLabel) {
-                        coordinator.runFullCheck()
-                    }
-                    .help(fullCheckHelp)
-
-                    Button("Run a check") {
-                        coordinator.runScan(depth: .quick, reason: "you asked")
-                    }
-                    .keyboardShortcut("r")
-                    .buttonStyle(.borderedProminent)
+                // Continuous monitoring owns the fast "is it broken now?"
+                // question and starts a targeted investigation when a fault
+                // appears. The only manual path is the occasional full
+                // baseline check (or its safe lighter fallback).
+                Button {
+                    coordinator.runFullCheck()
+                } label: {
+                    Label(fullCheckLabel, systemImage: "stethoscope")
                 }
+                .keyboardShortcut("r")
+                .buttonStyle(.borderedProminent)
+                .help(fullCheckHelp)
             }
         }
     }
@@ -352,91 +338,6 @@ struct HomeView: View {
         }
         .padding(.top, 24)
     }
-
-    // MARK: - Recent checks
-
-    /// The mockup's right-column list, pulled out as its own card: the last
-    /// few checks across every network, so a report on screen never hides
-    /// that fresher ones exist elsewhere. `HistoryStore.recentChecks`
-    /// already picks and orders these — the same call cold-launch
-    /// hydration makes, so this card and the report above it are answering
-    /// the same "what's the newest real look at any network?" question from
-    /// two different angles.
-    private var recentChecksCard: some View {
-        let checks = coordinator.history.recentChecks(limit: 5)
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Recent checks").font(.headline)
-            if checks.isEmpty {
-                Text("Checks will appear here once netdiag has run a few.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(checks) { run in
-                        recentCheckRow(run)
-                        if run.id != checks.last?.id { Divider() }
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
-    }
-
-    /// Tappable only when the CLI stamped an id on this run — the same
-    /// version-skew handling `RunListView` uses: a row without one is
-    /// listed but inert rather than offering a push that would fail. The
-    /// two cases render differently for the same reason `RunListView`
-    /// pairs its list with `unopenableNotice`: a plain `.buttonStyle(.plain)`
-    /// row gives no visual difference between "tap this" and "this just sits
-    /// here", so the tappable row gets a trailing chevron and the inert one
-    /// is dimmed with a tooltip explaining why.
-    @ViewBuilder
-    private func recentCheckRow(_ run: HistoryDocument.Run) -> some View {
-        if let runID = run.runID {
-            NavigationLink(value: RunRoute(runID: runID, networkID: run.networkID)) {
-                recentCheckRowContent(run, openable: true)
-            }
-            .buttonStyle(.plain)
-        } else {
-            recentCheckRowContent(run, openable: false)
-                .help("Recorded by an older netdiag — this check can be listed but not opened.")
-        }
-    }
-
-    private func recentCheckRowContent(_ run: HistoryDocument.Run, openable: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: run.health.symbol)
-                .foregroundStyle(run.health.tint)
-                .frame(width: 14)
-            Text(RelativeTime.string(from: run.date))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .leading)
-            Text(run.headline)
-                .font(.caption)
-                .foregroundStyle(openable && run.diagnosisCount > 0 ? .primary : .secondary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            if let badge = run.modeBadge {
-                Text(badge)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.secondary.opacity(0.15), in: Capsule())
-            }
-            if openable {
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
 
     // MARK: - Expert layer
 

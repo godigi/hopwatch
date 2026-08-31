@@ -1,14 +1,17 @@
 # shellcheck shell=bash
 # lib/output.sh — JSON build, baseline regression check, "Report saved to"
-# line. Always builds JSON (the baseline helper needs it); rebuilds after
-# the regression check so regressions surface inside the JSON's diagnosis
+# line, and the text report's "What should work here" section. Always
+# builds JSON (the baseline helper needs it); rebuilds after the
+# regression check so regressions surface inside the JSON's diagnosis
 # array too.
 #
 # Reads:  almost every module global
 # Writes: BASELINE_JSON, MOST_LIKELY_ROOT_CAUSE (recomputed),
 #         DIAGNOSIS_LINES (extended with regressions), MAX_SEVERITY
 #         (extended via add_diag), $LOG_DIR/baseline.jsonl (file)
-# Entry:  output_run
+# Entry:  output_run, suitability_run (called from diagnosis_run — see
+#         suitability_run's own comment for why it lives here but is
+#         invoked from lib/diagnosis.sh rather than from output_run)
 
 build_json() {
   # Most-likely root cause = first critical diagnosis, else first warn,
@@ -203,6 +206,86 @@ build_json_private() {
   REDACT=0
   build_json
   REDACT="$_saved_redact"
+}
+
+# ── "What should work here" ──────────────────────────────────────────────
+# The suitability array alone, for the text report. Reuses the same
+# document build the --json path uses so the text report and the JSON can
+# never disagree about a verdict — the same reason build_json_private
+# exists rather than a second hand-rolled record.
+build_suitability_json() {
+  build_json | python3 -c 'import json,sys; json.dump(json.load(sys.stdin)["suitability"], sys.stdout)'
+}
+
+# Five one-line verdicts — will a video call, a stream, a match, a VPN
+# session or ordinary browsing hold up on this network — rendered as the
+# headline above the Diagnosis paragraphs.
+#
+# Called from diagnosis_run() (lib/diagnosis.sh), immediately before that
+# function's own "What we found" header, rather than from output_run()
+# here: it needs `because` to name every rule diagnosis_run's own add_diag
+# calls just decided to fire, and DIAGNOSIS_LINES — what build_json reads
+# that list from — is only complete once diagnosis_run has run every rule
+# in its body. Calling this any earlier would render five rows computed
+# from zero fired rules; calling it from output_run (which does run after)
+# would put it below the Diagnosis section it is meant to lead.
+#
+# Returns 0 silently on any failure — no python3, an empty document, a
+# build_json that doesn't carry `suitability` yet. A report that loses one
+# section is better than a report that dies rendering it, and the
+# Diagnosis section right after this one does not depend on it.
+#
+# This function chooses a colour and a word per verdict and nothing else.
+# The labels, the ordering, the reasons and the verdicts are all
+# helpers/suitability.py's — CLAUDE.md's rule that the GUI holds no
+# diagnostic logic applies here too: no sentence about the network gets
+# composed in this file, only translated into the printer already in use
+# for every other section.
+suitability_run() {
+  local doc rows
+  doc="$(build_suitability_json 2>/dev/null)" || return 0
+  [ -n "$doc" ] || return 0
+
+  # label / verdict / reason, tab-separated: activity labels and rule IDs
+  # are both fixed vocabularies (LABELS / rule catalog in
+  # helpers/suitability.py) that never contain a tab, so this can't be
+  # split wrong the way a "|" or a plain space could.
+  rows="$(printf '%s' "$doc" | python3 -c '
+import json, sys
+for row in json.load(sys.stdin):
+    reason = row.get("unmeasured_reason") or ""
+    if not reason and row.get("because"):
+        reason = "because " + " ".join(row["because"])
+    print(row["label"] + "\t" + row["verdict"] + "\t" + reason)
+' 2>/dev/null)" || return 0
+  [ -n "$rows" ] || return 0
+
+  hdr "What should work here"
+  local label verdict reason word
+  while IFS=$'\t' read -r label verdict reason; do
+    [ -n "$label" ] || continue
+    case "$verdict" in
+      good)       word="fine" ;;
+      degraded)   word="rough" ;;
+      broken)     word="won't hold up" ;;
+      unmeasured) word="not measured" ;;
+      *)          word="$verdict" ;;
+    esac
+    case "$verdict" in
+      good)     ok   "$label: $word" ;;
+      degraded) warn "$label: $word" ;;
+      broken)   bad  "$label: $word" ;;
+      *)        info "$label: $word" ;;
+    esac
+    # The reason is subordinate to the verdict, and has to look it. Sent
+    # through `say` with a deeper indent and no glyph rather than through
+    # `info`, which prints the same "  · " prefix the unmeasured verdicts
+    # above already use: five activities rendered as nine identically
+    # bulleted lines, where a reason reads as a sixth activity. The
+    # dimming is the same treatment `info` gives its body, so this is a
+    # change of rank, not of palette.
+    [ -n "$reason" ] && say "      ${C_DIM}${reason}${C_RESET}"
+  done <<<"$rows"
 }
 
 # ── Retention ────────────────────────────────────────────────────────────

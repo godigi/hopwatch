@@ -27,6 +27,49 @@ keep changing; the ID won't.
 - `warn` — performance is degraded or a known foot-gun is active.
 - `info` — surfaced for context, not actionable on its own.
 
+## What a rule breaks, and what to do about it
+
+Severity says how bad a fault is. It does not say what it stops you
+*doing*, and for a non-expert that is the only form of the answer they can
+use. So every rule additionally declares two things, both held in
+`helpers/rules_catalog.py` and emitted by `netdiag --rules-catalog`:
+
+**`impacts`** — which of five activities the rule breaks or merely
+degrades: video calls, streaming, gaming, VPN & remote access, ordinary
+browsing. `broken` means "this will not work"; `degraded` means "this will
+be unpleasant". Deliberately not a third middle grade: magnitude is
+`diagnosis[].severity`'s job, decided against `lib/thresholds.sh`, and must
+not be re-decided here.
+
+`helpers/suitability.py` projects the rules that fired through this table
+to produce the `suitability` block and the report's "What should work here"
+section. It reads no metrics and contains no numeric comparison, so it
+cannot become a fifth judge that disagrees with this engine — see
+`docs/JSON-SCHEMA.md`.
+
+A rule with no activity consequence omits `impacts` entirely. But **every
+rule graded `critical` must have one**: a fault severe enough to call the
+connection unusable, while claiming every activity is fine, is a
+contradiction. `tests/test_rules_catalog.bats` enforces exactly that, and
+it is what caught `ETH-2` — ethernet stuck on half duplex, `critical`, and
+originally classified as having no consequence at all.
+
+**`fix` / `fix_away` / `fix_target`** — the remediation, lifted out of the
+`add_diag` prose so it can be shown, ranked and swapped rather than living
+as a substring of a paragraph. `fix_target` names who can actually act:
+`you`, `your_router`, `your_isp`, `network_operator`, or `nobody`.
+
+`fix_away` exists for the traveller. "Reboot your router" is sound at home
+and useless in a hotel where the router is behind the front desk, so the
+two targets where the advice genuinely changes carry both sentences and the
+consumer picks. An imperative the reader cannot carry out is worse than
+silence, so `fix_away` may never open with one.
+
+`nobody` is a real answer. A VPN that is carrying traffic, an IPv6-only
+network that works, ping blocked while the connection is fine — these have
+no action behind them, and inventing one to fill the field would be worse
+than saying there is nothing to do.
+
 ## Rules in the v0.1.0 starter
 
 The original script emits the rules below. Replacing them with the ranked

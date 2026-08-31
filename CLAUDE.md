@@ -94,7 +94,10 @@ the header of `lib/monitor.sh` for the orphaned-process-group reason.
 
 - **Default:** colored human-readable stdout + ANSI-stripped log to `~/net-diag/<timestamp>.log`.
 - **`--json`:** single JSON object to stdout matching [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md). No colors, no log unless `--log` also passed.
-- **`--quiet`:** only the Diagnosis section to stdout (full log still written).
+- **`--quiet`:** only the punchline sections to stdout — "What should work
+  here" and the Diagnosis — with the full log still written. Suitability is
+  included deliberately: five per-activity verdicts are the most compressed
+  useful answer the report has, which is exactly what `--quiet` is for.
 - **`--quick`:** skip bufferbloat, mtr, speed test, internet packet-loss probe, baseline diff, WiFi scan. An explicit `--speed` overrides the speed-test skip.
 
 ## Exit codes

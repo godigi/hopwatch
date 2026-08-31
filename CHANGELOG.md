@@ -6,6 +6,25 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Changed — Home answers first and asks only one question [GUI]
+
+Home now leads with "What should work here" as one horizontal, icon-first
+status strip. The dense measurement report is still intact behind a single
+"Check details" disclosure, while the duplicate Recent checks card is gone;
+past runs already have a dedicated Networks screen.
+
+The app no longer presents quick and full checks as two equivalent manual
+choices. Continuous monitoring owns the fast path and automatically starts a
+targeted, non-saturating investigation when a fault appears. The one manual
+action on Home and in the menu-bar dropdown is the occasional Full check
+(with the existing safe lighter fallback when the link may be struggling),
+and a first visit to a network still establishes a full baseline once.
+
+Wi-Fi signal now carries its scale colour everywhere it appears: Excellent
+and Good are green, Fair and Weak are yellow, and a critical radio finding or
+disconnected link is red. The word and status glyph remain alongside colour,
+so colour is never the only signal.
+
 ### Fixed — one outlier was setting the whole Trends scale [GUI]
 
 The gateway RTT chart held 2443 samples that sit between about 2 and 8 ms,
@@ -227,6 +246,166 @@ for a tool whose purpose is to be believed:
   monitor from starting. Hydration is reads only — deliberately skipping
   the one write `start()` does at that point, so a screenshot run leaves
   `events.json` alone.
+
+## [0.13.1] - 2026-08-30
+
+### Added — the app shows what should work here [GUI]
+
+The five activity verdicts the CLI has been emitting since 0.13.0 now
+appear in the app's report card, above the diagnosis list, in the same
+order and with the same words the terminal uses.
+
+Built as a shared component rather than a view private to the report,
+because the arrival card lands next and renders the same five rows in the
+menu-bar dropdown. A user sees those two surfaces seconds apart, and
+describing a verdict differently in each is how an app contradicts
+itself — the same reason `SignalScale.cellContent` and `AlertStageCard`
+are shared.
+
+The panel decides a colour, a glyph and a two-word category label, and
+nothing else; the label, ordering, reason sentence and verdict are the
+CLI's, rendered verbatim. The four verdicts get four distinct *shapes*,
+not four tints of one shape, so the panel still reads for someone who
+cannot distinguish red from green.
+
+Also removes a dead `Suitability` type that had been sitting in
+`RunSnapshot` decoding a differently-shaped key (`web_browsing`,
+`video_calls`, `large_downloads`) that nothing in `helpers/` or `lib/`
+ever emitted, and that no view read. Its own comment called it a
+candidate for deletion. The idea had been started once and abandoned;
+this is the shape the CLI actually produces.
+
+## [0.13.0] - 2026-08-30
+
+### Added — the report says what this network is good for [`suitability`]
+
+`netdiag --json` gains a `suitability` array and the text report gains a
+"What should work here" section: five verdicts — video calls, streaming,
+gaming, VPN & remote access, ordinary browsing — each `good`, `degraded`,
+`broken` or `unmeasured`, each naming the rule that decided it.
+
+This is the answer a non-expert can actually use. The report already said
+`Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of that fact most people can
+act on. On a real run of a network with `G2` firing, it now reads: video
+calls broken, gaming broken, streaming rough, browsing rough — because G2.
+
+**It is a projection, not a second opinion.** The verdict is the worst
+`impacts` level among the rules that fired. `helpers/suitability.py` reads
+no metrics and contains no numeric comparison at all — a test walks its AST
+and fails the build if one appears — so it cannot become a fifth judge next
+to `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py`, and it can never print a healthy activity above a
+firing rule that breaks it. Even the internals hold the line: the
+worst-of-N helper ranks by position in a table rather than by comparing
+numbers.
+
+**`unmeasured` is a verdict, not a hidden row.** `--quick` skips
+bufferbloat, the speed test, the loss probe *and* the MTU probe, so at that
+depth four of the five genuinely cannot be judged. The rows still print,
+saying what was not run. Dropping them would quietly convert "we did not
+look" into "nothing is wrong", which is the failure this whole project is
+organised against. A rule that fired outranks this: a connection that is
+down is down at any depth.
+
+Two implementation notes worth recording. `measured_families()` reads the
+*assembled document* rather than the environment, so what the verdict
+claims was measured cannot drift from what the report shows. And the one
+family with no natural null is `path`, which keys off
+`wan.upnp.state != "unknown"` — `wan` is present even on `--quick`, but its
+UPnP probe sits behind the same `--quick` gate as the rest of the path
+batch, making that string the honest signal.
+
+"What should work here" also joins Report / Summary / Diagnosis as a
+punchline section in `hdr()`. A headline answer suppressed in default mode
+is not a headline.
+
+### Added — the fix, lifted out of the paragraph [`fix`, `fix_away`, `fix_target`]
+
+Every catalog rule now carries `fix`, `fix_target`, and — where the advice
+genuinely changes when the equipment is not yours — `fix_away`.
+
+The advice already existed; it was just unreachable. `add_diag` takes the
+summary as one string, so "Fix: enable Smart Queue Management or QoS in
+your router's admin page" was a substring of a paragraph that nothing could
+rank, reorder or swap. `add_diag` is untouched: general advice about a rule
+is what the catalog already holds (`blurb`), not a fact about one incident.
+
+`fix_target` is the traveller-facing half. "Reboot your router" is sound at
+home and useless in a hotel, where the router is behind the front desk, so
+the target says which of the two the reader is in: `you`, `your_router`,
+`your_isp`, `network_operator`, `nobody`. Across 53 rules that lands as you
+21, nobody 12, your_router 10, your_isp 8, network_operator 2, with 12
+carrying a second `fix_away` sentence.
+
+`nobody` is a real answer rather than a gap — a VPN that is carrying
+traffic, an IPv6-only network that works, ping blocked while the connection
+is fine. Inventing an action to fill a required field would be worse than
+saying there is nothing to do.
+
+A test pins the thing that actually matters about `fix_away`: it may never
+open with an imperative. "Reboot the router", read by a guest, is an order
+they cannot carry out; "ask whoever runs this network to restart it" is one
+they can. An imperative opening is the signature of advice written for the
+wrong reader.
+
+### Added — every rule says which activities it breaks [`impacts`, catalog schema 5]
+
+Groundwork for answering the question a non-expert actually has. The report
+says `Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of the answer most people can
+use.
+
+Each rule in `netdiag --rules-catalog` now carries an optional `impacts` map
+over five activities — video calls, streaming, gaming, VPN and remote access,
+ordinary browsing — saying which of them the rule breaks or merely degrades.
+36 of 53 rules carry one; the rest (a drifted clock, an expiring lease, a
+watcher that is not running) genuinely have no activity consequence and omit
+the key rather than carrying an empty object, so "no consequence" and "not yet
+classified" stay distinguishable.
+
+**Where the line between the two levels sits** turned out to matter more
+than the levels themselves. `broken` means the activity cannot function at
+all right now; `degraded` means it functions, but unreliably or badly. Two
+consequences, both of which the first draft of the table got wrong: an
+*intermittent* fault is never `broken` (a flapping link ends the call you
+are on, but the next one connects), and a *historical* one never is either
+(`AV-1` counts yesterday's outages, while the rest of a report describes the
+link at this instant — a red "video calls: won't hold up" on a connection
+that is currently fine is a claim the run has not established).
+
+The rule that exposed it: `NAT-1` was marked `gaming: broken` because its
+own prose says double NAT "breaks games". It does not. It breaks *inbound*
+reach, and a game connecting outbound to a matchmaking server plays fine,
+just with Strict NAT and worse matchmaking. What double NAT genuinely
+breaks is port-forwarding-dependent — Plex, Steam in-home streaming,
+doorbells — and none of those has a row here. A test now fails the build if
+`AV-1`, `AV-2`, `WD-1`, `NAT-1` or `NAT-1b` reaches for `broken` again.
+
+Nothing reads it yet. The point of putting it here is that the suitability
+layer being built on top can then be a **projection of which rules fired**
+rather than a second reading of the metrics. Four things already judge a
+network — `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py` — and CLAUDE.md exists to stop them drifting apart. A
+fifth judge that read `bufferbloat_gw_ms` for itself would, on its first
+disagreement, put a green "calls: fine" row directly above a red B1 paragraph.
+Deriving from the fired rule set makes that contradiction structurally
+impossible rather than merely unlikely.
+
+Two things this turned up that were not obvious going in:
+
+- `helpers/capabilities.py` mirrors `SCHEMA_RULES_CATALOG` and
+  `tests/test_capabilities.bats` compares the two, so the 4 → 5 bump had to
+  happen in both files or the suite fails. Not cosmetic.
+- The test asserts an invariant rather than a count: **every rule graded
+  `critical` must declare what it breaks.** A fault graded critical that
+  affects nothing a person actually does is a contradiction — the severity
+  claims the connection is unusable while the table claims every activity is
+  fine. That invariant immediately caught `ETH-2` (ethernet stuck on half
+  duplex), which was `critical` and classified as having no consequence at
+  all, despite causing collisions and heavy loss. `ETH-1` stays absent by
+  contrast: a link negotiated below the port's ceiling is a cap, not a fault,
+  the same reason `SP-1` ("WiFi is the speed cap") carries none.
 
 ### Fixed — the menu says one thing once, and means it [GUI]
 
@@ -3140,7 +3319,9 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/godigi/netdiag/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/godigi/netdiag/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/godigi/netdiag/compare/v0.9.1...v0.10.0

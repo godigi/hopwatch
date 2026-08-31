@@ -51,6 +51,32 @@ struct RulesCatalog: Decodable, Sendable {
         var scope: String?
         var blurb: String?
         var doc: String?
+        /// Activity → `degraded` | `broken`, for the rules that have one —
+        /// added in catalog schema `5`. `nil` (the key omitted, not an
+        /// empty object) on a rule with no activity consequence and on
+        /// every rule against a catalog too old to emit it — see
+        /// docs/JSON-SCHEMA.md's `impacts` note for why the app must not
+        /// tell those two cases apart itself. This is the table
+        /// `helpers/suitability.py` projects `RunSnapshot.suitability`
+        /// through on the CLI side; nothing here re-derives that
+        /// projection.
+        var impacts: [String: String]?
+        /// General remediation advice, in the `blurb` register — required
+        /// on every rule as of schema `5`, `nil` against an older catalog.
+        var fix: String?
+        /// The `fix` sibling for when the reader does not control the
+        /// equipment ("ask whoever runs this network…" rather than "reboot
+        /// your router"). Present on exactly the `your_router` and
+        /// `network_operator` rules per docs/JSON-SCHEMA.md — `nil`
+        /// everywhere else, including on every rule against an older
+        /// catalog. A consumer picks between `fix` and `fixAway`; neither
+        /// this type nor anything reading it composes a third sentence.
+        var fixAway: String?
+        /// Who can act on `fix` — `you` / `your_router` / `your_isp` /
+        /// `network_operator` / `nobody`. `nobody` is a real answer (a
+        /// dozen rules have no action behind them), not a gap; `nil` only
+        /// against a catalog too old to have this field at all.
+        var fixTarget: String?
 
         /// Every family this rule is about, primary first. The one thing
         /// a consumer deciding "does this rule concern my row?" should
@@ -110,7 +136,9 @@ extension RulesCatalog {
             return Rule(id: id, title: entry.title, category: entry.category,
                         also: entry.also,
                         severity: entry.severity, scope: entry.scope,
-                        blurb: entry.blurb, doc: entry.doc)
+                        blurb: entry.blurb, doc: entry.doc,
+                        impacts: entry.impacts, fix: entry.fix,
+                        fixAway: entry.fixAway, fixTarget: entry.fixTarget)
         }
         byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -141,9 +169,15 @@ extension RulesCatalog {
         var scope: String?
         var blurb: String?
         var doc: String?
+        var impacts: [String: String]?
+        var fix: String?
+        var fixAway: String?
+        var fixTarget: String?
 
         enum CodingKeys: String, CodingKey {
-            case id, title, category, also, severity, scope, blurb, doc
+            case id, title, category, also, severity, scope, blurb, doc, impacts, fix
+            case fixAway = "fix_away"
+            case fixTarget = "fix_target"
         }
 
         init(from decoder: Decoder) throws {
@@ -159,6 +193,14 @@ extension RulesCatalog {
             scope = c.lenient(.scope)
             blurb = c.lenient(.blurb)
             doc = c.lenient(.doc)
+            // `impacts`, `fix`, `fixAway`, `fixTarget` are all schema `5`.
+            // Same reasoning as `also` above: `lenient` already yields nil
+            // against a catalog too old to have them, so a catalog with
+            // none of the three still decodes rather than failing whole.
+            impacts = c.lenient(.impacts)
+            fix = c.lenient(.fix)
+            fixAway = c.lenient(.fixAway)
+            fixTarget = c.lenient(.fixTarget)
         }
     }
 

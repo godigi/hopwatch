@@ -73,7 +73,7 @@ extension SignalScale.Band {
     var tint: Color {
         switch tone {
         case "good": return .green
-        case "ok":   return .primary
+        case "ok":   return .green
         case "warn": return .yellow
         case "bad":  return .red
         default:     return .secondary

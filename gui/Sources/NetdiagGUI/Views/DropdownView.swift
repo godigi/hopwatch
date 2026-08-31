@@ -8,7 +8,7 @@ import CoreWLAN
 /// 1. Stage — a single card whose content is a function of app state
 ///    (healthy / alerted / testing / paused / skewed). Everything below it
 ///    never moves.
-/// 2. One primary CTA: Check My Connection, directly under the stage.
+/// 2. One primary CTA: the occasional full check, directly under the stage.
 /// 3. Heartbeat strip — a thin live sparkline of internet ping, labeled
 ///    with min/avg/max, directly under the CTA, proving monitoring is alive.
 /// 4. Instrument grid — fixed 4x2: internet ping, internet loss, download,
@@ -411,25 +411,37 @@ struct DropdownView: View {
 
     /// The Wi-Fi cell's (value, unit, tint) — the CLI's own word as the
     /// value and the raw dBm underneath (`SignalScale.cellContent`,
-    /// shared with `HomeView`'s Wi-Fi row), with one override on top: a
-    /// fired `wifi`-category rule always wins the tint, the same red every
-    /// other cell in this grid uses for "the CLI found a problem here" —
-    /// a band's own tone answers "how strong is this reading", not "did
-    /// the CLI diagnose something", and the two can disagree (VPN-masked
-    /// WiFi rules, a flapping link the diagnosis names but a strong
-    /// instantaneous RSSI reading wouldn't).
+    /// shared with `HomeView`'s Wi-Fi row), with one override on top: the
+    /// severity of a fired Wi-Fi rule outranks the instantaneous signal
+    /// band. A warning stays yellow; a critical or disconnected link is
+    /// red; otherwise the scale's own green/yellow tint is rendered.
     private var wifiCell: (value: String, unit: String?, tint: Color) {
+        if coordinator.monitor.latest?.link.up == false {
+            return ("disconnected", nil, .red)
+        }
         guard coordinator.monitor.latest?.link.isWiFi == true else {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-        guard firedCategories.contains("wifi") else {
-            // Signal quality is a radio measurement, not a connection
-            // verdict. Keep it neutral so "Good" cannot be mistaken for
-            // "the internet is working" when the router/path is failing.
-            return (content.value, content.unit, .primary)
+        return (content.value, content.unit, wifiRuleTint ?? content.tint)
+    }
+
+    /// Colour mapping only: which rules fired and what severity the CLI's
+    /// catalog gives them are already decided outside the GUI. `varies`
+    /// uses the incident-specific severity carried by this monitor sample.
+    private var wifiRuleTint: Color? {
+        guard let catalog = coordinator.rulesCatalog.catalog else { return nil }
+        let hits = firedRules.compactMap { catalog[$0] }
+            .filter { $0.categories.contains("wifi") }
+        guard !hits.isEmpty else { return nil }
+        if hits.contains(where: { $0.severity == "critical" }) { return .red }
+        if hits.contains(where: { $0.severity == "warn" }) { return .yellow }
+        if hits.contains(where: { $0.severity == "varies" }) {
+            return coordinator.monitor.latest?.status.severity == "critical" ? .red : .yellow
         }
-        return (content.value, content.unit, .red)
+        // Informational Wi-Fi rules (for example, a hidden network name)
+        // say nothing about radio strength and must not replace its colour.
+        return nil
     }
 
     private func refreshCoreWLANRSSIIfNeeded() {
@@ -573,41 +585,18 @@ struct DropdownView: View {
     // MARK: - The one CTA
 
     private var checkButton: some View {
-        VStack(spacing: 4) {
-            Button {
-                // This is the status button, not a throughput benchmark. The
-                // quick profile checks the gateway, DNS, TCP and public HTTPS
-                // path without traceroute, bufferbloat or a speed test, so the
-                // answer arrives while the problem is still happening.
-                coordinator.runScan(depth: .quick, reason: "you asked")
-            } label: {
-                HStack {
-                    Image(systemName: "stethoscope")
-                    Text("Check My Connection")
-                }
-                .frame(maxWidth: .infinity)
+        Button {
+            coordinator.runFullCheck()
+        } label: {
+            HStack {
+                Image(systemName: "stethoscope")
+                Text(FullCheckPolicy.controlLabel(isSafe: coordinator.fullCheckIsSafe))
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(coordinator.isScanning)
-
-            // The throughput benchmark the button above deliberately is
-            // not. Kept visually quieter and stating its cost, because a
-            // menu-bar click that saturates the link for a minute should
-            // never be the one you hit by accident. The label tracks
-            // which depth will actually run — `runFullCheck` falls back
-            // to the lighter depth whenever the last reading was not
-            // clearly healthy, so a label fixed at "Full check" would lie
-            // in exactly that state. Shared with `HomeView` via
-            // `FullCheckPolicy` so the two controls can't drift.
-            Button(FullCheckPolicy.controlLabel(isSafe: coordinator.fullCheckIsSafe)) {
-                coordinator.runFullCheck()
-            }
-            .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .disabled(coordinator.isScanning)
-            .help(FullCheckPolicy.controlHelp(isSafe: coordinator.fullCheckIsSafe))
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .disabled(coordinator.isScanning)
+        .help(FullCheckPolicy.controlHelp(isSafe: coordinator.fullCheckIsSafe))
     }
 
     // MARK: - System Controls & Footer

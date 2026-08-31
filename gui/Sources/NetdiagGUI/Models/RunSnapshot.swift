@@ -54,7 +54,18 @@ struct RunSnapshot: Decodable, Sendable {
     var dhcp: DHCP = .init()
     var mtr: MTR = .init()
     var timings: Timings = .init()
-    var suitability: Suitability?
+    /// Five per-activity verdicts — `calls`, `streaming`, `gaming`, `vpn`,
+    /// `browsing`, always in that order and always all five, on any CLI new
+    /// enough to write them (docs/JSON-SCHEMA.md's `suitability` section).
+    /// It is a projection of `diagnosis`, not a second opinion:
+    /// `helpers/suitability.py` derives each row's verdict from the rules
+    /// that actually fired, read against `--rules-catalog`'s `impacts`
+    /// table, so nothing on this side composes a verdict of its own.
+    /// Defaults to `[]` against an older CLI that predates the block, or a
+    /// stored record written before it existed — same reasoning as `dns`
+    /// and `tcpReach` above: a missing block costs one panel, not the
+    /// whole run.
+    var suitability: [SuitabilityRow] = []
     /// netdiag's own background watcher, or `nil` when none is installed —
     /// which is most runs. Optional rather than defaulted for the reason
     /// the CLI emits `null`: a struct full of zeroes would say "installed,
@@ -454,17 +465,43 @@ struct RunSnapshot: Decodable, Sendable {
         }
     }
 
-    struct Suitability: Decodable, Sendable {
-        var webBrowsing: String?
-        var videoCalls: String?
-        var gaming: String?
-        var largeDownloads: String?
+    /// One row of `suitability` — see the property above and
+    /// docs/JSON-SCHEMA.md's `suitability` section for the full contract.
+    struct SuitabilityRow: Decodable, Sendable, Identifiable {
+        /// The closed set `calls` / `streaming` / `gaming` / `vpn` /
+        /// `browsing`. A `String`, not an enum: this is a key the CLI
+        /// already treats as closed and stable, and nothing here branches
+        /// on it — it is only ever used to look a row up or to key a list.
+        var activity: String?
+        /// Plain-English row title — "Video & voice calls" — rendered
+        /// verbatim, same discipline as `Diagnosis.summary`.
+        var label: String?
+        var verdict: Verdict = .unknown
+        /// Rule IDs that decided this verdict, a subset of this run's own
+        /// `diagnosis[].rule` values by construction. Empty when `verdict`
+        /// is `good`: nothing fired.
+        var because: [String] = []
+        /// Set only when `verdict` is `unmeasured`, naming what wasn't run
+        /// (e.g. `--quick` skipping the speed test); `nil` otherwise. An
+        /// unmeasured row is a verdict, not a gap — see docs/JSON-SCHEMA.md.
+        var unmeasuredReason: String?
+        var id: String { activity ?? "?" }
 
         enum CodingKeys: String, CodingKey {
-            case gaming
-            case webBrowsing = "web_browsing"
-            case videoCalls = "video_calls"
-            case largeDownloads = "large_downloads"
+            case activity, label, verdict, because
+            case unmeasuredReason = "unmeasured_reason"
+        }
+
+        /// A closed set — `good` / `degraded` / `broken` / `unmeasured` —
+        /// plus tolerance for a verdict this build has never heard of. The
+        /// CLI is the sole author of this vocabulary (CLAUDE.md: "the GUI
+        /// holds no diagnostic logic"), so a future addition must degrade
+        /// to something neutral here rather than fail the whole decode,
+        /// the same discipline `RunDetail.Verdict` already applies to
+        /// `--show`'s comparison verdicts.
+        enum Verdict: String, Sendable {
+            case good, degraded, broken, unmeasured
+            case unknown
         }
     }
 
@@ -554,13 +591,7 @@ extension RunSnapshot {
         // tests/test_gui_decoding.bats is that check.
         wan = c.lenient(.wan, .init())
         vpn = c.lenient(.vpn, .init())
-        // `suitability` is decoded for parity, but nothing produces or
-        // consumes it: no `suitability` key appears anywhere in
-        // helpers/emit_json.py, lib/, or docs/JSON-SCHEMA.md, and no view
-        // reads this property. It is a candidate for deletion rather than
-        // a field to build on — left in place here only because removing a
-        // public model type is a wider change than fixing a decode.
-        suitability = c.lenient(.suitability)
+        suitability = c.lenient(.suitability, [])
         tcpReach = c.lenient(.tcpReach, [])
         wifiScan = c.lenient(.wifiScan)
         wifiDisconnects = c.lenient(.wifiDisconnects)
@@ -644,6 +675,20 @@ extension RunSnapshot.Timings {
         budgetS = c.lenient(.budgetS)
         overBudget = c.lenient(.overBudget, false)
         phases = c.lenient(.phases, [:])
+    }
+}
+
+extension RunSnapshot.SuitabilityRow {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        activity = c.lenient(.activity)
+        label = c.lenient(.label)
+        // An absent verdict is not a `good` one — falling back to `good`
+        // would paint a missing judgement as a delivered all-clear, the
+        // same reasoning RunDetail.Metric applies to its own verdict.
+        verdict = RunSnapshot.SuitabilityRow.Verdict(rawValue: c.lenient(.verdict, "")) ?? .unknown
+        because = c.lenient(.because, [])
+        unmeasuredReason = c.lenient(.unmeasuredReason)
     }
 }
 

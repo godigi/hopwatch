@@ -59,8 +59,55 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 | `timings` | object | `total_s`, `budget_s`, `over_budget`, and `phases{}` per stage |
 | `baseline` | object | comparison against history, or `null` — see below |
 | `diagnosis` | array | `severity` (`info`/`warn`/`critical`), `rule`, `summary` |
+| `suitability` | array | one entry per activity — `activity`, `label`, `verdict` (`good`/`degraded`/`broken`/`unmeasured`), `because` (rule IDs), `unmeasured_reason`. Five entries, fixed order, always present. See below. |
 | `most_likely_root_cause` | string | the highest-severity diagnosis summary, first by insertion order |
 | `netdiag_extras` | object | `arp_gw_incomplete`, `network_changed_mid_run`, plus `target*` keys when a positional TARGET was given. `network_changed_mid_run` is `true` when the Mac changed networks between the start and end of the run, so the measurements straddle two — such a run is deliberately **absent from `baseline.jsonl`**, so this field is only ever seen on stdout (see `DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks`). |
+
+## `suitability` — what this network is good for
+
+Five entries, always all five, always in this order: `calls`, `streaming`,
+`gaming`, `vpn`, `browsing`.
+
+```jsonc
+{
+  "activity": "calls",
+  "label": "Video & voice calls",
+  "verdict": "broken",            // good | degraded | broken | unmeasured
+  "because": ["B1"],              // rule IDs that decided it; [] when good
+  "unmeasured_reason": null       // set only when verdict is "unmeasured"
+}
+```
+
+**It is a projection of `diagnosis`, not a second opinion.** The verdict is
+the worst `impacts` level among the rules that actually fired, read from the
+`impacts` table in `--rules-catalog` (schema 5). `helpers/suitability.py`
+contains no cutoff and no numeric comparison at all —
+`tests/test_suitability.bats` walks its AST and fails the build if one
+appears — so it is not a fifth judge alongside `lib/diagnosis.sh`,
+`lib/monitor.sh`, `helpers/history.py` and `helpers/summary.py`, and it
+cannot report a healthy activity above a firing rule that breaks it.
+
+`because` is a subset of the run's `diagnosis[].rule` values by
+construction, because the projection is built from that array rather than
+from a second parse of the same environment variable. A `good` verdict has
+an empty `because`: nothing fired.
+
+**`unmeasured` is a verdict, not an omission.** `--quick` skips bufferbloat,
+the speed test, the loss probe **and** the MTU probe (`bin/netdiag` refuses
+`--mtu-only --quick` in as many words), so at that depth four of the five
+activities genuinely cannot be judged and only `browsing` can. The rows
+still appear, with `unmeasured_reason` naming what was not run. Hiding them
+would turn "we did not look" into "nothing is wrong".
+
+A rule that fired outranks an unmeasured dependency — a connection that is
+down is down at any depth.
+
+Whether a measurement family ran is decided in `helpers/emit_json.py`'s
+`measured_families()` from the schema's own null contract: a field is `null`
+when its probe did not run, never `0`. The one family without a natural null
+is `path`, which keys off `wan.upnp.state != "unknown"` — `wan` is present
+even on `--quick`, but its UPnP probe sits behind the same `--quick` gate as
+the rest of the path batch, so that string is the honest signal.
 
 ## The event journal and `--events`
 
@@ -1175,8 +1222,8 @@ today's fields keeps working against tomorrow's catalog.
 
 ```jsonc
 {
-  "schema": 4,
-  "version": "0.9.0",
+  "schema": 5,
+  "version": "0.13.0",
   "rules": [
     {
       "id": "G2",
@@ -1186,7 +1233,15 @@ today's fields keeps working against tomorrow's catalog.
       "severity": "critical",
       "scope": "both",
       "blurb": "Packets are being dropped between your Mac and your router even though the WiFi signal is strong, which points at the router itself rather than the wireless link. A reboot (power off, wait, then power back on) clears this in most cases.",
-      "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi"
+      "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi",
+      // schema 5 — which activities this rule breaks, and what to do
+      "impacts": {
+        "calls": "broken", "streaming": "degraded", "gaming": "broken",
+        "vpn": "degraded", "browsing": "degraded"
+      },
+      "fix": "Reboot the router: unplug it, wait ten seconds, plug it back in. …",
+      "fix_away": "Ask whoever runs this network to restart the router — tell them …",
+      "fix_target": "your_router"
     }
   ],
   "metrics": [
@@ -1262,6 +1317,45 @@ today's fields keeps working against tomorrow's catalog.
   `doc` is where the actual number lives.
 - **`doc`** is a GitHub-style anchor into `docs/DIAGNOSIS-RULES.md` for
   the full trigger condition, evidence, and rationale.
+- **`impacts`** *(optional, added in `schema` 5)* maps activity →
+  `degraded` | `broken` for the rules that have an activity consequence.
+  Activities are the closed set `calls`, `streaming`, `gaming`, `vpn`,
+  `browsing`. This is the table `helpers/suitability.py` projects through;
+  see `suitability` above for why the projection exists rather than a
+  second reading of the metrics.
+
+  A rule with no consequence — a drifted clock, an expiring lease, a
+  watcher that is not running — **omits the key** rather than carrying an
+  empty object, so "no consequence" and "not yet classified" stay
+  distinguishable. Two levels and not three: `good` is the absence of an
+  impact, and a middle grade would be a judgement about magnitude, which
+  lives in `diagnosis[].severity` against `lib/thresholds.sh`.
+
+  `tests/test_rules_catalog.bats` asserts an invariant rather than a
+  count: **every rule graded `critical` must declare what it breaks.** A
+  fault graded critical that affects nothing a person does is a
+  contradiction — the severity claims the connection is unusable while
+  the table claims every activity is fine.
+- **`fix`** and **`fix_target`** *(required, added in `schema` 5)* are the
+  remediation layer. `fix` is general advice about the rule, in the same
+  register as `blurb` — no numbers, 1–3 sentences. `fix_target` is one of
+  `you`, `your_router`, `your_isp`, `network_operator`, `nobody`.
+
+  `nobody` is a real answer, not a gap: twelve rules (a VPN that is
+  carrying traffic, an IPv6-only network that works, ping blocked while
+  the connection is fine, a metered link) have no action behind them, and
+  inventing one to fill a required field would be worse than saying so.
+- **`fix_away`** *(optional, added in `schema` 5)* is present on exactly
+  the `your_router` and `network_operator` rules, and forbidden on the
+  rest. It exists because "reboot your router" is sound at home and
+  useless in a hotel where the router is behind the front desk: `fix` is
+  the advice when the reader controls the equipment, `fix_away` when they
+  do not. A consumer picks between them using whatever it knows about
+  whose network this is; it must not compose a third sentence of its own.
+
+  It may never open with an imperative — "ask whoever runs this network to
+  restart the router", never "reboot the router" — because an order the
+  reader cannot carry out is worse than silence. A test enforces this.
 - **`metrics`** is a glossary, not a rule list: one entry per jargon term
   a consumer needs to explain, for a `questionmark.circle` hint next to a
   row label or a chart title. Added in schema `2`; `rules` is unchanged
@@ -1325,7 +1419,7 @@ probing, no log file, no `~/net-diag` writes, sudo-free.
      "blurb": "Your Mac has a solid radio signal to the access point. Signal strength alone cannot confirm that websites will load."},
     {"min_dbm": -75, "label": "Fair", "tone": "warn",
      "blurb": "Your radio signal is on the weaker side, but this reading still does not identify whether an internet problem is local Wi-Fi, the router, or the provider."},
-    {"min_dbm": null, "label": "Weak", "tone": "bad",
+    {"min_dbm": null, "label": "Weak", "tone": "warn",
      "blurb": "Your radio signal is weak or obstructed. Confirm the router and internet path with a reachability check before assuming signal strength is the cause."}
   ]
 }
@@ -1345,7 +1439,9 @@ probing, no log file, no `~/net-diag` writes, sudo-free.
   - **`label`** is the exact user-facing word: `"Excellent"`, `"Good"`,
     `"Fair"`, or `"Weak"`.
   - **`tone`** is `good` / `ok` / `warn` / `bad` — a closed set for
-    tinting, never a color or a hex code.
+    tinting, never a color or a hex code. The current scale uses `good` or
+    `ok` for Excellent/Good and `warn` for Fair/Weak; `bad` remains the
+    reserved severe tone for a future band or unavailable link state.
   - **`blurb`** is one plain sentence a tooltip can show, with no
     embedded numeric threshold — same discipline as `--rules-catalog`'s
     `blurb` / `metrics[].help`.

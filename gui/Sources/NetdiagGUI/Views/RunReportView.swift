@@ -13,6 +13,11 @@ import AppKit
 /// comparison chip is the CLI's `summary` rendered verbatim. Nothing here
 /// compares a number to a threshold or writes a sentence about one.
 struct RunReportView: View {
+    enum Presentation {
+        case full
+        case home
+    }
+
     let snapshot: RunSnapshot
     /// nil for a live run: a run has nothing to be compared against until
     /// it is in the store.
@@ -25,6 +30,10 @@ struct RunReportView: View {
     /// from `Defaults` so the captions appear the instant the enclosing
     /// expert disclosure is opened, not on the next launch.
     var showRuleIDs: Bool = false
+    /// Home leads with the user-facing activity answer and keeps the dense
+    /// measurement table behind one disclosure. A stored run's detail page
+    /// remains the place where the complete report opens by default.
+    var presentation: Presentation = .full
 
     /// For `coordinator.rulesCatalog` — the category-driven row health
     /// below, and the `RuleChip`s in the diagnosis captions.
@@ -32,12 +41,61 @@ struct RunReportView: View {
 
     @State private var shareError: String?
     @State private var didCopy = false
+    @State private var homeDetailsExpanded = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            suitability
+            if presentation == .home {
+                homeDetails
+            } else {
+                details
+            }
+        }
+    }
+
+    /// The measurement table, sharing controls and diagnosis prose remain
+    /// together: expanding "Check details" reveals the same report a
+    /// stored run shows, not a second abbreviated implementation that can
+    /// drift from it.
+    private var details: some View {
         VStack(alignment: .leading, spacing: 16) {
             card
             copyRow
             diagnoses
+        }
+    }
+
+    private var homeDetails: some View {
+        DisclosureGroup(isExpanded: $homeDetailsExpanded) {
+            details.padding(.top, Theme.Spacing.md)
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Label("Check details", systemImage: "list.bullet.rectangle")
+                    .font(.headline)
+                Spacer()
+                Text(verbatim: "\(rows.count) measurements")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .cardStyle()
+    }
+
+    // MARK: - What should work here
+
+    /// First in every report, before the measurement table and findings.
+    /// The five activity answers are the non-expert's summary; everything
+    /// else is evidence behind it. Renders nothing for a report from a CLI
+    /// that predates `suitability`.
+    @ViewBuilder
+    private var suitability: some View {
+        if !snapshot.suitability.isEmpty {
+            SuitabilityPanel(rows: snapshot.suitability, layout: .strip)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
         }
     }
 
@@ -107,7 +165,8 @@ struct RunReportView: View {
                     }
                     .frame(width: 156, alignment: .leading)
                     Text(row.value)
-                        .foregroundStyle(row.measured ? .primary : .secondary)
+                        .foregroundStyle(row.valueTint
+                            ?? (row.measured ? Color.primary : Color.secondary))
                         .lineLimit(1)
                         // Takes the row's slack rather than a fixed 128pt.
                         //
@@ -163,6 +222,10 @@ struct RunReportView: View {
         /// re-derived so the two columns can never disagree about units.
         /// `nil` alongside a `nil` `metricKey`.
         let medianFormatter: ((Double) -> String)?
+        /// Optional presentation tint supplied by a CLI-owned scale. Today
+        /// only Wi-Fi uses it; nil leaves the ordinary measured/unmeasured
+        /// treatment untouched for every other row.
+        var valueTint: Color? = nil
         /// Rows that state a *configuration* rather than grade a measured
         /// quality — VPN, NAT topology, IPv6 availability, Local network.
         /// "VPN: not active" is a fact, not an all-clear, and a green dot
@@ -395,12 +458,23 @@ struct RunReportView: View {
             // different questions — what this check wrote down, versus
             // what the radio says right now — and only the first one needs
             // sudo. Saying "recorded" scopes the claim to the run.
+            let signal = SignalScale.cellContent(
+                rssi: wifi.rssi, scale: coordinator.signalScale.scale)
+            let signalValue: String
+            if wifi.rssi == nil {
+                signalValue = "not recorded (needs sudo)"
+            } else if let unit = signal.unit {
+                signalValue = "\(signal.value) · \(unit)"
+            } else {
+                signalValue = signal.value
+            }
             out.append(Row(label: "Wi-Fi signal",
-                           value: wifi.rssi.map { "\($0) dBm" } ?? "not recorded (needs sudo)",
+                           value: signalValue,
                            health: health(["W1", "W2", "WS-1", "WD-1"], "Wi-Fi signal"),
                            metricKey: "wifi_rssi_dbm",
                            glossaryKey: "wifi_signal",
-                           medianFormatter: { "\(Int($0.rounded())) dBm" }))
+                           medianFormatter: { "\(Int($0.rounded())) dBm" },
+                           valueTint: wifi.rssi == nil ? nil : signal.tint))
         }
         out.append(Row(label: "Under load",
                        value: bufferbloatValue,

@@ -83,14 +83,14 @@ assert labels == ['Excellent', 'Good', 'Fair', 'Weak'], labels
 "
 }
 
-@test "tones are good, ok, warn, bad in that order" {
+@test "excellent/good are positive and fair/weak are warnings" {
   run "$NETDIAG" --signal-scale
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 tones = [b['tone'] for b in d['bands']]
-assert tones == ['good', 'ok', 'warn', 'bad'], tones
+assert tones == ['good', 'ok', 'warn', 'warn'], tones
 "
 }
 

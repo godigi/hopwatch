@@ -70,7 +70,10 @@ import sys
 # v3 → v4: added the optional per-metric `why_absent` field, plus 16 new
 # `metrics` entries — the 13 `--history` metric keys and 3 for the live
 # monitor's chart measurements.
-SCHEMA_RULES_CATALOG = 4
+# v4 → v5: added the optional per-rule `impacts` map (see ACTIVITIES /
+# IMPACT_LEVELS) — which activities a fired rule breaks or degrades, for
+# helpers/suitability.py to project without re-judging any metric itself.
+SCHEMA_RULES_CATALOG = 5
 
 # The measurement family each rule judges — the GUI tints a report-card
 # row by this, not by severity, so a "varies"-severity rule like B1 still
@@ -131,6 +134,51 @@ SEVERITIES = frozenset({"info", "warn", "critical", "varies"})
 # both    — evaluated in both places, on whichever inputs that mode has.
 SCOPES = frozenset({"scan", "monitor", "both"})
 
+# The activities `helpers/suitability.py` projects rules onto. Five, and
+# closed: a sixth means a new row on every report card and in the arrival
+# card, which is a product decision, not a data one.
+ACTIVITIES = frozenset({"calls", "streaming", "gaming", "vpn", "browsing"})
+
+# ── Where the line between the two levels sits ────────────────────────
+# `broken` means the activity cannot function at all right now.
+# `degraded` means it functions, but unreliably or badly.
+#
+# Two consequences worth stating, because getting them wrong is how this
+# table turns into a scaremonger:
+#
+#   * An **intermittent** fault is never `broken`. A flapping link (AV-2)
+#     does end the call you are on, but the next one connects; `broken`
+#     renders as "won't hold up", which reads as "do not bother trying".
+#   * A **historical** fault is never `broken` either. AV-1 counts
+#     outages over the last day, and the rest of a report describes the
+#     link as it is at this instant. A red "video calls: won't hold up"
+#     on a connection that is fine right now, because of last night, is a
+#     claim the run has not established.
+#
+# The one that caught this: NAT-1 was `gaming: broken` because its own
+# prose says double NAT "breaks games". It does not — it breaks *inbound*
+# reach, and a game that connects outbound to a matchmaking server plays
+# fine, just with Strict NAT and worse matchmaking. What double NAT truly
+# breaks is port-forwarding-dependent (Plex, Steam in-home streaming,
+# doorbells), and none of those has a row here.
+#
+# How badly a rule hits an activity. Deliberately two levels, not three:
+# "good" is the absence of any impact, and a third middle grade would be a
+# judgement about magnitude — which lives in diagnosis[].severity, decided
+# against lib/thresholds.sh, and must not be re-decided here.
+IMPACT_LEVELS = frozenset({"degraded", "broken"})
+
+# Who can actually apply the fix. `nobody` is for the rules whose honest
+# advice is "there is nothing to do" — a real answer, and better than
+# inventing an action to fill a required field.
+FIX_TARGETS = frozenset({"you", "your_router", "your_isp",
+                         "network_operator", "nobody"})
+
+# The two targets where the advice genuinely changes depending on whether
+# the equipment is yours. `you` (something on this Mac) and `your_isp`
+# (a phone call either way) read the same in a hotel as at home.
+FIX_TARGETS_NEEDING_AWAY = frozenset({"your_router", "network_operator"})
+
 # One entry per rule the engine can emit. Order follows
 # docs/DIAGNOSIS-RULES.md's own reading order rather than rule-ID sort,
 # except that a rule's variants sit beside it (N1b after N1, DI-2 after
@@ -141,7 +189,7 @@ SCOPES = frozenset({"scan", "monitor", "both"})
 # reserved (the Report card already shows UPnP state directly; no
 # add_diag call exists anywhere for it) — see tests/test_rules_catalog.bats
 # for the explicit exclusion this drives.
-RULES: list[dict[str, str]] = [
+RULES: list[dict[str, object]] = [
     {
         "id": "N1",
         "title": "No network connection at all",
@@ -156,6 +204,14 @@ RULES: list[dict[str, str]] = [
             "at both ends."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1--no-network-at-all",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Turn WiFi on and pick a network, or check that the ethernet "
+            "cable is seated at both ends. Nothing else can be diagnosed "
+            "until basic connectivity exists."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "N1b",
@@ -171,6 +227,13 @@ RULES: list[dict[str, str]] = [
             "out whether the problem is the router, the ISP, or DNS."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1b--router-present-nothing-public-responds",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Re-run netdiag as a full scan instead of a focused one — it "
+            "will show whether the fault is your router, your ISP, or DNS."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "N1c",
@@ -187,6 +250,16 @@ RULES: list[dict[str, str]] = [
             "without a working route, which only its owner can fix."
         ),
         "doc": "DIAGNOSIS-RULES.md#n1c--joined-with-no-route-out",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Open a browser and try to load any page — most captive "
+            "portals show a sign-in or terms screen the moment you do, and "
+            "accepting it restores the route out. If nothing appears, the "
+            "network itself has no working route, and only whoever runs "
+            "it can fix that."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "W1",
@@ -200,6 +273,14 @@ RULES: list[dict[str, str]] = [
             "switching to a nearer access point or band usually helps."
         ),
         "doc": "DIAGNOSIS-RULES.md#w1--weak-wifi-signal",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Move closer to the router, or move the router away from "
+            "walls, metal and other radios. If neither is possible, a "
+            "mesh node or a wired connection is the durable answer."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "W2",
@@ -213,6 +294,21 @@ RULES: list[dict[str, str]] = [
             "sources can improve it."
         ),
         "doc": "DIAGNOSIS-RULES.md#w2--low-wifi-snr",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Log into the router's admin page and switch to a less "
+            "crowded WiFi channel, or move the router itself away from "
+            "other radios and reflective metal surfaces."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to try a different WiFi "
+            "channel — interference is stepping on the signal here. If "
+            "that's not on offer, moving away from likely interference "
+            "sources, or joining a 5 GHz network if one is available, "
+            "often helps in the meantime."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "WS-1",
@@ -226,6 +322,26 @@ RULES: list[dict[str, str]] = [
             "inconsistent; a less busy channel may help."
         ),
         "doc": "DIAGNOSIS-RULES.md#ws-1--wifi-channel-is-congested",
+        # `vpn` included for the same reason W1 and W2 include it: all
+        # three are radio-quality rules, and channel contention produces
+        # the same jitter and loss a tunnel suffers from. Omitting it here
+        # while the other two carry it was an inconsistency, not a
+        # judgement that a congested channel spares a VPN.
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Log into the router's admin page and switch to a quieter "
+            "WiFi channel, or let it choose one automatically — the "
+            "congestion eases once you're not sharing a channel with "
+            "several neighbours."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to switch to a quieter WiFi "
+            "channel. From a guest position there's little else to do "
+            "about it; a wired connection, if one's offered, sidesteps "
+            "the congestion entirely."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "G1",
@@ -248,6 +364,14 @@ RULES: list[dict[str, str]] = [
             "the router or switching to a closer access point clears this."
         ),
         "doc": "DIAGNOSIS-RULES.md#g1--gateway-loss--weak-wifi",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Move closer to the router, or switch to a closer access "
+            "point if you have one — the wireless link itself is the "
+            "problem here, not the router or your internet service."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "G2",
@@ -263,6 +387,20 @@ RULES: list[dict[str, str]] = [
             "most cases. On ethernet, check the cable."
         ),
         "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi",
+        "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",
+                    "vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Reboot the router: unplug it, wait ten seconds, plug it back "
+            "in. That clears this in most cases. If it comes back within a "
+            "day, the router is failing and wants replacing."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to restart the router — tell "
+            "them your Mac is losing packets to it while the Wi-Fi signal "
+            "is strong, which is the detail that distinguishes a bad router "
+            "from a bad radio."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "G3",
@@ -280,6 +418,15 @@ RULES: list[dict[str, str]] = [
             "ethernet, suspect the cable or the switch port."
         ),
         "doc": "DIAGNOSIS-RULES.md#g3--gateway-loss-below-the-critical-floor",
+        "impacts": {"calls": "degraded", "gaming": "degraded"},
+        "fix": (
+            "Move closer to the router or switch to a less crowded WiFi "
+            "band if you're on wireless. On ethernet, reseat or swap the "
+            "cable and check the link isn't stuck at half-duplex. If it "
+            "keeps recurring on WiFi, restarting the router is worth "
+            "trying too."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "P1",
@@ -295,6 +442,15 @@ RULES: list[dict[str, str]] = [
             "it's the ISP."
         ),
         "doc": "DIAGNOSIS-RULES.md#p1--dns-down-public-unreachable",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Try loading a raw address like http://1.1.1.1 in a browser. "
+            "If that loads, the problem is DNS — switch to a public "
+            "resolver such as Cloudflare or Google. If it doesn't, call "
+            "your ISP; this points to an outage on their side."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "P2",
@@ -309,6 +465,14 @@ RULES: list[dict[str, str]] = [
             "or contact support."
         ),
         "doc": "DIAGNOSIS-RULES.md#p2--public-unreachable-dns-up",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Check your ISP's status page, or call their support line and "
+            "report the outage — DNS is working fine, so the fault sits "
+            "entirely on their side of the connection."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "L1",
@@ -325,6 +489,15 @@ RULES: list[dict[str, str]] = [
             "trying before reporting the numbers to your ISP."
         ),
         "doc": "DIAGNOSIS-RULES.md#l1--severe-internet-side-packet-loss",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "degraded"},
+        "fix": (
+            "Reboot the modem once, if you're able to — that occasionally "
+            "clears it. If the loss returns, report the figures from this "
+            "report to your ISP; that's the number that gets an engineer "
+            "sent out, since the router itself is answering cleanly."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "L2",
@@ -341,6 +514,15 @@ RULES: list[dict[str, str]] = [
             "re-running when it feels worst."
         ),
         "doc": "DIAGNOSIS-RULES.md#l2--moderate-internet-side-packet-loss",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Not severe enough to act on by itself, but if it persists, "
+            "report the loss to your ISP — it's often tied to time-of-day "
+            "congestion on their local segment, so re-running netdiag "
+            "when it feels worst helps build the case."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "ICMP-1",
@@ -357,6 +539,13 @@ RULES: list[dict[str, str]] = [
             "measured here."
         ),
         "doc": "DIAGNOSIS-RULES.md#icmp-1--ping-filtered-upstream-real-traffic-fine",
+        "fix": (
+            "Nothing to do — the connection itself is fine. Ping being "
+            "blocked doesn't affect real browsing, calls, or downloads, "
+            "and there's no setting on your end that changes how the "
+            "path in between treats it."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "D1",
@@ -371,6 +560,13 @@ RULES: list[dict[str, str]] = [
             "network settings usually clears it up."
         ),
         "doc": "DIAGNOSIS-RULES.md#d1--partial-dns-internet-reachable",
+        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Switch to a public DNS resolver such as Cloudflare or Google "
+            "in System Settings → Network → Details → DNS — that usually "
+            "clears the flakiness immediately."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "D2",
@@ -387,6 +583,16 @@ RULES: list[dict[str, str]] = [
             "Google in System Settings."
         ),
         "doc": "DIAGNOSIS-RULES.md#d2--no-name-lookups-working-at-all",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Fix the connection first — DNS failing alongside everything "
+            "else is usually a symptom of that, not a fault of its own. "
+            "If lookups still fail once the connection is back, switch to "
+            "a public resolver such as Cloudflare or Google in System "
+            "Settings → Network → Details → DNS."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "D3",
@@ -402,6 +608,13 @@ RULES: list[dict[str, str]] = [
             "the delay."
         ),
         "doc": "DIAGNOSIS-RULES.md#d3--slow-dns-resolver-latency",
+        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Switch to a public resolver such as Cloudflare or Google in "
+            "System Settings → Network → Details → DNS — it's usually "
+            "noticeably faster than an ISP's default."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "D4",
@@ -417,6 +630,13 @@ RULES: list[dict[str, str]] = [
             "the redirection."
         ),
         "doc": "DIAGNOSIS-RULES.md#d4--dns-hijacking-and-search-redirection",
+        "impacts": {"vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Switch to a public resolver such as Cloudflare or Google, or "
+            "turn on Encrypted DNS (DNS-over-HTTPS), in System Settings → "
+            "Network → Details → DNS to stop the redirection."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "B1",
@@ -433,6 +653,28 @@ RULES: list[dict[str, str]] = [
             "the underlying queueing problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#b1--bufferbloat-at-gateway-hop",
+        # Load-conditional, so not `broken`. Bufferbloat only bites while
+        # the link is saturated — this rule's own summary says calls will
+        # glitch "whenever someone's downloading or uploading", and on an
+        # idle link the same call is fine. That is the flapping case in a
+        # different costume: a fault that comes and goes cannot claim an
+        # activity "won't hold up", which a reader takes as a statement
+        # about right now.
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Turn on Smart Queue Management (SQM) or QoS in the router's "
+            "admin page — that fixes the underlying queueing problem "
+            "directly. If the router doesn't support it, replacing it "
+            "with one that does is the durable fix."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network whether their router supports "
+            "Smart Queue Management or QoS, and to enable it. From a "
+            "guest position there's little else to do beyond avoiding "
+            "heavy uploads or downloads while on a call or in a game."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "B2",
@@ -448,6 +690,22 @@ RULES: list[dict[str, str]] = [
             "responsibility to fix."
         ),
         "doc": "DIAGNOSIS-RULES.md#b2--bufferbloat-at-isp-hop-only",
+        # Load-conditional, so not `broken`. Bufferbloat only bites while
+        # the link is saturated — this rule's own summary says calls will
+        # glitch "whenever someone's downloading or uploading", and on an
+        # idle link the same call is fine. That is the flapping case in a
+        # different costume: a fault that comes and goes cannot claim an
+        # activity "won't hold up", which a reader takes as a statement
+        # about right now.
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Call the ISP and ask about firmware updates for their "
+            "equipment, or a plan with better latency under load. Quote "
+            "the bufferbloat grade from this report — it is the figure "
+            "that gets the conversation past the first line of support."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "M1",
@@ -463,6 +721,14 @@ RULES: list[dict[str, str]] = [
             "the router's WAN MTU or MSS-clamping setting."
         ),
         "doc": "DIAGNOSIS-RULES.md#m1--path-mtu-below-1500",
+        "impacts": {"vpn": "broken", "browsing": "degraded"},
+        "fix": (
+            "Disconnect any VPN and try again — a misconfigured tunnel is "
+            "the most common cause. If the problem persists without one, "
+            "the router's WAN MTU or MSS-clamping setting needs "
+            "adjusting, which is worth raising with whoever manages it."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "MT1",
@@ -478,6 +744,17 @@ RULES: list[dict[str, str]] = [
             "along — is the one to investigate."
         ),
         "doc": "DIAGNOSIS-RULES.md#mt1--first-lossy-hop-identified",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "If the lossy hop turns out to be your own router, a reboot "
+            "is worth trying first. Otherwise, report it to your ISP "
+            "along with the hop and the loss figure from this report — a "
+            "transit hop beyond your gateway is their responsibility to "
+            "chase, and naming the exact hop is what gets it escalated "
+            "past the first line of support."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "V6-1",
@@ -494,6 +771,20 @@ RULES: list[dict[str, str]] = [
             "actually provisioned."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-1--ipv6-broken-while-ipv4-works",
+        "impacts": {"streaming": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Reboot the router — that clears many half-working IPv6 "
+            "setups on its own. If it keeps happening, ask your ISP "
+            "whether IPv6 is actually provisioned on your line."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to restart the router; a "
+            "stuck IPv6 setup is often just a router that needs a fresh "
+            "start. If that's not on offer, the brief pause on every "
+            "page load is safe to live with — nothing on your end needs "
+            "changing."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "V6-2",
@@ -508,6 +799,14 @@ RULES: list[dict[str, str]] = [
             "falling back to IPv4."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-2--unresponsive-ipv6-dns-resolver",
+        "impacts": {"streaming": "degraded", "browsing": "degraded"},
+        "fix": (
+            "In System Settings → Network → [WiFi/Ethernet] → Details → "
+            "TCP/IP, set Configure IPv6 to Link-local Only to stop your "
+            "Mac waiting on a broken resolver. Updating the router's "
+            "IPv6 DNS settings is the other fix, if you control it."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "V6-3",
@@ -526,6 +825,13 @@ RULES: list[dict[str, str]] = [
             "needs fixing."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-3--the-network-is-ipv6-only-by-design",
+        "fix": (
+            "Nothing to fix — this is a deliberate network design, not a "
+            "fault, and your Mac already handles it automatically. If one "
+            "particular app misbehaves here, that app is the one that "
+            "needs updating, not your network settings."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "VPN-1",
@@ -542,6 +848,14 @@ RULES: list[dict[str, str]] = [
             "it and run again for a picture of the underlying connection."
         ),
         "doc": "DIAGNOSIS-RULES.md#vpn-1--vpn-is-carrying-the-default-route",
+        "fix": (
+            "Nothing to fix — a VPN carrying your traffic is expected, "
+            "not a problem. If something in this report looks slow, "
+            "disconnecting the VPN and running netdiag again will show "
+            "whether the tunnel or the network underneath it is "
+            "responsible."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "TCP-1",
@@ -558,6 +872,13 @@ RULES: list[dict[str, str]] = [
             "ignored."
         ),
         "doc": "DIAGNOSIS-RULES.md#tcp-1--tcp-works-icmp-is-filtered",
+        "fix": (
+            "Nothing to fix — this is a filtering choice somewhere on "
+            "the path, not a fault. Real connections work fine, so the "
+            "ping-based loss number this check reports can be safely "
+            "ignored."
+        ),
+        "fix_target": "nobody",
     },
 
     {
@@ -574,6 +895,22 @@ RULES: list[dict[str, str]] = [
             "points are actually set up as a proper mesh."
         ),
         "doc": "DIAGNOSIS-RULES.md#wd-1--wifi-link-is-flapping",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Move closer to the access point if you can, and if there's "
+            "more than one, check they're set up as a proper mesh in the "
+            "router's admin page rather than as separate, overlapping "
+            "networks. A router firmware update can also settle a "
+            "stubborn case."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network whether their access points "
+            "are set up as a proper mesh, or whether a firmware update "
+            "is overdue — moving closer to the nearest one is something "
+            "you can still try yourself in the meantime."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "WI-1",
@@ -593,6 +930,13 @@ RULES: list[dict[str, str]] = [
             "instead."
         ),
         "doc": "DIAGNOSIS-RULES.md#wi-1--macos-is-withholding-the-networks-name",
+        "fix": (
+            "Grant Location Services access to whatever runs netdiag, in "
+            "System Settings → Privacy & Security → Location Services — "
+            "that's what lets macOS hand over the real network name on "
+            "future checks."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "DQ-1",
@@ -610,6 +954,12 @@ RULES: list[dict[str, str]] = [
             "once you have settled on a connection."
         ),
         "doc": "DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks",
+        "fix": (
+            "Nothing to fix — re-run once you've settled on one "
+            "connection, and the new run will describe just that "
+            "network."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "VPN-2",
@@ -626,6 +976,13 @@ RULES: list[dict[str, str]] = [
             "tunnel is the place to look."
         ),
         "doc": "DIAGNOSIS-RULES.md#vpn-2--a-split-tunnel-carries-part-of-your-traffic",
+        "fix": (
+            "Nothing to fix — this is how a split-tunnel VPN is meant to "
+            "work. If a site that feels broken is one that goes through "
+            "the tunnel, look there instead of at this report, since "
+            "everything here was measured on the direct path."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "PX-1",
@@ -642,6 +999,20 @@ RULES: list[dict[str, str]] = [
             "it, is the more likely cause."
         ),
         "doc": "DIAGNOSIS-RULES.md#px-1--a-proxy-or-pac-file-is-configured",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "If you set this proxy up yourself — on your own router, or "
+            "in a profile on this Mac — its rules are the place to look "
+            "for the address or site that's failing before assuming the "
+            "network itself is at fault."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network whether they operate a proxy "
+            "and what it's configured to allow — a guest can't inspect "
+            "the rules directly, and that's the more likely explanation "
+            "than the connection itself."
+        ),
+        "fix_target": "network_operator",
     },
     {
         "id": "FW-1",
@@ -658,6 +1029,19 @@ RULES: list[dict[str, str]] = [
             "others, none of which would show up as a network problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#fw-1--network-filtering-software-is-in-the-path",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "If you installed this filtering or security software "
+            "yourself, its own settings are the place to see what it's "
+            "blocking and why — this is not a network fault."
+        ),
+        "fix_away": (
+            "Ask whoever manages your Mac's security policy about it — "
+            "filtering installed by an employer or school can't be "
+            "changed from here, but they can tell you what it's "
+            "blocking and why."
+        ),
+        "fix_target": "network_operator",
     },
     {
         "id": "SP-1",
@@ -675,6 +1059,13 @@ RULES: list[dict[str, str]] = [
             "connection can really do."
         ),
         "doc": "DIAGNOSIS-RULES.md#sp-1--the-wireless-link-is-the-speed-cap",
+        "fix": (
+            "Plug in with an ethernet cable, or move closer to the "
+            "router and prefer the 5 GHz or 6 GHz band, to see what the "
+            "connection can really do — a faster internet plan will not "
+            "raise this number on its own."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "MET-1",
@@ -692,6 +1083,12 @@ RULES: list[dict[str, str]] = [
             "--speed to run it anyway."
         ),
         "doc": "DIAGNOSIS-RULES.md#met-1--metered-connection",
+        "fix": (
+            "Nothing to fix — this is just what a cellular connection "
+            "is. Pass --speed if you want the speed test to run anyway, "
+            "on purpose, spending part of your allowance."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "NT-1",
@@ -707,6 +1104,13 @@ RULES: list[dict[str, str]] = [
             "Settings usually fixes it."
         ),
         "doc": "DIAGNOSIS-RULES.md#nt-1--system-clock-drift--30-s",
+        "fix": (
+            "Open System Settings → General → Date & Time and turn on "
+            "\"Set date and time automatically\" — that keeps the clock "
+            "synced going forward, which secure sites need to validate "
+            "their certificates."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "DI-1",
@@ -723,6 +1127,17 @@ RULES: list[dict[str, str]] = [
             "first."
         ),
         "doc": "DIAGNOSIS-RULES.md#di-1--router-unreachable-at-the-hardware-arp-layer",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Check the physical connection first: reseat the ethernet "
+            "cable at both ends, confirm you're actually joined to "
+            "WiFi rather than showing a stale connection, and make "
+            "sure the right network is chosen as your active one. "
+            "Nothing else here can be trusted until your Mac can reach "
+            "the router at all."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "DI-2",
@@ -738,6 +1153,20 @@ RULES: list[dict[str, str]] = [
             "— find and renumber one of the offending devices."
         ),
         "doc": "DIAGNOSIS-RULES.md#di-2--duplicate-ip-on-the-lan",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Track down the device using a static IP that collides "
+            "with the router's DHCP range — usually something manually "
+            "configured — and give it a different address, or check "
+            "the router for a second DHCP server on the network."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to check for a duplicate IP "
+            "or a second DHCP server — you have no way to see or "
+            "change other devices on a network that isn't yours."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "ETH-1",
@@ -755,6 +1184,13 @@ RULES: list[dict[str, str]] = [
             "the router if you can."
         ),
         "doc": "DIAGNOSIS-RULES.md#eth-1--ethernet-negotiated-below-the-ports-capability",
+        "fix": (
+            "Try a different, better-quality ethernet cable, and remove "
+            "any dock or hub between your Mac and the router if you "
+            "can — a damaged cable or cheap adapter is the usual reason "
+            "a link settles below what the port can actually do."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "ETH-2",
@@ -770,7 +1206,30 @@ RULES: list[dict[str, str]] = [
             "negotiation, usually because one end is pinned to a fixed "
             "speed instead of automatic."
         ),
+        # Collisions and heavy loss, which is why this is graded the same
+        # as a router dropping packets rather than as a slow link. ETH-1
+        # deliberately carries no impacts by contrast: a link negotiated
+        # below the port's ceiling is a cap, not a fault, and 100 Mb is
+        # ample for everything in this table — the same reason SP-1
+        # ("WiFi is the speed cap") carries none either.
+        "impacts": {"calls": "broken", "streaming": "degraded",
+                    "gaming": "broken", "vpn": "degraded",
+                    "browsing": "degraded"},
         "doc": "DIAGNOSIS-RULES.md#eth-2--ethernet-stuck-on-half-duplex",
+        "fix": (
+            "Check the port your Mac plugs into — on the router or a "
+            "switch — and set it back to automatic negotiation instead "
+            "of a fixed speed; that mismatch is almost always what "
+            "forces half duplex. Swap the cable too if that alone "
+            "doesn't clear it."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to check the port your Mac "
+            "plugs into and set it back to automatic negotiation — a "
+            "fixed-speed port on their end is what's forcing this, and "
+            "it isn't something you can change from your Mac."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "DH-1",
@@ -786,6 +1245,12 @@ RULES: list[dict[str, str]] = [
             "keeping an eye on."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-1--dhcp-lease-expires-within-1-hour",
+        "fix": (
+            "Nothing to do — this normally renews on its own. If the "
+            "network happens to drop right as it renews, that's the "
+            "connection to look at, not something to change now."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "DH-3",
@@ -802,6 +1267,23 @@ RULES: list[dict[str, str]] = [
             "again; failing that, restart the router."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-3--self-assigned-address-dhcp-never-answered",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Try rejoining the network first — forgetting and rejoining "
+            "WiFi, or unplugging and replugging an ethernet cable — "
+            "which makes your Mac ask again. If that doesn't get an "
+            "address, restart the router: its address service is very "
+            "likely down, out of addresses, or still starting up."
+        ),
+        "fix_away": (
+            "Try rejoining the network yourself first — forgetting and "
+            "rejoining WiFi, or replugging the cable — since that alone "
+            "sometimes gets an address. If it still doesn't, ask "
+            "whoever runs this network to restart the router or check "
+            "that it hasn't run out of addresses."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "DH-2",
@@ -817,6 +1299,14 @@ RULES: list[dict[str, str]] = [
             "second look if it wasn't."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-2--dhcp-handed-dns-differs-from-system-resolver",
+        "impacts": {"vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "Check for a manually entered DNS server in System Settings "
+            "→ Network → [your connection] → Details → DNS — clear it "
+            "if you didn't set it on purpose, to go back to what the "
+            "router recommends."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "WAN-1",
@@ -832,6 +1322,13 @@ RULES: list[dict[str, str]] = [
             "behaving inconsistently between connections."
         ),
         "doc": "DIAGNOSIS-RULES.md#wan-1--outbound-traffic-load-balanced-across-multiple-isps",
+        "fix": (
+            "Nothing to fix — this is normal for a multi-WAN router "
+            "balancing traffic across more than one provider on "
+            "purpose. It explains why a service might see your address "
+            "change, or an app behave differently between connections."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "WAN-1b",
@@ -848,6 +1345,13 @@ RULES: list[dict[str, str]] = [
             "changing."
         ),
         "doc": "DIAGNOSIS-RULES.md#wan-1b--same-isp-multiple-public-ips-cgnat-round-robin",
+        "fix": (
+            "Nothing to fix locally — this is how your provider's "
+            "shared-address pool works, common on cellular and budget "
+            "connections. It explains why a service might complain "
+            "that your address keeps changing."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "NAT-1",
@@ -865,6 +1369,29 @@ RULES: list[dict[str, str]] = [
             "or access-point mode usually fixes it."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1--double-nat-detected",
+        # Not "broken". Double NAT breaks *inbound* connections — port
+        # forwarding, UPnP, hosting — and modern multiplayer runs outbound
+        # to matchmaking servers, so it plays. What you get is Strict /
+        # Type-3 NAT: slower matchmaking, cannot host, some peers
+        # unreachable, party chat flaky. The rule's own prose says it
+        # "breaks games", which is loose — the things it truly breaks are
+        # the port-forwarding-dependent ones (Plex, Steam in-home
+        # streaming, doorbells) and those have no row here.
+        "impacts": {"gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Log into the outer router's admin page and switch it to "
+            "\"bridge mode\" or \"access point mode\" so the inner "
+            "router handles the network alone — that stops incoming "
+            "connections for games, Plex, video doorbells and similar "
+            "from getting lost between the two routers."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network whether the outer router "
+            "can be switched to bridge or access-point mode — you "
+            "won't have admin access to it yourself, but the same fix "
+            "applies at their end."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "NAT-1b",
@@ -880,6 +1407,17 @@ RULES: list[dict[str, str]] = [
             "shows private-network addresses partway along the path."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1b--isp-side-private-transit-not-your-double-nat",
+        # Same reasoning as NAT-1: inbound reach is what suffers, and a
+        # game that connects outbound still plays.
+        "impacts": {"gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Nothing to fix — this is normal for how your ISP built "
+            "their own network, not a fault. It only explains why a "
+            "traceroute shows private-network addresses partway along "
+            "the path; those are your ISP's own infrastructure, not a "
+            "misconfigured router of yours."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "BL-1",
@@ -899,6 +1437,13 @@ RULES: list[dict[str, str]] = [
             "much, is named in the diagnosis text."
         ),
         "doc": "DIAGNOSIS-RULES.md#bl-1--a-metric-regressed-against-this-networks-own-history",
+        "fix": (
+            "Look at which measurement moved and by how much — it's "
+            "named in the diagnosis text — and treat that as the thing "
+            "to act on. A regression on its own has no separate fix; "
+            "whatever specific reading is named is the real target."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "CP-1",
@@ -917,6 +1462,15 @@ RULES: list[dict[str, str]] = [
             "is only waiting to cut it off."
         ),
         "doc": "DIAGNOSIS-RULES.md#cp-1--captive-portal-blocking-real-access",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Open a browser and load any plain address — the network's "
+            "sign-in or terms page should appear. Nothing else will "
+            "work until it's accepted, and this applies wherever the "
+            "network is."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "ND-1",
@@ -936,6 +1490,13 @@ RULES: list[dict[str, str]] = [
             "a healthy idle watcher looks like."
         ),
         "doc": "DIAGNOSIS-RULES.md#nd-1--the-background-watcher-is-installed-and-not-running",
+        "fix": (
+            "Reinstall it: run \"netdiag --uninstall-watcher\" followed "
+            "by \"netdiag --install-watcher\" — the installer now "
+            "refuses to put the watcher somewhere macOS won't let it "
+            "run, so a clean reinstall clears most causes."
+        ),
+        "fix_target": "you",
     },
     {
         "id": "AV-1",
@@ -954,6 +1515,24 @@ RULES: list[dict[str, str]] = [
             "whoever runs the line."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-1--this-connection-keeps-dropping",
+        # All `degraded`, deliberately, even though the outages this rule
+        # counts were total while they lasted. AV-1 describes what this
+        # network *has been* like — the rule exists precisely because a
+        # snapshot taken at a good moment reports a healthy network
+        # truthfully and uselessly. Everything else in a report describes
+        # the link as it is right now, and a suitability row is read as a
+        # statement about now. "Video calls: won't hold up" on a link that
+        # is fine at this instant, because of last night, is a claim this
+        # run has not established.
+        "impacts": {"calls": "degraded", "streaming": "degraded", "gaming": "degraded",
+                    "vpn": "degraded", "browsing": "degraded"},
+        "fix": (
+            "If this keeps happening, raise it with your ISP and give "
+            "them the exact times: run \"netdiag --events\" to print "
+            "each drop, since dated evidence gets a technician "
+            "escalated much faster than \"my internet is unreliable\"."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "AV-2",
@@ -970,6 +1549,21 @@ RULES: list[dict[str, str]] = [
             "continuous recorder can see them at all."
         ),
         "doc": "DIAGNOSIS-RULES.md#av-2--the-connection-is-flapping",
+        # A short drop does end a call and a match. But it ends *that*
+        # one; the next connects. "Won't hold up" reads as "do not bother
+        # trying", which is not what an intermittent fault means — and
+        # this rule is `info` precisely because the link works between
+        # the flaps.
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "If these short drops are actually causing trouble — a "
+            "dropped call, a failed upload — run \"netdiag --events\" "
+            "to see the exact times, and raise it with your ISP if it "
+            "keeps happening. A single scan will never catch this on "
+            "its own, so the event log is the only record worth "
+            "handing them."
+        ),
+        "fix_target": "your_isp",
     },
     {
         "id": "TR-1",
@@ -989,6 +1583,13 @@ RULES: list[dict[str, str]] = [
             "explanation for a finding you were about to act on."
         ),
         "doc": "DIAGNOSIS-RULES.md#tr-1--your-own-mac-was-using-the-connection",
+        "fix": (
+            "Nothing to fix — if you want a clean reading, pause or "
+            "stop whatever's transferring (a backup, a sync, a big "
+            "download) and run the check again; otherwise nothing here "
+            "needs acting on."
+        ),
+        "fix_target": "nobody",
     },
 ]
 
@@ -1326,10 +1927,12 @@ METRICS: list[dict[str, str]] = [
 ]
 
 
-_FIELDS = frozenset({"id", "title", "category", "severity", "scope", "blurb", "doc"})
-# Optional, and the only optional field a rule has. See `also`'s note at
-# CATEGORIES for what it means and why exactly one is enough.
-_OPTIONAL_FIELDS = frozenset({"also"})
+_FIELDS = frozenset({"id", "title", "category", "severity", "scope", "blurb",
+                     "doc", "fix", "fix_target"})
+# Optional. See `also`'s note at CATEGORIES for what it means and why
+# exactly one is enough, ACTIVITIES / IMPACT_LEVELS above for `impacts`, and
+# FIX_TARGETS / FIX_TARGETS_NEEDING_AWAY above for `fix_away`.
+_OPTIONAL_FIELDS = frozenset({"also", "impacts", "fix_away"})
 _METRIC_FIELDS = frozenset({"key", "label", "help"})
 # Optional, and the only optional field a metric has. Present on a metric
 # whose absence has a knowable cause (a check mode that skips it, a
@@ -1340,7 +1943,7 @@ _METRIC_FIELDS = frozenset({"key", "label", "help"})
 _METRIC_OPTIONAL_FIELDS = frozenset({"why_absent"})
 
 
-def _validate(rules: list[dict[str, str]]) -> None:
+def _validate(rules: list[dict[str, object]]) -> None:
     """Fail loud on a malformed entry rather than ship a silent typo.
 
     The bats suite re-checks all of this from the emitted JSON too, so
@@ -1354,7 +1957,36 @@ def _validate(rules: list[dict[str, str]]) -> None:
             f"entry has the wrong field set: {r}"
         )
         for k, v in r.items():
+            if k == "impacts":
+                continue
             assert isinstance(v, str) and v.strip(), f"{r.get('id')}.{k} is empty"
+        if "impacts" in r:
+            imp = r["impacts"]
+            assert isinstance(imp, dict) and imp, (
+                f"{r['id']}: impacts must be a non-empty object — omit the key "
+                f"rather than shipping an empty one, so 'no consequence' and "
+                f"'not yet classified' stay distinguishable"
+            )
+            for activity, level in imp.items():
+                assert activity in ACTIVITIES, (
+                    f"{r['id']}: bad activity {activity!r}"
+                )
+                assert level in IMPACT_LEVELS, (
+                    f"{r['id']}: bad impact level {level!r}"
+                )
+        assert r["fix_target"] in FIX_TARGETS, (
+            f"{r['id']}: bad fix_target {r['fix_target']!r}"
+        )
+        needs_away = r["fix_target"] in FIX_TARGETS_NEEDING_AWAY
+        assert ("fix_away" in r) == needs_away, (
+            f"{r['id']}: fix_target={r['fix_target']!r} requires "
+            f"{'a' if needs_away else 'no'} fix_away"
+        )
+        if "fix_away" in r:
+            assert r["fix_away"] != r["fix"], (
+                f"{r['id']}: fix_away repeats fix — if the advice does not "
+                f"change away from home, the target is wrong, not the text"
+            )
         assert r["category"] in CATEGORIES, f"{r['id']}: bad category {r['category']!r}"
         if "also" in r:
             assert r["also"] in CATEGORIES, f"{r['id']}: bad also {r['also']!r}"

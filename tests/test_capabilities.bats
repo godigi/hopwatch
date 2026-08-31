@@ -147,7 +147,8 @@ for name in ('monitor', 'history', 'show', 'progress'):
   # Ties the hand-maintained FEATURES list to actual CLI surface, so a
   # renamed or removed flag fails here instead of shipping a stale name
   # to the GUI. "watcher" is the one convention break: it stands for the
-  # --install-watcher / --uninstall-watcher pair.
+  # --install-watcher / --uninstall-watcher pair. "recorder" follows the
+  # same convention for --install-recorder / --uninstall-recorder.
   run "$NETDIAG" --capabilities
   [ "$status" -eq 0 ]
   local features
@@ -158,6 +159,7 @@ for name in ('monitor', 'history', 'show', 'progress'):
   while IFS= read -r feat; do
     case "$feat" in
       watcher) [[ "$output" == *"--install-watcher"* ]] ;;
+      recorder) [[ "$output" == *"--install-recorder"* ]] ;;
       *)       [[ "$output" == *"--$feat"* ]] ;;
     esac
   done <<< "$features"

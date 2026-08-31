@@ -115,7 +115,7 @@ def main() -> None:
         {
             "min_dbm": None,
             "label": "Weak",
-            "tone": "bad",
+            "tone": "warn",
             "blurb": (
                 "Your radio signal is weak or obstructed. Confirm the "
                 "router and internet path with a reachability check before "
