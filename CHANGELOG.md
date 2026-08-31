@@ -6,6 +6,35 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — one outlier was setting the whole Trends scale [GUI]
+
+The gateway RTT chart held 2443 samples that sit between about 2 and 8 ms,
+plus a handful of multi-second spikes. Charted against their own range, the
+axis ran 0–3000 ms and all the ordinary variation drew as a flat line on the
+floor: the chart contained every point and conveyed none of them.
+
+The y-axis is now clamped near the 99th percentile — but only when the
+maximum exceeds it by more than 2×, since a series with a genuinely wide
+spread should be seen at full height, and never below the typical band the
+same chart shades. Nothing is hidden by this: readings above the ceiling are
+drawn pinned to it with their own orange triangle, and a caption states how
+many there are and how high the highest actually went ("18 readings are
+above this range and are drawn at the top edge — the highest reached
+2786.47 ms"). That caption is required rather than decorative, for the
+reason `MonitorSeries` refuses to draw a line across a gap: a chart that
+quietly rescales past its own outliers is reassuring in the same false way.
+
+Also: Swift Charts formats axis values through the current locale, so the
+incident chart's count axis rendered 2000 as "2.000" — reading as *two*
+against an axis whose other labels were 0, 500 and 1.500. Both charts now
+label their y-axis plainly. Same defect as the count interpolations in the
+entry below, arriving by a different route.
+
+These numbers scale an axis and decide nothing about the network, so they
+are not thresholds under CLAUDE.md's rule — the cutoffs that judge a reading
+still live in `lib/thresholds.sh` and reach this screen as the CLI's own
+`judged` verdict, rendered verbatim.
+
 ### Fixed — three things the gallery showed [GUI]
 
 All three were found by looking at `--gallery`'s renders rather than by

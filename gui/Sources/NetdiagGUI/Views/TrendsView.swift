@@ -251,6 +251,13 @@ struct TrendsView: View {
             if count == 0 {
                 noData(descriptor)
             } else {
+                // A single outlier was setting the whole scale: 2371 gateway
+                // RTT samples that live between 2 and 8 ms were being drawn
+                // against a 0–3000 ms axis because one reading hit 2.8 s,
+                // flattening every real variation into a line on the floor.
+                // See `Clamp` for what is done about it and why nothing is
+                // hidden by it.
+                let clamp = Clamp.forValues(points.map(\.1), p90: stat?.p90)
                 Chart {
                     // Drawn first, so the line and points sit on top of it.
                     if hasBand, let p10 = stat?.p10, let p90 = stat?.p90,
@@ -266,18 +273,30 @@ struct TrendsView: View {
                         }
                     }
                     ForEach(points, id: \.0) { point in
+                        let value = clamp?.apply(point.1) ?? point.1
                         LineMark(x: .value("When", point.0),
-                                 y: .value(descriptor?.label ?? "", point.1))
+                                 y: .value(descriptor?.label ?? "", value))
                             .interpolationMethod(.monotone)
                         // Points as well as a line: with 38 samples spread
                         // over two months, a line alone implies a
                         // continuous measurement that was never taken.
                         PointMark(x: .value("When", point.0),
-                                  y: .value(descriptor?.label ?? "", point.1))
+                                  y: .value(descriptor?.label ?? "", value))
                             .symbolSize(count > 200 ? 4 : 18)
+                        // A reading drawn at the ceiling rather than at its
+                        // real height gets its own mark, so "pegged" can
+                        // never be mistaken for "measured this value".
+                        if let clamp, clamp.exceeds(point.1) {
+                            PointMark(x: .value("When", point.0),
+                                      y: .value(descriptor?.label ?? "", clamp.upper))
+                                .symbol(.triangle)
+                                .symbolSize(40)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
-                .chartYAxis { AxisMarks(position: .leading) }
+                .chartYDomain(clamp.map { 0...$0.upper })
+                .chartYAxis { AxisMarks(position: .leading) { plainCountLabel($0) } }
                 .frame(height: 220)
 
                 if hasBand {
@@ -285,7 +304,111 @@ struct TrendsView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
+                // Required, not decorative: the axis stops below the real
+                // maximum, and a chart that quietly rescales past its own
+                // outliers tells the same comfortable lie as a smooth line
+                // through an outage — the thing `MonitorSeries` refuses to
+                // draw. If the top of the range is not the top of the data,
+                // the chart has to say so.
+                if let clamp {
+                    Text(verbatim: clamp.note(unit: descriptor?.unit))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .proseWidth()
+                }
             }
+        }
+    }
+
+    /// Y-axis labels without the locale's thousands separator.
+    ///
+    /// Swift Charts formats axis values through the current locale, so the
+    /// incident chart's count axis rendered 2000 as "2.000" — which reads
+    /// as *two* against an axis whose other labels are 0, 500 and 1.500.
+    /// The same defect as the `LocalizedStringKey` count interpolations
+    /// fixed elsewhere in this file, arriving by a different route: the app
+    /// is English throughout, so its numbers should be spelled one way.
+    @AxisMarkBuilder
+    private func plainCountLabel(_ value: AxisValue) -> some AxisMark {
+        AxisGridLine()
+        AxisTick()
+        AxisValueLabel {
+            if let number = value.as(Double.self) {
+                Text(verbatim: number == number.rounded()
+                     ? String(Int(number))
+                     : String(format: "%g", number))
+            }
+        }
+    }
+
+    /// A y-axis bound that keeps one extreme reading from flattening every
+    /// other one, without hiding it.
+    ///
+    /// The store this was written against holds 2371 gateway RTT samples
+    /// that sit between about 2 and 8 ms, plus a single 2.8 s spike. Charted
+    /// against their own range, the axis ran 0–3000 ms and the other 2370
+    /// points drew as a flat line on the floor: the chart contained all the
+    /// data and conveyed none of it.
+    ///
+    /// So the axis is clamped near the 99th percentile and out-of-range
+    /// readings are drawn pinned to the ceiling with their own orange
+    /// triangle, above a caption naming how many there are and how high the
+    /// highest actually went. Nothing is dropped, and nothing is drawn at a
+    /// height it was not measured at without saying so — the same standard
+    /// `MonitorSeries` applies when it refuses to draw a line across a gap,
+    /// because a chart that silently rescales past its outliers is
+    /// reassuring in exactly the way that one would be.
+    ///
+    /// These numbers scale an axis; they decide nothing about the network.
+    /// The cutoffs that judge a reading live in `lib/thresholds.sh` and
+    /// reach this screen as the CLI's own `judged` verdict, which this view
+    /// renders verbatim and does not compute.
+    struct Clamp {
+        let upper: Double
+        let outliers: Int
+        let maximum: Double
+
+        func exceeds(_ value: Double) -> Bool { value > upper }
+        func apply(_ value: Double) -> Double { min(value, upper) }
+
+        /// `nil` when the data's own range is already readable — the common
+        /// case, and the one where clamping would be meddling.
+        static func forValues(_ values: [Double], p90: Double?) -> Clamp? {
+            let finite = values.filter { $0.isFinite }
+            guard finite.count >= 10, let maximum = finite.max(), maximum > 0
+            else { return nil }
+            let sorted = finite.sorted()
+            let p99 = sorted[min(sorted.count - 1,
+                                 Int((Double(sorted.count) * 0.99).rounded(.down)))]
+            guard p99 > 0 else { return nil }
+            // Only step in for a genuinely extreme tail. A series whose
+            // maximum is merely twice its 99th percentile has a real spread
+            // worth seeing at full height.
+            guard maximum > p99 * 2 else { return nil }
+            // Never clamp below the typical band the chart also draws, or
+            // the shading would run off the top of its own axis.
+            var upper = p99 * 1.15
+            if let p90, p90 > 0 { upper = max(upper, p90 * 1.2) }
+            guard upper < maximum else { return nil }
+            return Clamp(upper: upper,
+                         outliers: finite.filter { $0 > upper }.count,
+                         maximum: maximum)
+        }
+
+        func note(unit: String?) -> String {
+            let suffix = (unit?.isEmpty == false) ? " \(unit!)" : ""
+            let peak = Self.trim(maximum) + suffix
+            return outliers == 1
+                ? "1 reading is above this range and is drawn at the top edge — it actually reached \(peak)."
+                : "\(outliers) readings are above this range and are drawn at the top edge — the highest reached \(peak)."
+        }
+
+        /// Two significant-ish decimals without trailing zeros, so a 2.8 s
+        /// spike reads "2800" rather than "2800.000000001".
+        private static func trim(_ value: Double) -> String {
+            value == value.rounded()
+                ? String(Int(value))
+                : String(format: "%.2f", value)
         }
     }
 
@@ -374,7 +497,7 @@ struct TrendsView: View {
                 // Leading, matching the metric chart above — one chart
                 // reading from the left and the next from the right reads
                 // as two different apps stacked.
-                .chartYAxis { AxisMarks(position: .leading) }
+                .chartYAxis { AxisMarks(position: .leading) { plainCountLabel($0) } }
                 .frame(height: 160)
             }
         }
@@ -443,5 +566,16 @@ struct TrendsView: View {
         // single view setting the whole tab's ideal width. See
         // `proseWidth`.
         .proseWidth(520)
+    }
+}
+
+private extension View {
+    /// `chartYScale(domain:)` takes a range, not an optional, and applying
+    /// it unconditionally would force a fixed axis on every metric — so the
+    /// "no clamp needed" case, which is most of them, needs to leave the
+    /// chart's own auto-scaling alone rather than pass it a sentinel.
+    @ViewBuilder
+    func chartYDomain(_ range: ClosedRange<Double>?) -> some View {
+        if let range { chartYScale(domain: range) } else { self }
     }
 }
