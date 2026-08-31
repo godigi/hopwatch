@@ -109,17 +109,30 @@ struct RunReportView: View {
                     Text(row.value)
                         .foregroundStyle(row.measured ? .primary : .secondary)
                         .lineLimit(1)
-                        .frame(width: 128, alignment: .leading)
-                        // Safety net for any value long enough to
-                        // tail-truncate at this column's fixed width (the
-                        // Wi-Fi row's sudo-hint fallback is the current
-                        // longest) — the full string is always one hover
+                        // Takes the row's slack rather than a fixed 128pt.
+                        //
+                        // At 128 the truncation was not the rare safety net
+                        // the note below assumes: on an ordinary `--quick`
+                        // run, seven of the thirteen rows read "not measured
+                        // (quic…" — cut off one character into the word that
+                        // carries the whole point, so the card explained
+                        // nothing seven times over. The slack was being
+                        // spent on a `Spacer` instead.
+                        //
+                        // The verdict column takes a fixed width in exchange,
+                        // so every row still divides the remainder the same
+                        // way and the columns stay aligned down the card —
+                        // which a flexible value column beside a
+                        // variable-width chip would not do.
+                        .frame(minWidth: 128, maxWidth: .infinity, alignment: .leading)
+                        // Still a safety net, for a value long enough to
+                        // truncate even here — the full string is one hover
                         // away instead of silently lost.
                         .help(row.value)
                     medianColumn(row)
                         .frame(width: 96, alignment: .leading)
-                    Spacer(minLength: 4)
                     verdictColumn(row)
+                        .frame(width: 76, alignment: .trailing)
                 }
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)
