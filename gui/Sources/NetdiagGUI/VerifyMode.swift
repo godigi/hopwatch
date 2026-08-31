@@ -244,6 +244,29 @@ private enum VerifyHarness {
         ])
         equal(acrossDays.count, 2, "separate days stay separate rows")
 
+        // An alert is about a rule the CLI already reported, so listing both
+        // printed one incident twice in different words. The alert is
+        // absorbed as a flag, not deleted — being notified is the one thing
+        // it knows that the rule row does not.
+        let withAlert = ActivityEntry.fold([
+            event("rule-fired", "G2", 0, "Router dropping packets"),
+            event("rule-cleared", "G2", 90, "Resolved: Router dropping packets"),
+            event("alert", "G2", 30, "Connection is unstable"),
+        ])
+        equal(withAlert.count, 1, "an alert merges into the rule row it is about")
+        check(withAlert.first?.notified == true, "and marks it as having notified")
+        equal(withAlert.first?.summary, "Router dropping packets",
+              "keeping the CLI's words for the rule, not the alert's category label")
+
+        // An alert with no rule — public IP changed, captive portal, VPN
+        // dropped — has no row to merge into and must keep its own.
+        let ruleless = ActivityEntry.fold([
+            event("alert", nil, 0, "Your public IP address changed"),
+        ])
+        equal(ruleless.count, 1, "a rule-less alert keeps its own row")
+        check(ruleless.first?.notified == false,
+              "and is not marked as a merge target")
+
         equal(ActivityEntry.duration(45), "45s", "sub-minute durations read in seconds")
         equal(ActivityEntry.duration(240), "4m", "a whole number of minutes drops seconds")
         equal(ActivityEntry.duration(3600 * 2 + 720), "2h 12m", "hours keep minutes")

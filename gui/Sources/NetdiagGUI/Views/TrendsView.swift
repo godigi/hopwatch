@@ -173,7 +173,15 @@ struct TrendsView: View {
                     // The sample count is in the picker itself, so choosing
                     // an empty metric is an informed choice rather than a
                     // dead end the user has to discover by selecting it.
-                    Text("\(m.label) (\(m.samples))").tag(m.key)
+                    //
+                    // `verbatim:` matters. `Text("…\(Int)…")` builds a
+                    // `LocalizedStringKey`, which formats integers with the
+                    // locale's grouping separator — so 2371 samples rendered
+                    // as "Gateway RTT (2.371)" here, reading as a decimal,
+                    // while `metricNote` two hundred lines down said "2371
+                    // samples" because it interpolates into a plain `String`.
+                    // Same number, two spellings, one of them wrong.
+                    Text(verbatim: "\(m.label) (\(m.samples))").tag(m.key)
                 }
             }
             .frame(maxWidth: 220)
@@ -414,15 +422,15 @@ struct TrendsView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("\(counts.runs) run\(counts.runs == 1 ? "" : "s") across \(counts.networks) network\(counts.networks == 1 ? "" : "s"), read from ~/net-diag/baseline.jsonl and its archive.")
+            Text(verbatim: "\(counts.runs) run\(counts.runs == 1 ? "" : "s") across \(counts.networks) network\(counts.networks == 1 ? "" : "s"), read from ~/net-diag/baseline.jsonl and its archive.")
                 .font(.caption).foregroundStyle(.secondary)
             if counts.redactedDropped > 0 {
-                Text("\(counts.redactedDropped) run\(counts.redactedDropped == 1 ? " was" : "s were") skipped: they were recorded with --redact, so their network identity was masked and they can't be attributed to any network.")
+                Text(verbatim: "\(counts.redactedDropped) run\(counts.redactedDropped == 1 ? " was" : "s were") skipped: they were recorded with --redact, so their network identity was masked and they can't be attributed to any network.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if counts.duplicatesDropped > 0 {
-                Text("\(counts.duplicatesDropped) duplicate record\(counts.duplicatesDropped == 1 ? " was" : "s were") merged.")
+                Text(verbatim: "\(counts.duplicatesDropped) duplicate record\(counts.duplicatesDropped == 1 ? " was" : "s were") merged.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !coordinator.watcher.isInstalled {

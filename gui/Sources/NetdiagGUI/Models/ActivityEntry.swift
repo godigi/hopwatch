@@ -59,6 +59,10 @@ struct ActivityEntry: Identifiable, Equatable {
     /// measurement, because the monitor restarted while the rule was
     /// firing and the gap went unobserved.
     var durationIsLowerBound: Bool
+    /// An alert for this rule fired on this day, i.e. the user was actually
+    /// notified. Folded in from the alert's own event rather than left as a
+    /// separate row — see `absorbAlerts`.
+    var notified: Bool = false
 }
 
 extension ActivityEntry {
@@ -181,7 +185,41 @@ extension ActivityEntry {
                 durationIsLowerBound: false))
         }
 
-        return entries.values.sorted { $0.latest > $1.latest }
+        return absorbAlerts(entries).values.sorted { $0.latest > $1.latest }
+    }
+
+    /// Fold each alert row into the rule row it is about.
+    ///
+    /// `AlertEngine` firing writes an `alert` event alongside the
+    /// `rule-fired` the CLI already reported, so one incident produced two
+    /// rows saying the same thing in different words — "Moderate internet
+    /// packet loss" (rule `L2`) and "Internet connection degraded" (the
+    /// alert `L2` raised). The dropdown's teaser already drops that echo;
+    /// Activity listed both.
+    ///
+    /// Dropping the alert row outright would lose the one thing it knows
+    /// that the rule row does not: that the user was *notified*. So the
+    /// alert is absorbed as a flag on the rule's own row instead of
+    /// deleted. An alert carrying no rule — "Your public IP address
+    /// changed", captive portal, VPN dropped, which are raised from monitor
+    /// events rather than rules — has no row to merge into and keeps its
+    /// own, which is correct: nothing else is reporting it.
+    private static func absorbAlerts(
+        _ entries: [String: ActivityEntry]) -> [String: ActivityEntry] {
+        var result = entries
+        for (key, entry) in entries where entry.kind == "alert" {
+            guard let ruleID = entry.ruleID else { continue }
+            let day = key.split(separator: "|").last.map(String.init) ?? ""
+            let ruleKey = "rule|\(ruleID)|\(day)"
+            guard var target = result[ruleKey] else { continue }
+            target.notified = true
+            // The alert lands after the rule's dwell, so it can be the
+            // newest thing in the group; keep the row dated by it.
+            target.latest = max(target.latest, entry.latest)
+            result[ruleKey] = target
+            result.removeValue(forKey: key)
+        }
+        return result
     }
 }
 

@@ -298,6 +298,16 @@ struct ActivityRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // The absorbed alert's one distinct fact: this is the subset of
+            // findings that actually interrupted the user. A glyph rather
+            // than a word, because it is a property of the row, not another
+            // clause in the sentence — see `ActivityEntry.absorbAlerts`.
+            if entry.notified {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .help("You were notified about this")
+            }
             Spacer(minLength: 8)
             RelativeTimeText(date: entry.latest)
                 .font(.caption)

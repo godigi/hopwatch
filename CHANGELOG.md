@@ -6,6 +6,40 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — three things the gallery showed [GUI]
+
+All three were found by looking at `--gallery`'s renders rather than by
+reading the code, which is the point of having it.
+
+- **The report card truncated its values mid-reason.** The value column was
+  a fixed 128pt with a `.help()` tooltip as a "safety net for any value long
+  enough to truncate". On an ordinary `--quick` run, seven of the thirteen
+  rows read `not measured (quic…` — cut off one character into the word
+  carrying the whole point, so the card explained nothing seven times over,
+  and the tooltip was load-bearing rather than a net. Meanwhile the row's
+  slack was being spent on a `Spacer`. The value column now takes that
+  slack (`minWidth: 128, maxWidth: .infinity`), and the verdict chip takes a
+  fixed 76pt in exchange so every row divides the remainder identically and
+  the columns stay aligned — which a flexible value column beside a
+  variable-width chip would not.
+- **One incident, two rows in Activity.** `AlertEngine` firing writes an
+  `alert` event alongside the `rule-fired` the CLI already reported, so
+  "Moderate internet packet loss" (rule `L2`) and "Internet connection
+  degraded" (the alert `L2` raised) both appeared. The dropdown's teaser
+  already dropped that echo; Activity listed both. The alert is now absorbed
+  into the rule's own row as a bell glyph rather than deleted — being
+  *notified* is the one thing the alert row knew that the rule row did not,
+  and it is what separates the findings that interrupted you from the ones
+  that did not. An alert with no rule behind it (public IP changed, captive
+  portal, VPN dropped) has nothing to merge into and keeps its own row.
+- **Trends rendered counts as decimals.** `Text("…\(someInt)…")` builds a
+  `LocalizedStringKey`, which formats integers with the locale's grouping
+  separator, so 2371 samples appeared as "Gateway RTT (2.371)" and 2393 runs
+  as "2.393 runs" — both reading as decimals — while `metricNote` said
+  "2371 samples" because it interpolates into a plain `String`. Same
+  numbers, two spellings, one wrong. The four count call-sites now use
+  `Text(verbatim:)`, matching the spelling that was already right.
+
 ### Fixed — opening Trends did not hide the sidebar; it pushed the whole window off the top
 
 The report was "click Trends and the sidebar disappears, and things are
