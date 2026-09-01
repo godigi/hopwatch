@@ -68,6 +68,7 @@ private enum VerifyHarness {
         runNetworkIdentityTests()
         runNetworkIdentityFixtureTests()
         runArrivalStateTests()
+        runArrivalPolicyTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -433,6 +434,61 @@ private enum VerifyHarness {
         let decoded = try? JSONDecoder().decode(ArrivalState.self, from: futureJSON)
         check(decoded == .unchecked || decoded == nil,
               "an unrecognised persisted state never reads as checked")
+    }
+
+    // MARK: - ArrivalPolicy
+    private static func runArrivalPolicyTests() {
+        print("ArrivalPolicy:")
+
+        // The regression that started this work. At the instant a network
+        // is joined the monitor has produced no sample, so severity is "".
+        // FullCheckPolicy correctly refuses to call an unknown severity
+        // safe — but asking it *then* silently downgraded essentially
+        // every arrival to the lighter check. The answer is to not ask
+        // yet.
+        check(ArrivalPolicy.decide(hasSample: false, severity: "",
+                                   isExpensive: false, isConstrained: false) == .wait,
+              "no sample yet means wait, never a downgrade")
+        check(ArrivalPolicy.decide(hasSample: false, severity: "ok",
+                                   isExpensive: false, isConstrained: false) == .wait,
+              "hasSample is what gates the decision, not the severity string")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "an ordinary healthy network gets the full check")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "info",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "info is not a problem and still earns a full check")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "warn",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "warn still earns a full check — FullCheckPolicy allows it")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "critical",
+                                   isExpensive: false, isConstrained: false)
+                == .quick(.unhealthy),
+              "a critical link gets the quick check, with a reason")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "wat",
+                                   isExpensive: false, isConstrained: false)
+                == .quick(.unhealthy),
+              "an unrecognised severity is not treated as safe")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: true, isConstrained: false)
+                == .quick(.hotspot),
+              "an expensive path gets the quick check rather than a speed test")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: false, isConstrained: true)
+                == .quick(.hotspot),
+              "a constrained path (Low Data Mode) is treated the same way")
+
+        // Precedence: cost beats health. Both downgrade to quick, but the
+        // reason the user is shown must be the one they can act on — and
+        // "this is your phone's data" is more actionable than "the link
+        // looked unhealthy a moment ago".
+        check(ArrivalPolicy.decide(hasSample: true, severity: "critical",
+                                   isExpensive: true, isConstrained: false)
+                == .quick(.hotspot),
+              "when both apply, the hotspot reason is the one shown")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
