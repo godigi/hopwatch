@@ -26,7 +26,16 @@ struct HomeView: View {
                 locationWarningBanner
                 wifiRow
 
-                if coordinator.isScanning {
+                ArrivalCard(state: coordinator.arrivalState,
+                            network: coordinator.wifiDisplayName,
+                            progress: coordinator.isScanning ? coordinator.progress : nil,
+                            onRunFullCheck: { coordinator.runDeclinedFullCheck() })
+
+                // Only for scans the arrival card is not already showing —
+                // otherwise a new network renders two sets of progress rows.
+                if coordinator.isScanning,
+                   ArrivalCopy.forState(coordinator.arrivalState,
+                                        network: coordinator.wifiDisplayName) == nil {
                     ScanProgressView(progress: coordinator.progress)
                     Divider()
                 }

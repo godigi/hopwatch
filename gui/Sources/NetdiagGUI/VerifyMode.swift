@@ -70,6 +70,7 @@ private enum VerifyHarness {
         runArrivalStateTests()
         runArrivalPolicyTests()
         runArrivalMigrationTests()
+        runArrivalCopyTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -530,6 +531,55 @@ private enum VerifyHarness {
 
         check(Defaults.migratedArrivalStates(from: []).isEmpty,
               "an empty legacy set migrates to an empty map")
+    }
+
+    // MARK: - Arrival card copy
+    private static func runArrivalCopyTests() {
+        print("Arrival card:")
+
+        let hotspot = ArrivalCopy.forState(
+            .declined(depth: .quick, reason: .hotspot, at: Date()), network: "SB Airbnb")
+        check(hotspot?.body.contains("hotspot") == true,
+              "the hotspot decline says why")
+        check(hotspot?.actionTitle != nil,
+              "the hotspot decline offers the override")
+
+        let unhealthy = ArrivalCopy.forState(
+            .declined(depth: .quick, reason: .unhealthy, at: Date()), network: "SB Airbnb")
+        check(unhealthy?.actionTitle != nil,
+              "the unhealthy decline also offers the override")
+
+        let checking = ArrivalCopy.forState(
+            .checking(depth: .full, startedAt: Date()), network: "SB Airbnb")
+        check(checking?.title.contains("SB Airbnb") == true,
+              "a check in flight names the network")
+        check(checking?.actionTitle == nil,
+              "a check in flight offers no button")
+
+        check(ArrivalCopy.forState(.unchecked, network: "SB Airbnb") != nil,
+              "unchecked renders something rather than nothing")
+        check(ArrivalCopy.forState(.checked(depth: .full, at: Date(), runID: nil),
+                                   network: "SB Airbnb") == nil,
+              "a checked network shows no card at all")
+
+        // The GUI authors no verdicts. These are the words that would mean
+        // this file had started diagnosing, which is lib/diagnosis.sh's
+        // job — see AlertDefinitions.swift's header.
+        let forbidden = ["slow", "bad", "poor", "unusable", "broken", "healthy", "good"]
+        for state: ArrivalState in [
+            .unchecked,
+            .checking(depth: .full, startedAt: Date()),
+            .declined(depth: .quick, reason: .hotspot, at: Date()),
+            .declined(depth: .quick, reason: .unhealthy, at: Date()),
+        ] {
+            guard let copy = ArrivalCopy.forState(state, network: "SB Airbnb") else { continue }
+            let text = (copy.title + " " + copy.body + " " + (copy.actionTitle ?? "")).lowercased()
+            let hit = forbidden.first { text.contains($0) }
+            check(hit == nil,
+                  hit == nil
+                    ? "\(state.debugLabel) copy states mechanism, not a verdict"
+                    : "\(state.debugLabel) copy contains the verdict word \"\(hit!)\"")
+        }
     }
 
     private static func check(_ condition: Bool, _ name: String) {
