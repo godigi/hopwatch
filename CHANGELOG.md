@@ -6,6 +6,31 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — the Trends outlier clamp never engaged on a real chart [GUI]
+
+`TrendsView.Clamp` exists so that one 2.8-second reading cannot flatten a
+latency chart into a line on the floor. It did that only for series of more
+than 100 samples, which Trends almost never draws: a day of runs on one
+network is dozens of points.
+
+The tail was located by the *index* `floor(n * 0.99)`, and for every n from
+10 to 100 that index is `n - 1` — so "the 99th percentile" was the maximum
+itself, the extreme-tail guard reduced to `maximum > maximum * 2`, false for
+all positive data, and the function returned nil. The clamp's own doc
+comment's worked example — 37 readings in a 2–8 ms band plus one 2800 ms
+spike — was one of the cases it silently declined to help.
+
+The tail is now set aside by *count* (the top 1% of samples, floored at one
+reading) and the ceiling is taken from the highest reading below it. Below
+100 samples there is no 1% and no element strictly under the 99th
+percentile, so a percentile index is the wrong instrument at that size; the
+floor of one reading is the honest reading of the same intent. Its cost is
+that two *equal* extremes in a short series count as spread rather than as a
+tail, which is the right call at 5% of the data. The fix also closes the
+same failure at large n, where 24 equal spikes in 2371 samples put the index
+inside the tail. 28 new `--verify` assertions walk n = 10, 38, 100, 101 and
+2371, both the clamping and the left-alone cases.
+
 ## [0.14.0] - 2026-09-01
 
 ### Fixed — a new network could go unchecked forever, and Home showed somebody else's report [GUI]
