@@ -37,11 +37,22 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
   | | **Monitoring** | **Full check** | **Quick check** |
   |---|---|---|---|
   | Answers | *Is it still fine?* | *What is this network capable of?* | *What is wrong right now?* |
-  | When | continuous, every few seconds | on demand; automatically **once** per new network | on demand; on arrival when a full check is unsafe or unwise |
+  | When | continuous, every few seconds | the one manual action; automatically **once** per new network | never a manual action — see below |
   | Cost | negligible, no saturation | ~65–115 s, **saturates the link** | ~8 s, never saturates |
   | Gives | one sample per cycle, alerts on transitions | bufferbloat, speed, path MTU, per-hop loss | everything else |
 
-  Two rules follow, and both are load-bearing:
+  **The quick check is an internal depth, not a button.** The GUI
+  deliberately offers one manual action, the full check, because two
+  manual checks presented side by side read as equivalent choices and
+  leave the user to guess which one they want. "What is wrong right now?"
+  is answered *without being asked*: monitoring runs continuously, starts
+  a 2-second investigation burst the instant severity turns bad, and
+  triggers its own non-saturating scan. The quick depth is reached from
+  `ArrivalPolicy` (a metered or unhealthy link on arrival) and from an
+  alert, never from a control. `netdiag --quick` remains ordinary CLI
+  surface; this rule is about the app.
+
+  Two further rules follow, and both are load-bearing:
   1. **Every new network gets a check on arrival, and the arrival is a
      state the UI renders** — not a fire-and-forget side effect that can
      decline itself and never retry. A depth may be downgraded (an

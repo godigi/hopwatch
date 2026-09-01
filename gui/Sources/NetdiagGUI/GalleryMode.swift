@@ -196,14 +196,29 @@ enum GalleryMode {
     /// signal scale are reads, and reads are what the views render from.
     /// `monitor.start()`, `events.start()`, the workspace observers, the
     /// notification authorisation prompt and the first-sighting auto-scan
-    /// are all writes — of processes, of TCC prompts, of `seenNetworks` —
+    /// are all writes — of processes, of TCC prompts, of `arrivalStates` —
     /// and a screenshot run must cause none of them.
     private static func hydrate(_ coordinator: NetdiagCoordinator) async {
         coordinator.rulesCatalog.ensureLoaded()
         coordinator.signalScale.ensureLoaded()
         await coordinator.history.load()
         await coordinator.rulesCatalog.refresh()
-        await coordinator.hydrateFromHistoryIfNeeded()
+        // Hydration is scoped to the network the monitor says we are on,
+        // and this function's whole point is that it never starts the
+        // monitor — so there is no live id here, and a strictly-scoped call
+        // would put Home's empty state in every screenshot. Stand in the
+        // network of the newest stored check: the same run this used to
+        // hydrate unconditionally, and the ordinary case of launching the
+        // app where you last ran one.
+        let standIn = coordinator.history.recentChecks(limit: 1).first?.networkID
+        await coordinator.hydrateFromHistoryIfNeeded(explicitNetworkID: standIn)
+        // Same stand-in, same reason, for the arrival card: without a
+        // monitor there is no live network, so Home would render "New
+        // network: this network" over a header naming the network and a
+        // full set of measurements — and a spurious provenance caption
+        // besides, since an unidentified current network is exactly the
+        // case that gets labelled. See `adoptGalleryArrivalState`.
+        coordinator.adoptGalleryArrivalState(networkID: standIn)
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this
         // paragraph's whole claim is that a screenshot run writes nothing.

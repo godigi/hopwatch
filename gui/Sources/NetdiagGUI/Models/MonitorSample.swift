@@ -86,15 +86,34 @@ struct MonitorSample: Decodable, Sendable {
         /// `historyJoinID`, which falls back to `id`, never on this raw.
         var groupId: String?
 
-        /// The id to join against `--history`'s network groups with. The
-        /// raw `id` is the *record* format (`wifi:mac=AA:BB:…`), which
-        /// history.py canonicalizes before grouping — joining on it never
-        /// matches, which is exactly the bug where a Wi-Fi name adopted
-        /// from CoreWLAN showed on Home but not in the Networks tab.
+        /// The id to join against `--history`'s network groups with.
+        ///
+        /// Canonicalised, and **nil rather than a raw fallback**. The raw
+        /// `id` is the *record* format (`wifi:mac=AA:BB:…`), which
+        /// history.py canonicalises before grouping — joining on it never
+        /// matches. The previous `groupId ?? id` papered over that by
+        /// handing back a record-format string when the CLI had not yet
+        /// resolved a group, which is how one live install accumulated
+        /// `gw:10.125.128.1`, `wifi:gw=10.125.128.1` and
+        /// `mac:76:42:18:5c:40:64` for a single iPhone hotspot.
+        ///
+        /// The `id` fallback is retained but canonicalised: a record-format
+        /// id still yields a usable identity, it just yields the same one
+        /// the group would. What is gone is the possibility of returning a
+        /// non-canonical string.
+        ///
+        /// `nil` means "not identified yet", and every caller must treat it
+        /// as "do not decide", never as "a new network". `id` remains
+        /// available for display, which is the only thing it is fit for.
+        ///
+        /// Module-qualified because this struct is *also* called
+        /// `NetworkIdentity`: unqualified, the name resolves to this nested
+        /// type, which has no `canonical`.
         var historyJoinID: String? {
-            let joined = groupId ?? id
-            guard let joined, !joined.isEmpty else { return nil }
-            return joined
+            if let groupId, let canonical = NetdiagGUI.NetworkIdentity.canonical(groupId) {
+                return canonical
+            }
+            return NetdiagGUI.NetworkIdentity.canonical(id ?? "")
         }
 
         enum CodingKeys: String, CodingKey {

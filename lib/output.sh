@@ -284,7 +284,21 @@ for row in json.load(sys.stdin):
     # bulleted lines, where a reason reads as a sixth activity. The
     # dimming is the same treatment `info` gives its body, so this is a
     # change of rank, not of palette.
-    [ -n "$reason" ] && say "      ${C_DIM}${reason}${C_RESET}"
+    #
+    # `if` rather than `[ … ] && …`: this is the last command in the loop
+    # body, so with the trailing-and form the function's exit status is
+    # the test's — and the last of the five activities usually has no
+    # reason, so `suitability_run` returned 1 on the ordinary healthy
+    # path. `bin/netdiag` only sets `set -u` so production survived, but
+    # `lib/diagnosis.sh` calls this from inside an `if` body, and a
+    # function that is the last command of an if-body is not exempt from
+    # `set -e`. The first bats test to source both files and call
+    # `diagnosis_run` would have aborted silently at the section
+    # boundary — see `tests/test_watchdog.bats`, which already exercises
+    # library functions under `set -eu` for this reason.
+    if [ -n "$reason" ]; then
+      say "      ${C_DIM}${reason}${C_RESET}"
+    fi
   done <<<"$rows"
 }
 

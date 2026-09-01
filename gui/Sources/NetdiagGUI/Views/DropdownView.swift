@@ -75,6 +75,7 @@ struct DropdownView: View {
     private var stage: StageResolver.Stage {
         StageResolver.resolve(.init(
             isScanning: coordinator.isScanning,
+            isArrivalCheck: coordinator.isArrivalCheck,
             monitoringEnabled: appSettings.monitoringEnabled,
             isPausedForAnyReason: coordinator.monitor.isPausedForAnyReason,
             pauseReason: coordinator.monitor.pauseReason,
@@ -105,6 +106,7 @@ struct DropdownView: View {
         case .alerted(let alert): alertStage(alert)
         case .checking: checkingStage
         case .testing: testingStage
+        case .arrived: arrivedStage
         case .paused(let reason): pausedStage(reason)
         case .skewed(let message): skewedStage(message)
         }
@@ -235,6 +237,27 @@ struct DropdownView: View {
 
     private var testingStage: some View {
         VStack(alignment: .leading, spacing: 4) {
+            scanningRow
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+    }
+
+    /// `.testing`'s card with one line added in front of it. Same
+    /// container, same progress row, same Cancel button — the only thing
+    /// that differs between an arrival check and a user-started one is who
+    /// asked for it, so that is the only thing the card says differently.
+    /// It names the network for the same reason `ArrivalCard` does: the
+    /// two surfaces have to describe one moment one way.
+    ///
+    /// Mechanism only, like every other line here: which check is running
+    /// and why it started, never what it has found.
+    private var arrivedStage: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(coordinator.wifiDisplayName.map { "Checking a new network: \($0)" }
+                    ?? "Checking a new network")
+                .font(.callout).fontWeight(.semibold)
             scanningRow
         }
         .padding(.vertical, Theme.Spacing.xs)

@@ -35,6 +35,19 @@ struct RunReportView: View {
     /// remains the place where the complete report opens by default.
     var presentation: Presentation = .full
 
+    /// Where this report came from, when it is not self-evidently about the
+    /// here and now. Rendered as a caption above the report.
+    ///
+    /// Exists because Home rendered a stored run from another network
+    /// through this same view with nothing distinguishing it from a live
+    /// one, and users read it as current. Hydration is now scoped to the
+    /// current network so that specific case cannot recur; this closes the
+    /// general one — any report whose network or age is not obvious says so.
+    ///
+    /// Mechanism, not judgement: it says where a report came from, never
+    /// whether what the report found was good or bad.
+    var provenance: String?
+
     /// For `coordinator.rulesCatalog` — the category-driven row health
     /// below, and the `RuleChip`s in the diagnosis captions.
     @Environment(NetdiagCoordinator.self) private var coordinator
@@ -45,6 +58,12 @@ struct RunReportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let provenance {
+                Text(provenance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             suitability
             if presentation == .home {
                 homeDetails

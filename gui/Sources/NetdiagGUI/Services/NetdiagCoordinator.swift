@@ -83,6 +83,37 @@ final class NetdiagCoordinator {
 
     private var scanTask: Task<Void, Never>?
     private var lastNetworkID: String?
+    /// Whether cold-launch hydration has run against an *identified*
+    /// network. Hydration is scoped to the network we are on, and `start()`
+    /// kicks it off before the monitor has produced a sample — so the first
+    /// attempt normally has no network to scope to and does nothing. This
+    /// latches on the first attempt that had one, so `handleSample` can
+    /// retry until the network is known without spawning a task on every
+    /// sample forever afterwards.
+    private var didHydrateForNetwork = false
+    /// The current network's arrival state, mirrored into observable
+    /// storage so the arrival card re-renders when it changes. `Defaults`
+    /// is the source of truth; this is the copy SwiftUI can see.
+    private(set) var arrivalState: ArrivalState = .unchecked
+    /// The canonical id `arrivalState` describes. Views read this to name
+    /// the network on the arrival card.
+    private(set) var arrivalNetworkID: String?
+    /// What the app will do next about an unchecked network — see
+    /// `arrivalIntent(now:)` for why "unchecked" alone is not enough for
+    /// the card to render honestly.
+    private(set) var arrivalIntent: ArrivalCopy.Intent = .starting
+    /// Consecutive declined arrival attempts for the current network, held
+    /// in memory only: a backoff that survived relaunch would punish a
+    /// user for quitting the app. Reset when the network changes or an
+    /// attempt starts.
+    private var arrivalAttempts = 0
+    private var nextArrivalAttemptAt: Date?
+    /// Carried from `attemptArrival` to the scan's completion, which is
+    /// where the terminal arrival state is written. Nil when the in-flight
+    /// scan is not an arrival check.
+    private var pendingArrivalNetworkID: String?
+    private var pendingArrivalDepth: ArrivalDepth?
+    private var pendingArrivalDecline: DeclineReason?
     /// The severity seen on the previous sample, used by `handleSample` to
     /// detect the ok/info → warn/critical edge that auto-starts an
     /// investigation burst. Stored on the coordinator rather than read back
@@ -94,6 +125,10 @@ final class NetdiagCoordinator {
     // MARK: - Lifecycle
 
     func start() {
+        // First, before anything reads a network id: a build that saw a
+        // sample before migrating would treat every already-seen network
+        // as unchecked and re-baseline the world.
+        Defaults.migrateArrivalStatesIfNeeded()
         alerts.inNetworkGracePeriod = { [weak events] in
             events?.withinGracePeriod() ?? false
         }
@@ -214,11 +249,33 @@ final class NetdiagCoordinator {
     // `~/net-diag`. This fills that gap once, right after launch, without
     // ever letting the fallback be mistaken for a live measurement.
 
-    /// Picks the newest run that counts as a check
-    /// (`HistoryDocument.Run.isCheck` — the `run_mode` predicate
-    /// docs/JSON-SCHEMA.md documents and `helpers/history.py` applies
-    /// identically) and has an id `--show` can open, then fetches its full
-    /// record via `details.detail(for:)`.
+    /// Picks the newest run **on the network this machine is currently on**
+    /// that counts as a check (`HistoryDocument.Run.isCheck` — the
+    /// `run_mode` predicate docs/JSON-SCHEMA.md documents and
+    /// `helpers/history.py` applies identically) and has an id `--show` can
+    /// open, then fetches its full record via `details.detail(for:)`.
+    ///
+    /// The network predicate is the fix for a real bug. This used to take
+    /// the newest stored check *anywhere*, and Home renders a hydrated
+    /// report through the same `RunReportView` as a live one, with nothing
+    /// on screen saying otherwise — so arriving somewhere new showed the
+    /// previous building's report as if it were this network's, which is
+    /// where a phantom "Wi-Fi over the last hour" warning at the top of a
+    /// brand-new network's dashboard came from. Having no run for this
+    /// network is the correct empty state: the arrival card is already
+    /// saying a check is on its way.
+    ///
+    /// A nil current network means "not identified yet", never "any network
+    /// will do" — hydrating from an arbitrary run there would reintroduce
+    /// exactly this bug on a slow start. It is also the *ordinary* state at
+    /// the moment `start()` first calls this: `monitor.start()` runs after
+    /// this task is created, and the monitor's first sample costs a child
+    /// process where `history.load()` is a local file read. So the first
+    /// attempt normally finds no network and deliberately does nothing, and
+    /// `handleSample` retries on the sample that finally names one — see
+    /// `didHydrateForNetwork`. The one exception is monitoring being
+    /// switched off, where no sample is ever coming and "wait" would mean
+    /// "never"; the body says what happens there and why it is still safe.
     ///
     /// Silent on failure: a pruned run (the store rolls into an archive and
     /// is eventually trimmed) or a `netdiag` older than `--show` must fall
@@ -234,9 +291,42 @@ final class NetdiagCoordinator {
     /// same state `start()` reaches without also starting the monitor —
     /// this is a read, and the screenshot harness needs Home to render the
     /// report a real launch would show rather than its empty state.
-    func hydrateFromHistoryIfNeeded() async {
+    ///
+    /// - Parameter explicitNetworkID: The network to scope to, for a caller
+    ///   with no live monitor to read one from. `GalleryMode` is the only
+    ///   one: it deliberately never starts the monitor, so the live id is
+    ///   always nil there and a strictly-scoped hydration would put the
+    ///   empty state in every screenshot.
+    func hydrateFromHistoryIfNeeded(explicitNetworkID: String? = nil) async {
         if latestRun == nil, hydratedReport == nil {
-            if let id = history.recentChecks(limit: 1).compactMap(\.runID).first {
+            let current = explicitNetworkID ?? monitor.latest?.network.historyJoinID
+            let id: String?
+            if let current {
+                // Latched on the first attempt that had a network at all,
+                // so the `handleSample` retry stops once this has really
+                // run.
+                didHydrateForNetwork = true
+                id = newestCheckID(onNetwork: current)
+            } else if !Defaults.monitoringEnabled {
+                // With monitoring off there will never be a sample, so
+                // "wait for the monitor to name the network" leaves Home
+                // empty forever rather than briefly — a different situation
+                // from a slow start, and a regression against the behaviour
+                // this had before it was scoped. So this one case keeps the
+                // old fallback: the newest check anywhere.
+                //
+                // Safe, because it cannot produce the unlabelled report the
+                // scoping exists to prevent. `HomeView.storedProvenance`
+                // captions any report the live monitor cannot confirm is
+                // about the network you are on, and with monitoring off it
+                // can confirm nothing — so a report hydrated here always
+                // arrives saying which network and when it came from.
+                didHydrateForNetwork = true
+                id = history.recentChecks(limit: 1).compactMap(\.runID).first
+            } else {
+                id = nil
+            }
+            if let id {
                 do {
                     hydratedReport = try await details.detail(for: id)
                 } catch {
@@ -253,6 +343,25 @@ final class NetdiagCoordinator {
                 latestSpeedTestAt = speed.date
             }
         }
+    }
+
+    /// The newest run on one network that counts as a check and carries an
+    /// id `--show` can open.
+    ///
+    /// `history.runs(networkID:window:)` rather than a hand-rolled filter
+    /// because it canonicalises *both* sides of the comparison through the
+    /// store's own `canonicalID`, which follows manual merges — comparing
+    /// raw ids would miss every run the user has merged into this network.
+    ///
+    /// Ordering matches `recentChecks`: newest first on the raw `ts`
+    /// string, which docs/JSON-SCHEMA.md fixes at ISO 8601 UTC with no
+    /// fractional seconds, so lexicographic order is already chronological
+    /// order and the parse can be skipped.
+    private func newestCheckID(onNetwork networkID: String) -> String? {
+        history.runs(networkID: networkID, window: .all)
+            .filter { $0.isCheck && $0.runID != nil }
+            .max { ($0.ts ?? "") < ($1.ts ?? "") }?
+            .runID
     }
 
     // MARK: - Monitoring toggle
@@ -288,48 +397,228 @@ final class NetdiagCoordinator {
                 date: sample.timestamp)
         }
 
-        // The history group key, so `seenNetworks`, the alert engine's
-        // per-network memory and the first-sighting scan all key on the
-        // same id the Networks tab renders by — the raw sample id is the
-        // record format, which never matches a history group.
+        // Not identified yet — the CLI has no group and no usable record
+        // id. Decide nothing: `nil` here has never meant "a new network".
         guard let id = sample.network.historyJoinID else { return }
-        guard id != lastNetworkID else { return }
-        lastNetworkID = id
-        alerts.networkChanged(to: id)
-        log.info("now on network \(id, privacy: .public)")
 
-        // First time this app has seen this network: run one scan, so the
-        // dashboard has something real the moment the user opens it. Keyed
-        // on a set the app owns rather than on the history, because the
-        // history only learns about the network *from* this scan — reading
-        // it here would fire the trigger a second time.
+        // The sample that finally names a network is also the first moment
+        // cold-launch hydration can be scoped to one — `start()` runs it
+        // well before this, when there is nothing to scope to. See
+        // `didHydrateForNetwork`.
+        if !didHydrateForNetwork, latestRun == nil, hydratedReport == nil {
+            Task { await hydrateFromHistoryIfNeeded() }
+        }
+
+        if id != lastNetworkID {
+            lastNetworkID = id
+            alerts.networkChanged(to: id)
+            log.info("now on network \(id, privacy: .public)")
+            // A different network's backoff is meaningless.
+            arrivalAttempts = 0
+            nextArrivalAttemptAt = nil
+        }
+
+        // Deliberately outside the id-changed guard above. The previous
+        // version attempted the arrival scan *inside* it, having already
+        // advanced `lastNetworkID` — so a scan declined for being busy
+        // could never be retried, because every later sample returned at
+        // the guard. Its comment promised "the next sighting retries";
+        // there is no next sighting while you stay on the network. A live
+        // install had "SB Airbnb" named in `networkNames` and absent from
+        // `seenNetworks`, which is only reachable that way.
+        considerArrival(for: id, sample: sample)
+    }
+
+    // MARK: - Arrival
+
+    /// The one automatic check, and the reason there is no timed one:
+    /// joining a network for the first time is exactly when a baseline of
+    /// what it can do — throughput, bufferbloat, path MTU — is worth
+    /// having. Monitoring covers the continuous question; this covers the
+    /// one-off one. See CLAUDE.md's three-depth table.
+    private func considerArrival(for id: String, sample: MonitorSample) {
+        let state = Defaults.arrivalStates[id] ?? .unchecked
+        // Assigned only on a real change. Under `@Observable` a write
+        // invalidates every observer whether or not the value differs, and
+        // this runs once per monitor sample — every 5 s on the fast tier.
+        // Unguarded, the arrival card would redraw on a timer for as long
+        // as the app is open.
+        if arrivalNetworkID != id { arrivalNetworkID = id }
+        if arrivalState != state { arrivalState = state }
+
+        // Published before the guards below, because the card renders what
+        // is *not* going to happen as carefully as what is. An `.unchecked`
+        // network whose automatic check is switched off, or is queued
+        // behind a running scan, must not wear the same spinner as one
+        // being measured right now.
+        let intent = arrivalIntent(now: Date())
+        if arrivalIntent != intent { arrivalIntent = intent }
+
         guard Defaults.scanOnNewNetwork else { return }
-        guard !Defaults.seenNetworks.contains(id) else { return }
-        log.info("first sighting of \(id, privacy: .public) — scanning")
-        // The one automatic full check, and the reason there is no timed
-        // one: joining a network for the first time is exactly when a
-        // baseline of what it can do — throughput, bufferbloat, path MTU —
-        // is worth having, and the `seenNetworks` guard above bounds it to
-        // once per network for the life of the install. Monitoring covers
-        // the continuous question; this covers the one-off one.
-        //
-        // `seenNetworks` is written *after* `runFullCheck` reports the scan
-        // actually started, not before it is attempted (NET.3). `launch()`
-        // silently no-ops when a scan is already in flight — two networks
-        // joined back to back, or a manual scan the user happened to start
-        // — and marking a network seen ahead of that check burns its one
-        // automatic baseline on an attempt that never ran, permanently:
-        // nothing ever retries a network already in this set. Both calls
-        // run synchronously up to the point the scan's `Task` is handed to
-        // `scanTask`, so there is no `await` between "did it start?" and
-        // "mark it seen" for a second sample to race through.
-        guard runFullCheck(reason: "new network") else {
-            log.debug("first-sighting scan for \(id, privacy: .public) declined — a scan is already running; left unseen so the next sighting retries")
+        let now = Date()
+        guard state.needsAttempt(now: now) else { return }
+        if let next = nextArrivalAttemptAt, now < next { return }
+
+        switch ArrivalPolicy.decide(hasSample: true,
+                                    severity: sample.status.severity,
+                                    isExpensive: events.pathIsExpensive,
+                                    isConstrained: events.pathIsConstrained) {
+        case .wait:
+            // Unreachable from here — we hold a sample. Kept exhaustive
+            // rather than defaulted so a future case cannot be silently
+            // swallowed into "do nothing".
+            return
+
+        case .full:
+            attemptArrival(id: id, depth: .full, reason: "new network")
+
+        case .quick(let why):
+            // A decision, not a failure: recorded so it does not retry,
+            // and rendered as a button rather than a spinner.
+            attemptArrival(id: id, depth: .quick,
+                           reason: "new network (\(why.rawValue))",
+                           declineWith: why)
+        }
+    }
+
+    /// Try to start an arrival check, and record what happened.
+    ///
+    /// `launch()` silently declines while another scan is in flight. That
+    /// decline must leave the state `.unchecked` so the next sample tries
+    /// again — the bug being fixed here is precisely a decline that was
+    /// recorded as nothing and never retried.
+    private func attemptArrival(id: String, depth: ArrivalDepth, reason: String,
+                                declineWith: DeclineReason? = nil) {
+        let now = Date()
+        guard runScan(depth: depth.runnerDepth, reason: reason) else {
+            arrivalAttempts += 1
+            // 30 s doubling, capped at five minutes. In memory only.
+            let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
+            nextArrivalAttemptAt = now.addingTimeInterval(delay)
+            log.debug("arrival check for \(id, privacy: .public) declined — a scan is running; retrying in \(delay, format: .fixed(precision: 0))s")
             return
         }
-        var seen = Defaults.seenNetworks
-        seen.insert(id)
-        Defaults.seenNetworks = seen
+
+        arrivalAttempts = 0
+        nextArrivalAttemptAt = nil
+
+        // `.checking` while it runs, so Home shows progress rather than a
+        // stale report. The scan's completion writes the terminal state.
+        setArrivalState(.checking(depth: depth, startedAt: now), for: id)
+        pendingArrivalNetworkID = id
+        pendingArrivalDepth = depth
+        pendingArrivalDecline = declineWith
+    }
+
+    /// Stand in for the arrival state the monitor would have established,
+    /// for `GalleryMode` only.
+    ///
+    /// The gallery never starts the monitor, so without this every Home
+    /// screenshot renders the arrival card over a report the app has
+    /// plainly already got — "New network: this network", above a header
+    /// naming the network, above a full set of measurements. That is not
+    /// what a launch on a known network looks like, and the gallery exists
+    /// to show what the app looks like.
+    ///
+    /// `.checked` rather than the real stored state: the ordinary case
+    /// this screenshot stands for is a network already known, and the
+    /// arrival card's own states have seven dedicated renders from
+    /// `--verify`. Writes nothing to `Defaults` — a screenshot run must
+    /// not mutate arrival history, which is the same contract
+    /// `GalleryMode.hydrate` keeps for the monitor and the event log.
+    func adoptGalleryArrivalState(networkID: String?) {
+        arrivalNetworkID = networkID.flatMap(NetdiagGUI.NetworkIdentity.canonical)
+        arrivalState = .checked(depth: .full, at: Date(), runID: nil)
+        arrivalIntent = .starting
+    }
+
+    /// What the app is about to do on its own about an unchecked network.
+    ///
+    /// Exists because "unchecked" alone cannot tell a user whether to wait
+    /// or to press something. Three outcomes, and the card renders each
+    /// differently: a check is imminent, a check is queued behind one
+    /// already running, or no automatic check is coming at all because the
+    /// Settings toggle is off. Before this, all three showed the same
+    /// spinner and the same "Starting a check." — so a user who had turned
+    /// the feature off saw a permanent promise of work that would never
+    /// arrive.
+    private func arrivalIntent(now: Date) -> ArrivalCopy.Intent {
+        guard Defaults.scanOnNewNetwork else { return .notAutomatic }
+        // A backoff is only ever set by a decline for busy-ness, and the
+        // longest is five minutes — far too long to keep claiming a check
+        // is "starting".
+        if let next = nextArrivalAttemptAt, now < next { return .waitingForAnotherCheck }
+        if isScanning, !isArrivalCheck { return .waitingForAnotherCheck }
+        return .starting
+    }
+
+    /// Write one network's arrival state to both the store and the
+    /// observable mirror, so the two cannot disagree.
+    private func setArrivalState(_ state: ArrivalState, for id: String) {
+        var all = Defaults.arrivalStates
+        all[id] = state
+        Defaults.arrivalStates = all
+        if id == arrivalNetworkID { arrivalState = state }
+    }
+
+    /// Write the terminal arrival state for a scan that has just landed.
+    ///
+    /// `.declined` when the policy chose the quick check for a reason the
+    /// user can override, `.checked` otherwise. Both are terminal: neither
+    /// retries. A check that failed or was cancelled never reaches here and
+    /// stays `.unchecked`, so the next sample tries again.
+    ///
+    /// `measured` is the network the finished run actually describes. When
+    /// it disagrees with the network the check was started for, the user
+    /// changed networks mid-scan and this result belongs to neither: the
+    /// run may have measured the new network for most of its length, so
+    /// crediting it to the old one would either file a report labelled B
+    /// under A, or — on an early switch — mark A checked having never
+    /// measured it, silently spending its one automatic baseline. Both
+    /// networks are left `.unchecked` instead, and both retry.
+    private func finishArrivalIfPending(runID: String?, measured: String?) {
+        guard let id = pendingArrivalNetworkID, let depth = pendingArrivalDepth else { return }
+        let decline = pendingArrivalDecline
+        clearPendingArrival()
+
+        // `measured == nil` is "the run could not name its network", not
+        // "a different network" — treat it as agreeing, since the check
+        // did run and refusing it would retry forever.
+        guard measured == nil || measured == id else {
+            log.info("arrival check for \(id, privacy: .public) landed after a network change — left unchecked so it retries")
+            return
+        }
+
+        if let decline {
+            setArrivalState(.declined(depth: depth, reason: decline, at: Date()), for: id)
+        } else {
+            setArrivalState(.checked(depth: depth, at: Date(), runID: runID), for: id)
+        }
+        log.info("arrival check for \(id, privacy: .public) finished at \(depth.rawValue, privacy: .public)")
+    }
+
+    /// Forget the in-flight arrival check without writing a terminal
+    /// state. Used when a scan fails or is cancelled: the network stays
+    /// `.unchecked`, so the next sample retries. That retry is the entire
+    /// point of this change.
+    private func clearPendingArrival() {
+        pendingArrivalNetworkID = nil
+        pendingArrivalDepth = nil
+        pendingArrivalDecline = nil
+    }
+
+    /// Whether the in-flight scan (if any) is an arrival check.
+    var isArrivalCheck: Bool { pendingArrivalNetworkID != nil }
+
+    /// The arrival card's override button: run the full check the policy
+    /// declined, and record it as this network's arrival check.
+    func runDeclinedFullCheck() {
+        guard let id = arrivalNetworkID else { return }
+        guard runScan(depth: .full, reason: "you asked for the full check anyway") else { return }
+        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
+        pendingArrivalNetworkID = id
+        pendingArrivalDepth = .full
+        pendingArrivalDecline = nil
     }
 
     /// Auto-start a short, fast-cadence "investigation" burst the moment
@@ -464,7 +753,14 @@ final class NetdiagCoordinator {
             do {
                 let result = try await NetdiagRunner.run(depth: depth, target: target,
                                                          progress: self.progress)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    // Cancelled between the child exiting and this line.
+                    // The run may well have completed, but nothing here
+                    // adopted it, so claiming the network was checked
+                    // would record a baseline the user cannot open.
+                    self.clearPendingArrival()
+                    return
+                }
                 if adoptAsReport {
                     self.latestRun = result
                     self.hydratedReport = nil
@@ -478,10 +774,14 @@ final class NetdiagCoordinator {
                 // and the network list are one record out of date until
                 // this reload.
                 await self.history.load()
+                self.finishArrivalIfPending(runID: result.snapshot.runID,
+                                            measured: result.snapshot.network.historyJoinID)
                 self.log.info("\(reason, privacy: .public) finished in \(result.duration, format: .fixed(precision: 1))s, exit \(result.exitCode)")
             } catch is CancellationError {
+                self.clearPendingArrival()
                 self.log.debug("scan cancelled")
             } catch {
+                self.clearPendingArrival()
                 self.lastRunError = error.localizedDescription
                 self.log.error("scan failed: \(error.localizedDescription, privacy: .public)")
             }

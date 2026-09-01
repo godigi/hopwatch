@@ -20,6 +20,12 @@ enum StageResolver {
     /// The one card the dropdown leads with.
     enum Stage: Equatable, Sendable {
         case skewed(String)
+        /// A check running because this network is new to the app, as
+        /// opposed to one the user started. Distinct from `.testing`
+        /// purely so the menu bar and Home describe the same moment the
+        /// same way — the dropdown used to call an arrival check "Testing",
+        /// which reads as something the user did.
+        case arrived
         case testing
         case paused(String?)
         case alerted(AlertSnapshot)
@@ -72,6 +78,9 @@ enum StageResolver {
     /// from the coordinator's observable state.
     struct Inputs: Sendable {
         let isScanning: Bool
+        /// Whether the in-flight scan is this network's arrival check.
+        /// Meaningless when `isScanning` is false.
+        let isArrivalCheck: Bool
         let monitoringEnabled: Bool
         let isPausedForAnyReason: Bool
         let pauseReason: String?
@@ -84,12 +93,14 @@ enum StageResolver {
         let severity: String
         let linkUp: Bool
         let measurementState: String
-        init(isScanning: Bool, monitoringEnabled: Bool,
+        init(isScanning: Bool, isArrivalCheck: Bool = false,
+             monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
              activeAlert: AlertSnapshot?, severity: String, linkUp: Bool,
              measurementState: String = "unknown") {
             self.isScanning = isScanning
+            self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
             self.pauseReason = pauseReason
@@ -104,12 +115,15 @@ enum StageResolver {
 
     /// The order of the guards is load-bearing and matches the precedence
     /// the dropdown has always had: a scan in progress, then a user pause,
-    /// then a skewed CLI, then an already-active alert. Only after a live
+    /// then a skewed CLI, then an already-active alert. An arrival check
+    /// takes the scanning guard's place rather than a slot of its own —
+    /// it *is* a scan in progress, and demoting it below the pause guards
+    /// would put "Monitoring paused" over a running progress bar. Only after a live
     /// sample has actually measured traffic does severity decide between
     /// `.watching` and `.healthy` — association and RSSI alone never earn a
     /// green all-clear.
     static func resolve(_ i: Inputs) -> Stage {
-        if i.isScanning { return .testing }
+        if i.isScanning { return i.isArrivalCheck ? .arrived : .testing }
         if !i.monitoringEnabled { return .paused(nil) }
         if i.isPausedForAnyReason { return .paused(i.pauseReason) }
         if let error = i.lastError, !i.monitorRunning { return .skewed(error) }

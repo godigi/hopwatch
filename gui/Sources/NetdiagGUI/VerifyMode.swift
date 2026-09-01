@@ -65,12 +65,21 @@ private enum VerifyHarness {
         runHealthResolverTests()
         runAlertAttributionTests()
         runFullCheckPolicyTests()
+        runNetworkIdentityTests()
+        runNetworkIdentityFixtureTests()
+        runArrivalStateTests()
+        runArrivalPolicyTests()
+        runArrivalMigrationTests()
+        runArrivalCopyTests()
+        runArrivalStageTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
+        runReportProvenanceTests()
         runSnapshots()
+        renderArrivalCards()
         print("")
         if failures.isEmpty {
             print("All checks passed.")
@@ -286,6 +295,407 @@ private enum VerifyHarness {
         }
     }
 
+    // MARK: - NetworkIdentity
+    //
+    // The three real keys below came out of a live install's defaults,
+    // where one iPhone hotspot had accumulated all of gw:10.125.128.1,
+    // wifi:gw=10.125.128.1 and mac:76:42:18:5c:40:64. That is the bug this
+    // type exists to make unrepresentable.
+    private static func runNetworkIdentityTests() {
+        print("NetworkIdentity:")
+
+        check(NetworkIdentity.canonical("wifi:mac=AA:BB:CC:DD:EE:FF") == "mac:aa:bb:cc:dd:ee:ff",
+              "a record-form MAC canonicalises and lowercases")
+        check(NetworkIdentity.canonical("mac:aa:bb:cc:dd:ee:ff") == "mac:aa:bb:cc:dd:ee:ff",
+              "an already-canonical MAC is unchanged")
+        check(NetworkIdentity.canonical("wifi:gw=10.125.128.1") == "gw:10.125.128.1",
+              "a record-form gateway canonicalises")
+        check(NetworkIdentity.canonical("lan:gw=192.168.60.1") == "gw:192.168.60.1",
+              "the lan: record prefix canonicalises the same way")
+        check(NetworkIdentity.canonical("wifi:ssid=SB Airbnb") == "ssid:SB Airbnb",
+              "a record-form SSID canonicalises")
+
+        // MAC wins over SSID wins over gateway, matching history.py.
+        check(NetworkIdentity.canonical("wifi:mac=AA:BB:CC:DD:EE:FF,ssid=Home,gw=192.168.1.1")
+                == "mac:aa:bb:cc:dd:ee:ff",
+              "MAC outranks SSID and gateway")
+        check(NetworkIdentity.canonical("wifi:ssid=Home,gw=192.168.1.1") == "ssid:Home",
+              "SSID outranks gateway")
+
+        check(NetworkIdentity.canonical("") == nil,
+              "an empty id canonicalises to nothing")
+        check(NetworkIdentity.canonical("unknown") == nil,
+              "the CLI's unknown sentinel canonicalises to nothing")
+        check(NetworkIdentity.canonical("wifi:mac=") == nil,
+              "a present-but-empty field is not an identity")
+
+        // fold: weak keys collapse onto the MAC group that shares their
+        // gateway or SSID. The map is weak-key -> strong-key.
+        let folded = NetworkIdentity.fold(
+            [
+                "mac:76:42:18:5c:40:64": ["gw:10.125.128.1", "ssid:Richard's iPhone"],
+                "mac:64:d1:54:4a:93:7f": ["gw:172.20.10.1"],
+            ],
+            weak: ["gw:10.125.128.1", "gw:172.20.10.1", "ssid:Richard's iPhone", "gw:8.8.8.8"])
+        check(folded["gw:10.125.128.1"] == "mac:76:42:18:5c:40:64",
+              "a gateway folds onto the MAC group that used it")
+        check(folded["ssid:Richard's iPhone"] == "mac:76:42:18:5c:40:64",
+              "an SSID folds onto the MAC group that used it")
+        check(folded["gw:172.20.10.1"] == "mac:64:d1:54:4a:93:7f",
+              "a second gateway folds onto its own MAC group")
+        check(folded["gw:8.8.8.8"] == nil,
+              "a weak key with no MAC group folds nowhere, rather than guessing")
+    }
+
+    /// The Swift half of the fixture guard. `tests/test_network_identity
+    /// .bats` drives the identical file through helpers/history.py; this
+    /// drives it through NetworkIdentity. Both must agree, because two
+    /// implementations of one rule drift and the drift is invisible until
+    /// a network's arrival check is filed under a key it never presents
+    /// under again.
+    ///
+    /// Skipped rather than failed when the fixture is not found: the
+    /// harness runs from the built .app bundle too, where the repo's tests
+    /// directory is not present. bats covers the file's existence.
+    private static func runNetworkIdentityFixtureTests() {
+        print("NetworkIdentity fixture:")
+        let candidates = [
+            "tests/fixtures/network-ids.txt",
+            "../tests/fixtures/network-ids.txt",
+        ]
+        guard let text = candidates.lazy
+            .compactMap({ try? String(contentsOfFile: $0, encoding: .utf8) })
+            .first
+        else {
+            print("  – fixture not reachable from this working directory, skipped")
+            return
+        }
+
+        var cases = 0
+        var mismatches: [String] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let row = line.trimmingCharacters(in: .whitespaces)
+            guard !row.isEmpty, !row.hasPrefix("#") else { continue }
+            let parts = row.split(separator: "|", maxSplits: 1,
+                                  omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            cases += 1
+            let raw = String(parts[0])
+            let expected = String(parts[1])
+            let got = NetworkIdentity.canonical(raw) ?? "-"
+            if got != expected {
+                mismatches.append("\(raw) -> \(got), fixture says \(expected)")
+            }
+        }
+        check(cases >= 10, "the fixture supplied cases to check (\(cases))")
+        check(mismatches.isEmpty,
+              mismatches.isEmpty
+                ? "every fixture case canonicalises as the fixture says"
+                : "fixture mismatches: \(mismatches.joined(separator: "; "))")
+    }
+
+    // MARK: - ArrivalState
+    private static func runArrivalStateTests() {
+        print("ArrivalState:")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        check(ArrivalState.unchecked.needsAttempt(now: now),
+              "unchecked wants an attempt")
+        check(!ArrivalState.checked(depth: .full, at: now, runID: "r1").needsAttempt(now: now),
+              "checked wants nothing")
+        check(!ArrivalState.declined(depth: .full, reason: .hotspot, at: now)
+                .needsAttempt(now: now),
+              "declined is a decision, not a failure, so it does not retry")
+
+        // A scan that crashed leaves .checking behind. Without a staleness
+        // rule that network is wedged forever, which is the same class of
+        // bug as the one this whole change is fixing.
+        let fresh = ArrivalState.checking(depth: .full, startedAt: now)
+        check(!fresh.needsAttempt(now: now.addingTimeInterval(60)),
+              "a checking state inside its window is left alone")
+        check(fresh.needsAttempt(now: now.addingTimeInterval(ArrivalState.stallWindow + 1)),
+              "a checking state past the stall window is retried")
+
+        // Round-trips through UserDefaults as JSON.
+        for state: ArrivalState in [
+            .unchecked,
+            .checking(depth: .quick, startedAt: now),
+            .checked(depth: .full, at: now, runID: "abc"),
+            .checked(depth: .full, at: now, runID: nil),
+            .declined(depth: .full, reason: .unhealthy, at: now),
+            .declined(depth: .full, reason: .hotspot, at: now),
+        ] {
+            let data = try? JSONEncoder().encode(state)
+            let back = data.flatMap { try? JSONDecoder().decode(ArrivalState.self, from: $0) }
+            check(back == state, "\(state.debugLabel) survives a JSON round trip")
+        }
+
+        // Forward compatibility: a state written by a newer build must not
+        // crash this one, and must not read as "checked" — we cannot clear
+        // a verdict we do not understand. Same reasoning as
+        // FullCheckPolicy's allow-list.
+        let futureJSON = Data(#"{"kind":"quarantined","at":0}"#.utf8)
+        let decoded = try? JSONDecoder().decode(ArrivalState.self, from: futureJSON)
+        check(decoded == .unchecked || decoded == nil,
+              "an unrecognised persisted state never reads as checked")
+    }
+
+    // MARK: - ArrivalPolicy
+    private static func runArrivalPolicyTests() {
+        print("ArrivalPolicy:")
+
+        // The regression that started this work. At the instant a network
+        // is joined the monitor has produced no sample, so severity is "".
+        // FullCheckPolicy correctly refuses to call an unknown severity
+        // safe — but asking it *then* silently downgraded essentially
+        // every arrival to the lighter check. The answer is to not ask
+        // yet.
+        check(ArrivalPolicy.decide(hasSample: false, severity: "",
+                                   isExpensive: false, isConstrained: false) == .wait,
+              "no sample yet means wait, never a downgrade")
+        check(ArrivalPolicy.decide(hasSample: false, severity: "ok",
+                                   isExpensive: false, isConstrained: false) == .wait,
+              "hasSample is what gates the decision, not the severity string")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "an ordinary healthy network gets the full check")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "info",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "info is not a problem and still earns a full check")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "warn",
+                                   isExpensive: false, isConstrained: false) == .full,
+              "warn still earns a full check — FullCheckPolicy allows it")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "critical",
+                                   isExpensive: false, isConstrained: false)
+                == .quick(.unhealthy),
+              "a critical link gets the quick check, with a reason")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "wat",
+                                   isExpensive: false, isConstrained: false)
+                == .quick(.unhealthy),
+              "an unrecognised severity is not treated as safe")
+
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: true, isConstrained: false)
+                == .quick(.hotspot),
+              "an expensive path gets the quick check rather than a speed test")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
+                                   isExpensive: false, isConstrained: true)
+                == .quick(.hotspot),
+              "a constrained path (Low Data Mode) is treated the same way")
+
+        // Precedence: cost beats health. Both downgrade to quick, but the
+        // reason the user is shown must be the one they can act on — and
+        // "this is your phone's data" is more actionable than "the link
+        // looked unhealthy a moment ago".
+        check(ArrivalPolicy.decide(hasSample: true, severity: "critical",
+                                   isExpensive: true, isConstrained: false)
+                == .quick(.hotspot),
+              "when both apply, the hotspot reason is the one shown")
+    }
+
+    // MARK: - Arrival migration
+    private static func runArrivalMigrationTests() {
+        print("Arrival migration:")
+
+        // The keys below are verbatim from a live install, where one
+        // iPhone hotspot had accumulated all three forms.
+        let legacy: Set<String> = [
+            "gw:10.125.128.1",
+            "wifi:gw=10.125.128.1",
+            "mac:76:42:18:5c:40:64",
+            "mac:28:70:4e:45:89:5a",
+            "unknown",
+            "",
+        ]
+        let migrated = Defaults.migratedArrivalStates(from: legacy)
+
+        check(migrated["gw:10.125.128.1"] != nil,
+              "a canonical legacy key survives migration")
+        check(migrated["wifi:gw=10.125.128.1"] == nil,
+              "a record-format legacy key is not carried across verbatim")
+        check(migrated["mac:76:42:18:5c:40:64"] != nil,
+              "a MAC key survives migration")
+        check(migrated["unknown"] == nil && migrated[""] == nil,
+              "nameless legacy entries are dropped rather than keyed")
+
+        // Fail closed. Every migrated network reads as already checked, so
+        // an upgrade never re-checks the world — and never spends cellular
+        // data re-baselining a hotspot it already knew about.
+        let allChecked = migrated.values.allSatisfy {
+            if case .checked = $0 { return true }
+            return false
+        }
+        check(allChecked, "every migrated entry is checked, never unchecked")
+        check(migrated.values.allSatisfy { !$0.needsAttempt(now: Date()) },
+              "no migrated entry asks for an attempt")
+
+        check(Defaults.migratedArrivalStates(from: []).isEmpty,
+              "an empty legacy set migrates to an empty map")
+    }
+
+    // MARK: - Arrival card copy
+    private static func runArrivalCopyTests() {
+        print("Arrival card:")
+
+        let hotspot = ArrivalCopy.forState(
+            .declined(depth: .quick, reason: .hotspot, at: Date()), network: "SB Airbnb")
+        check(hotspot?.body.contains("hotspot") == true,
+              "the hotspot decline says why")
+        check(hotspot?.actionTitle != nil,
+              "the hotspot decline offers the override")
+
+        let unhealthy = ArrivalCopy.forState(
+            .declined(depth: .quick, reason: .unhealthy, at: Date()), network: "SB Airbnb")
+        check(unhealthy?.actionTitle != nil,
+              "the unhealthy decline also offers the override")
+
+        let checking = ArrivalCopy.forState(
+            .checking(depth: .full, startedAt: Date()), network: "SB Airbnb")
+        check(checking?.title.contains("SB Airbnb") == true,
+              "a check in flight names the network")
+        check(checking?.actionTitle == nil,
+              "a check in flight offers no button")
+
+        check(ArrivalCopy.forState(.unchecked, network: "SB Airbnb") != nil,
+              "unchecked renders something rather than nothing")
+        check(ArrivalCopy.forState(.checked(depth: .full, at: Date(), runID: nil),
+                                   network: "SB Airbnb") == nil,
+              "a checked network shows no card at all")
+
+        // The three unchecked intents must be distinguishable. All three
+        // used to render one spinner and one "Starting a check." — so a
+        // user who had switched automatic checks off in Settings saw a
+        // permanent promise of work that was never coming, and a check
+        // queued behind another one claimed to be starting for up to five
+        // minutes. Both are the same failure this whole change exists to
+        // fix: a UI implying work that is not happening.
+        let starting = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                            intent: .starting)
+        let waiting = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                           intent: .waitingForAnotherCheck)
+        let manual = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                          intent: .notAutomatic)
+
+        check(starting?.isBusy == true, "an imminent arrival check shows a spinner")
+        check(waiting?.isBusy == true, "a queued arrival check shows a spinner")
+        check(manual?.isBusy == false,
+              "an unchecked network with no automatic check coming shows no spinner")
+        check(manual?.actionTitle != nil,
+              "with automatic checks off, the card offers the check as a button")
+        check(starting?.actionTitle == nil,
+              "a check already starting offers no redundant button")
+        check(starting?.body != waiting?.body,
+              "a queued check does not claim to be starting")
+        check(waiting?.body != manual?.body && starting?.body != manual?.body,
+              "the three unchecked intents each say something different")
+
+        // The busy states are exactly the ones where work is in flight.
+        check(ArrivalCopy.forState(.checking(depth: .full, startedAt: Date()),
+                                   network: "SB Airbnb")?.isBusy == true,
+              "a check in flight is busy")
+        check(ArrivalCopy.forState(.declined(depth: .quick, reason: .hotspot, at: Date()),
+                                   network: "SB Airbnb")?.isBusy == false,
+              "a declined check is finished, not busy")
+
+        // The GUI authors no verdicts. These are the words that would mean
+        // this file had started diagnosing, which is lib/diagnosis.sh's
+        // job — see AlertDefinitions.swift's header.
+        // Every reachable (state, intent) pair, not just the states: the
+        // three unchecked intents each have their own sentence, and a
+        // verdict word smuggled into one of them would otherwise ship
+        // unchecked.
+        let forbidden = ["slow", "bad", "poor", "unusable", "broken", "healthy", "good"]
+        let cases: [(ArrivalState, ArrivalCopy.Intent)] = [
+            (.unchecked, .starting),
+            (.unchecked, .waitingForAnotherCheck),
+            (.unchecked, .notAutomatic),
+            (.checking(depth: .full, startedAt: Date()), .starting),
+            (.checking(depth: .quick, startedAt: Date()), .starting),
+            (.declined(depth: .quick, reason: .hotspot, at: Date()), .starting),
+            (.declined(depth: .quick, reason: .unhealthy, at: Date()), .starting),
+        ]
+        for (state, intent) in cases {
+            guard let copy = ArrivalCopy.forState(state, network: "SB Airbnb",
+                                                  intent: intent) else { continue }
+            let text = (copy.title + " " + copy.body + " " + (copy.actionTitle ?? "")).lowercased()
+            let hit = forbidden.first { text.contains($0) }
+            let label = "\(state.debugLabel)/\(intent)"
+            check(hit == nil,
+                  hit == nil
+                    ? "\(label) copy states mechanism, not a verdict"
+                    : "\(label) copy contains the verdict word \"\(hit!)\"")
+        }
+    }
+
+    // MARK: - Arrival stage
+    private static func runArrivalStageTests() {
+        print("Arrival stage:")
+
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: true)) == .arrived,
+              "a scan that is the arrival check reads as .arrived, not .testing")
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: false)) == .testing,
+              "a scan the user started still reads as .testing")
+        check(StageResolver.resolve(inputs(isScanning: false, isArrivalCheck: true)) != .arrived,
+              "arrival only shows while the check is actually running")
+
+        // Precedence, and a correction to the plan this task was written
+        // from. That plan expected "monitoring off" to outrank `.arrived`;
+        // it does not, and must not. `runStageTests` already asserts
+        // "scanning precedes paused / skewed / alert / watching" with
+        // `monitoringEnabled: false` live, so the scanning guard runs
+        // first by long-standing design — a scan is a thing genuinely
+        // happening right now, and the card has to say so whether or not
+        // background monitoring is switched on. `.arrived` inherits that
+        // position rather than carving out an exception, because a user
+        // watching an arrival check run would otherwise see "Monitoring
+        // paused" over a progress bar. What keeps `.arrived` from
+        // resurrecting a stage while nothing is running is the check
+        // above: it requires `isScanning`.
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: true,
+                                           monitoringEnabled: false)) == .arrived,
+              "an arrival check in flight outranks monitoring being off, exactly as a user scan does")
+    }
+
+    // MARK: - Home report provenance
+
+    /// The predicate deciding whether a stored report on Home is labelled
+    /// with where it came from. Asserted because its nil handling is the
+    /// only thing standing between a user and another building's report
+    /// presented as this network's — the bug it was written for.
+    private static func runReportProvenanceTests() {
+        print("Home report provenance:")
+        // Identity, so these assert the predicate rather than HistoryStore's
+        // merge table.
+        let plain: (String) -> String = { $0 }
+
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:sb-airbnb",
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain) == false,
+              "a stored run from the network we are on needs no caption")
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:home",
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain),
+              "a stored run from another network is labelled")
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:home",
+                                       currentNetworkID: nil,
+                                       canonical: plain),
+              "an unidentified current network labels rather than assumes")
+        check(HomeView.needsProvenance(storedNetworkID: nil,
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain) == false,
+              "a run with no recorded network has nothing truthful to caption")
+        // Merges are why `canonical` is a parameter: two raw ids the user
+        // has merged are one network, and a caption saying otherwise would
+        // contradict the Networks tab.
+        check(HomeView.needsProvenance(storedNetworkID: "gw:10.0.0.1",
+                                       currentNetworkID: "mac:aa:bb:cc:dd:ee:ff",
+                                       canonical: { _ in "merged" }) == false,
+              "two ids merged into one network count as the same network")
+    }
+
     private static func check(_ condition: Bool, _ name: String) {
         if condition {
             print("  \u{2714} \(name)")
@@ -299,6 +709,7 @@ private enum VerifyHarness {
                                linkUp: Bool = true,
                                activeAlert: StageResolver.AlertSnapshot? = nil,
                                isScanning: Bool = false,
+                               isArrivalCheck: Bool = false,
                                monitoringEnabled: Bool = true,
                                isPausedForAnyReason: Bool = false,
                                pauseReason: String? = nil,
@@ -307,6 +718,7 @@ private enum VerifyHarness {
                                measurementState: String = "measured") -> StageResolver.Inputs {
         StageResolver.Inputs(
             isScanning: isScanning,
+            isArrivalCheck: isArrivalCheck,
             monitoringEnabled: monitoringEnabled,
             isPausedForAnyReason: isPausedForAnyReason,
             pauseReason: pauseReason,
@@ -820,6 +1232,13 @@ private enum VerifyHarness {
                 content(icon: "circle.dashed", tint: .accentColor,
                         title: "Checking…", tertiary: "pinging the gateway")
                     .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .arrived:
+                // Same treatment as `.testing` — same icon, same tint. The
+                // only difference is the title, because the only
+                // difference is who asked for the check.
+                content(icon: "circle.dashed", tint: .accentColor,
+                        title: "Checking a new network", tertiary: "pinging the gateway")
+                    .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             case .checking:
                 content(icon: "hourglass", tint: .secondary,
                         title: "Checking connection…", tertiary: "waiting for a live reading")
@@ -923,6 +1342,64 @@ private enum VerifyHarness {
                 continue
             }
             writePNG(image, to: "\(dir)/stage-\(name).png", name: name)
+        }
+    }
+
+    /// The arrival card, rendered offscreen per state, for the same reason
+    /// the stage cards are: the card at the top of Home cannot be
+    /// screenshotted from the menu-bar dropdown, and joining seven
+    /// different networks to see seven states is not a workflow.
+    ///
+    /// `progress: nil` on the `.checking` states deliberately — the scan
+    /// progress rows have their own coverage, and a live `ScanProgress`
+    /// cannot be constructed here without a running child process. What is
+    /// being checked is the card's own copy and layout.
+    private static func renderArrivalCards() {
+        print("Render arrival-card snapshots:")
+        let dir = "/tmp/opencode/verify"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let now = Date()
+        let cases: [(String, ArrivalState, ArrivalCopy.Intent)] = [
+            ("unchecked-starting",  .unchecked, .starting),
+            ("unchecked-queued",    .unchecked, .waitingForAnotherCheck),
+            ("unchecked-manual",    .unchecked, .notAutomatic),
+            ("checking-full",       .checking(depth: .full, startedAt: now), .starting),
+            ("checking-quick",      .checking(depth: .quick, startedAt: now), .starting),
+            ("declined-hotspot",    .declined(depth: .quick, reason: .hotspot, at: now), .starting),
+            ("declined-unhealthy",  .declined(depth: .quick, reason: .unhealthy, at: now), .starting),
+        ]
+        for (name, state, intent) in cases {
+            // Taller than the stage cards: the hotspot and unhealthy copy
+            // run to three or four lines plus a button, where a stage card
+            // is one line plus a title.
+            // Everything about the two pins below is the harness, not the
+            // card. `renderImage` hosts a view with no window and no
+            // appearance, and semantic colours then resolve dark. The stage
+            // cards survive that only because they paint concrete
+            // `Color.gray` fills; `Theme.cardStyle` uses `.quaternary` and
+            // the card's text uses the default foreground, so unpinned this
+            // drew white text over an unresolved fill and the PNG came out
+            // blank — which is what the first run of this actually
+            // produced.
+            //
+            // `.environment` goes *outside* `.background`, which is load
+            // bearing and was wrong the first time. A background's content
+            // inherits the environment from above the `.background`
+            // modifier, not from the subtree it sits behind — so with the
+            // scheme pinned on the inside, the card's text resolved light
+            // while its backdrop resolved dark and the PNG came out
+            // dark-on-dark, looking like a real contrast bug.
+            let card = ArrivalCard(state: state, network: "SB Airbnb",
+                                   progress: nil, intent: intent, onRunFullCheck: {})
+                .frame(width: 360).padding(4)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .environment(\.colorScheme, .light)
+            guard let image = renderImage(card, size: NSSize(width: 368, height: 190)) else {
+                print("  \u{2718} arrival-\(name) — could not allocate bitmap representation")
+                failures.append("render-arrival-\(name)")
+                continue
+            }
+            writePNG(image, to: "\(dir)/arrival-\(name).png", name: "arrival-\(name)")
         }
     }
 

@@ -26,7 +26,18 @@ struct HomeView: View {
                 locationWarningBanner
                 wifiRow
 
-                if coordinator.isScanning {
+                ArrivalCard(state: coordinator.arrivalState,
+                            network: arrivalNetworkName,
+                            progress: coordinator.isScanning ? coordinator.progress : nil,
+                            intent: coordinator.arrivalIntent,
+                            onRunFullCheck: { coordinator.runDeclinedFullCheck() })
+
+                // Only for scans the arrival card is not already showing —
+                // otherwise a new network renders two sets of progress rows.
+                if coordinator.isScanning,
+                   ArrivalCopy.forState(coordinator.arrivalState,
+                                        network: arrivalNetworkName,
+                                        intent: coordinator.arrivalIntent) == nil {
                     ScanProgressView(progress: coordinator.progress)
                     Divider()
                 }
@@ -60,7 +71,8 @@ struct HomeView: View {
                     RunReportView(snapshot: detail.run, comparison: detail.comparison,
                                   rawJSON: detail.asRunResult.rawJSON,
                                   showRuleIDs: appSettings.expertExpanded,
-                                  presentation: .home)
+                                  presentation: .home,
+                                  provenance: storedProvenance(detail))
                 case nil:
                     emptyState
                 }
@@ -82,6 +94,22 @@ struct HomeView: View {
         .task(id: coordinator.monitor.latest?.seq) {
             refreshCoreWLANRSSIIfNeeded()
         }
+    }
+
+    /// The name for the arrival card, falling back past CoreWLAN.
+    ///
+    /// `wifiDisplayName` is nil without Location Services, and the card's
+    /// own fallback is the generic "this network" — which rendered
+    /// directly beneath a header already showing the real name, from the
+    /// history store, two lines up. `arrivalNetworkID` is the canonical id
+    /// the card is *about*, and `history.displayName(for:)` is the same
+    /// resolver the Networks tab and the header use, so this cannot
+    /// disagree with them.
+    private var arrivalNetworkName: String? {
+        if let live = coordinator.wifiDisplayName, !live.isEmpty { return live }
+        guard let id = coordinator.arrivalNetworkID else { return nil }
+        let resolved = coordinator.history.displayName(for: id)
+        return resolved.isEmpty ? nil : resolved
     }
 
     // MARK: - Wi-Fi row
@@ -305,12 +333,17 @@ struct HomeView: View {
     /// that just ran. A stored one drops it: the process that produced a
     /// report hydrated from history exited long before this launch, and
     /// its duration says nothing about how long *this* check took. A stored
-    /// one adds the network's name instead — hydration picks the newest
-    /// check across every network this app has seen, so showing last
-    /// week's office report with no label while the headline above talks
-    /// about the network you're on right now would read as one contradictory
-    /// screen. Mirrors `RunDetailView.subtitle`, which names the network
-    /// the same way for the same reason.
+    /// one adds the network's name instead, so a report and the headline
+    /// above it can never read as one contradictory screen. Mirrors
+    /// `RunDetailView.subtitle`, which names the network the same way for
+    /// the same reason.
+    ///
+    /// That name used to be here because hydration picked the newest check
+    /// across every network this app had seen, which it no longer does —
+    /// see `NetdiagCoordinator.hydrateFromHistoryIfNeeded`. It stays
+    /// because a hydrated report still goes stale in place the moment you
+    /// walk to a different network, which is the case `storedProvenance`
+    /// labels on the report itself.
     private var lastCheckedCaption: String? {
         switch coordinator.reportSource {
         case .live(let run):
@@ -326,6 +359,54 @@ struct HomeView: View {
         case nil:
             return nil
         }
+    }
+
+    /// A stored run is only unremarkable when it is about the network you
+    /// are on and recent enough to still be true. Anything else is
+    /// labelled, because an unlabelled report from an hour ago somewhere
+    /// else is indistinguishable from a live one — which is exactly how a
+    /// Wi-Fi warning about a previous building ended up at the top of a
+    /// brand-new network's dashboard.
+    ///
+    /// Returns nil for a report that needs no caption, so the common case
+    /// renders exactly as it did before.
+    private func storedProvenance(_ detail: RunDetail) -> String? {
+        guard Self.needsProvenance(
+            storedNetworkID: detail.context.networkID,
+            currentNetworkID: coordinator.monitor.latest?.network.historyJoinID,
+            canonical: coordinator.history.canonicalID)
+        else { return nil }
+        // Non-nil `networkID` is implied by the predicate above, which
+        // returns false without one.
+        guard let networkID = detail.context.networkID else { return nil }
+        // `history.displayName(for:)` is the same resolver the header, the
+        // arrival card and the Networks tab use, so this cannot name a
+        // network differently from the rest of the app.
+        let name = coordinator.history.displayName(for: networkID)
+        return "Last check on \(name), \(RelativeTime.string(from: detail.run.date))"
+    }
+
+    /// Whether a stored report needs a provenance caption: true unless it
+    /// is positively about the network we are on right now.
+    ///
+    /// Static and pure so it can be asserted directly — the nil handling is
+    /// the subtle part, and it is what decides whether another building's
+    /// report can appear unlabelled. `canonical` is a parameter rather than
+    /// something this reaches for so the function stays a function of its
+    /// arguments; callers pass `HistoryStore.canonicalID`, which follows
+    /// manual merges.
+    static func needsProvenance(storedNetworkID: String?,
+                                currentNetworkID: String?,
+                                canonical: (String) -> String) -> Bool {
+        // An old `netdiag` whose `--show` predates `context`: there is no
+        // network to name, and `lastCheckedCaption` already prints the date
+        // for this case. Nothing truthful to add here.
+        guard let storedNetworkID else { return false }
+        // `nil` means "not identified yet", never "any network will do", so
+        // this is precisely the state in which Home cannot claim the report
+        // is about the here and now. Label it.
+        guard let currentNetworkID else { return true }
+        return canonical(storedNetworkID) != canonical(currentNetworkID)
     }
 
     private var emptyState: some View {
