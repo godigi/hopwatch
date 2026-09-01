@@ -6,6 +6,8 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-01
+
 ### Fixed — a new network could go unchecked forever, and Home showed somebody else's report [GUI]
 
 Joining a brand-new network showed no check running, none queued, and no
@@ -3401,6 +3403,7 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
 [Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.1...HEAD
+[0.14.0]: https://github.com/godigi/netdiag/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/godigi/netdiag/compare/v0.11.0...v0.12.0
