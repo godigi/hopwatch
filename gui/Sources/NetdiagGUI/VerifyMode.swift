@@ -71,6 +71,7 @@ private enum VerifyHarness {
         runArrivalPolicyTests()
         runArrivalMigrationTests()
         runArrivalCopyTests()
+        runArrivalStageTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -582,6 +583,35 @@ private enum VerifyHarness {
         }
     }
 
+    // MARK: - Arrival stage
+    private static func runArrivalStageTests() {
+        print("Arrival stage:")
+
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: true)) == .arrived,
+              "a scan that is the arrival check reads as .arrived, not .testing")
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: false)) == .testing,
+              "a scan the user started still reads as .testing")
+        check(StageResolver.resolve(inputs(isScanning: false, isArrivalCheck: true)) != .arrived,
+              "arrival only shows while the check is actually running")
+
+        // Precedence, and a correction to the plan this task was written
+        // from. That plan expected "monitoring off" to outrank `.arrived`;
+        // it does not, and must not. `runStageTests` already asserts
+        // "scanning precedes paused / skewed / alert / watching" with
+        // `monitoringEnabled: false` live, so the scanning guard runs
+        // first by long-standing design — a scan is a thing genuinely
+        // happening right now, and the card has to say so whether or not
+        // background monitoring is switched on. `.arrived` inherits that
+        // position rather than carving out an exception, because a user
+        // watching an arrival check run would otherwise see "Monitoring
+        // paused" over a progress bar. What keeps `.arrived` from
+        // resurrecting a stage while nothing is running is the check
+        // above: it requires `isScanning`.
+        check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: true,
+                                           monitoringEnabled: false)) == .arrived,
+              "an arrival check in flight outranks monitoring being off, exactly as a user scan does")
+    }
+
     private static func check(_ condition: Bool, _ name: String) {
         if condition {
             print("  \u{2714} \(name)")
@@ -595,6 +625,7 @@ private enum VerifyHarness {
                                linkUp: Bool = true,
                                activeAlert: StageResolver.AlertSnapshot? = nil,
                                isScanning: Bool = false,
+                               isArrivalCheck: Bool = false,
                                monitoringEnabled: Bool = true,
                                isPausedForAnyReason: Bool = false,
                                pauseReason: String? = nil,
@@ -603,6 +634,7 @@ private enum VerifyHarness {
                                measurementState: String = "measured") -> StageResolver.Inputs {
         StageResolver.Inputs(
             isScanning: isScanning,
+            isArrivalCheck: isArrivalCheck,
             monitoringEnabled: monitoringEnabled,
             isPausedForAnyReason: isPausedForAnyReason,
             pauseReason: pauseReason,
@@ -1115,6 +1147,13 @@ private enum VerifyHarness {
             case .testing:
                 content(icon: "circle.dashed", tint: .accentColor,
                         title: "Checking…", tertiary: "pinging the gateway")
+                    .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .arrived:
+                // Same treatment as `.testing` — same icon, same tint. The
+                // only difference is the title, because the only
+                // difference is who asked for the check.
+                content(icon: "circle.dashed", tint: .accentColor,
+                        title: "Checking a new network", tertiary: "pinging the gateway")
                     .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             case .checking:
                 content(icon: "hourglass", tint: .secondary,
