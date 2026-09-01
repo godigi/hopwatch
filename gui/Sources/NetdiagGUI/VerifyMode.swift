@@ -67,6 +67,7 @@ private enum VerifyHarness {
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
         runNetworkIdentityFixtureTests()
+        runArrivalStateTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -385,6 +386,53 @@ private enum VerifyHarness {
               mismatches.isEmpty
                 ? "every fixture case canonicalises as the fixture says"
                 : "fixture mismatches: \(mismatches.joined(separator: "; "))")
+    }
+
+    // MARK: - ArrivalState
+    private static func runArrivalStateTests() {
+        print("ArrivalState:")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        check(ArrivalState.unchecked.needsAttempt(now: now),
+              "unchecked wants an attempt")
+        check(!ArrivalState.checked(depth: .full, at: now, runID: "r1").needsAttempt(now: now),
+              "checked wants nothing")
+        check(!ArrivalState.declined(depth: .full, reason: .hotspot, at: now)
+                .needsAttempt(now: now),
+              "declined is a decision, not a failure, so it does not retry")
+
+        // A scan that crashed leaves .checking behind. Without a staleness
+        // rule that network is wedged forever, which is the same class of
+        // bug as the one this whole change is fixing.
+        let fresh = ArrivalState.checking(depth: .full, startedAt: now)
+        check(!fresh.needsAttempt(now: now.addingTimeInterval(60)),
+              "a checking state inside its window is left alone")
+        check(fresh.needsAttempt(now: now.addingTimeInterval(ArrivalState.stallWindow + 1)),
+              "a checking state past the stall window is retried")
+
+        // Round-trips through UserDefaults as JSON.
+        for state: ArrivalState in [
+            .unchecked,
+            .checking(depth: .quick, startedAt: now),
+            .checked(depth: .full, at: now, runID: "abc"),
+            .checked(depth: .full, at: now, runID: nil),
+            .declined(depth: .full, reason: .unhealthy, at: now),
+            .declined(depth: .full, reason: .hotspot, at: now),
+        ] {
+            let data = try? JSONEncoder().encode(state)
+            let back = data.flatMap { try? JSONDecoder().decode(ArrivalState.self, from: $0) }
+            check(back == state, "\(state.debugLabel) survives a JSON round trip")
+        }
+
+        // Forward compatibility: a state written by a newer build must not
+        // crash this one, and must not read as "checked" — we cannot clear
+        // a verdict we do not understand. Same reasoning as
+        // FullCheckPolicy's allow-list.
+        let futureJSON = Data(#"{"kind":"quarantined","at":0}"#.utf8)
+        let decoded = try? JSONDecoder().decode(ArrivalState.self, from: futureJSON)
+        check(decoded == .unchecked || decoded == nil,
+              "an unrecognised persisted state never reads as checked")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
