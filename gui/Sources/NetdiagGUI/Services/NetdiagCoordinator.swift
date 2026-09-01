@@ -343,9 +343,14 @@ final class NetdiagCoordinator {
     /// having. Monitoring covers the continuous question; this covers the
     /// one-off one. See CLAUDE.md's three-depth table.
     private func considerArrival(for id: String, sample: MonitorSample) {
-        arrivalNetworkID = id
         let state = Defaults.arrivalStates[id] ?? .unchecked
-        arrivalState = state
+        // Assigned only on a real change. Under `@Observable` a write
+        // invalidates every observer whether or not the value differs, and
+        // this runs once per monitor sample — every 5 s on the fast tier.
+        // Unguarded, the arrival card would redraw on a timer for as long
+        // as the app is open.
+        if arrivalNetworkID != id { arrivalNetworkID = id }
+        if arrivalState != state { arrivalState = state }
 
         guard Defaults.scanOnNewNetwork else { return }
         let now = Date()
@@ -418,10 +423,27 @@ final class NetdiagCoordinator {
     /// user can override, `.checked` otherwise. Both are terminal: neither
     /// retries. A check that failed or was cancelled never reaches here and
     /// stays `.unchecked`, so the next sample tries again.
-    private func finishArrivalIfPending(runID: String?) {
+    ///
+    /// `measured` is the network the finished run actually describes. When
+    /// it disagrees with the network the check was started for, the user
+    /// changed networks mid-scan and this result belongs to neither: the
+    /// run may have measured the new network for most of its length, so
+    /// crediting it to the old one would either file a report labelled B
+    /// under A, or — on an early switch — mark A checked having never
+    /// measured it, silently spending its one automatic baseline. Both
+    /// networks are left `.unchecked` instead, and both retry.
+    private func finishArrivalIfPending(runID: String?, measured: String?) {
         guard let id = pendingArrivalNetworkID, let depth = pendingArrivalDepth else { return }
         let decline = pendingArrivalDecline
         clearPendingArrival()
+
+        // `measured == nil` is "the run could not name its network", not
+        // "a different network" — treat it as agreeing, since the check
+        // did run and refusing it would retry forever.
+        guard measured == nil || measured == id else {
+            log.info("arrival check for \(id, privacy: .public) landed after a network change — left unchecked so it retries")
+            return
+        }
 
         if let decline {
             setArrivalState(.declined(depth: depth, reason: decline, at: Date()), for: id)
@@ -608,7 +630,8 @@ final class NetdiagCoordinator {
                 // and the network list are one record out of date until
                 // this reload.
                 await self.history.load()
-                self.finishArrivalIfPending(runID: result.snapshot.runID)
+                self.finishArrivalIfPending(runID: result.snapshot.runID,
+                                            measured: result.snapshot.network.historyJoinID)
                 self.log.info("\(reason, privacy: .public) finished in \(result.duration, format: .fixed(precision: 1))s, exit \(result.exitCode)")
             } catch is CancellationError {
                 self.clearPendingArrival()
