@@ -210,8 +210,15 @@ enum GalleryMode {
         // network of the newest stored check: the same run this used to
         // hydrate unconditionally, and the ordinary case of launching the
         // app where you last ran one.
-        await coordinator.hydrateFromHistoryIfNeeded(
-            explicitNetworkID: coordinator.history.recentChecks(limit: 1).first?.networkID)
+        let standIn = coordinator.history.recentChecks(limit: 1).first?.networkID
+        await coordinator.hydrateFromHistoryIfNeeded(explicitNetworkID: standIn)
+        // Same stand-in, same reason, for the arrival card: without a
+        // monitor there is no live network, so Home would render "New
+        // network: this network" over a header naming the network and a
+        // full set of measurements — and a spurious provenance caption
+        // besides, since an unidentified current network is exactly the
+        // case that gets labelled. See `adoptGalleryArrivalState`.
+        coordinator.adoptGalleryArrivalState(networkID: standIn)
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this
         // paragraph's whole claim is that a screenshot run writes nothing.

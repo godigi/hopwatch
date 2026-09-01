@@ -510,6 +510,28 @@ final class NetdiagCoordinator {
         pendingArrivalDecline = declineWith
     }
 
+    /// Stand in for the arrival state the monitor would have established,
+    /// for `GalleryMode` only.
+    ///
+    /// The gallery never starts the monitor, so without this every Home
+    /// screenshot renders the arrival card over a report the app has
+    /// plainly already got — "New network: this network", above a header
+    /// naming the network, above a full set of measurements. That is not
+    /// what a launch on a known network looks like, and the gallery exists
+    /// to show what the app looks like.
+    ///
+    /// `.checked` rather than the real stored state: the ordinary case
+    /// this screenshot stands for is a network already known, and the
+    /// arrival card's own states have seven dedicated renders from
+    /// `--verify`. Writes nothing to `Defaults` — a screenshot run must
+    /// not mutate arrival history, which is the same contract
+    /// `GalleryMode.hydrate` keeps for the monitor and the event log.
+    func adoptGalleryArrivalState(networkID: String?) {
+        arrivalNetworkID = networkID.flatMap(NetdiagGUI.NetworkIdentity.canonical)
+        arrivalState = .checked(depth: .full, at: Date(), runID: nil)
+        arrivalIntent = .starting
+    }
+
     /// What the app is about to do on its own about an unchecked network.
     ///
     /// Exists because "unchecked" alone cannot tell a user whether to wait
