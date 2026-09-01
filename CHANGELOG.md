@@ -6,6 +6,38 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — `--events` dropped the outage that began before the window
+
+`netdiag --events=24` omitted any fault that started more than a day ago
+and ended inside the window — which is the likeliest shape of the question
+`--events` exists to answer. Asked at breakfast about a fault that began at
+23:40 and cleared at 07:02, it returned an `episodes` array with nothing in
+it.
+
+`in_window` filters the rows before `episodes()` pairs them, so the
+`rule-fired` is gone and the `rule-cleared` arrives orphaned. `close()`
+popped nothing and returned, and the episode was never appended. The raw
+row stayed in `events`, which is no help to anything reading `episodes` —
+including `lib/availability.sh`, whose AV-1 outage count therefore excluded
+every drop that straddled the window's start.
+
+An end with no beginning is still an end. An orphan clear now produces a
+resolved episode with `started: null`, `duration_s: null` and
+`start_unobserved: true` — the beginning is not invented and no duration is
+derived from one — sorted first, because the only thing known about that
+start is that it precedes every start that was seen. This is the same
+answer the GUI's `ActivityEntry.fold` gives for the same input, fixed one
+release entry above for the same reason; the two are meant to agree, and
+`ActivityEntry`'s header already claimed an orphan clear as one of the
+three cases it reproduces from `helpers/events.py`. It was the one case
+`helpers/events.py` did not actually handle.
+
+The reader still judges nothing: whether that duration — or its absence —
+is acceptable is AV-1's to say against `lib/thresholds.sh`.
+`docs/JSON-SCHEMA.md` documents the null start; `tests/test_events.bats`
+gains the window case, and the test that asserted the old behaviour ("a
+clear with no matching fire is not an episode") now asserts the new one.
+
 ### Fixed — three ways the Activity timeline mis-told the history it folds [GUI]
 
 An hour-long fault could render with no duration; a fault that ran through

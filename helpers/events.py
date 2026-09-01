@@ -22,7 +22,7 @@ live; they are deliberately not here.
 A rule that fired and later cleared is an *episode* with a duration. They
 are paired by (network, rule id), oldest fired to next cleared.
 
-Three honest cases the pairing has to survive:
+Four honest cases the pairing has to survive:
 
   * **Still open at the end of the window** — `ongoing: true`, and the
     duration is measured to the last event seen, not to now: the recorder
@@ -35,6 +35,11 @@ Three honest cases the pairing has to survive:
   * **A gap while open** — a sleep or a stall. The episode keeps running
     (the fault plausibly did too) but records `unobserved_s`, so a reader
     can tell a four-hour outage from a four-hour closed lid.
+  * **A clear with no fire before it** — the fault began before the window
+    (or before the recorder existed). Reported with `started: null`,
+    `duration_s: null` and `start_unobserved: true`: an end with no
+    beginning is still an end, and dropping it would omit exactly the
+    fault someone asking "was it down last night?" is asking about.
 
 ## Observation
 
@@ -176,7 +181,39 @@ def episodes(rows):
             key = (network, row["from"])
             if key in open_eps:
                 open_eps[key]["ongoing"] = False
-            close(key, at, "cleared")
+                close(key, at, "cleared")
+            else:
+                # An orphan clear: the fire is not in what was read. Usually
+                # because the window cut it off — `--events=24` on a fault
+                # that began the previous evening — and sometimes because
+                # the recorder was installed mid-fault or the archive rolled.
+                #
+                # This used to contribute no episode at all, which meant
+                # "was the internet down last night, and for how long?" —
+                # the question this reader exists to answer — silently
+                # omitted the likeliest shape of a yes. The raw row stayed
+                # in `events`, which is no help to anything reading
+                # `episodes`.
+                #
+                # An end with no beginning is still an end. It is reported
+                # with `started` and `duration_s` null: the start was not
+                # observed, so none is claimed and none is derived. Same
+                # answer `ActivityEntry.fold` gives the GUI for the same
+                # input — a resolved episode with no duration, never a
+                # guessed one.
+                done.append({
+                    "rule": row["from"],
+                    "summary": row.get("summary"),
+                    "network": network,
+                    "network_label": row.get("network_label"),
+                    "started": None,
+                    "start_unobserved": True,
+                    "ended": at.strftime("%Y-%m-%dT%H:%M:%SZ") if at else None,
+                    "duration_s": None,
+                    "ongoing": False,
+                    "unobserved_s": 0,
+                    "ended_by": "cleared",
+                })
         elif kind == "monitor-started":
             # Everything still open was being watched by a process that is
             # no longer running. Close each at this restart rather than
@@ -197,6 +234,10 @@ def episodes(rows):
 
     for ep in done:
         ep.pop("_started_at", None)
+    # An unknown start sorts first: it began at or before the earliest
+    # start there is, which is the only thing known about it. Sorting it by
+    # its end instead would place it among episodes whose starts are known
+    # and imply one for it.
     done.sort(key=lambda e: (e.get("started") or ""))
     return done
 

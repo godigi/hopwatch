@@ -196,6 +196,27 @@ fault. `ended_by` says how each one ended:
 | `monitor-restart` | the recorder died or the Mac rebooted while it was open. Closed there, with `duration_is_lower_bound: true`, rather than silently spanning a period nobody watched |
 | `still-open` | open at the end of the record. `ongoing: true`, and the duration is measured **to the last event**, never to now — the recorder may have stopped an hour ago and "ongoing for four hours" would be inventing observation |
 
+**A fault can end inside the window and have begun outside it.** That is
+the likeliest shape of "was the internet down last night?", so the episode
+is reported rather than dropped, with `started: null`, `duration_s: null`
+and `start_unobserved: true`:
+
+```json
+{"rule": "N1", "summary": "No network connection at all",
+ "network": "wifi:mac=…", "network_label": "Home",
+ "started": null, "start_unobserved": true,
+ "ended": "2026-08-28T07:02:11Z", "duration_s": null,
+ "ongoing": false, "unobserved_s": 0, "ended_by": "cleared"}
+```
+
+`start_unobserved` is present only when `true`, like
+`duration_is_lower_bound`. An end with no beginning is still an end; the
+beginning is not invented, and no duration is derived from one. Episodes
+with an unknown start sort first — the only thing known about the start is
+that it is at or before every start that *was* seen. The same input
+produces the same answer in the GUI (`ActivityEntry.fold`): a resolved
+episode with no duration.
+
 **`observation` is not decoration.** `MonitorSeries.swift` refuses to draw
 a line across a gap because a smooth line through a two-minute outage is
 *reassuring*; an availability figure computed over a window the Mac spent
