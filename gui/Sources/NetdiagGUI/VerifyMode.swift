@@ -79,6 +79,7 @@ private enum VerifyHarness {
         runSuitabilityPanelTests()
         runReportProvenanceTests()
         runSnapshots()
+        renderArrivalCards()
         print("")
         if failures.isEmpty {
             print("All checks passed.")
@@ -1341,6 +1342,64 @@ private enum VerifyHarness {
                 continue
             }
             writePNG(image, to: "\(dir)/stage-\(name).png", name: name)
+        }
+    }
+
+    /// The arrival card, rendered offscreen per state, for the same reason
+    /// the stage cards are: the card at the top of Home cannot be
+    /// screenshotted from the menu-bar dropdown, and joining seven
+    /// different networks to see seven states is not a workflow.
+    ///
+    /// `progress: nil` on the `.checking` states deliberately — the scan
+    /// progress rows have their own coverage, and a live `ScanProgress`
+    /// cannot be constructed here without a running child process. What is
+    /// being checked is the card's own copy and layout.
+    private static func renderArrivalCards() {
+        print("Render arrival-card snapshots:")
+        let dir = "/tmp/opencode/verify"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let now = Date()
+        let cases: [(String, ArrivalState, ArrivalCopy.Intent)] = [
+            ("unchecked-starting",  .unchecked, .starting),
+            ("unchecked-queued",    .unchecked, .waitingForAnotherCheck),
+            ("unchecked-manual",    .unchecked, .notAutomatic),
+            ("checking-full",       .checking(depth: .full, startedAt: now), .starting),
+            ("checking-quick",      .checking(depth: .quick, startedAt: now), .starting),
+            ("declined-hotspot",    .declined(depth: .quick, reason: .hotspot, at: now), .starting),
+            ("declined-unhealthy",  .declined(depth: .quick, reason: .unhealthy, at: now), .starting),
+        ]
+        for (name, state, intent) in cases {
+            // Taller than the stage cards: the hotspot and unhealthy copy
+            // run to three or four lines plus a button, where a stage card
+            // is one line plus a title.
+            // Everything about the two pins below is the harness, not the
+            // card. `renderImage` hosts a view with no window and no
+            // appearance, and semantic colours then resolve dark. The stage
+            // cards survive that only because they paint concrete
+            // `Color.gray` fills; `Theme.cardStyle` uses `.quaternary` and
+            // the card's text uses the default foreground, so unpinned this
+            // drew white text over an unresolved fill and the PNG came out
+            // blank — which is what the first run of this actually
+            // produced.
+            //
+            // `.environment` goes *outside* `.background`, which is load
+            // bearing and was wrong the first time. A background's content
+            // inherits the environment from above the `.background`
+            // modifier, not from the subtree it sits behind — so with the
+            // scheme pinned on the inside, the card's text resolved light
+            // while its backdrop resolved dark and the PNG came out
+            // dark-on-dark, looking like a real contrast bug.
+            let card = ArrivalCard(state: state, network: "SB Airbnb",
+                                   progress: nil, intent: intent, onRunFullCheck: {})
+                .frame(width: 360).padding(4)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .environment(\.colorScheme, .light)
+            guard let image = renderImage(card, size: NSSize(width: 368, height: 190)) else {
+                print("  \u{2718} arrival-\(name) — could not allocate bitmap representation")
+                failures.append("render-arrival-\(name)")
+                continue
+            }
+            writePNG(image, to: "\(dir)/arrival-\(name).png", name: "arrival-\(name)")
         }
     }
 
