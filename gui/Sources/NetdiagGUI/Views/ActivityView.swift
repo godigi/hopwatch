@@ -22,12 +22,25 @@ import SwiftUI
 struct ActivityView: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
 
-    private var events: [NetworkEvent] { coordinator.eventLog.events }
-    private var entries: [ActivityEntry] { ActivityEntry.fold(events) }
-
+    /// Folded once per render, at the top of `body`, and passed down.
+    ///
+    /// `entries` and `days` used to be computed properties, and every read
+    /// of one re-ran `ActivityEntry.fold` over the store's 500 rows: five
+    /// folds and four `byDay` calls per `body`, counted with a probe —
+    /// `heading` alone read `entries` once and `days` twice, then
+    /// `days.isEmpty` and `ForEach(days)` each folded again. `coordinator`
+    /// is `@Observable`, so a monitor sample seconds apart invalidates this
+    /// view and pays all nine while the screen is open.
+    ///
+    /// Deliberately *not* `@State`: the fold is a pure function of
+    /// `eventLog.events`, and cached state would go stale the moment the
+    /// monitor recorded a transition. Recomputing once per render keeps the
+    /// observation-driven refresh exactly as it was.
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            heading
+        let entries = ActivityEntry.fold(coordinator.eventLog.events)
+        let days = days(of: entries)
+        return VStack(alignment: .leading, spacing: 0) {
+            heading(entries: entries, days: days)
             Divider()
             List {
                 activeSection
@@ -49,7 +62,7 @@ struct ActivityView: View {
     /// Counts episodes, not stored rows. "329 events" was technically true
     /// and told the reader nothing except that the list would be long; the
     /// number that matters is how many distinct things happened.
-    private var heading: some View {
+    private func heading(entries: [ActivityEntry], days: [Day]) -> some View {
         let count = entries.count
         return VStack(alignment: .leading, spacing: 2) {
             Text("Activity").font(.headline)
@@ -118,7 +131,7 @@ struct ActivityView: View {
     /// The bucketing itself is `ActivityEntry.byDay`, next to the per-day
     /// key `fold` groups on, so the two cannot disagree about which day a
     /// row belongs to. This view only labels the result.
-    private var days: [Day] {
+    private func days(of entries: [ActivityEntry]) -> [Day] {
         ActivityEntry.byDay(entries).map {
             Day(id: "\($0.day.timeIntervalSince1970)", label: dayLabel($0.day),
                 entries: $0.entries)
