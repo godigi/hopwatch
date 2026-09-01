@@ -37,6 +37,24 @@ read_events() {
   python3 "$EVENTS" --journal "$J" --version test
 }
 
+# The same read, bounded to the last $1 hours — the shape a user asks for
+# ("was it down last night?") and the only one where the window itself can
+# cut an episode in half.
+read_events_window() {
+  python3 "$EVENTS" --journal "$J" --hours "$1" --version test
+}
+
+# A timestamp $1 minutes before now. Needed wherever the assertion is about
+# --hours, which is measured against the wall clock: a fixed 2026 date is
+# either always inside the window or always outside it.
+ago() {
+  python3 -c "
+import datetime, sys
+print((datetime.datetime.now(datetime.timezone.utc)
+       - datetime.timedelta(minutes=int(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))
+" "$1"
+}
+
 # ── Pairing ──────────────────────────────────────────────────────────────
 
 @test "a fault that fired and cleared becomes an episode with a duration" {
@@ -129,15 +147,48 @@ assert d['episodes'][0]['duration_s'] == 600, d['episodes'][0]
 "
 }
 
-@test "a clear with no matching fire is not an episode" {
-  # The recorder started mid-fault and only saw the recovery. Inventing a
-  # start time for it would be inventing a duration.
+@test "a clear with no matching fire is an episode with an unknown start" {
+  # The recorder started mid-fault and only saw the recovery. An end with
+  # no beginning is still an end: the episode is reported, and its start
+  # and duration are null rather than invented.
   ev rule-cleared 2026-08-28T03:00:00Z 1 N1
   run read_events
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
-assert json.load(sys.stdin)['episodes'] == []
+eps = json.load(sys.stdin)['episodes']
+assert len(eps) == 1, eps
+assert eps[0]['rule'] == 'N1', eps[0]
+assert eps[0]['started'] is None, eps[0]
+assert eps[0]['duration_s'] is None, eps[0]
+assert eps[0]['start_unobserved'] is True, eps[0]
+"
+}
+
+@test "a fault that began before the window still appears when it ends inside it" {
+  # 'Was the internet down last night, and for how long?' — a fault that
+  # started before the window and ended inside it is the likeliest shape of
+  # that answer, and --events=24 used to drop it entirely: the fire is
+  # filtered out by the window, so the clear arrives orphaned and paired
+  # with nothing. The `events` array still carried the raw row, which is no
+  # help to anyone reading `episodes`.
+  ev rule-fired   "$(ago 2880)" 1 N1
+  ev rule-cleared "$(ago 60)"   2 N1
+  run read_events_window 24
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+eps = [e for e in d['episodes'] if e['rule'] == 'N1']
+assert len(eps) == 1, d['episodes']
+ep = eps[0]
+# The fire is genuinely outside what was read, so no start is claimed and
+# no duration is derived from one.
+assert ep['started'] is None, ep
+assert ep['duration_s'] is None, ep
+assert ep['start_unobserved'] is True, ep
+assert ep['ongoing'] is False, ep
+assert ep['ended_by'] == 'cleared', ep
 "
 }
 

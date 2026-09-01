@@ -6,6 +6,170 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — `--events` dropped the outage that began before the window
+
+`netdiag --events=24` omitted any fault that started more than a day ago
+and ended inside the window — which is the likeliest shape of the question
+`--events` exists to answer. Asked at breakfast about a fault that began at
+23:40 and cleared at 07:02, it returned an `episodes` array with nothing in
+it.
+
+`in_window` filters the rows before `episodes()` pairs them, so the
+`rule-fired` is gone and the `rule-cleared` arrives orphaned. `close()`
+popped nothing and returned, and the episode was never appended. The raw
+row stayed in `events`, which is no help to anything reading `episodes` —
+including `lib/availability.sh`, whose AV-1 outage count therefore excluded
+every drop that straddled the window's start.
+
+An end with no beginning is still an end. An orphan clear now produces a
+resolved episode with `started: null`, `duration_s: null` and
+`start_unobserved: true` — the beginning is not invented and no duration is
+derived from one — sorted first, because the only thing known about that
+start is that it precedes every start that was seen. This is the same
+answer the GUI's `ActivityEntry.fold` gives for the same input, fixed one
+release entry above for the same reason; the two are meant to agree, and
+`ActivityEntry`'s header already claimed an orphan clear as one of the
+three cases it reproduces from `helpers/events.py`. It was the one case
+`helpers/events.py` did not actually handle.
+
+The reader still judges nothing: whether that duration — or its absence —
+is acceptable is AV-1's to say against `lib/thresholds.sh`.
+`docs/JSON-SCHEMA.md` documents the null start; `tests/test_events.bats`
+gains the window case, and the test that asserted the old behaviour ("a
+clear with no matching fire is not an episode") now asserts the new one.
+
+### Fixed — three ways the Activity timeline mis-told the history it folds [GUI]
+
+An hour-long fault could render with no duration; a fault that ran through
+midnight could print twice in one day's section; and a fault that had just
+been resolved could vanish from the dropdown entirely. All three are in
+`ActivityEntry.fold` and the two views over it, and all three come from the
+same place: the fold reproduces `helpers/events.py`'s episode pairing, and
+in these three cases it had drifted from it.
+
+**The restart discarded the span it was meant to bound.** When a rule fires
+twice with no clear between, the monitor restarted mid-fault — it emits only
+on transition, so a second `fired` means it lost its previous sample. The
+branch closed the open episode at `existing.end ?? existing.start`, and
+`end` is nil for everything in `open` by construction, so every such episode
+closed at its own start. Zero length, rejected by the one-second rendering
+floor, `totalDuration` nil — and `durationIsLowerBound` left qualifying a
+duration that no longer existed, so the `+` the branch set could never
+appear. A fault known to have held for an hour read as a bare occurrence.
+`helpers/events.py` does the opposite and is the reference: `episodes()`
+skips the second `rule-fired` and keeps the earlier start, the earliest
+moment the fault is known to have been true. `Episode` now carries a
+`lastSeen` sighting distinct from `end` — an ending is not the same fact as
+a sighting — so the span survives, reads "lasted 1h+", and stays open. The
+existing "re-fire after a restart" test never reached this branch: its clear
+closes the first episode before the second fire lands.
+
+**Two places disagreed about which day a row belongs to.** `group` keys per
+day on the episode's start; `ActivityView` bucketed its sections on
+`latest`. For an episode crossing midnight those are different days, so a
+rule firing 23:50 Monday and clearing 00:10 Tuesday, then firing again at
+09:00 Tuesday, produced two entries that both landed in Tuesday's section —
+the same sentence twice, and the one-row-per-rule-per-day promise in
+`ActivityEntry`'s own header broken. Both now use the start.
+`helpers/events.py` identifies an episode the same way, sorting on
+`started`, and `earliest` reproduces `group`'s key by construction where
+`latest` cannot: `merge` and `absorbAlerts` both move `latest` as rows
+accumulate. The bucketing moved out of the view into `ActivityEntry.byDay`,
+beside the key it has to agree with, and now sorts its sections explicitly —
+day order only followed from the fold's newest-first ordering while the
+bucket was `latest` too.
+
+**A rolling window manufactures orphans.** A `rule-cleared` with no matching
+`rule-fired` was dropped, which is a sound defence against the 500-entry
+store cap truncating history and the wrong answer for the dropdown, which
+folds `eventLog.within(hours: 24)`: any fault older than a day that ends
+today arrives with its beginning already outside the slice. So a long fault
+that had just been fixed disappeared from the panel where "it's fixed now"
+is the most useful thing to say — something the older `EventRow` timeline
+did render. An end with no beginning is still an end. It now folds to a
+zero-length episode, so the same one-second floor leaves `totalDuration` nil
+and the row states the resolution in the CLI's own words without inventing a
+duration for it; it keeps its `rule-cleared` kind and so its green check,
+while `merge` prefers a fired episode's words on a day the rule was also
+seen to fire. Rejected: folding a wider slice than the dropdown displays,
+which fixes only that surface and inflates its "LAST 24 HOURS" counts with
+same-day episodes from outside the window; and dropping orphans only when
+the store detects truncation, which is a property of the whole store rather
+than evidence about one rule, and leaves the window case unfixed.
+
+21 new `--verify` assertions cover all three, each written to fail first.
+One difference with `helpers/events.py` remains by design: it marks a
+duration a lower bound only on an explicit `monitor-started` journal row,
+which `EventStore` has no equivalent of, so the GUI infers the restart from
+the fire-on-fire itself — the same conclusion from the only evidence it has.
+
+### Fixed — a missing UPnP state counted as a measured path
+
+`measured_families()` decided whether the `path` family had been probed by
+testing `wan.upnp.state` against the literal `"unknown"` — bash's default
+from `lib/globals.sh`. When the value is `None` or `""` the comparison is
+true and the family was counted as probed. That happens on a direct
+invocation of `helpers/emit_json.py`, a mode the module's own docstring
+supports on purpose ("a direct helper invocation should expose missing
+metadata as null"), where no `NETDIAG_*` variable is set and the whole
+`wan` block comes back null.
+
+Nothing user-visible was wrong in a normal run — bash always exports the
+`"unknown"` default — but the `vpn` row would have read `good` for a run
+that probed no path at all the moment the MTU probe happened to be
+present, which is the exact lie `helpers/suitability.py`'s header names as
+its reason to exist. The check now recognises the family by the two values
+that mean it *ran* (`enabled`, `disabled`) rather than by the one spelling
+of absence bash happens to use.
+
+### Fixed — `schemas.run` still said 1 after the run document grew `suitability`
+
+`--capabilities` exists so a GUI can ask what its CLI supports instead of
+probing the output for a key. When `--json` gained a top-level
+`suitability` block, `SCHEMA_RULES_CATALOG` was bumped 4 → 5 in the same
+change and `SCHEMA_RUN` was left at 1 — so a pre-suitability build and a
+current one answered the handshake identically, and the one question the
+handshake could have answered had to be answered by probing instead.
+`helpers/capabilities.py`'s own docstring states the rule that was missed:
+bump the constant the day the run document actually grows a field.
+
+`schemas.run` is now `2`. Nothing in the app gates on it today
+(`CLICapabilities.schemas` is carried through only for the About caption,
+and `CapabilityStore.requiredVersion` compares version strings), so this
+breaks nothing and makes the entry usable the day a gate is wanted.
+`run` has no embedded number to check itself against the way the other six
+do, so its new bats test reads the run document's *shape* instead: it
+invokes `helpers/emit_json.py` standalone and fails if a build that emits
+`suitability` still answers 1. Also corrected `docs/JSON-SCHEMA.md`'s
+worked example, which still showed `rules_catalog: 4`, and a Swift doc
+comment that listed six `schemas` keys when there have been seven since
+`signal_scale` shipped.
+
+### Fixed — the Trends outlier clamp never engaged on a real chart [GUI]
+
+`TrendsView.Clamp` exists so that one 2.8-second reading cannot flatten a
+latency chart into a line on the floor. It did that only for series of more
+than 100 samples, which Trends almost never draws: a day of runs on one
+network is dozens of points.
+
+The tail was located by the *index* `floor(n * 0.99)`, and for every n from
+10 to 100 that index is `n - 1` — so "the 99th percentile" was the maximum
+itself, the extreme-tail guard reduced to `maximum > maximum * 2`, false for
+all positive data, and the function returned nil. The clamp's own doc
+comment's worked example — 37 readings in a 2–8 ms band plus one 2800 ms
+spike — was one of the cases it silently declined to help.
+
+The tail is now set aside by *count* (the top 1% of samples, floored at one
+reading) and the ceiling is taken from the highest reading below it. Below
+100 samples there is no 1% and no element strictly under the 99th
+percentile, so a percentile index is the wrong instrument at that size; the
+floor of one reading is the honest reading of the same intent. Its cost is
+that two *equal* extremes in a short series count as spread rather than as a
+tail, which is the right call at 5% of the data. The fix also closes the
+same failure at large n, where 24 equal spikes in 2371 samples put the index
+inside the tail. 28 new `--verify` assertions walk n = 10, 38, 100, 101 and
+2371, both the clamping and the left-alone cases.
+
 ## [0.14.0] - 2026-09-01
 
 ### Fixed — a new network could go unchecked forever, and Home showed somebody else's report [GUI]

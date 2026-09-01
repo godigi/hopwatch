@@ -102,13 +102,20 @@ private struct RuleChipPopover: View {
     }
 }
 
-/// The five activity rows: "what should work here".
+/// The five activity rows: "what should work here", as one icon strip.
 ///
-/// Shared rather than private to `RunReportView` because the menu-bar
-/// dropdown's arrival card renders the same five rows, and a user sees the
-/// two surfaces seconds apart — describing a verdict differently in each
-/// is how an app contradicts itself. Same reason `SignalScale.cellContent`
-/// and `AlertStageCard` are shared.
+/// Shared rather than private to `RunReportView` because Home, a stored
+/// run's detail and the run list all render it through that view, and a
+/// user sees those surfaces seconds apart — describing a verdict
+/// differently in each is how an app contradicts itself. Same reason
+/// `SignalScale.cellContent` and `AlertStageCard` are shared.
+///
+/// This carried a second, vertical layout and a `compact` flag for a
+/// dropdown arrival card that was to render the same five rows. That card
+/// shipped (`ArrivalCard.swift`) stating mechanism only and rendering no
+/// suitability at all, so both were dead the day they landed: one call
+/// site, always the strip. Deleted rather than kept warm — git history has
+/// them if the arrival card ever grows the rows it was supposed to.
 ///
 /// ── What this view is allowed to decide ────────────────────────────────
 /// A colour, a glyph, and a two-or-three-word category word. That is all.
@@ -121,21 +128,7 @@ private struct RuleChipPopover: View {
 /// edit wants to explain *why* an activity won't work, that belongs in
 /// `helpers/rules_catalog.py`'s `impacts` table and its blurbs, not here.
 struct SuitabilityPanel: View {
-    enum Layout {
-        case list
-        case strip
-    }
-
     let rows: [RunSnapshot.SuitabilityRow]
-    /// Drops the per-row reason line. The dropdown is 360pt wide and the
-    /// arrival card carries a fix and a memory line underneath, so the
-    /// reasons are the first thing that has to give there.
-    var compact: Bool = false
-    /// Home and a full report have enough width to make the five answers
-    /// glanceable as one visual strip. The dropdown's future arrival card
-    /// keeps the vertical list because its 360pt width cannot carry five
-    /// useful labels side by side.
-    var layout: Layout = .list
 
     var body: some View {
         // Nothing at all, rather than an empty card: a report from a CLI
@@ -146,17 +139,11 @@ struct SuitabilityPanel: View {
                 Text("What should work here")
                     .font(.headline)
                     .padding(.bottom, Theme.Spacing.sm)
-                switch layout {
-                case .list:
+                // Home and a full report have enough width to make the five
+                // answers glanceable side by side.
+                HStack(alignment: .top, spacing: Theme.Spacing.xs) {
                     ForEach(rows) { row in
-                        rowView(row)
-                        if row.id != rows.last?.id { Divider() }
-                    }
-                case .strip:
-                    HStack(alignment: .top, spacing: Theme.Spacing.xs) {
-                        ForEach(rows) { row in
-                            tileView(row)
-                        }
+                        tileView(row)
                     }
                 }
             }
@@ -166,7 +153,8 @@ struct SuitabilityPanel: View {
     /// One activity as an icon-first tile. The verdict still has both a
     /// distinct glyph and a word, so colour accelerates the scan without
     /// becoming the only way to read it. Longer CLI-authored reasons move
-    /// to hover help here; the vertical rendering keeps them inline.
+    /// to hover help, because five of them inline would be a paragraph
+    /// where the point is a glance.
     private func tileView(_ row: RunSnapshot.SuitabilityRow) -> some View {
         let tint = Self.tint(row.verdict)
         return VStack(spacing: Theme.Spacing.xs) {
@@ -194,29 +182,6 @@ struct SuitabilityPanel: View {
                     in: RoundedRectangle(cornerRadius: Theme.Radius.control))
         .help(Self.detail(row) ?? Self.word(row.verdict))
         .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private func rowView(_ row: RunSnapshot.SuitabilityRow) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
-            Image(systemName: Self.symbol(row.verdict))
-                .foregroundStyle(Self.tint(row.verdict))
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.label ?? row.id)
-                if !compact, let detail = Self.detail(row) {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: Theme.Spacing.sm)
-            Text(Self.word(row.verdict))
-                .font(.callout.weight(.medium))
-                .foregroundStyle(Self.tint(row.verdict))
-        }
-        .padding(.vertical, Theme.Spacing.xs)
     }
 
     // MARK: - Mappings

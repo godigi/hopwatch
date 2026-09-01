@@ -350,7 +350,9 @@ struct TrendsView: View {
     /// points drew as a flat line on the floor: the chart contained all the
     /// data and conveyed none of it.
     ///
-    /// So the axis is clamped near the 99th percentile and out-of-range
+    /// So the axis is clamped just above the highest reading that is not
+    /// part of the extreme tail — the top 1% of samples, or the single
+    /// highest one in a series too short to have a 1% — and out-of-range
     /// readings are drawn pinned to the ceiling with their own orange
     /// triangle, above a caption naming how many there are and how high the
     /// highest actually went. Nothing is dropped, and nothing is drawn at a
@@ -378,16 +380,38 @@ struct TrendsView: View {
             guard finite.count >= 10, let maximum = finite.max(), maximum > 0
             else { return nil }
             let sorted = finite.sorted()
-            let p99 = sorted[min(sorted.count - 1,
-                                 Int((Double(sorted.count) * 0.99).rounded(.down)))]
-            guard p99 > 0 else { return nil }
+            // The tail is set aside by *count*, not located by a
+            // percentile index, and that distinction is the whole of this
+            // function's history. Written as `sorted[floor(n * 0.99)]` it
+            // was correct only above 100 samples: for every n from 10 to
+            // 100 that index is `n - 1`, so "the 99th percentile" was the
+            // maximum itself, the extreme-tail guard below reduced to
+            // `maximum > maximum * 2`, and the clamp silently never
+            // engaged on any series a day of runs actually produces. It
+            // fails the same way at any size once a spike repeats: 24
+            // equal spikes in 2371 samples put the index inside the tail.
+            //
+            // Below 100 readings there is genuinely no 1% to take, and no
+            // element sits strictly under the 99th percentile — so a
+            // percentile is the wrong instrument at that size and the
+            // floor of one reading is the honest reading of it: set the
+            // single highest sample aside and compare it to the rest.
+            // The cost of that floor is that two *equal* extremes in a
+            // short series are treated as spread rather than as a tail,
+            // which is the right call — two of thirty-eight is 5% of the
+            // data, and pinning 5% of a chart to its ceiling hides more
+            // than it reveals.
+            let tail = max(1, Int((Double(sorted.count) * 0.01).rounded(.up)))
+            guard sorted.count > tail else { return nil }
+            let bulkMaximum = sorted[sorted.count - tail - 1]
+            guard bulkMaximum > 0 else { return nil }
             // Only step in for a genuinely extreme tail. A series whose
-            // maximum is merely twice its 99th percentile has a real spread
-            // worth seeing at full height.
-            guard maximum > p99 * 2 else { return nil }
+            // maximum is merely twice the rest of the data has a real
+            // spread worth seeing at full height.
+            guard maximum > bulkMaximum * 2 else { return nil }
             // Never clamp below the typical band the chart also draws, or
             // the shading would run off the top of its own axis.
-            var upper = p99 * 1.15
+            var upper = bulkMaximum * 1.15
             if let p90, p90 > 0 { upper = max(upper, p90 * 1.2) }
             guard upper < maximum else { return nil }
             return Clamp(upper: upper,

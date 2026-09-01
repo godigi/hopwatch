@@ -1,649 +1,677 @@
 {
-  "version": "0.13.0",
-  "timestamp": "2026-08-30T21:58:54Z",
-  "run_mode": "full",
-  "run_id": null,
-  "interface": {
-    "name": "en0",
-    "ip": "[redacted]",
-    "gateway": "192.168.60.1",
-    "gateway_mac": "[redacted]",
-    "type": "wifi",
-    "link_status": "active",
-    "link_up": true,
-    "self_assigned_ip": false,
-    "link_mbps": null,
-    "link_max_mbps": null,
-    "duplex": null,
-    "service": "Wi-Fi",
-    "metered": false,
-    "metered_certain": false,
-    "dhcp_router": "192.168.60.1"
-  },
-  "network": {
-    "id": "wifi:mac=[redacted]",
-    "label": "WiFi (SSID hidden by macOS)"
-  },
-  "wifi": {
-    "ssid": "[redacted]",
-    "bssid": "[redacted]",
-    "security": "WPA2_PSK",
-    "rssi": null,
-    "noise": null,
-    "snr": null,
-    "channel": null,
-    "phy": null,
-    "tx_rate": null,
-    "privileged": false,
-    "name_hidden": true,
-    "ssid_source": null
-  },
-  "gateway": {
-    "ip": "192.168.60.1",
-    "loss_pct": 0.0,
-    "rtt_avg_ms": 2.845,
-    "rtt_jitter_ms": 0.272
-  },
-  "internet_latency": {
-    "target": "1.1.1.1",
-    "rtt_avg_ms": 52.459,
-    "rtt_jitter_ms": 1.712,
-    "loss_pct": 0.0,
-    "target_alt": "8.8.8.8",
-    "rtt_avg_ms_alt": 53.279,
-    "loss_pct_alt": 0.0
-  },
-  "public": {
-    "ip": "[redacted]",
-    "asn": "AS53246",
-    "isp": "Cyber Info Provedor de Acesso LTDA ME",
-    "city": "[redacted]",
-    "country": "Brazil",
-    "country_iso": "BR",
-    "captive_portal": false
-  },
-  "dns": [
-    {
-      "resolver": "192.168.60.1",
-      "name": "apple.com",
-      "answer": "17.253.144.10",
-      "ok": true
+    "version": "0.14.0",
+    "timestamp": "2026-09-01T14:31:03Z",
+    "run_mode": "full",
+    "run_id": null,
+    "interface": {
+        "name": "en0",
+        "ip": "[redacted]",
+        "gateway": "10.0.0.1",
+        "gateway_mac": "[redacted]",
+        "type": "wifi",
+        "link_status": "active",
+        "link_up": true,
+        "self_assigned_ip": false,
+        "link_mbps": null,
+        "link_max_mbps": null,
+        "duplex": null,
+        "service": "Wi-Fi",
+        "metered": false,
+        "metered_certain": false,
+        "dhcp_router": "10.0.0.1"
     },
-    {
-      "resolver": "1.1.1.1",
-      "name": "apple.com",
-      "answer": "17.253.144.10",
-      "ok": true
+    "network": {
+        "id": "wifi:mac=[redacted]",
+        "label": "WiFi (SSID hidden by macOS)"
     },
-    {
-      "resolver": "8.8.8.8",
-      "name": "apple.com",
-      "answer": "17.253.144.10",
-      "ok": true
+    "wifi": {
+        "ssid": "[redacted]",
+        "bssid": "[redacted]",
+        "security": "WPA2_PSK",
+        "rssi": null,
+        "noise": null,
+        "snr": null,
+        "channel": null,
+        "phy": null,
+        "tx_rate": null,
+        "privileged": false,
+        "name_hidden": true,
+        "ssid_source": null
     },
-    {
-      "resolver": "192.168.60.1",
-      "name": "cloudflare.com",
-      "answer": "104.16.132.229",
-      "ok": true
-    },
-    {
-      "resolver": "1.1.1.1",
-      "name": "cloudflare.com",
-      "answer": "104.16.132.229",
-      "ok": true
-    },
-    {
-      "resolver": "8.8.8.8",
-      "name": "cloudflare.com",
-      "answer": "104.16.132.229",
-      "ok": true
-    }
-  ],
-  "traceroute": {
-    "target": "1.1.1.1",
-    "hops": [
-      {
-        "n": 1,
-        "ip": "192.168.60.1",
-        "responded": true,
-        "rtt_ms": 3.542
-      },
-      {
-        "n": 2,
-        "ip": "177.21.98.253",
-        "responded": true,
-        "rtt_ms": 3.905
-      },
-      {
-        "n": 3,
-        "ip": "177.21.96.1",
-        "responded": true,
-        "rtt_ms": 3.901
-      },
-      {
-        "n": 4,
-        "ip": null,
-        "responded": false,
-        "rtt_ms": null
-      },
-      {
-        "n": 5,
-        "ip": "10.5.6.137",
-        "responded": true,
-        "rtt_ms": 6.098
-      },
-      {
-        "n": 6,
-        "ip": "10.5.3.126",
-        "responded": true,
-        "rtt_ms": 6.22
-      },
-      {
-        "n": 7,
-        "ip": "10.5.16.5",
-        "responded": true,
-        "rtt_ms": 6.266
-      },
-      {
-        "n": 8,
-        "ip": "10.5.4.178",
-        "responded": true,
-        "rtt_ms": 9.639
-      },
-      {
-        "n": 9,
-        "ip": "10.5.14.69",
-        "responded": true,
-        "rtt_ms": 9.859
-      },
-      {
-        "n": 10,
-        "ip": "10.5.9.42",
-        "responded": true,
-        "rtt_ms": 80.876
-      },
-      {
-        "n": 11,
-        "ip": null,
-        "responded": false,
-        "rtt_ms": null
-      },
-      {
-        "n": 12,
-        "ip": "10.5.20.66",
-        "responded": true,
-        "rtt_ms": 60.699
-      },
-      {
-        "n": 13,
-        "ip": "187.16.219.111",
-        "responded": true,
-        "rtt_ms": 60.987
-      },
-      {
-        "n": 14,
-        "ip": "172.68.16.89",
-        "responded": true,
-        "rtt_ms": 48.533
-      },
-      {
-        "n": 15,
-        "ip": "1.1.1.1",
-        "responded": true,
-        "rtt_ms": 53.416
-      }
-    ]
-  },
-  "per_hop": [
-    {
-      "n": 1,
-      "ip": "192.168.60.1",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 3.245
-    },
-    {
-      "n": 2,
-      "ip": "177.21.98.253",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 4.814
-    },
-    {
-      "n": 3,
-      "ip": "177.21.96.1",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 7.06
-    },
-    {
-      "n": 4,
-      "ip": "10.5.6.137",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 5,
-      "ip": "10.5.3.126",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 6,
-      "ip": "10.5.16.5",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 7,
-      "ip": "10.5.4.178",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 8,
-      "ip": "10.5.14.69",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 9,
-      "ip": "10.5.9.42",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 10,
-      "ip": "10.5.20.66",
-      "responded": true,
-      "loss_pct": null,
-      "avg_ms": null
-    },
-    {
-      "n": 11,
-      "ip": "187.16.219.111",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 64.121
-    },
-    {
-      "n": 12,
-      "ip": "172.68.16.89",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 51.371
-    },
-    {
-      "n": 13,
-      "ip": "1.1.1.1",
-      "responded": true,
-      "loss_pct": 0.0,
-      "avg_ms": 52.962
-    }
-  ],
-  "bufferbloat": {
-    "idle_gw_rtt_ms": 2.845,
-    "loaded_gw_rtt_ms": 3.114,
-    "idle_inet_rtt_ms": 51.88,
-    "loaded_inet_rtt_ms": 52.766,
-    "gw_delta_ms": 0.3,
-    "inet_delta_ms": 0.9,
-    "gw_grade": "A",
-    "inet_grade": "A"
-  },
-  "mtu": {
-    "effective": 1500,
-    "path_size": 1472
-  },
-  "ipv6": {
-    "available": false,
-    "global_addr": null,
-    "gateway": null,
-    "ping_loss_pct": null,
-    "aaaa_ok": false,
-    "trace_hops": null,
-    "tcp_v6_ok": false,
-    "only": false,
-    "clat": false
-  },
-  "vpn": {
-    "active": false,
-    "type": null,
-    "name": null
-  },
-  "tcp_reach": [
-    {
-      "host": "1.1.1.1",
-      "port": 443,
-      "ok": true,
-      "elapsed_ms": 102.0
-    },
-    {
-      "host": "1.1.1.1",
-      "port": 53,
-      "ok": true,
-      "elapsed_ms": 100.0
-    },
-    {
-      "host": "8.8.8.8",
-      "port": 443,
-      "ok": true,
-      "elapsed_ms": 99.0
-    },
-    {
-      "host": "github.com",
-      "port": 443,
-      "ok": true,
-      "elapsed_ms": 117.0
-    },
-    {
-      "host": "apple.com",
-      "port": 443,
-      "ok": true,
-      "elapsed_ms": 164.0
-    }
-  ],
-  "path_actors": {
-    "split_tunnel": false,
-    "split_tunnel_interfaces": [],
-    "proxy": false,
-    "proxy_detail": null,
-    "network_filters": []
-  },
-  "availability": {
-    "window_hours": 24,
-    "outages": 0,
-    "downtime_s": 0,
-    "longest_outage_s": 0,
-    "short_drops": 0,
-    "unobserved_pct": 0
-  },
-  "traffic": {
-    "sampled_s": 2.0,
-    "down_mbps": 0.11,
-    "up_mbps": 0.01,
-    "top_processes": [
-      {
-        "name": "mDNSResponder",
-        "down_mbps": 0.04,
-        "up_mbps": 0.01
-      },
-      {
-        "name": "Google Chrome H",
-        "down_mbps": 0.04,
-        "up_mbps": 0.0
-      },
-      {
-        "name": "Spotify",
-        "down_mbps": 0.03,
-        "up_mbps": 0.0
-      }
-    ]
-  },
-  "watcher": {
-    "state": "failing",
-    "program": null,
-    "interval_s": 900,
-    "last_exit": 1,
-    "last_run_age_s": 430,
-    "installed_age_s": 185552,
-    "path_blocked": false
-  },
-  "wifi_scan": {
-    "current_channel": "149",
-    "current_band": "5GHz",
-    "neighbour_count": 6,
-    "current_channel_neighbours": 1
-  },
-  "wifi_disconnects": {
-    "window_hours": 1,
-    "count": 0,
-    "events": []
-  },
-  "speedtest": {
-    "down_mbps": 19.0,
-    "up_mbps": 14.1,
-    "latency_ms": 6.127,
-    "jitter_ms": 0.149,
-    "server": "Cyber Info Servi\u00e7os de Telecomunica\u00e7\u00f5es Ltda"
-  },
-  "ntp": {
-    "drift_seconds": 0.080672,
-    "using_network_time": null,
-    "server": null
-  },
-  "duplicate_ips": [],
-  "dhcp": {
-    "server": "192.168.60.1",
-    "lease_start": "08/30/2026 11:55:35",
-    "lease_end": "08/31/2026 11:55:35",
-    "time_remaining_s": 60996,
-    "dns_servers": "192.168.60.1"
-  },
-  "mtr": {
-    "target": "1.1.1.1",
-    "duration_s": 12,
-    "hops": [
-      {
-        "n": 1,
-        "ip": "192.168.60.1",
-        "responded": true,
+    "gateway": {
+        "ip": "10.0.0.1",
         "loss_pct": 0.0,
-        "avg_ms": 3.245
-      },
-      {
-        "n": 2,
-        "ip": "177.21.98.253",
-        "responded": true,
+        "rtt_avg_ms": 5.019,
+        "rtt_jitter_ms": 3.833
+    },
+    "internet_latency": {
+        "target": "1.1.1.1",
+        "rtt_avg_ms": 55.631,
+        "rtt_jitter_ms": 3.926,
         "loss_pct": 0.0,
-        "avg_ms": 4.814
-      },
-      {
-        "n": 3,
-        "ip": "177.21.96.1",
-        "responded": true,
-        "loss_pct": 0.0,
-        "avg_ms": 7.06
-      },
-      {
-        "n": 4,
-        "ip": "10.5.6.137",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 5,
-        "ip": "10.5.3.126",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 6,
-        "ip": "10.5.16.5",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 7,
-        "ip": "10.5.4.178",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 8,
-        "ip": "10.5.14.69",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 9,
-        "ip": "10.5.9.42",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 10,
-        "ip": "10.5.20.66",
-        "responded": true,
-        "loss_pct": null,
-        "avg_ms": null
-      },
-      {
-        "n": 11,
-        "ip": "187.16.219.111",
-        "responded": true,
-        "loss_pct": 0.0,
-        "avg_ms": 64.121
-      },
-      {
-        "n": 12,
-        "ip": "172.68.16.89",
-        "responded": true,
-        "loss_pct": 0.0,
-        "avg_ms": 51.371
-      },
-      {
-        "n": 13,
-        "ip": "1.1.1.1",
-        "responded": true,
-        "loss_pct": 0.0,
-        "avg_ms": 52.962
-      }
+        "target_alt": "8.8.8.8",
+        "rtt_avg_ms_alt": 58.132,
+        "loss_pct_alt": 0.0
+    },
+    "public": {
+        "ip": "[redacted]",
+        "asn": "AS53246",
+        "isp": "Cyber Info Provedor de Acesso LTDA ME",
+        "city": "[redacted]",
+        "country": "Brazil",
+        "country_iso": "BR",
+        "captive_portal": false
+    },
+    "dns": [
+        {
+            "resolver": "177.21.96.10",
+            "name": "apple.com",
+            "answer": "17.253.144.10",
+            "ok": true
+        },
+        {
+            "resolver": "1.1.1.1",
+            "name": "apple.com",
+            "answer": "17.253.144.10",
+            "ok": true
+        },
+        {
+            "resolver": "8.8.8.8",
+            "name": "apple.com",
+            "answer": "17.253.144.10",
+            "ok": true
+        },
+        {
+            "resolver": "177.21.96.10",
+            "name": "cloudflare.com",
+            "answer": "104.16.132.229",
+            "ok": true
+        },
+        {
+            "resolver": "1.1.1.1",
+            "name": "cloudflare.com",
+            "answer": "104.16.132.229",
+            "ok": true
+        },
+        {
+            "resolver": "8.8.8.8",
+            "name": "cloudflare.com",
+            "answer": "104.16.132.229",
+            "ok": true
+        }
     ],
-    "first_lossy_hop": null
-  },
-  "wan": {
-    "load_balancing": {
-      "distinct_asns": [
-        "AS53246"
-      ],
-      "distinct_ips": [
-        "[redacted]"
-      ],
-      "active": false
+    "traceroute": {
+        "target": "1.1.1.1",
+        "hops": [
+            {
+                "n": 1,
+                "ip": "10.0.0.1",
+                "responded": true,
+                "rtt_ms": 3.948
+            },
+            {
+                "n": 2,
+                "ip": "10.76.20.1",
+                "responded": true,
+                "rtt_ms": 6.539
+            },
+            {
+                "n": 3,
+                "ip": "172.18.100.106",
+                "responded": true,
+                "rtt_ms": 5.936
+            },
+            {
+                "n": 4,
+                "ip": "172.18.100.105",
+                "responded": true,
+                "rtt_ms": 4.51
+            },
+            {
+                "n": 5,
+                "ip": null,
+                "responded": false,
+                "rtt_ms": null
+            },
+            {
+                "n": 6,
+                "ip": "10.5.6.137",
+                "responded": true,
+                "rtt_ms": 7.468
+            },
+            {
+                "n": 7,
+                "ip": "10.5.3.126",
+                "responded": true,
+                "rtt_ms": 30.859
+            },
+            {
+                "n": 8,
+                "ip": "10.5.16.5",
+                "responded": true,
+                "rtt_ms": 9.462
+            },
+            {
+                "n": 9,
+                "ip": "10.5.4.178",
+                "responded": true,
+                "rtt_ms": 14.514
+            },
+            {
+                "n": 10,
+                "ip": "10.5.14.69",
+                "responded": true,
+                "rtt_ms": 9.55
+            },
+            {
+                "n": 11,
+                "ip": "10.5.9.42",
+                "responded": true,
+                "rtt_ms": 56.17
+            },
+            {
+                "n": 12,
+                "ip": null,
+                "responded": false,
+                "rtt_ms": null
+            },
+            {
+                "n": 13,
+                "ip": "10.5.20.66",
+                "responded": true,
+                "rtt_ms": 54.487
+            },
+            {
+                "n": 14,
+                "ip": null,
+                "responded": false,
+                "rtt_ms": null
+            },
+            {
+                "n": 15,
+                "ip": "172.68.16.129",
+                "responded": true,
+                "rtt_ms": 53.857
+            },
+            {
+                "n": 16,
+                "ip": "1.1.1.1",
+                "responded": true,
+                "rtt_ms": 54.77
+            }
+        ]
     },
-    "double_nat": {
-      "detected": false,
-      "rfc1918_chain": [
-        "192.168.60.1"
-      ],
-      "home_chain": [
-        "192.168.60.1"
-      ],
-      "home_count": 1,
-      "isp_transit_chain": [],
-      "isp_transit_count": 0
+    "per_hop": [
+        {
+            "n": 1,
+            "ip": "10.0.0.1",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 5.681
+        },
+        {
+            "n": 2,
+            "ip": "10.76.20.1",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 7.962
+        },
+        {
+            "n": 3,
+            "ip": "172.18.100.106",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 20.24
+        },
+        {
+            "n": 4,
+            "ip": "172.18.100.105",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 8.499
+        },
+        {
+            "n": 5,
+            "ip": "10.5.6.137",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 6,
+            "ip": "10.5.3.126",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 7,
+            "ip": "10.5.16.5",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 8,
+            "ip": "10.5.4.178",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 9,
+            "ip": "10.5.14.69",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 10,
+            "ip": "10.5.9.42",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 11,
+            "ip": "10.5.20.66",
+            "responded": true,
+            "loss_pct": null,
+            "avg_ms": null
+        },
+        {
+            "n": 12,
+            "ip": "172.68.16.129",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 54.317
+        },
+        {
+            "n": 13,
+            "ip": "1.1.1.1",
+            "responded": true,
+            "loss_pct": 0.0,
+            "avg_ms": 54.403
+        }
+    ],
+    "bufferbloat": {
+        "idle_gw_rtt_ms": 5.019,
+        "loaded_gw_rtt_ms": 3.558,
+        "idle_inet_rtt_ms": 54.036,
+        "loaded_inet_rtt_ms": 52.632,
+        "gw_delta_ms": -1.5,
+        "inet_delta_ms": -1.4,
+        "gw_grade": "A",
+        "inet_grade": "A"
     },
-    "upnp": {
-      "state": "disabled",
-      "device": null,
-      "url": null,
-      "tested_via": "ssdp"
-    }
-  },
-  "hosts_file": {
-    "custom_count": 0,
-    "suspicious_redirects": []
-  },
-  "timings": {
-    "total_s": 60.55,
-    "budget_s": 30.0,
-    "over_budget": true,
-    "phases": {
-      "iface": 0.14,
-      "vpn": 0.04,
-      "wifi": 0.08,
-      "gateway": 3.92,
-      "arp": 0.04,
-      "netid": 0.0,
-      "dhcp": 0.07,
-      "public": 0.71,
-      "parallel_batch": 14.23,
-      "internet_ping": 4.01,
-      "bufferbloat": 11.1,
-      "mtu": 0.48,
-      "traceroute": 4.4,
-      "nat": 0.02,
-      "mtr": 4.4,
-      "watchdog": 0.06,
-      "availability": 0.09,
-      "speedtest": 16.11
-    }
-  },
-  "baseline": {
-    "compared_runs": 10,
-    "network_id": "wifi:mac=[redacted]",
-    "skipped_other_networks": 1879,
-    "regressions": []
-  },
-  "diagnosis": [
-    {
-      "severity": "warn",
-      "rule": "ND-1",
-      "summary": "netdiag's background watcher is installed but isn't running: launchd reports that its last run exited 1. Nothing about your network is wrong \u2014 but nothing has been recorded in the meantime either, so the history this report compares against has a hole in it. Re-install it with: netdiag --uninstall-watcher && netdiag --install-watcher, which now refuses to install a watcher somewhere it could never run."
+    "mtu": {
+        "effective": 1480,
+        "path_size": 1452
     },
-    {
-      "severity": "info",
-      "rule": "WI-1",
-      "summary": "macOS isn't telling netdiag which WiFi network you're on, so this check is labelled with a generic name instead of the real one. Nothing is broken and nothing is mis-filed \u2014 checks are grouped by your router's hardware address, not by its name \u2014 but every unnamed network looks alike in a list, so it's hard to tell one place from another later. Granting Location Services to whatever runs netdiag (System Settings \u2192 Privacy & Security \u2192 Location Services) fixes the name for future checks."
-    }
-  ],
-  "most_likely_root_cause": "netdiag's background watcher is installed but isn't running: launchd reports that its last run exited 1. Nothing about your network is wrong \u2014 but nothing has been recorded in the meantime either, so the history this report compares against has a hole in it. Re-install it with: netdiag --uninstall-watcher && netdiag --install-watcher, which now refuses to install a watcher somewhere it could never run.",
-  "netdiag_extras": {
-    "arp_gw_incomplete": false,
-    "network_changed_mid_run": false,
-    "target": null,
-    "target_ping": null,
-    "target_traceroute": null
-  },
-  "suitability": [
-    {
-      "activity": "calls",
-      "label": "Video & voice calls",
-      "verdict": "good",
-      "because": [],
-      "unmeasured_reason": null
+    "ipv6": {
+        "available": false,
+        "global_addr": null,
+        "gateway": null,
+        "ping_loss_pct": null,
+        "aaaa_ok": false,
+        "trace_hops": null,
+        "tcp_v6_ok": false,
+        "only": false,
+        "clat": false
     },
-    {
-      "activity": "streaming",
-      "label": "Streaming",
-      "verdict": "good",
-      "because": [],
-      "unmeasured_reason": null
+    "vpn": {
+        "active": false,
+        "type": null,
+        "name": null
     },
-    {
-      "activity": "gaming",
-      "label": "Gaming",
-      "verdict": "good",
-      "because": [],
-      "unmeasured_reason": null
+    "tcp_reach": [
+        {
+            "host": "1.1.1.1",
+            "port": 443,
+            "ok": true,
+            "elapsed_ms": 74.0
+        },
+        {
+            "host": "1.1.1.1",
+            "port": 53,
+            "ok": true,
+            "elapsed_ms": 79.0
+        },
+        {
+            "host": "8.8.8.8",
+            "port": 443,
+            "ok": true,
+            "elapsed_ms": 81.0
+        },
+        {
+            "host": "github.com",
+            "port": 443,
+            "ok": true,
+            "elapsed_ms": 90.0
+        },
+        {
+            "host": "apple.com",
+            "port": 443,
+            "ok": true,
+            "elapsed_ms": 80.0
+        }
+    ],
+    "path_actors": {
+        "split_tunnel": false,
+        "split_tunnel_interfaces": [],
+        "proxy": false,
+        "proxy_detail": null,
+        "network_filters": []
     },
-    {
-      "activity": "vpn",
-      "label": "VPN & remote access",
-      "verdict": "good",
-      "because": [],
-      "unmeasured_reason": null
+    "availability": {
+        "window_hours": 24,
+        "outages": 1,
+        "downtime_s": 0,
+        "longest_outage_s": 0,
+        "short_drops": 0,
+        "unobserved_pct": 0
     },
-    {
-      "activity": "browsing",
-      "label": "Ordinary browsing",
-      "verdict": "good",
-      "because": [],
-      "unmeasured_reason": null
-    }
-  ]
+    "traffic": {
+        "sampled_s": 2.0,
+        "down_mbps": 0.74,
+        "up_mbps": 0.02,
+        "top_processes": [
+            {
+                "name": "codex",
+                "down_mbps": 0.68,
+                "up_mbps": 0.0
+            },
+            {
+                "name": "Google Chrome H",
+                "down_mbps": 0.02,
+                "up_mbps": 0.01
+            },
+            {
+                "name": "mDNSResponder",
+                "down_mbps": 0.01,
+                "up_mbps": 0.0
+            }
+        ]
+    },
+    "watcher": {
+        "state": "ok",
+        "program": null,
+        "interval_s": 900,
+        "last_exit": 0,
+        "last_run_age_s": 307,
+        "installed_age_s": 331482,
+        "path_blocked": false
+    },
+    "wifi_scan": {
+        "current_channel": "1",
+        "current_band": "2GHz",
+        "neighbour_count": 12,
+        "current_channel_neighbours": 6
+    },
+    "wifi_disconnects": {
+        "window_hours": 1,
+        "count": 0,
+        "events": []
+    },
+    "speedtest": {
+        "down_mbps": 78.9,
+        "up_mbps": 80.3,
+        "latency_ms": 5.374,
+        "jitter_ms": 0.442,
+        "server": "Cyber Info Servi\u00e7os de Telecomunica\u00e7\u00f5es Ltda"
+    },
+    "ntp": {
+        "drift_seconds": 0.093121,
+        "using_network_time": null,
+        "server": null
+    },
+    "duplicate_ips": [],
+    "dhcp": {
+        "server": "10.0.0.1",
+        "lease_start": "09/01/2026 04:23:07",
+        "lease_end": "09/02/2026 04:23:07",
+        "time_remaining_s": 60720,
+        "dns_servers": "177.21.96.10"
+    },
+    "mtr": {
+        "target": "1.1.1.1",
+        "duration_s": 12,
+        "hops": [
+            {
+                "n": 1,
+                "ip": "10.0.0.1",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 5.681
+            },
+            {
+                "n": 2,
+                "ip": "10.76.20.1",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 7.962
+            },
+            {
+                "n": 3,
+                "ip": "172.18.100.106",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 20.24
+            },
+            {
+                "n": 4,
+                "ip": "172.18.100.105",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 8.499
+            },
+            {
+                "n": 5,
+                "ip": "10.5.6.137",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 6,
+                "ip": "10.5.3.126",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 7,
+                "ip": "10.5.16.5",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 8,
+                "ip": "10.5.4.178",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 9,
+                "ip": "10.5.14.69",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 10,
+                "ip": "10.5.9.42",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 11,
+                "ip": "10.5.20.66",
+                "responded": true,
+                "loss_pct": null,
+                "avg_ms": null
+            },
+            {
+                "n": 12,
+                "ip": "172.68.16.129",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 54.317
+            },
+            {
+                "n": 13,
+                "ip": "1.1.1.1",
+                "responded": true,
+                "loss_pct": 0.0,
+                "avg_ms": 54.403
+            }
+        ],
+        "first_lossy_hop": null
+    },
+    "wan": {
+        "load_balancing": {
+            "distinct_asns": [
+                "AS53246"
+            ],
+            "distinct_ips": [
+                "[redacted]"
+            ],
+            "active": false
+        },
+        "double_nat": {
+            "detected": true,
+            "rfc1918_chain": [
+                "10.0.0.1",
+                "10.76.20.1",
+                "172.18.100.106",
+                "172.18.100.105"
+            ],
+            "home_chain": [
+                "172.18.100.106",
+                "172.18.100.105"
+            ],
+            "home_count": 2,
+            "isp_transit_chain": [
+                "10.0.0.1",
+                "10.76.20.1"
+            ],
+            "isp_transit_count": 2
+        },
+        "upnp": {
+            "state": "enabled",
+            "device": "NAT-PMP responder",
+            "url": null,
+            "tested_via": "nat-pmp"
+        }
+    },
+    "hosts_file": {
+        "custom_count": 0,
+        "suspicious_redirects": []
+    },
+    "timings": {
+        "total_s": 69.02,
+        "budget_s": 30.0,
+        "over_budget": true,
+        "phases": {
+            "iface": 0.07,
+            "vpn": 0.03,
+            "wifi": 0.05,
+            "gateway": 3.9,
+            "arp": 0.03,
+            "netid": 0.0,
+            "dhcp": 0.04,
+            "public": 0.57,
+            "parallel_batch": 9.88,
+            "internet_ping": 4.0,
+            "bufferbloat": 11.05,
+            "mtu": 4.48,
+            "traceroute": 6.36,
+            "nat": 0.03,
+            "mtr": 4.25,
+            "watchdog": 0.04,
+            "availability": 0.05,
+            "speedtest": 23.87
+        }
+    },
+    "baseline": {
+        "compared_runs": 10,
+        "network_id": "wifi:mac=[redacted]",
+        "skipped_other_networks": 1566,
+        "regressions": []
+    },
+    "diagnosis": [
+        {
+            "severity": "warn",
+            "rule": "WS-1",
+            "summary": "Your WiFi channel is crowded (6 neighbouring networks). If performance is inconsistent, choose a less busy channel or let the router select one automatically."
+        },
+        {
+            "severity": "warn",
+            "rule": "NAT-1",
+            "summary": "You have 2 routers chained together in your home (172.18.100.106 \u2192 172.18.100.105), then your ISP transit (10.0.0.1 \u2192 10.76.20.1). That breaks games, Plex, Steam in-home streaming, video doorbells, and anything else that needs to \"open a port\" \u2014 incoming connections get lost between the routers. Fix: log into the outer router's admin page and set it to \"bridge mode\" or \"access-point mode\" so the inner router does the routing alone."
+        },
+        {
+            "severity": "info",
+            "rule": "WI-1",
+            "summary": "macOS isn't telling netdiag which WiFi network you're on, so this check is labelled with a generic name instead of the real one. Nothing is broken and nothing is mis-filed \u2014 checks are grouped by your router's hardware address, not by its name \u2014 but every unnamed network looks alike in a list, so it's hard to tell one place from another later. Granting Location Services to whatever runs netdiag (System Settings \u2192 Privacy & Security \u2192 Location Services) fixes the name for future checks."
+        }
+    ],
+    "most_likely_root_cause": "Your WiFi channel is crowded (6 neighbouring networks). If performance is inconsistent, choose a less busy channel or let the router select one automatically.",
+    "netdiag_extras": {
+        "arp_gw_incomplete": false,
+        "network_changed_mid_run": false,
+        "target": null,
+        "target_ping": null,
+        "target_traceroute": null
+    },
+    "suitability": [
+        {
+            "activity": "calls",
+            "label": "Video & voice calls",
+            "verdict": "degraded",
+            "because": [
+                "WS-1"
+            ],
+            "unmeasured_reason": null
+        },
+        {
+            "activity": "streaming",
+            "label": "Streaming",
+            "verdict": "degraded",
+            "because": [
+                "WS-1"
+            ],
+            "unmeasured_reason": null
+        },
+        {
+            "activity": "gaming",
+            "label": "Gaming",
+            "verdict": "degraded",
+            "because": [
+                "WS-1",
+                "NAT-1"
+            ],
+            "unmeasured_reason": null
+        },
+        {
+            "activity": "vpn",
+            "label": "VPN & remote access",
+            "verdict": "degraded",
+            "because": [
+                "WS-1",
+                "NAT-1"
+            ],
+            "unmeasured_reason": null
+        },
+        {
+            "activity": "browsing",
+            "label": "Ordinary browsing",
+            "verdict": "good",
+            "because": [],
+            "unmeasured_reason": null
+        }
+    ]
 }

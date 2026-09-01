@@ -13,12 +13,15 @@ import Foundation
 struct CLICapabilities: Decodable, Sendable {
     var schema: Int?
     var version: String?
-    /// Schema number of six other outputs (`run`, `monitor`, `history`,
-    /// `show`, `rules_catalog`, `progress`), keyed exactly as
-    /// docs/JSON-SCHEMA.md names them. Nothing in this app reads an entry
-    /// here to decide behavior yet — `Feature` membership below is what
-    /// gating uses — so this is carried through only to be shown, in the
-    /// About section's expert-ish caption.
+    /// Schema number of seven other outputs (`run`, `monitor`, `history`,
+    /// `show`, `rules_catalog`, `signal_scale`, `progress`), keyed exactly
+    /// as docs/JSON-SCHEMA.md names them. Nothing in this app reads an
+    /// entry here to decide behavior yet — `Feature` membership below is
+    /// what gating uses — so this is carried through only to be shown, in
+    /// the About section's expert-ish caption. `schemas.run >= 2` is the
+    /// answer to "will this CLI's `--json` carry a `suitability` block",
+    /// and is the entry to reach for the day a gate is needed rather than
+    /// probing the run document for the key.
     var schemas: [String: Int]?
     /// An open set, not a closed enum — see docs/JSON-SCHEMA.md: "expect
     /// it to grow as new CLI surface ships. A GUI checks membership, not

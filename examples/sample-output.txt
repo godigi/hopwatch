@@ -1,23 +1,24 @@
-netdiag  2026-08-30-190000
-log: /Users/bfreeman/net-diag/2026-08-30-190000.log
+netdiag  2026-09-01-113221
+log: /Users/bfreeman/net-diag/2026-09-01-113221.log
 
 ── Report ──
-  ⚠  Background watcher  last run exited 1
+  ⚠  Packet size         1480 bytes · below standard · some sites may hang
+  ⚠  NAT topology        double-NAT · 2 routers chained
+  ⚠  Router config       UPnP / port-forwarding enabled
 
-  ✓  Network             en0 · WiFi 5GHz ch149
-  ✓  Router              192.168.60.1 · 0% loss · 3.5 ms · ±1.4 ms jitter
+  ✓  Network             en0 · WiFi 2GHz ch1
+  ✓  Router              10.0.0.1 · 0% loss · 3.7 ms · ±1.9 ms jitter
   ✓  Internet            Cyber Info Provedor de Acesso LTDA ME ([redacted], Brazil)
-  ✓  Latency             1.1.1.1 · 52 ms · ±1.1 ms jitter
+  ✓  Latency             1.1.1.1 · 55 ms · ±2.7 ms jitter
   ✓  Packet loss         0.0% to 1.1.1.1 · 0.0% to 8.8.8.8 · clean
   ✓  DNS                 working
   ✓  Bufferbloat         grade A/A · clean under load
-  ✓  Packet size         1500 bytes · standard
-  ✓  Router config       UPnP disabled (safer default)
   ✓  Hosts file          clean (only macOS defaults)
-  ✓  Availability        no drops recorded in 24h
+  ✓  Background watcher  last ran 6 minutes ago
   ·  VPN                 not active
   ·  IPv6                not available (IPv4-only network)
   ·  Speed               measuring now — result prints below (~1 min)
+  ·  Availability        1 drop(s) in 24h · 0 seconds down
 
 ── What should work here ──
   ✓ Video & voice calls: fine
@@ -28,12 +29,13 @@ log: /Users/bfreeman/net-diag/2026-08-30-190000.log
   ✓ Ordinary browsing: fine
 
 ── What we found ──
-  ⚠ netdiag's background watcher is installed but isn't running: launchd
-    reports that its last run exited 1. Nothing about your network is
-    wrong — but nothing has been recorded in the meantime either, so the
-    history this report compares against has a hole in it. Re-install it
-    with: netdiag --uninstall-watcher && netdiag --install-watcher, which
-    now refuses to install a watcher somewhere it could never run.
+  ⚠ You have 2 routers chained together in your home (172.18.100.106 →
+    172.18.100.105), then your ISP transit (10.0.0.1 → 10.76.20.1). That
+    breaks games, Plex, Steam in-home streaming, video doorbells, and
+    anything else that needs to "open a port" — incoming connections get
+    lost between the routers. Fix: log into the outer router's admin page
+    and set it to "bridge mode" or "access-point mode" so the inner router
+    does the routing alone.
 
   · macOS isn't telling netdiag which WiFi network you're on, so this
     check is labelled with a generic name instead of the real one. Nothing
@@ -46,8 +48,8 @@ log: /Users/bfreeman/net-diag/2026-08-30-190000.log
 
 ── Speed test ──
   · Running Ookla speedtest...
-  ✓ Down 19.1 Mbps · Up 14.0 Mbps · 5.919 ms (jitter 0.338 ms)
+  ✓ Down 87.8 Mbps · Up 85.3 Mbps · 5.357 ms (jitter 1.101 ms)
   · Server: Cyber Info Serviços de Telecomunicações Ltda
 
 Pass --expert to see the underlying measurements.
-Report saved to: /Users/bfreeman/net-diag/2026-08-30-190000.log
+Report saved to: /Users/bfreeman/net-diag/2026-09-01-113221.log

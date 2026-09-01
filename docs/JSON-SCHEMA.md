@@ -105,9 +105,13 @@ down is down at any depth.
 Whether a measurement family ran is decided in `helpers/emit_json.py`'s
 `measured_families()` from the schema's own null contract: a field is `null`
 when its probe did not run, never `0`. The one family without a natural null
-is `path`, which keys off `wan.upnp.state != "unknown"` — `wan` is present
-even on `--quick`, but its UPnP probe sits behind the same `--quick` gate as
-the rest of the path batch, so that string is the honest signal.
+is `path`, which keys off `wan.upnp.state` being one of the two values that
+mean the probe ran — `"enabled"` or `"disabled"` — rather than off any one
+spelling of absence. `wan` is present even on `--quick`, but its UPnP probe
+sits behind the same `--quick` gate as the rest of the path batch, so
+`"unknown"` (bash's default) is the honest signal there; `null` and `""`
+mean the same thing and count the same way, which is what a direct
+invocation of `helpers/emit_json.py` produces.
 
 ## The event journal and `--events`
 
@@ -191,6 +195,27 @@ fault. `ended_by` says how each one ended:
 | `cleared` | the fault went away and the monitor saw it |
 | `monitor-restart` | the recorder died or the Mac rebooted while it was open. Closed there, with `duration_is_lower_bound: true`, rather than silently spanning a period nobody watched |
 | `still-open` | open at the end of the record. `ongoing: true`, and the duration is measured **to the last event**, never to now — the recorder may have stopped an hour ago and "ongoing for four hours" would be inventing observation |
+
+**A fault can end inside the window and have begun outside it.** That is
+the likeliest shape of "was the internet down last night?", so the episode
+is reported rather than dropped, with `started: null`, `duration_s: null`
+and `start_unobserved: true`:
+
+```json
+{"rule": "N1", "summary": "No network connection at all",
+ "network": "wifi:mac=…", "network_label": "Home",
+ "started": null, "start_unobserved": true,
+ "ended": "2026-08-28T07:02:11Z", "duration_s": null,
+ "ongoing": false, "unobserved_s": 0, "ended_by": "cleared"}
+```
+
+`start_unobserved` is present only when `true`, like
+`duration_is_lower_bound`. An end with no beginning is still an end; the
+beginning is not invented, and no duration is derived from one. Episodes
+with an unknown start sort first — the only thing known about the start is
+that it is at or before every start that *was* seen. The same input
+produces the same answer in the GUI (`ActivityEntry.fold`): a resolved
+episode with no duration.
 
 **`observation` is not decoration.** `MonitorSeries.swift` refuses to draw
 a line across a gap because a smooth line through a two-minute outage is
@@ -1160,8 +1185,8 @@ every optional dependency below is missing.
 {
   "schema": 1,
   "version": "0.9.0",
-  "schemas": {"run": 1, "monitor": 2, "history": 2, "show": 1,
-              "rules_catalog": 4, "signal_scale": 1, "progress": 1},
+  "schemas": {"run": 2, "monitor": 2, "history": 2, "show": 1,
+              "rules_catalog": 5, "signal_scale": 1, "progress": 1},
   "features": ["capabilities", "version", "progress", "monitor", "history",
                "show", "redact", "speed-only", "dns-only",
                "bufferbloat-only", "ping-only", "watcher", "rules-catalog",
@@ -1184,10 +1209,14 @@ every optional dependency below is missing.
   a `"schema"` field each of those already emits (`lib/monitor.sh`,
   `helpers/history.py`, `helpers/rules_catalog.py`,
   `helpers/signal_scale.py`) — see their sections above and below. `run`
-  (the `--json` output) and `progress` (the `--progress` event stream) do
-  not embed a schema field as of v0.9.0; both report `1` here as the
-  number a future field would start at, and this note is that field's
-  documentation until one exists.
+  (the `--json` output) and `progress` (the `--progress` event stream)
+  embed no schema field of their own; the number reported here is the
+  only one either has, and this note is that field's documentation until
+  one exists. `run` is therefore versioned by hand in
+  `helpers/capabilities.py`, and is `2`: `1` was the run document before
+  it grew the top-level `suitability` block, so a consumer that reads
+  `schemas.run >= 2` knows the block is there without probing for the
+  key. `progress` is still `1`, the number a first field would start at.
 - **`features`** is an open set, not a closed enum — expect it to grow
   as new CLI surface ships. A GUI checks membership (`"redact" in
   features`), not the array's length or order.

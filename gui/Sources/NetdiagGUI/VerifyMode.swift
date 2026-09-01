@@ -78,6 +78,7 @@ private enum VerifyHarness {
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
         runReportProvenanceTests()
+        runTrendsClampTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -229,12 +230,74 @@ private enum VerifyHarness {
         check(!(restarted.first?.detail?.contains("still active") ?? false),
               "an open episode does not assert the fault is ongoing")
 
-        // A clear whose fire is older than the store's 500-entry cap
-        // describes an end with no beginning: no duration exists to state.
+        // Two fires with *no clear between* — the case above never reaches,
+        // because its clear closes the first episode before the second fire
+        // arrives. This is the real restart: the monitor died at some point
+        // during an hour-long fault and re-observed it on the way back up.
+        //
+        // The hour between the two fires is not a guess. The rule was firing
+        // at the start of it and firing at the end of it, so the fault is
+        // known to have held for at least that long, and `helpers/events.py`
+        // says so by keeping the earlier start (`episodes()`, the `continue`
+        // on a second `rule-fired`). What went unobserved is only whether it
+        // held *continuously*, which is what the `+` is for.
+        let refired = ActivityEntry.fold([
+            event("rule-fired", "G3", 3600),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(refired.count, 1, "a fire-on-fire stays one row")
+        equal(refired.first?.occurrences, 1,
+              "as one episode — the second fire re-observed a fault already open")
+        equal(refired.first?.totalDuration, 3600,
+              "carrying the span from the first fire to the last sighting")
+        check(refired.first?.durationIsLowerBound == true,
+              "marked a floor, because the gap between the two was unobserved")
+        equal(refired.first?.detail, "lasted 1h+",
+              "and the floor actually renders — a `+` needs a duration to sit on")
+        check(refired.first?.isOngoing == true,
+              "still open: no clear was ever seen for it")
+
+        // A clear whose fire is not in the slice being folded describes an
+        // end with no beginning. There is no duration to state — but there
+        // is still an ending, and the CLI's own "Resolved: …" states it.
+        //
+        // Dropping the row entirely was defensible against the store's
+        // 500-entry cap and wrong against the dropdown, which folds a
+        // rolling `eventLog.within(hours: 24)` and so manufactures orphans
+        // routinely: a fault that fired 20:00 yesterday and cleared 09:00
+        // today is a lone `rule-cleared` by 10:00, and a long fault that
+        // just ended is precisely what someone opening the menu bar is
+        // looking for.
         let orphan = ActivityEntry.fold([
             event("rule-cleared", "G3", 0, "Resolved: Minor packet loss to router"),
         ])
-        equal(orphan.count, 0, "an orphan clear contributes no row")
+        equal(orphan.count, 1, "an orphan clear still reports that the fault ended")
+        equal(orphan.first?.summary, "Resolved: Minor packet loss to router",
+              "in the CLI's own words")
+        equal(orphan.first?.kind, "rule-cleared",
+              "styled as a resolution — the green check EventRow used to give it")
+        equal(orphan.first?.totalDuration, nil,
+              "carrying no duration, because no start was ever observed")
+        check(orphan.first?.isOngoing == false, "and not marked still open")
+        equal(orphan.first?.detail, nil,
+              "so the row adds nothing beyond the summary")
+
+        // ...and where the rule fired again later the same day, the orphan
+        // merges into that row rather than doubling it — and the row reads
+        // as the fault, not as its resolution, whichever merged first.
+        let orphanThenFlap = ActivityEntry.fold([
+            event("rule-cleared", "G3", 0, "Resolved: Minor packet loss to router"),
+            event("rule-fired", "G3", 600),
+            event("rule-cleared", "G3", 900, "Resolved: Minor packet loss to router"),
+        ])
+        equal(orphanThenFlap.count, 1, "an orphan merges into the rule's day row")
+        equal(orphanThenFlap.first?.occurrences, 2, "counting both endings")
+        equal(orphanThenFlap.first?.kind, "rule-fired",
+              "a day the rule was seen to fire reads as the fault")
+        equal(orphanThenFlap.first?.summary, "Minor packet loss to router",
+              "keeping the fault's words, not the resolution's")
+        equal(orphanThenFlap.first?.totalDuration, 300,
+              "and only the span that was actually observed")
 
         // Discrete facts have no duration and must never be paired.
         let discrete = ActivityEntry.fold([
@@ -254,6 +317,45 @@ private enum VerifyHarness {
             event("rule-cleared", "G3", 86_400 * 2 + 60, "Resolved: Minor packet loss to router"),
         ])
         equal(acrossDays.count, 2, "separate days stay separate rows")
+
+        // ...and a fault that runs *through* midnight is filed once, under
+        // the day it began.
+        //
+        // `group` keys per day on the episode's start, so a 23:50→00:10
+        // fault and a 09:00 one the next morning are two entries — right,
+        // they are two occurrences on two days. `ActivityView` then bucketed
+        // both into sections by `latest`, which is Tuesday for both, and
+        // Tuesday's section printed two identical "Minor packet loss to
+        // router" rows: the one-row-per-rule-per-day promise this type's
+        // header makes, broken by keying and bucketing on different fields.
+        let cal = Calendar.current
+        let midnightBase = cal.startOfDay(for: day)
+        func moment(_ dayOffset: Int, _ hour: Int, _ minute: Int) -> Date {
+            let shifted = cal.date(byAdding: .day, value: dayOffset,
+                                   to: midnightBase)!
+            return cal.date(bySettingHour: hour, minute: minute, second: 0,
+                            of: shifted)!
+        }
+        func at(_ kind: String, _ when: Date, _ summary: String) -> NetworkEvent {
+            NetworkEvent(date: when, kind: kind, summary: summary, ruleID: "G3")
+        }
+        let crossing = ActivityEntry.byDay(ActivityEntry.fold([
+            at("rule-fired", moment(0, 23, 50), "Minor packet loss to router"),
+            at("rule-cleared", moment(1, 0, 10),
+               "Resolved: Minor packet loss to router"),
+            at("rule-fired", moment(1, 9, 0), "Minor packet loss to router"),
+            at("rule-cleared", moment(1, 9, 5),
+               "Resolved: Minor packet loss to router"),
+        ], calendar: cal), calendar: cal)
+        equal(crossing.count, 2, "a midnight crossing spans two day sections")
+        equal(crossing.first?.day, cal.startOfDay(for: moment(1, 0, 0)),
+              "newest day first")
+        equal(crossing.first?.entries.count, 1,
+              "the second day lists G3 once, not twice")
+        equal(crossing.last?.entries.count, 1,
+              "and the crossing episode is filed under the day it began")
+        equal(crossing.last?.entries.first?.totalDuration, 1200,
+              "still carrying the 20 minutes it ran across midnight")
 
         // An alert is about a rule the CLI already reported, so listing both
         // printed one incident twice in different words. The alert is
@@ -694,6 +796,76 @@ private enum VerifyHarness {
                                        currentNetworkID: "mac:aa:bb:cc:dd:ee:ff",
                                        canonical: { _ in "merged" }) == false,
               "two ids merged into one network count as the same network")
+    }
+
+    // MARK: - Trends y-axis clamp
+
+    /// `TrendsView.Clamp` is the only thing standing between one 2.8 s
+    /// reading and a latency chart drawn as a flat line on the floor, and
+    /// it was unreachable from any check until this one.
+    ///
+    /// It had to be: the tail was located by the *index* `floor(n * 0.99)`,
+    /// and for every n from 10 to 100 that index is `n - 1` — the maximum
+    /// itself. The "genuinely extreme tail" guard then read
+    /// `maximum > maximum * 2`, false for all positive data, so no series
+    /// of 100 samples or fewer ever clamped. Trends draws series that short
+    /// routinely: a day's worth of runs on one network is dozens of points,
+    /// not thousands. The sizes below are chosen to walk that dead range.
+    static func runTrendsClampTests() {
+        print("TrendsView.Clamp (y-axis outlier clamp):")
+
+        /// `count - 1` readings in a believable 2–8 ms band, plus one spike
+        /// — the shape the `Clamp` doc comment describes verbatim.
+        func band(_ count: Int, spike: Double) -> [Double] {
+            (0..<(count - 1)).map { 2.0 + Double($0 % 7) } + [spike]
+        }
+
+        for n in [10, 38, 100, 101, 2371] {
+            guard let clamp = TrendsView.Clamp.forValues(band(n, spike: 2800), p90: nil) else {
+                check(false, "n = \(n): a lone 2.8 s spike clamps the axis")
+                continue
+            }
+            check(true, "n = \(n): a lone 2.8 s spike clamps the axis")
+            check(clamp.upper < 20,
+                  "n = \(n): ceiling lands in the band, not near the spike (\(clamp.upper))")
+            equal(clamp.outliers, 1, "n = \(n): the one spike is counted as out of range")
+            equal(clamp.maximum, 2800, "n = \(n): the spike's real height is kept for the caption")
+        }
+
+        // The other half of the contract: a series whose spread is real
+        // must be drawn at full height, because clamping it would be
+        // meddling with data the user should see.
+        check(TrendsView.Clamp.forValues((1...50).map { Double($0) * 10 }, p90: nil) == nil,
+              "a smoothly spread 10–500 ms series is left alone")
+        check(TrendsView.Clamp.forValues((1...200).map { Double($0) }, p90: nil) == nil,
+              "a smoothly spread 1–200 series is left alone")
+        check(TrendsView.Clamp.forValues(Array(repeating: 5.0, count: 40), p90: nil) == nil,
+              "a series with no spread at all has no outlier to clamp")
+        // A maximum merely twice the bulk is spread, not a tail — the
+        // existing 2x guard, which the index bug made unreachable below
+        // 101 samples and which must survive the fix.
+        check(TrendsView.Clamp.forValues(band(38, spike: 16), p90: nil) == nil,
+              "n = 38: a maximum only twice the band is drawn at full height")
+        check(TrendsView.Clamp.forValues(band(9, spike: 2800), p90: nil) == nil,
+              "n = 9: too few readings to call anything a tail")
+
+        // The band the chart also shades must fit inside the axis it is
+        // drawn on, so p90 raises the ceiling — and if that lifts it to
+        // the maximum there is nothing left to clamp.
+        if let clamp = TrendsView.Clamp.forValues(band(38, spike: 2800), p90: 40) {
+            check(clamp.upper >= 48, "p90 raises the ceiling above the shaded band (\(clamp.upper))")
+        } else {
+            check(false, "p90 raises the ceiling above the shaded band")
+        }
+        check(TrendsView.Clamp.forValues(band(38, spike: 2800), p90: 3000) == nil,
+              "a p90 at the top of the data leaves no room to clamp")
+
+        // The boundary of the approach, stated rather than left to be
+        // rediscovered: below 100 samples only a single reading can be set
+        // aside, so two equal extremes out of 38 — 5% of the data — are
+        // spread, not a tail, and are drawn at full height.
+        check(TrendsView.Clamp.forValues(band(37, spike: 2800) + [2800], p90: nil) == nil,
+              "n = 38: two equal extremes are 5% of the data, not a tail")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

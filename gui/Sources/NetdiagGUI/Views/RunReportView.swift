@@ -111,7 +111,7 @@ struct RunReportView: View {
     @ViewBuilder
     private var suitability: some View {
         if !snapshot.suitability.isEmpty {
-            SuitabilityPanel(rows: snapshot.suitability, layout: .strip)
+            SuitabilityPanel(rows: snapshot.suitability)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cardStyle()
