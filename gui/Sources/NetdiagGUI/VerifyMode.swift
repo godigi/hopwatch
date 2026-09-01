@@ -230,6 +230,33 @@ private enum VerifyHarness {
         check(!(restarted.first?.detail?.contains("still active") ?? false),
               "an open episode does not assert the fault is ongoing")
 
+        // Two fires with *no clear between* — the case above never reaches,
+        // because its clear closes the first episode before the second fire
+        // arrives. This is the real restart: the monitor died at some point
+        // during an hour-long fault and re-observed it on the way back up.
+        //
+        // The hour between the two fires is not a guess. The rule was firing
+        // at the start of it and firing at the end of it, so the fault is
+        // known to have held for at least that long, and `helpers/events.py`
+        // says so by keeping the earlier start (`episodes()`, the `continue`
+        // on a second `rule-fired`). What went unobserved is only whether it
+        // held *continuously*, which is what the `+` is for.
+        let refired = ActivityEntry.fold([
+            event("rule-fired", "G3", 3600),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(refired.count, 1, "a fire-on-fire stays one row")
+        equal(refired.first?.occurrences, 1,
+              "as one episode — the second fire re-observed a fault already open")
+        equal(refired.first?.totalDuration, 3600,
+              "carrying the span from the first fire to the last sighting")
+        check(refired.first?.durationIsLowerBound == true,
+              "marked a floor, because the gap between the two was unobserved")
+        equal(refired.first?.detail, "lasted 1h+",
+              "and the floor actually renders — a `+` needs a duration to sit on")
+        check(refired.first?.isOngoing == true,
+              "still open: no clear was ever seen for it")
+
         // A clear whose fire is older than the store's 500-entry cap
         // describes an end with no beginning: no duration exists to state.
         let orphan = ActivityEntry.fold([

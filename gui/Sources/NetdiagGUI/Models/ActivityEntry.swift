@@ -73,7 +73,18 @@ extension ActivityEntry {
         var kind: String
         var summary: String
         var start: Date
+        /// When the rule was *observed to stop*. `nil` while it is still
+        /// firing as far as the log knows.
         var end: Date?
+        /// The newest moment the rule is known to have still been firing.
+        /// Distinct from `end`, which is an ending; this is a sighting.
+        ///
+        /// `helpers/events.py` needs the same distinction and gets it from
+        /// the journal's own last row (`close(key, last_at, "still-open")`),
+        /// so an episode there can be `ongoing: true` and carry a
+        /// `duration_s` at once. Nothing in `EventStore` marks the end of
+        /// the log, so the sighting is tracked per episode instead.
+        var lastSeen: Date
         var isLowerBound: Bool
     }
 
@@ -103,20 +114,36 @@ extension ActivityEntry {
 
             switch event.kind {
             case "rule-fired":
-                if var existing = open[ruleID] {
+                if open[ruleID] != nil {
                     // A second `fired` with no `cleared` between. The monitor
                     // only emits on transition, so this means it restarted
                     // and lost its previous sample — the span in between was
                     // not observed and must not be reported as though it
-                    // were. Close the old episode where it was last seen and
-                    // mark the duration a floor, as `helpers/events.py` does.
-                    existing.end = existing.end ?? existing.start
-                    existing.isLowerBound = true
-                    episodes.append(existing)
+                    // were continuous.
+                    //
+                    // Keep the *earlier* start, exactly as `helpers/events.py`
+                    // does (`episodes()` skips the second `rule-fired`): it is
+                    // the earliest moment the fault is known to have been
+                    // true, and the rule was still firing now, so the span
+                    // between the two is evidence, not invention. Only its
+                    // continuity is unobserved — hence the floor.
+                    //
+                    // The previous code closed the open episode at
+                    // `existing.end ?? existing.start`, and `end` is nil for
+                    // everything in `open` by construction. That made every
+                    // such episode zero-length, so the duration fell under the
+                    // one-second floor below, `totalDuration` came out nil,
+                    // and `isLowerBound` ended up qualifying a duration that
+                    // no longer existed: an hour-long fault rendered as a bare
+                    // occurrence with no duration and no `+`.
+                    open[ruleID]?.lastSeen = event.date
+                    open[ruleID]?.isLowerBound = true
+                    continue
                 }
                 open[ruleID] = Episode(ruleID: ruleID, kind: event.kind,
                                        summary: event.summary, start: event.date,
-                                       end: nil, isLowerBound: false)
+                                       end: nil, lastSeen: event.date,
+                                       isLowerBound: false)
             case "rule-cleared":
                 if var existing = open.removeValue(forKey: ruleID) {
                     existing.end = event.date
@@ -162,15 +189,21 @@ extension ActivityEntry {
         for episode in episodes {
             let day = calendar.startOfDay(for: episode.start)
             let key = "rule|\(episode.ruleID)|\(day.timeIntervalSince1970)"
-            let duration = episode.end.map { $0.timeIntervalSince(episode.start) }
+            // Measured to the observed end where there is one, and otherwise
+            // to the last sighting — which for an episode nothing has
+            // re-observed is its own start, so an ordinary open episode still
+            // states no duration. Only a fire-on-fire moves `lastSeen`, and
+            // that span is a floor (`Episode.lastSeen`).
+            let seen = episode.end ?? episode.lastSeen
+            let duration = seen.timeIntervalSince(episode.start)
             merge(key, ActivityEntry(
                 id: key, kind: "rule-fired", summary: episode.summary,
                 ruleID: episode.ruleID,
-                latest: episode.end ?? episode.start, earliest: episode.start,
+                latest: seen, earliest: episode.start,
                 occurrences: 1,
                 // A sub-second pair is a sampling artefact, not a duration
                 // worth printing; it still counts as an occurrence.
-                totalDuration: (duration ?? 0) >= 1 ? duration : nil,
+                totalDuration: duration >= 1 ? duration : nil,
                 isOngoing: episode.end == nil,
                 durationIsLowerBound: episode.isLowerBound))
         }
