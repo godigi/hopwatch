@@ -6,6 +6,29 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — `schemas.run` still said 1 after the run document grew `suitability`
+
+`--capabilities` exists so a GUI can ask what its CLI supports instead of
+probing the output for a key. When `--json` gained a top-level
+`suitability` block, `SCHEMA_RULES_CATALOG` was bumped 4 → 5 in the same
+change and `SCHEMA_RUN` was left at 1 — so a pre-suitability build and a
+current one answered the handshake identically, and the one question the
+handshake could have answered had to be answered by probing instead.
+`helpers/capabilities.py`'s own docstring states the rule that was missed:
+bump the constant the day the run document actually grows a field.
+
+`schemas.run` is now `2`. Nothing in the app gates on it today
+(`CLICapabilities.schemas` is carried through only for the About caption,
+and `CapabilityStore.requiredVersion` compares version strings), so this
+breaks nothing and makes the entry usable the day a gate is wanted.
+`run` has no embedded number to check itself against the way the other six
+do, so its new bats test reads the run document's *shape* instead: it
+invokes `helpers/emit_json.py` standalone and fails if a build that emits
+`suitability` still answers 1. Also corrected `docs/JSON-SCHEMA.md`'s
+worked example, which still showed `rules_catalog: 4`, and a Swift doc
+comment that listed six `schemas` keys when there have been seven since
+`signal_scale` shipped.
+
 ### Fixed — the Trends outlier clamp never engaged on a real chart [GUI]
 
 `TrendsView.Clamp` exists so that one 2.8-second reading cannot flatten a

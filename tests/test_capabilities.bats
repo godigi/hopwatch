@@ -262,6 +262,35 @@ assert str(json.load(sys.stdin)['schemas']['monitor']) == sys.argv[1]
 " "$mon_const"
 }
 
+@test "schemas.run reflects the run document having grown the suitability block" {
+  # `run` embeds no schema field of its own, so unlike every check above
+  # this one reads the document's *shape* instead. helpers/emit_json.py is
+  # what writes that shape, and it runs standalone under an empty
+  # environment — every NETDIAG_* value becomes null — so this touches no
+  # network and needs no fixture.
+  #
+  # Schema 1 is the run document as it stood before `suitability` was a
+  # top-level key. A build that emits the block and still answers 1 tells
+  # a consumer the block is absent, which is the one thing the handshake
+  # exists to stop it having to probe for.
+  local py
+  py="$(command -v python3)"
+  [ -n "$py" ]
+  run env -i "$py" "$HELPERS/emit_json.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+assert "suitability" in json.load(sys.stdin), "no top-level suitability block"
+'
+  run "$NETDIAG" --capabilities
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+run_schema = json.load(sys.stdin)['schemas']['run']
+assert run_schema >= 2, f'suitability shipped but schemas.run is still {run_schema}'
+"
+}
+
 # ── Unknown-flag behavior is unaffected ──────────────────────────────────
 
 @test "an unrelated unknown flag still exits 3, not 0 or 2" {

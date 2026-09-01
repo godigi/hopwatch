@@ -26,12 +26,18 @@ outputs, and declares two more that don't carry one yet:
   * signal_scale  — helpers/signal_scale.py's own SCHEMA_SIGNAL_SCALE,
     literal "schema": SCHEMA_SIGNAL_SCALE.
   * run           — helpers/emit_json.py (the --json output) embeds no
-    schema field today; defaults to 1 here so a consumer always has a
-    number.
+    schema field today; the number lives here alone so a consumer always
+    has one. `1` was the document before the top-level `suitability`
+    block; `2` is the document with it.
   * progress      — the --progress event stream (docs/JSON-SCHEMA.md)
     embeds no schema field either, for the same reason.
 Bump the constant below the day either of the last two actually grows a
-field, so this file never has to be discovered as the odd one out.
+field, so this file never has to be discovered as the odd one out. The
+other five are checked against their own source of truth by
+tests/test_capabilities.bats; `run` has no embedded number to compare
+against, so its test reads the run document's *shape* instead — it
+invokes emit_json.py standalone and asserts that a build emitting
+`suitability` cannot still answer 1.
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ SCHEMA_CAPABILITIES = 1
 # Per-mode schema numbers — see the module docstring for where each one
 # actually lives. Named constants so there is exactly one place to bump
 # per source, not a literal buried in the dict below.
-SCHEMA_RUN = 1            # no embedded field yet (see docstring)
+SCHEMA_RUN = 2            # no embedded field yet (see docstring)
 SCHEMA_MONITOR = 2        # lib/monitor.sh: NETDIAG_MON_SCHEMA
 SCHEMA_HISTORY = 2        # helpers/history.py main(): "schema"
 SCHEMA_SHOW = 1           # helpers/history.py build_detail(): "schema"

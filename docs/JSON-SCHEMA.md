@@ -1160,8 +1160,8 @@ every optional dependency below is missing.
 {
   "schema": 1,
   "version": "0.9.0",
-  "schemas": {"run": 1, "monitor": 2, "history": 2, "show": 1,
-              "rules_catalog": 4, "signal_scale": 1, "progress": 1},
+  "schemas": {"run": 2, "monitor": 2, "history": 2, "show": 1,
+              "rules_catalog": 5, "signal_scale": 1, "progress": 1},
   "features": ["capabilities", "version", "progress", "monitor", "history",
                "show", "redact", "speed-only", "dns-only",
                "bufferbloat-only", "ping-only", "watcher", "rules-catalog",
@@ -1184,10 +1184,14 @@ every optional dependency below is missing.
   a `"schema"` field each of those already emits (`lib/monitor.sh`,
   `helpers/history.py`, `helpers/rules_catalog.py`,
   `helpers/signal_scale.py`) — see their sections above and below. `run`
-  (the `--json` output) and `progress` (the `--progress` event stream) do
-  not embed a schema field as of v0.9.0; both report `1` here as the
-  number a future field would start at, and this note is that field's
-  documentation until one exists.
+  (the `--json` output) and `progress` (the `--progress` event stream)
+  embed no schema field of their own; the number reported here is the
+  only one either has, and this note is that field's documentation until
+  one exists. `run` is therefore versioned by hand in
+  `helpers/capabilities.py`, and is `2`: `1` was the run document before
+  it grew the top-level `suitability` block, so a consumer that reads
+  `schemas.run >= 2` knows the block is there without probing for the
+  key. `progress` is still `1`, the number a first field would start at.
 - **`features`** is an open set, not a closed enum — expect it to grow
   as new CLI surface ships. A GUI checks membership (`"redact" in
   features`), not the array's length or order.
