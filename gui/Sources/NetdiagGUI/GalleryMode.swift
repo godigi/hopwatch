@@ -203,7 +203,15 @@ enum GalleryMode {
         coordinator.signalScale.ensureLoaded()
         await coordinator.history.load()
         await coordinator.rulesCatalog.refresh()
-        await coordinator.hydrateFromHistoryIfNeeded()
+        // Hydration is scoped to the network the monitor says we are on,
+        // and this function's whole point is that it never starts the
+        // monitor — so there is no live id here, and a strictly-scoped call
+        // would put Home's empty state in every screenshot. Stand in the
+        // network of the newest stored check: the same run this used to
+        // hydrate unconditionally, and the ordinary case of launching the
+        // app where you last ran one.
+        await coordinator.hydrateFromHistoryIfNeeded(
+            explicitNetworkID: coordinator.history.recentChecks(limit: 1).first?.networkID)
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this
         // paragraph's whole claim is that a screenshot run writes nothing.

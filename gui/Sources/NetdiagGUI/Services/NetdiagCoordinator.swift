@@ -83,6 +83,14 @@ final class NetdiagCoordinator {
 
     private var scanTask: Task<Void, Never>?
     private var lastNetworkID: String?
+    /// Whether cold-launch hydration has run against an *identified*
+    /// network. Hydration is scoped to the network we are on, and `start()`
+    /// kicks it off before the monitor has produced a sample — so the first
+    /// attempt normally has no network to scope to and does nothing. This
+    /// latches on the first attempt that had one, so `handleSample` can
+    /// retry until the network is known without spawning a task on every
+    /// sample forever afterwards.
+    private var didHydrateForNetwork = false
     /// The current network's arrival state, mirrored into observable
     /// storage so the arrival card re-renders when it changes. `Defaults`
     /// is the source of truth; this is the copy SwiftUI can see.
@@ -241,11 +249,33 @@ final class NetdiagCoordinator {
     // `~/net-diag`. This fills that gap once, right after launch, without
     // ever letting the fallback be mistaken for a live measurement.
 
-    /// Picks the newest run that counts as a check
-    /// (`HistoryDocument.Run.isCheck` — the `run_mode` predicate
-    /// docs/JSON-SCHEMA.md documents and `helpers/history.py` applies
-    /// identically) and has an id `--show` can open, then fetches its full
-    /// record via `details.detail(for:)`.
+    /// Picks the newest run **on the network this machine is currently on**
+    /// that counts as a check (`HistoryDocument.Run.isCheck` — the
+    /// `run_mode` predicate docs/JSON-SCHEMA.md documents and
+    /// `helpers/history.py` applies identically) and has an id `--show` can
+    /// open, then fetches its full record via `details.detail(for:)`.
+    ///
+    /// The network predicate is the fix for a real bug. This used to take
+    /// the newest stored check *anywhere*, and Home renders a hydrated
+    /// report through the same `RunReportView` as a live one, with nothing
+    /// on screen saying otherwise — so arriving somewhere new showed the
+    /// previous building's report as if it were this network's, which is
+    /// where a phantom "Wi-Fi over the last hour" warning at the top of a
+    /// brand-new network's dashboard came from. Having no run for this
+    /// network is the correct empty state: the arrival card is already
+    /// saying a check is on its way.
+    ///
+    /// A nil current network means "not identified yet", never "any network
+    /// will do" — hydrating from an arbitrary run there would reintroduce
+    /// exactly this bug on a slow start. It is also the *ordinary* state at
+    /// the moment `start()` first calls this: `monitor.start()` runs after
+    /// this task is created, and the monitor's first sample costs a child
+    /// process where `history.load()` is a local file read. So the first
+    /// attempt normally finds no network and deliberately does nothing, and
+    /// `handleSample` retries on the sample that finally names one — see
+    /// `didHydrateForNetwork`. The one exception is monitoring being
+    /// switched off, where no sample is ever coming and "wait" would mean
+    /// "never"; the body says what happens there and why it is still safe.
     ///
     /// Silent on failure: a pruned run (the store rolls into an archive and
     /// is eventually trimmed) or a `netdiag` older than `--show` must fall
@@ -261,9 +291,42 @@ final class NetdiagCoordinator {
     /// same state `start()` reaches without also starting the monitor —
     /// this is a read, and the screenshot harness needs Home to render the
     /// report a real launch would show rather than its empty state.
-    func hydrateFromHistoryIfNeeded() async {
+    ///
+    /// - Parameter explicitNetworkID: The network to scope to, for a caller
+    ///   with no live monitor to read one from. `GalleryMode` is the only
+    ///   one: it deliberately never starts the monitor, so the live id is
+    ///   always nil there and a strictly-scoped hydration would put the
+    ///   empty state in every screenshot.
+    func hydrateFromHistoryIfNeeded(explicitNetworkID: String? = nil) async {
         if latestRun == nil, hydratedReport == nil {
-            if let id = history.recentChecks(limit: 1).compactMap(\.runID).first {
+            let current = explicitNetworkID ?? monitor.latest?.network.historyJoinID
+            let id: String?
+            if let current {
+                // Latched on the first attempt that had a network at all,
+                // so the `handleSample` retry stops once this has really
+                // run.
+                didHydrateForNetwork = true
+                id = newestCheckID(onNetwork: current)
+            } else if !Defaults.monitoringEnabled {
+                // With monitoring off there will never be a sample, so
+                // "wait for the monitor to name the network" leaves Home
+                // empty forever rather than briefly — a different situation
+                // from a slow start, and a regression against the behaviour
+                // this had before it was scoped. So this one case keeps the
+                // old fallback: the newest check anywhere.
+                //
+                // Safe, because it cannot produce the unlabelled report the
+                // scoping exists to prevent. `HomeView.storedProvenance`
+                // captions any report the live monitor cannot confirm is
+                // about the network you are on, and with monitoring off it
+                // can confirm nothing — so a report hydrated here always
+                // arrives saying which network and when it came from.
+                didHydrateForNetwork = true
+                id = history.recentChecks(limit: 1).compactMap(\.runID).first
+            } else {
+                id = nil
+            }
+            if let id {
                 do {
                     hydratedReport = try await details.detail(for: id)
                 } catch {
@@ -280,6 +343,25 @@ final class NetdiagCoordinator {
                 latestSpeedTestAt = speed.date
             }
         }
+    }
+
+    /// The newest run on one network that counts as a check and carries an
+    /// id `--show` can open.
+    ///
+    /// `history.runs(networkID:window:)` rather than a hand-rolled filter
+    /// because it canonicalises *both* sides of the comparison through the
+    /// store's own `canonicalID`, which follows manual merges — comparing
+    /// raw ids would miss every run the user has merged into this network.
+    ///
+    /// Ordering matches `recentChecks`: newest first on the raw `ts`
+    /// string, which docs/JSON-SCHEMA.md fixes at ISO 8601 UTC with no
+    /// fractional seconds, so lexicographic order is already chronological
+    /// order and the parse can be skipped.
+    private func newestCheckID(onNetwork networkID: String) -> String? {
+        history.runs(networkID: networkID, window: .all)
+            .filter { $0.isCheck && $0.runID != nil }
+            .max { ($0.ts ?? "") < ($1.ts ?? "") }?
+            .runID
     }
 
     // MARK: - Monitoring toggle
@@ -318,6 +400,14 @@ final class NetdiagCoordinator {
         // Not identified yet — the CLI has no group and no usable record
         // id. Decide nothing: `nil` here has never meant "a new network".
         guard let id = sample.network.historyJoinID else { return }
+
+        // The sample that finally names a network is also the first moment
+        // cold-launch hydration can be scoped to one — `start()` runs it
+        // well before this, when there is nothing to scope to. See
+        // `didHydrateForNetwork`.
+        if !didHydrateForNetwork, latestRun == nil, hydratedReport == nil {
+            Task { await hydrateFromHistoryIfNeeded() }
+        }
 
         if id != lastNetworkID {
             lastNetworkID = id

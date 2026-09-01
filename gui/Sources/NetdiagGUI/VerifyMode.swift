@@ -77,6 +77,7 @@ private enum VerifyHarness {
         runActivityFoldTests()
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
+        runReportProvenanceTests()
         runSnapshots()
         print("")
         if failures.isEmpty {
@@ -655,6 +656,43 @@ private enum VerifyHarness {
         check(StageResolver.resolve(inputs(isScanning: true, isArrivalCheck: true,
                                            monitoringEnabled: false)) == .arrived,
               "an arrival check in flight outranks monitoring being off, exactly as a user scan does")
+    }
+
+    // MARK: - Home report provenance
+
+    /// The predicate deciding whether a stored report on Home is labelled
+    /// with where it came from. Asserted because its nil handling is the
+    /// only thing standing between a user and another building's report
+    /// presented as this network's — the bug it was written for.
+    private static func runReportProvenanceTests() {
+        print("Home report provenance:")
+        // Identity, so these assert the predicate rather than HistoryStore's
+        // merge table.
+        let plain: (String) -> String = { $0 }
+
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:sb-airbnb",
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain) == false,
+              "a stored run from the network we are on needs no caption")
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:home",
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain),
+              "a stored run from another network is labelled")
+        check(HomeView.needsProvenance(storedNetworkID: "ssid:home",
+                                       currentNetworkID: nil,
+                                       canonical: plain),
+              "an unidentified current network labels rather than assumes")
+        check(HomeView.needsProvenance(storedNetworkID: nil,
+                                       currentNetworkID: "ssid:sb-airbnb",
+                                       canonical: plain) == false,
+              "a run with no recorded network has nothing truthful to caption")
+        // Merges are why `canonical` is a parameter: two raw ids the user
+        // has merged are one network, and a caption saying otherwise would
+        // contradict the Networks tab.
+        check(HomeView.needsProvenance(storedNetworkID: "gw:10.0.0.1",
+                                       currentNetworkID: "mac:aa:bb:cc:dd:ee:ff",
+                                       canonical: { _ in "merged" }) == false,
+              "two ids merged into one network count as the same network")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
