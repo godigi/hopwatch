@@ -66,6 +66,7 @@ private enum VerifyHarness {
         runAlertAttributionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
+        runNetworkIdentityFixtureTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -337,6 +338,53 @@ private enum VerifyHarness {
               "a second gateway folds onto its own MAC group")
         check(folded["gw:8.8.8.8"] == nil,
               "a weak key with no MAC group folds nowhere, rather than guessing")
+    }
+
+    /// The Swift half of the fixture guard. `tests/test_network_identity
+    /// .bats` drives the identical file through helpers/history.py; this
+    /// drives it through NetworkIdentity. Both must agree, because two
+    /// implementations of one rule drift and the drift is invisible until
+    /// a network's arrival check is filed under a key it never presents
+    /// under again.
+    ///
+    /// Skipped rather than failed when the fixture is not found: the
+    /// harness runs from the built .app bundle too, where the repo's tests
+    /// directory is not present. bats covers the file's existence.
+    private static func runNetworkIdentityFixtureTests() {
+        print("NetworkIdentity fixture:")
+        let candidates = [
+            "tests/fixtures/network-ids.txt",
+            "../tests/fixtures/network-ids.txt",
+        ]
+        guard let text = candidates.lazy
+            .compactMap({ try? String(contentsOfFile: $0, encoding: .utf8) })
+            .first
+        else {
+            print("  – fixture not reachable from this working directory, skipped")
+            return
+        }
+
+        var cases = 0
+        var mismatches: [String] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let row = line.trimmingCharacters(in: .whitespaces)
+            guard !row.isEmpty, !row.hasPrefix("#") else { continue }
+            let parts = row.split(separator: "|", maxSplits: 1,
+                                  omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            cases += 1
+            let raw = String(parts[0])
+            let expected = String(parts[1])
+            let got = NetworkIdentity.canonical(raw) ?? "-"
+            if got != expected {
+                mismatches.append("\(raw) -> \(got), fixture says \(expected)")
+            }
+        }
+        check(cases >= 10, "the fixture supplied cases to check (\(cases))")
+        check(mismatches.isEmpty,
+              mismatches.isEmpty
+                ? "every fixture case canonicalises as the fixture says"
+                : "fixture mismatches: \(mismatches.joined(separator: "; "))")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

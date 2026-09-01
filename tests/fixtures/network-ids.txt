@@ -1,0 +1,19 @@
+# Shared by tests/test_network_identity.bats and VerifyMode's
+# runNetworkIdentityFixtureTests(). Both must agree on every line — that
+# agreement is the whole point of the file. See
+# docs/superpowers/specs/2026-08-31-arrival-and-the-three-modes-design.md.
+#
+# raw record | expected canonical form ("-" = no identity)
+wifi:mac=AA:BB:CC:DD:EE:FF|mac:aa:bb:cc:dd:ee:ff
+wifi:mac=aa:bb:cc:dd:ee:ff|mac:aa:bb:cc:dd:ee:ff
+wifi:gw=10.125.128.1|gw:10.125.128.1
+lan:gw=192.168.60.1|gw:192.168.60.1
+wifi:ssid=SB Airbnb|ssid:SB Airbnb
+wifi:mac=24:FD:0D:D2:C2:19,ssid=SB Airbnb,gw=192.168.1.1|mac:24:fd:0d:d2:c2:19
+wifi:ssid=Mercure,gw=172.20.10.1|ssid:Mercure
+mac:aa:bb:cc:dd:ee:ff|mac:aa:bb:cc:dd:ee:ff
+gw:10.125.128.1|gw:10.125.128.1
+ssid:Mercure|ssid:Mercure
+unknown|-
+|-
+wifi:mac=|-

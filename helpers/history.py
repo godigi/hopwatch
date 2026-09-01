@@ -237,27 +237,57 @@ def clean(v: Any) -> str | None:
     return None if s.lower() in [p.lower() for p in PLACEHOLDERS] else s
 
 
-def parse_network_id(raw: str | None) -> dict[str, str]:
-    """Split `wifi:ssid=Home,mac=aa:bb:…` into {kind, ssid, mac, gw}.
+def canonical_network_id(raw: str | None) -> str | None:
+    """Canonical form of one network id, or None when there is no identity.
 
-    Values may themselves contain '=' (rare in an SSID but legal), so each
-    component splits on the *first* '=' only. Commas inside an SSID would
-    break this, which is why the resulting parts are only ever used as
-    identity hints — never round-tripped back into an id.
+    The rule the GUI's NetworkIdentity.swift ports: mac: beats ssid: beats
+    gw:, MACs lowercase, and a record-format id (`wifi:mac=…`, `lan:gw=…`)
+    reduces to the same form as an already-canonical one. Exposed as its
+    own function so tests/test_network_identity.bats can drive it against
+    the fixture the Swift side reads — two implementations of one rule
+    drift silently otherwise.
+
+    None means "no identity", never "a new network". Callers must not
+    substitute a fallback id here; that is exactly the bug that let one
+    hotspot accumulate three different keys.
     """
-    out: dict[str, str] = {}
-    if not raw:
-        return out
-    kind, _, rest = raw.partition(":")
-    if not rest:
-        kind, rest = "", raw
-    out["kind"] = kind or "lan"
-    for part in rest.split(","):
-        key, _, val = part.partition("=")
-        val = clean(val)
-        if val:
-            out[key.strip()] = val
-    return out
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw or raw == "unknown":
+        return None
+
+    for prefix in ("mac:", "ssid:", "gw:"):
+        if raw.startswith(prefix):
+            value = raw[len(prefix):]
+            if not value:
+                return None
+            return f"mac:{value.lower()}" if prefix == "mac:" else f"{prefix}{value}"
+
+    if ":" not in raw:
+        return None
+    # Record format `<kind>:<k>=<v>,<k>=<v>`. The kind (`wifi`, `lan`) is
+    # not part of the identity: the same gateway reached over Wi-Fi and
+    # over Ethernet is one network. A value may itself contain '=' (rare
+    # in an SSID but legal), so each field splits on its *first* '=' only.
+    # A comma inside an SSID would still break this, which is why the
+    # parts are only ever read as identity hints and never round-tripped
+    # back into an id.
+    _, _, body = raw.partition(":")
+    fields = {}
+    for field in body.split(","):
+        if "=" not in field:
+            continue
+        key, _, value = field.partition("=")
+        fields[key] = value
+
+    if fields.get("mac"):
+        return f"mac:{fields['mac'].lower()}"
+    if fields.get("ssid"):
+        return f"ssid:{fields['ssid']}"
+    if fields.get("gw"):
+        return f"gw:{fields['gw']}"
+    return None
 
 
 def group_key(rec: dict) -> tuple[str, bool]:
@@ -267,14 +297,17 @@ def group_key(rec: dict) -> tuple[str, bool]:
     gateway IP — so a run recorded before netid.sh existed lands in the
     same group as one recorded after it, on the strongest evidence the
     record happens to carry.
+
+    The second element is `synthesized`: False when the key came out of the
+    record's own `network.id`, True when no usable id was there and the key
+    had to be backfilled from the raw `interface`/`wifi` fields (or when
+    nothing at all identified the record, giving "unknown"). --history
+    surfaces it per group so a caller can tell a group the CLI named from
+    one this file inferred.
     """
-    parsed = parse_network_id(clean(get_nested(rec, "network.id")))
-    if parsed.get("mac"):
-        return f"mac:{parsed['mac'].lower()}", False
-    if parsed.get("ssid"):
-        return f"ssid:{parsed['ssid']}", False
-    if parsed.get("gw"):
-        return f"gw:{parsed['gw']}", False
+    key = canonical_network_id(clean(get_nested(rec, "network.id")))
+    if key:
+        return key, False
 
     # No usable id: backfill from the raw fields, and say so.
     mac = clean(get_nested(rec, "interface.gateway_mac"))
