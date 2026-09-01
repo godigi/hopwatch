@@ -110,6 +110,58 @@ a default:
    rows, because there is only one place either could have read them
    from.
 
+## Arrival state lives in the GUI, not the CLI (v0.14.0)
+
+"Have I checked this network before?" is a question about *this install's
+history with a network*, and the CLI has no concept of an install. A run
+is a snapshot; `--history` is a store of snapshots; neither knows whether
+the app has ever automatically checked a given network, nor whether an
+attempt to do so was declined. So `ArrivalState` is persisted in
+`UserDefaults` by the GUI, not added to the JSON schema.
+
+Three things keep that from becoming a fourth place where verdicts get
+authored:
+
+1. **`ArrivalPolicy` adds no thresholds.** It reads `status.severity` as
+   an opaque string and defers to `FullCheckPolicy.isSafe`, which is
+   itself an allow-list over the CLI's own vocabulary. Its only other
+   inputs are two booleans macOS hands it (`NWPath.isExpensive` /
+   `isConstrained`). Nothing here decides what makes a network bad; that
+   stays in `lib/thresholds.sh` with the other four judges.
+
+2. **The arrival card states mechanism, never a verdict.** It may say
+   what netdiag is doing and what it costs — "a full check runs a speed
+   test, which can spend a few hundred megabytes of cellular data" — and
+   may not characterise the network. This is enforced rather than
+   documented: `VerifyMode` runs every `(state, intent)` pair's copy past
+   a list of verdict words and fails the build on a hit. That check
+   caught the obvious shortcut of reusing
+   `FullCheckPolicy.controlHelp(isSafe: false)`, whose opening clause
+   ("the last reading wasn't clearly healthy") is a verdict — correct for
+   a button tooltip, wrong for a card reporting what already happened.
+
+3. **Network identity has one implementation per language, bound by a
+   fixture.** `helpers/history.py`'s `canonical_network_id()` and
+   `NetworkIdentity.canonical()` are the same rule (`mac:` > `ssid:` >
+   `gw:`), and `tests/fixtures/network-ids.txt` is read by both
+   `tests/test_network_identity.bats` and `VerifyMode`. This is the same
+   guard shape as `tests/test_thresholds.bats`, for the same reason: two
+   implementations of one rule drift, and *this* drift is invisible for
+   months — it surfaces as a check recorded under a key the network will
+   never present under again. Before the fixture existed there were four
+   partial implementations, one of which (`HistoryStore.migrateRawKeys`)
+   rewrote `mac=` forms and not `gw=`, which is precisely how one hotspot
+   came to hold three different keys.
+
+The three depths the app offers — continuous monitoring, the on-demand
+full check, the quick check — are documented as a constraint in
+`CLAUDE.md` rather than here, because they are a contract about product
+behaviour rather than a structural decision. The structural half is the
+rule that follows from them: **the app must always show which depth is
+running, and any Home surface reading history must scope to the current
+network or state its provenance.** Cold-launch hydration violated the
+second half for as long as it existed.
+
 ## Seeing and checking the GUI without Xcode (v0.12.0)
 
 This machine has only the Command Line Tools, which costs the app two

@@ -6,6 +6,87 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — a new network could go unchecked forever, and Home showed somebody else's report [GUI]
+
+Joining a brand-new network showed no check running, none queued, and no
+sign one had ever run — while a Wi-Fi warning about "the last hour" sat at
+the top of the window, describing an hour spent on a different network in a
+different building. Three separate defects, each verified against a live
+install's stored preferences.
+
+**The arrival check could decline itself permanently.** `handleSample`
+advanced its `lastNetworkID` guard *before* attempting the scan, and
+`launch()` silently declines while another scan is in flight. The code's own
+comment promised "the next sighting retries", but there is no next sighting
+while you stay on the network: every later sample returned at the guard.
+Leaving and rejoining was the only way out. The evidence was a network named
+in `networkNames` and absent from `seenNetworks` — a pair only reachable
+through that path. Arrival is now a persisted per-network state
+(`unchecked → checking → checked | declined`) driven on every sample, with a
+30-second doubling backoff capped at five minutes. A decline for policy is
+terminal; a decline for busy-ness, a failure and a cancellation all leave the
+network unchecked so the next sample tries again.
+
+**Arrival was almost always silently downgraded to a lighter check.**
+`FullCheckPolicy` treats any severity outside `{ok, info, warn}` as unsafe —
+correctly, since an unrecognised value must not read as safe. But it was
+asked at the instant of joining, when the monitor has produced no sample and
+severity is the empty string, so an honest "I do not understand this" became
+a downgrade on essentially every arrival. `ArrivalPolicy` is three-valued: it
+waits for a real sample before deciding. On ordinary Wi-Fi that means every
+new network now gets the full check, which was always the contract.
+
+**Home rendered another network's report unlabelled.** Cold-launch hydration
+took the newest stored run *globally*, with no network predicate, through the
+same view that renders a live one. Hydration is now scoped to the network you
+are on — no run for it is the correct empty state, since the arrival card is
+already saying a check is on its way — and `RunReportView` gained a
+provenance caption so the general case is closed too, not just this instance.
+
+### Added — the app says which of its three depths is happening [GUI]
+
+An arrival card at the top of Home names the network and states what netdiag
+is doing about it: a check starting, a check queued behind one already
+running, a check that will not happen automatically because the Settings
+toggle is off, or a full check deliberately downgraded with a button to
+override. The menu-bar dropdown gained a matching `.arrived` stage, so an
+arrival check no longer reads as "Testing" — indistinguishable from a scan
+the user started — while Home calls it something else.
+
+A metered link is the one carve-out from "every new network gets a full
+check": `NWPathMonitor` already reported `isExpensive`/`isConstrained` and
+the app was discarding both. A personal hotspot now gets the quick check and
+an explicit "Run full check anyway" button, because a full check runs a speed
+test and that spends real cellular data. The card says so; it does not say
+anything about whether the network is any good. That distinction is enforced
+— `--verify` rejects a set of verdict words in every arrival string, since
+verdicts belong to `lib/diagnosis.sh` and reach the UI through
+`diagnosis[].summary` verbatim.
+
+### Fixed — one network could hold three different names [GUI]
+
+`historyJoinID` fell back to the CLI's raw *record* format when no group had
+been resolved, and `HistoryStore.migrateRawKeys` rewrote only the two `mac=`
+spellings — never `gw=`. So one iPhone hotspot accumulated all of
+`gw:10.125.128.1`, `wifi:gw=10.125.128.1` and `mac:76:42:18:5c:40:64`, and a
+check recorded under one could never be found under another.
+
+`helpers/history.py` has always had the right rule (`mac:` > `ssid:` > `gw:`,
+plus a fold of weak keys onto their MAC group); the GUI never got it.
+`NetworkIdentity` ports it, and `tests/fixtures/network-ids.txt` is now read
+by both halves — bats drives it through Python, `--verify` through Swift — so
+the two cannot drift. That guard exists because this drift is invisible: the
+symptom appears months later as a check filed under a key the network will
+never present under again. `helpers/history.py` gained
+`canonical_network_id()` so the rule is callable on its own, and its second,
+subtly different parser was removed rather than left beside the first.
+
+Upgrading migrates `seenNetworks` into the new store and **fails closed**:
+anything that cannot be canonicalised confidently is treated as already
+checked. A network wrongly assumed seen loses one automatic baseline and is
+one button away from getting it; a network wrongly assumed new can spend a
+few hundred megabytes of someone's cellular data without asking.
+
 ### Changed — Home answers first and asks only one question [GUI]
 
 Home now leads with "What should work here" as one horizontal, icon-first
