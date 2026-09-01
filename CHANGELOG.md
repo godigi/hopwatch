@@ -6,6 +6,25 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — a missing UPnP state counted as a measured path
+
+`measured_families()` decided whether the `path` family had been probed by
+testing `wan.upnp.state` against the literal `"unknown"` — bash's default
+from `lib/globals.sh`. When the value is `None` or `""` the comparison is
+true and the family was counted as probed. That happens on a direct
+invocation of `helpers/emit_json.py`, a mode the module's own docstring
+supports on purpose ("a direct helper invocation should expose missing
+metadata as null"), where no `NETDIAG_*` variable is set and the whole
+`wan` block comes back null.
+
+Nothing user-visible was wrong in a normal run — bash always exports the
+`"unknown"` default — but the `vpn` row would have read `good` for a run
+that probed no path at all the moment the MTU probe happened to be
+present, which is the exact lie `helpers/suitability.py`'s header names as
+its reason to exist. The check now recognises the family by the two values
+that mean it *ran* (`enabled`, `disabled`) rather than by the one spelling
+of absence bash happens to use.
+
 ### Fixed — `schemas.run` still said 1 after the run document grew `suitability`
 
 `--capabilities` exists so a GUI can ask what its CLI supports instead of

@@ -105,9 +105,13 @@ down is down at any depth.
 Whether a measurement family ran is decided in `helpers/emit_json.py`'s
 `measured_families()` from the schema's own null contract: a field is `null`
 when its probe did not run, never `0`. The one family without a natural null
-is `path`, which keys off `wan.upnp.state != "unknown"` — `wan` is present
-even on `--quick`, but its UPnP probe sits behind the same `--quick` gate as
-the rest of the path batch, so that string is the honest signal.
+is `path`, which keys off `wan.upnp.state` being one of the two values that
+mean the probe ran — `"enabled"` or `"disabled"` — rather than off any one
+spelling of absence. `wan` is present even on `--quick`, but its UPnP probe
+sits behind the same `--quick` gate as the rest of the path batch, so
+`"unknown"` (bash's default) is the honest signal there; `null` and `""`
+mean the same thing and count the same way, which is what a direct
+invocation of `helpers/emit_json.py` produces.
 
 ## The event journal and `--events`
 

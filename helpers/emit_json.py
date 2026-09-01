@@ -209,6 +209,17 @@ def measured_families(data: dict) -> set[str]:
     this time", the same fact `--quick` skips for load-balancing and
     double-NAT detection too.
 
+    `None` and `""` mean the same thing and are tested alongside it, so
+    the family is recognised by the two values that mean it *ran* rather
+    than by the one spelling of absence bash happens to use. That
+    default is bash's; a direct invocation of this helper sets no
+    NETDIAG_* variable at all and the whole `wan` block comes back null,
+    a mode this module's docstring supports on purpose. Comparing only
+    against the literal counted such a run as having probed the path —
+    and had the MTU probe been present, the `vpn` row would have read
+    `good` for a run that probed no path whatsoever, which is the exact
+    lie helpers/suitability.py's header names as its reason to exist.
+
     This is not a judgement. It says what ran, never whether a number
     that ran is good; that stays in lib/diagnosis.sh against
     lib/thresholds.sh.
@@ -224,7 +235,8 @@ def measured_families(data: dict) -> set[str]:
         families.add("speed")
     if (data.get("mtu") or {}).get("effective") is not None:
         families.add("mtu")
-    if ((data.get("wan") or {}).get("upnp") or {}).get("state") != "unknown":
+    upnp_state = ((data.get("wan") or {}).get("upnp") or {}).get("state")
+    if upnp_state not in (None, "", "unknown"):
         families.add("path")
     return families
 
