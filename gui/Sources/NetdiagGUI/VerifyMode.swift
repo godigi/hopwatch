@@ -65,6 +65,7 @@ private enum VerifyHarness {
         runHealthResolverTests()
         runAlertAttributionTests()
         runFullCheckPolicyTests()
+        runNetworkIdentityTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -284,6 +285,58 @@ private enum VerifyHarness {
             print("  \u{2718} \(name) — got \(got), want \(want)")
             failures.append(name)
         }
+    }
+
+    // MARK: - NetworkIdentity
+    //
+    // The three real keys below came out of a live install's defaults,
+    // where one iPhone hotspot had accumulated all of gw:10.125.128.1,
+    // wifi:gw=10.125.128.1 and mac:76:42:18:5c:40:64. That is the bug this
+    // type exists to make unrepresentable.
+    private static func runNetworkIdentityTests() {
+        print("NetworkIdentity:")
+
+        check(NetworkIdentity.canonical("wifi:mac=AA:BB:CC:DD:EE:FF") == "mac:aa:bb:cc:dd:ee:ff",
+              "a record-form MAC canonicalises and lowercases")
+        check(NetworkIdentity.canonical("mac:aa:bb:cc:dd:ee:ff") == "mac:aa:bb:cc:dd:ee:ff",
+              "an already-canonical MAC is unchanged")
+        check(NetworkIdentity.canonical("wifi:gw=10.125.128.1") == "gw:10.125.128.1",
+              "a record-form gateway canonicalises")
+        check(NetworkIdentity.canonical("lan:gw=192.168.60.1") == "gw:192.168.60.1",
+              "the lan: record prefix canonicalises the same way")
+        check(NetworkIdentity.canonical("wifi:ssid=SB Airbnb") == "ssid:SB Airbnb",
+              "a record-form SSID canonicalises")
+
+        // MAC wins over SSID wins over gateway, matching history.py.
+        check(NetworkIdentity.canonical("wifi:mac=AA:BB:CC:DD:EE:FF,ssid=Home,gw=192.168.1.1")
+                == "mac:aa:bb:cc:dd:ee:ff",
+              "MAC outranks SSID and gateway")
+        check(NetworkIdentity.canonical("wifi:ssid=Home,gw=192.168.1.1") == "ssid:Home",
+              "SSID outranks gateway")
+
+        check(NetworkIdentity.canonical("") == nil,
+              "an empty id canonicalises to nothing")
+        check(NetworkIdentity.canonical("unknown") == nil,
+              "the CLI's unknown sentinel canonicalises to nothing")
+        check(NetworkIdentity.canonical("wifi:mac=") == nil,
+              "a present-but-empty field is not an identity")
+
+        // fold: weak keys collapse onto the MAC group that shares their
+        // gateway or SSID. The map is weak-key -> strong-key.
+        let folded = NetworkIdentity.fold(
+            [
+                "mac:76:42:18:5c:40:64": ["gw:10.125.128.1", "ssid:Richard's iPhone"],
+                "mac:64:d1:54:4a:93:7f": ["gw:172.20.10.1"],
+            ],
+            weak: ["gw:10.125.128.1", "gw:172.20.10.1", "ssid:Richard's iPhone", "gw:8.8.8.8"])
+        check(folded["gw:10.125.128.1"] == "mac:76:42:18:5c:40:64",
+              "a gateway folds onto the MAC group that used it")
+        check(folded["ssid:Richard's iPhone"] == "mac:76:42:18:5c:40:64",
+              "an SSID folds onto the MAC group that used it")
+        check(folded["gw:172.20.10.1"] == "mac:64:d1:54:4a:93:7f",
+              "a second gateway folds onto its own MAC group")
+        check(folded["gw:8.8.8.8"] == nil,
+              "a weak key with no MAC group folds nowhere, rather than guessing")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
