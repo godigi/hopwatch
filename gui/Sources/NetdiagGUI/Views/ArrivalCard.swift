@@ -17,25 +17,69 @@ struct ArrivalCopy {
     let body: String
     /// nil when there is nothing for the user to do but wait.
     var actionTitle: String?
+    /// Whether the card should show a spinner. False in every state where
+    /// nothing is actually happening — an `.unchecked` network with no
+    /// automatic check coming looked identical to one mid-check, which is
+    /// the same "the UI implies work that isn't happening" failure this
+    /// whole change exists to fix.
+    var isBusy: Bool = false
+
+    /// What, if anything, the app is about to do on its own about an
+    /// `.unchecked` network. Only consulted for that state: every other
+    /// state already says what happened.
+    enum Intent: Equatable, Sendable {
+        /// The automatic check is running or about to run.
+        case starting
+        /// Another check is in flight, so this one is queued behind it.
+        /// Distinct from `.starting` because the wait can be minutes, and
+        /// "Starting a check" for five minutes is a lie of tense.
+        case waitingForAnotherCheck
+        /// No automatic check is coming — the user turned off "run a check
+        /// the first time I join a network" in Settings. Without this case
+        /// the card sat on a permanent spinner promising a check that
+        /// would never arrive.
+        case notAutomatic
+    }
 
     /// nil means "render no card" — the network has been checked and the
     /// report below speaks for itself.
-    static func forState(_ state: ArrivalState, network: String?) -> ArrivalCopy? {
+    static func forState(_ state: ArrivalState, network: String?,
+                         intent: Intent = .starting) -> ArrivalCopy? {
         let name = network ?? "this network"
         switch state {
         case .checked:
             return nil
 
         case .unchecked:
-            return ArrivalCopy(
-                title: "New network: \(name)",
-                body: "netdiag hasn't measured this one yet. Starting a check.")
+            switch intent {
+            case .starting:
+                return ArrivalCopy(
+                    title: "New network: \(name)",
+                    body: "netdiag hasn't measured this one yet. Starting a check.",
+                    isBusy: true)
+            case .waitingForAnotherCheck:
+                return ArrivalCopy(
+                    title: "New network: \(name)",
+                    body: """
+                        netdiag hasn't measured this one yet. Another check is \
+                        running, so this one starts when that finishes.
+                        """,
+                    isBusy: true)
+            case .notAutomatic:
+                return ArrivalCopy(
+                    title: "New network: \(name)",
+                    body: """
+                        netdiag hasn't measured this one yet. Automatic checks on \
+                        joining a network are turned off in Settings.
+                        """,
+                    actionTitle: "Run full check")
+            }
 
         case .checking(let depth, _):
             let what = depth == .full
                 ? "Running a full check — speed, latency under load, path MTU and per-hop loss."
                 : "Running a quick check."
-            return ArrivalCopy(title: "New network: \(name)", body: what)
+            return ArrivalCopy(title: "New network: \(name)", body: what, isBusy: true)
 
         case .declined(_, let reason, _):
             switch reason {
@@ -81,16 +125,19 @@ struct ArrivalCard: View {
     let state: ArrivalState
     let network: String?
     let progress: ScanProgress?
+    var intent: ArrivalCopy.Intent = .starting
     var onRunFullCheck: () -> Void
 
     var body: some View {
-        if let copy = ArrivalCopy.forState(state, network: network) {
+        if let copy = ArrivalCopy.forState(state, network: network, intent: intent) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack(spacing: Theme.Spacing.sm) {
-                    switch state {
-                    case .unchecked, .checking:
+                    // Driven by the copy, not by the state: an `.unchecked`
+                    // network with automatic checks turned off is not busy,
+                    // and a spinner there promises work that is not coming.
+                    if copy.isBusy {
                         ProgressView().controlSize(.small)
-                    default:
+                    } else {
                         Image(systemName: "info.circle")
                             .foregroundStyle(.secondary)
                     }

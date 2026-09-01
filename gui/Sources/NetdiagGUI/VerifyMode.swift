@@ -563,23 +563,68 @@ private enum VerifyHarness {
                                    network: "SB Airbnb") == nil,
               "a checked network shows no card at all")
 
+        // The three unchecked intents must be distinguishable. All three
+        // used to render one spinner and one "Starting a check." — so a
+        // user who had switched automatic checks off in Settings saw a
+        // permanent promise of work that was never coming, and a check
+        // queued behind another one claimed to be starting for up to five
+        // minutes. Both are the same failure this whole change exists to
+        // fix: a UI implying work that is not happening.
+        let starting = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                            intent: .starting)
+        let waiting = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                           intent: .waitingForAnotherCheck)
+        let manual = ArrivalCopy.forState(.unchecked, network: "SB Airbnb",
+                                          intent: .notAutomatic)
+
+        check(starting?.isBusy == true, "an imminent arrival check shows a spinner")
+        check(waiting?.isBusy == true, "a queued arrival check shows a spinner")
+        check(manual?.isBusy == false,
+              "an unchecked network with no automatic check coming shows no spinner")
+        check(manual?.actionTitle != nil,
+              "with automatic checks off, the card offers the check as a button")
+        check(starting?.actionTitle == nil,
+              "a check already starting offers no redundant button")
+        check(starting?.body != waiting?.body,
+              "a queued check does not claim to be starting")
+        check(waiting?.body != manual?.body && starting?.body != manual?.body,
+              "the three unchecked intents each say something different")
+
+        // The busy states are exactly the ones where work is in flight.
+        check(ArrivalCopy.forState(.checking(depth: .full, startedAt: Date()),
+                                   network: "SB Airbnb")?.isBusy == true,
+              "a check in flight is busy")
+        check(ArrivalCopy.forState(.declined(depth: .quick, reason: .hotspot, at: Date()),
+                                   network: "SB Airbnb")?.isBusy == false,
+              "a declined check is finished, not busy")
+
         // The GUI authors no verdicts. These are the words that would mean
         // this file had started diagnosing, which is lib/diagnosis.sh's
         // job — see AlertDefinitions.swift's header.
+        // Every reachable (state, intent) pair, not just the states: the
+        // three unchecked intents each have their own sentence, and a
+        // verdict word smuggled into one of them would otherwise ship
+        // unchecked.
         let forbidden = ["slow", "bad", "poor", "unusable", "broken", "healthy", "good"]
-        for state: ArrivalState in [
-            .unchecked,
-            .checking(depth: .full, startedAt: Date()),
-            .declined(depth: .quick, reason: .hotspot, at: Date()),
-            .declined(depth: .quick, reason: .unhealthy, at: Date()),
-        ] {
-            guard let copy = ArrivalCopy.forState(state, network: "SB Airbnb") else { continue }
+        let cases: [(ArrivalState, ArrivalCopy.Intent)] = [
+            (.unchecked, .starting),
+            (.unchecked, .waitingForAnotherCheck),
+            (.unchecked, .notAutomatic),
+            (.checking(depth: .full, startedAt: Date()), .starting),
+            (.checking(depth: .quick, startedAt: Date()), .starting),
+            (.declined(depth: .quick, reason: .hotspot, at: Date()), .starting),
+            (.declined(depth: .quick, reason: .unhealthy, at: Date()), .starting),
+        ]
+        for (state, intent) in cases {
+            guard let copy = ArrivalCopy.forState(state, network: "SB Airbnb",
+                                                  intent: intent) else { continue }
             let text = (copy.title + " " + copy.body + " " + (copy.actionTitle ?? "")).lowercased()
             let hit = forbidden.first { text.contains($0) }
+            let label = "\(state.debugLabel)/\(intent)"
             check(hit == nil,
                   hit == nil
-                    ? "\(state.debugLabel) copy states mechanism, not a verdict"
-                    : "\(state.debugLabel) copy contains the verdict word \"\(hit!)\"")
+                    ? "\(label) copy states mechanism, not a verdict"
+                    : "\(label) copy contains the verdict word \"\(hit!)\"")
         }
     }
 

@@ -90,6 +90,10 @@ final class NetdiagCoordinator {
     /// The canonical id `arrivalState` describes. Views read this to name
     /// the network on the arrival card.
     private(set) var arrivalNetworkID: String?
+    /// What the app will do next about an unchecked network — see
+    /// `arrivalIntent(now:)` for why "unchecked" alone is not enough for
+    /// the card to render honestly.
+    private(set) var arrivalIntent: ArrivalCopy.Intent = .starting
     /// Consecutive declined arrival attempts for the current network, held
     /// in memory only: a backoff that survived relaunch would punish a
     /// user for quitting the app. Reset when the network changes or an
@@ -352,6 +356,14 @@ final class NetdiagCoordinator {
         if arrivalNetworkID != id { arrivalNetworkID = id }
         if arrivalState != state { arrivalState = state }
 
+        // Published before the guards below, because the card renders what
+        // is *not* going to happen as carefully as what is. An `.unchecked`
+        // network whose automatic check is switched off, or is queued
+        // behind a running scan, must not wear the same spinner as one
+        // being measured right now.
+        let intent = arrivalIntent(now: Date())
+        if arrivalIntent != intent { arrivalIntent = intent }
+
         guard Defaults.scanOnNewNetwork else { return }
         let now = Date()
         guard state.needsAttempt(now: now) else { return }
@@ -406,6 +418,26 @@ final class NetdiagCoordinator {
         pendingArrivalNetworkID = id
         pendingArrivalDepth = depth
         pendingArrivalDecline = declineWith
+    }
+
+    /// What the app is about to do on its own about an unchecked network.
+    ///
+    /// Exists because "unchecked" alone cannot tell a user whether to wait
+    /// or to press something. Three outcomes, and the card renders each
+    /// differently: a check is imminent, a check is queued behind one
+    /// already running, or no automatic check is coming at all because the
+    /// Settings toggle is off. Before this, all three showed the same
+    /// spinner and the same "Starting a check." — so a user who had turned
+    /// the feature off saw a permanent promise of work that would never
+    /// arrive.
+    private func arrivalIntent(now: Date) -> ArrivalCopy.Intent {
+        guard Defaults.scanOnNewNetwork else { return .notAutomatic }
+        // A backoff is only ever set by a decline for busy-ness, and the
+        // longest is five minutes — far too long to keep claiming a check
+        // is "starting".
+        if let next = nextArrivalAttemptAt, now < next { return .waitingForAnotherCheck }
+        if isScanning, !isArrivalCheck { return .waitingForAnotherCheck }
+        return .starting
     }
 
     /// Write one network's arrival state to both the store and the

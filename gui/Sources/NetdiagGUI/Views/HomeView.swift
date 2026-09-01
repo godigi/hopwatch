@@ -27,15 +27,17 @@ struct HomeView: View {
                 wifiRow
 
                 ArrivalCard(state: coordinator.arrivalState,
-                            network: coordinator.wifiDisplayName,
+                            network: arrivalNetworkName,
                             progress: coordinator.isScanning ? coordinator.progress : nil,
+                            intent: coordinator.arrivalIntent,
                             onRunFullCheck: { coordinator.runDeclinedFullCheck() })
 
                 // Only for scans the arrival card is not already showing —
                 // otherwise a new network renders two sets of progress rows.
                 if coordinator.isScanning,
                    ArrivalCopy.forState(coordinator.arrivalState,
-                                        network: coordinator.wifiDisplayName) == nil {
+                                        network: arrivalNetworkName,
+                                        intent: coordinator.arrivalIntent) == nil {
                     ScanProgressView(progress: coordinator.progress)
                     Divider()
                 }
@@ -91,6 +93,22 @@ struct HomeView: View {
         .task(id: coordinator.monitor.latest?.seq) {
             refreshCoreWLANRSSIIfNeeded()
         }
+    }
+
+    /// The name for the arrival card, falling back past CoreWLAN.
+    ///
+    /// `wifiDisplayName` is nil without Location Services, and the card's
+    /// own fallback is the generic "this network" — which rendered
+    /// directly beneath a header already showing the real name, from the
+    /// history store, two lines up. `arrivalNetworkID` is the canonical id
+    /// the card is *about*, and `history.displayName(for:)` is the same
+    /// resolver the Networks tab and the header use, so this cannot
+    /// disagree with them.
+    private var arrivalNetworkName: String? {
+        if let live = coordinator.wifiDisplayName, !live.isEmpty { return live }
+        guard let id = coordinator.arrivalNetworkID else { return nil }
+        let resolved = coordinator.history.displayName(for: id)
+        return resolved.isEmpty ? nil : resolved
     }
 
     // MARK: - Wi-Fi row
