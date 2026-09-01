@@ -257,12 +257,47 @@ private enum VerifyHarness {
         check(refired.first?.isOngoing == true,
               "still open: no clear was ever seen for it")
 
-        // A clear whose fire is older than the store's 500-entry cap
-        // describes an end with no beginning: no duration exists to state.
+        // A clear whose fire is not in the slice being folded describes an
+        // end with no beginning. There is no duration to state — but there
+        // is still an ending, and the CLI's own "Resolved: …" states it.
+        //
+        // Dropping the row entirely was defensible against the store's
+        // 500-entry cap and wrong against the dropdown, which folds a
+        // rolling `eventLog.within(hours: 24)` and so manufactures orphans
+        // routinely: a fault that fired 20:00 yesterday and cleared 09:00
+        // today is a lone `rule-cleared` by 10:00, and a long fault that
+        // just ended is precisely what someone opening the menu bar is
+        // looking for.
         let orphan = ActivityEntry.fold([
             event("rule-cleared", "G3", 0, "Resolved: Minor packet loss to router"),
         ])
-        equal(orphan.count, 0, "an orphan clear contributes no row")
+        equal(orphan.count, 1, "an orphan clear still reports that the fault ended")
+        equal(orphan.first?.summary, "Resolved: Minor packet loss to router",
+              "in the CLI's own words")
+        equal(orphan.first?.kind, "rule-cleared",
+              "styled as a resolution — the green check EventRow used to give it")
+        equal(orphan.first?.totalDuration, nil,
+              "carrying no duration, because no start was ever observed")
+        check(orphan.first?.isOngoing == false, "and not marked still open")
+        equal(orphan.first?.detail, nil,
+              "so the row adds nothing beyond the summary")
+
+        // ...and where the rule fired again later the same day, the orphan
+        // merges into that row rather than doubling it — and the row reads
+        // as the fault, not as its resolution, whichever merged first.
+        let orphanThenFlap = ActivityEntry.fold([
+            event("rule-cleared", "G3", 0, "Resolved: Minor packet loss to router"),
+            event("rule-fired", "G3", 600),
+            event("rule-cleared", "G3", 900, "Resolved: Minor packet loss to router"),
+        ])
+        equal(orphanThenFlap.count, 1, "an orphan merges into the rule's day row")
+        equal(orphanThenFlap.first?.occurrences, 2, "counting both endings")
+        equal(orphanThenFlap.first?.kind, "rule-fired",
+              "a day the rule was seen to fire reads as the fault")
+        equal(orphanThenFlap.first?.summary, "Minor packet loss to router",
+              "keeping the fault's words, not the resolution's")
+        equal(orphanThenFlap.first?.totalDuration, 300,
+              "and only the span that was actually observed")
 
         // Discrete facts have no duration and must never be paired.
         let discrete = ActivityEntry.fold([

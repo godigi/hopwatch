@@ -148,11 +148,31 @@ extension ActivityEntry {
                 if var existing = open.removeValue(forKey: ruleID) {
                     existing.end = event.date
                     episodes.append(existing)
+                } else {
+                    // An orphan `cleared`: the `fired` predates the store's
+                    // 500-entry cap, or the app was installed mid-fault, or
+                    // — much more often — it simply predates the slice being
+                    // folded. `DropdownView` folds a rolling
+                    // `eventLog.within(hours: 24)`, so any fault that began
+                    // more than a day ago and ended today arrives here with
+                    // its beginning already outside the window.
+                    //
+                    // This used to contribute no row at all, which made a
+                    // long fault that had just been resolved disappear from
+                    // the panel — the one thing someone opening the menu bar
+                    // most wants to see, and something the older `EventRow`
+                    // timeline did render, as "Resolved: …".
+                    //
+                    // An end with no beginning is still an end. It becomes a
+                    // zero-length episode: the one-second floor in `group`
+                    // then leaves `totalDuration` nil, so the row states the
+                    // resolution and invents no duration for it.
+                    episodes.append(Episode(
+                        ruleID: ruleID, kind: event.kind,
+                        summary: event.summary, start: event.date,
+                        end: event.date, lastSeen: event.date,
+                        isLowerBound: false))
                 }
-                // An orphan `cleared` — the `fired` predates the store's
-                // 500-entry cap, or the app was installed mid-fault. It
-                // describes an end with no beginning, so there is no
-                // duration to state and nothing to show.
             default:
                 break
             }
@@ -171,6 +191,14 @@ extension ActivityEntry {
             guard var existing = entries[key] else {
                 entries[key] = candidate
                 return
+            }
+            // A day on which the rule was actually seen to fire reads as the
+            // fault, not as its resolution. Without this, a group holding
+            // both an orphan `cleared` and a real episode would take its
+            // words and its icon from whichever happened to merge first.
+            if existing.kind == "rule-cleared" && candidate.kind != "rule-cleared" {
+                existing.kind = candidate.kind
+                existing.summary = candidate.summary
             }
             existing.occurrences += candidate.occurrences
             existing.latest = max(existing.latest, candidate.latest)
@@ -201,7 +229,11 @@ extension ActivityEntry {
             let seen = episode.end ?? episode.lastSeen
             let duration = seen.timeIntervalSince(episode.start)
             merge(key, ActivityEntry(
-                id: key, kind: "rule-fired", summary: episode.summary,
+                // The episode's own kind, which is "rule-fired" for every
+                // episode that was seen to start and "rule-cleared" for an
+                // orphan resolution — so the latter keeps the green check
+                // its text ("Resolved: …") is asking for.
+                id: key, kind: episode.kind, summary: episode.summary,
                 ruleID: episode.ruleID,
                 latest: seen, earliest: episode.start,
                 occurrences: 1,
