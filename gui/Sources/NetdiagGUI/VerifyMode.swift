@@ -283,6 +283,45 @@ private enum VerifyHarness {
         ])
         equal(acrossDays.count, 2, "separate days stay separate rows")
 
+        // ...and a fault that runs *through* midnight is filed once, under
+        // the day it began.
+        //
+        // `group` keys per day on the episode's start, so a 23:50→00:10
+        // fault and a 09:00 one the next morning are two entries — right,
+        // they are two occurrences on two days. `ActivityView` then bucketed
+        // both into sections by `latest`, which is Tuesday for both, and
+        // Tuesday's section printed two identical "Minor packet loss to
+        // router" rows: the one-row-per-rule-per-day promise this type's
+        // header makes, broken by keying and bucketing on different fields.
+        let cal = Calendar.current
+        let midnightBase = cal.startOfDay(for: day)
+        func moment(_ dayOffset: Int, _ hour: Int, _ minute: Int) -> Date {
+            let shifted = cal.date(byAdding: .day, value: dayOffset,
+                                   to: midnightBase)!
+            return cal.date(bySettingHour: hour, minute: minute, second: 0,
+                            of: shifted)!
+        }
+        func at(_ kind: String, _ when: Date, _ summary: String) -> NetworkEvent {
+            NetworkEvent(date: when, kind: kind, summary: summary, ruleID: "G3")
+        }
+        let crossing = ActivityEntry.byDay(ActivityEntry.fold([
+            at("rule-fired", moment(0, 23, 50), "Minor packet loss to router"),
+            at("rule-cleared", moment(1, 0, 10),
+               "Resolved: Minor packet loss to router"),
+            at("rule-fired", moment(1, 9, 0), "Minor packet loss to router"),
+            at("rule-cleared", moment(1, 9, 5),
+               "Resolved: Minor packet loss to router"),
+        ], calendar: cal), calendar: cal)
+        equal(crossing.count, 2, "a midnight crossing spans two day sections")
+        equal(crossing.first?.day, cal.startOfDay(for: moment(1, 0, 0)),
+              "newest day first")
+        equal(crossing.first?.entries.count, 1,
+              "the second day lists G3 once, not twice")
+        equal(crossing.last?.entries.count, 1,
+              "and the crossing episode is filed under the day it began")
+        equal(crossing.last?.entries.first?.totalDuration, 1200,
+              "still carrying the 20 minutes it ran across midnight")
+
         // An alert is about a rule the CLI already reported, so listing both
         // printed one incident twice in different words. The alert is
         // absorbed as a flag, not deleted — being notified is the one thing

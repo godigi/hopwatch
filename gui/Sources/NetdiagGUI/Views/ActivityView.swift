@@ -113,20 +113,15 @@ struct ActivityView: View {
         let entries: [ActivityEntry]
     }
 
-    /// One section per calendar day, newest first. `fold` returns entries
-    /// newest-first, so the days come out of it in order too.
+    /// One section per calendar day, newest first.
+    ///
+    /// The bucketing itself is `ActivityEntry.byDay`, next to the per-day
+    /// key `fold` groups on, so the two cannot disagree about which day a
+    /// row belongs to. This view only labels the result.
     private var days: [Day] {
-        let calendar = Calendar.current
-        var order: [Date] = []
-        var buckets: [Date: [ActivityEntry]] = [:]
-        for entry in entries {
-            let day = calendar.startOfDay(for: entry.latest)
-            if buckets[day] == nil { order.append(day) }
-            buckets[day, default: []].append(entry)
-        }
-        return order.map {
-            Day(id: "\($0.timeIntervalSince1970)", label: dayLabel($0),
-                entries: buckets[$0] ?? [])
+        ActivityEntry.byDay(entries).map {
+            Day(id: "\($0.day.timeIntervalSince1970)", label: dayLabel($0.day),
+                entries: $0.entries)
         }
     }
 

@@ -187,6 +187,10 @@ extension ActivityEntry {
         }
 
         for episode in episodes {
+            // Keyed on the day the episode *began*. `byDay` sections on the
+            // same field via `earliest`; if one of the two ever moves, the
+            // other has to move with it or a row can be filed under a day
+            // its key does not name.
             let day = calendar.startOfDay(for: episode.start)
             let key = "rule|\(episode.ruleID)|\(day.timeIntervalSince1970)"
             // Measured to the observed end where there is one, and otherwise
@@ -253,6 +257,48 @@ extension ActivityEntry {
             result.removeValue(forKey: key)
         }
         return result
+    }
+}
+
+extension ActivityEntry {
+
+    /// Rows bucketed into calendar-day sections, newest day first.
+    ///
+    /// Lives beside `group`, which builds the per-day key these sections
+    /// have to agree with, because they are one decision made twice — and
+    /// they drifted. `group` keys on the episode's `start`; this bucketed
+    /// on its `latest`. A rule that fired 23:50 Monday and cleared 00:10
+    /// Tuesday, then fired and cleared again at 09:00 Tuesday, therefore
+    /// produced two entries (`rule|G3|Monday`, `rule|G3|Tuesday`) that both
+    /// landed in Tuesday's section, printing the same sentence twice and
+    /// breaking the one-row-per-rule-per-day promise in this type's header.
+    ///
+    /// `earliest` is the field both now use, i.e. an episode belongs to the
+    /// day it *began*. Three reasons, in order of weight:
+    ///
+    ///  * `helpers/events.py` — the reference for this fold — identifies an
+    ///    episode by its start, sorting `episodes()` on `started`.
+    ///  * `earliest` reproduces `group`'s key exactly. Every episode merged
+    ///    under one key has the same `startOfDay(start)`, and `merge` takes
+    ///    the `min`, so `startOfDay(earliest)` is that day by construction.
+    ///    `latest` has no such guarantee: `merge` and `absorbAlerts` both
+    ///    move it, so a key built from it would change as rows accumulate.
+    ///  * A fault that ran through midnight is one thing that happened on
+    ///    Monday night, and Monday night is where someone goes looking.
+    static func byDay(_ entries: [ActivityEntry],
+                      calendar: Calendar = .current)
+        -> [(day: Date, entries: [ActivityEntry])] {
+        var buckets: [Date: [ActivityEntry]] = [:]
+        for entry in entries {
+            buckets[calendar.startOfDay(for: entry.earliest), default: []]
+                .append(entry)
+        }
+        // Sorted, not taken in encounter order. `fold` returns rows newest
+        // `latest` first, which only implied day order while the bucket was
+        // `latest` too: a Monday-night fault still running Tuesday lunchtime
+        // outranks a Tuesday-morning one and would print Monday's section
+        // above Tuesday's.
+        return buckets.keys.sorted(by: >).map { ($0, buckets[$0] ?? []) }
     }
 }
 
