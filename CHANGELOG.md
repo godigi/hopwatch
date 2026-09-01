@@ -6,6 +6,71 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed — three ways the Activity timeline mis-told the history it folds [GUI]
+
+An hour-long fault could render with no duration; a fault that ran through
+midnight could print twice in one day's section; and a fault that had just
+been resolved could vanish from the dropdown entirely. All three are in
+`ActivityEntry.fold` and the two views over it, and all three come from the
+same place: the fold reproduces `helpers/events.py`'s episode pairing, and
+in these three cases it had drifted from it.
+
+**The restart discarded the span it was meant to bound.** When a rule fires
+twice with no clear between, the monitor restarted mid-fault — it emits only
+on transition, so a second `fired` means it lost its previous sample. The
+branch closed the open episode at `existing.end ?? existing.start`, and
+`end` is nil for everything in `open` by construction, so every such episode
+closed at its own start. Zero length, rejected by the one-second rendering
+floor, `totalDuration` nil — and `durationIsLowerBound` left qualifying a
+duration that no longer existed, so the `+` the branch set could never
+appear. A fault known to have held for an hour read as a bare occurrence.
+`helpers/events.py` does the opposite and is the reference: `episodes()`
+skips the second `rule-fired` and keeps the earlier start, the earliest
+moment the fault is known to have been true. `Episode` now carries a
+`lastSeen` sighting distinct from `end` — an ending is not the same fact as
+a sighting — so the span survives, reads "lasted 1h+", and stays open. The
+existing "re-fire after a restart" test never reached this branch: its clear
+closes the first episode before the second fire lands.
+
+**Two places disagreed about which day a row belongs to.** `group` keys per
+day on the episode's start; `ActivityView` bucketed its sections on
+`latest`. For an episode crossing midnight those are different days, so a
+rule firing 23:50 Monday and clearing 00:10 Tuesday, then firing again at
+09:00 Tuesday, produced two entries that both landed in Tuesday's section —
+the same sentence twice, and the one-row-per-rule-per-day promise in
+`ActivityEntry`'s own header broken. Both now use the start.
+`helpers/events.py` identifies an episode the same way, sorting on
+`started`, and `earliest` reproduces `group`'s key by construction where
+`latest` cannot: `merge` and `absorbAlerts` both move `latest` as rows
+accumulate. The bucketing moved out of the view into `ActivityEntry.byDay`,
+beside the key it has to agree with, and now sorts its sections explicitly —
+day order only followed from the fold's newest-first ordering while the
+bucket was `latest` too.
+
+**A rolling window manufactures orphans.** A `rule-cleared` with no matching
+`rule-fired` was dropped, which is a sound defence against the 500-entry
+store cap truncating history and the wrong answer for the dropdown, which
+folds `eventLog.within(hours: 24)`: any fault older than a day that ends
+today arrives with its beginning already outside the slice. So a long fault
+that had just been fixed disappeared from the panel where "it's fixed now"
+is the most useful thing to say — something the older `EventRow` timeline
+did render. An end with no beginning is still an end. It now folds to a
+zero-length episode, so the same one-second floor leaves `totalDuration` nil
+and the row states the resolution in the CLI's own words without inventing a
+duration for it; it keeps its `rule-cleared` kind and so its green check,
+while `merge` prefers a fired episode's words on a day the rule was also
+seen to fire. Rejected: folding a wider slice than the dropdown displays,
+which fixes only that surface and inflates its "LAST 24 HOURS" counts with
+same-day episodes from outside the window; and dropping orphans only when
+the store detects truncation, which is a property of the whole store rather
+than evidence about one rule, and leaves the window case unfixed.
+
+21 new `--verify` assertions cover all three, each written to fail first.
+One difference with `helpers/events.py` remains by design: it marks a
+duration a lower bound only on an explicit `monitor-started` journal row,
+which `EventStore` has no equivalent of, so the GUI infers the restart from
+the fire-on-fire itself — the same conclusion from the only evidence it has.
+
 ### Fixed — a missing UPnP state counted as a measured path
 
 `measured_families()` decided whether the `path` family had been probed by
