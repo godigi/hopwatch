@@ -196,7 +196,7 @@ enum GalleryMode {
     /// signal scale are reads, and reads are what the views render from.
     /// `monitor.start()`, `events.start()`, the workspace observers, the
     /// notification authorisation prompt and the first-sighting auto-scan
-    /// are all writes — of processes, of TCC prompts, of `seenNetworks` —
+    /// are all writes — of processes, of TCC prompts, of `arrivalStates` —
     /// and a screenshot run must cause none of them.
     private static func hydrate(_ coordinator: NetdiagCoordinator) async {
         coordinator.rulesCatalog.ensureLoaded()

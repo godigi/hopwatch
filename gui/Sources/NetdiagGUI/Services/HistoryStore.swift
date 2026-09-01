@@ -29,22 +29,26 @@ final class HistoryStore {
     private(set) var manualMerges: [String: String] = Defaults.networkMerges
 
     /// One-time rewrite of keys recorded before the group-id join landed.
-    /// Renames and seen-network entries were keyed by the raw sample id
-    /// (`wifi:mac=AA:BB:…`), which never matches a `--history` group —
-    /// the bug where an adopted Wi-Fi name showed on Home but not in the
-    /// Networks tab. Rewrites `wifi:mac=X` / `lan:mac=X` to the group key
-    /// (`mac:x`), lowercased, without clobbering a key that already
-    /// exists. Idempotent: a second run finds nothing left to move.
+    /// Renames and arrival entries were keyed by the raw sample id
+    /// (`wifi:mac=AA:BB:…`), which never matches a `--history` group — the
+    /// bug where an adopted Wi-Fi name showed on Home but not in the
+    /// Networks tab.
+    ///
+    /// Delegates to `NetworkIdentity.canonical` rather than carrying its
+    /// own rule. The previous version rewrote only the two `mac=` forms,
+    /// so `wifi:gw=10.125.128.1` was left untouched and sat alongside the
+    /// `gw:10.125.128.1` the same network later presented as. One network,
+    /// two keys, forever.
+    ///
+    /// Idempotent: a canonical key canonicalises to itself. A key with no
+    /// identity at all is left exactly as it is — dropping it here would
+    /// silently discard a name the user typed.
     private static func migrateRawKeys(_ dict: [String: String]) -> [String: String] {
         var out = dict
         for (key, value) in dict {
-            let mac: String
-            if key.hasPrefix("wifi:mac=") { mac = String(key.dropFirst("wifi:mac=".count)) }
-            else if key.hasPrefix("lan:mac=") { mac = String(key.dropFirst("lan:mac=".count)) }
-            else { continue }
-            let groupKey = "mac:\(mac.lowercased())"
-            if out[groupKey] == nil { out[groupKey] = value }
-            if groupKey != key { out.removeValue(forKey: key) }
+            guard let canonical = NetworkIdentity.canonical(key), canonical != key else { continue }
+            if out[canonical] == nil { out[canonical] = value }
+            out.removeValue(forKey: key)
         }
         return out
     }
@@ -55,10 +59,11 @@ final class HistoryStore {
         let names = Self.migrateRawKeys(Defaults.networkNames)
         if names != Defaults.networkNames { Defaults.networkNames = names }
         customNames = names
-        let seen = Self.migrateRawKeys(
-            Dictionary(uniqueKeysWithValues: Defaults.seenNetworks.map { ($0, "1") }))
-        let seenKeys = Set(seen.keys)
-        if seenKeys != Defaults.seenNetworks { Defaults.seenNetworks = seenKeys }
+        // `seenNetworks` used to be canonicalised here too. It is now
+        // read-only and superseded by `Defaults.arrivalStates`, whose
+        // one-time `migrateArrivalStatesIfNeeded()` — called from
+        // `NetdiagCoordinator.start()` — canonicalises the same keys on
+        // their way across. Nothing left to do here.
     }
 
     func load() async {

@@ -69,6 +69,7 @@ private enum VerifyHarness {
         runNetworkIdentityFixtureTests()
         runArrivalStateTests()
         runArrivalPolicyTests()
+        runArrivalMigrationTests()
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
@@ -489,6 +490,46 @@ private enum VerifyHarness {
                                    isExpensive: true, isConstrained: false)
                 == .quick(.hotspot),
               "when both apply, the hotspot reason is the one shown")
+    }
+
+    // MARK: - Arrival migration
+    private static func runArrivalMigrationTests() {
+        print("Arrival migration:")
+
+        // The keys below are verbatim from a live install, where one
+        // iPhone hotspot had accumulated all three forms.
+        let legacy: Set<String> = [
+            "gw:10.125.128.1",
+            "wifi:gw=10.125.128.1",
+            "mac:76:42:18:5c:40:64",
+            "mac:28:70:4e:45:89:5a",
+            "unknown",
+            "",
+        ]
+        let migrated = Defaults.migratedArrivalStates(from: legacy)
+
+        check(migrated["gw:10.125.128.1"] != nil,
+              "a canonical legacy key survives migration")
+        check(migrated["wifi:gw=10.125.128.1"] == nil,
+              "a record-format legacy key is not carried across verbatim")
+        check(migrated["mac:76:42:18:5c:40:64"] != nil,
+              "a MAC key survives migration")
+        check(migrated["unknown"] == nil && migrated[""] == nil,
+              "nameless legacy entries are dropped rather than keyed")
+
+        // Fail closed. Every migrated network reads as already checked, so
+        // an upgrade never re-checks the world — and never spends cellular
+        // data re-baselining a hotspot it already knew about.
+        let allChecked = migrated.values.allSatisfy {
+            if case .checked = $0 { return true }
+            return false
+        }
+        check(allChecked, "every migrated entry is checked, never unchecked")
+        check(migrated.values.allSatisfy { !$0.needsAttempt(now: Date()) },
+              "no migrated entry asks for an attempt")
+
+        check(Defaults.migratedArrivalStates(from: []).isEmpty,
+              "an empty legacy set migrates to an empty map")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

@@ -56,6 +56,7 @@ enum Defaults {
         static let networkNames       = "networkNames"
         static let networkMerges      = "networkMerges"
         static let seenNetworks       = "seenNetworks"
+        static let arrivalStates      = "arrivalStates"
         static let hasOnboarded       = "hasOnboarded"
         static let pauseOnDisplaySleep = "pauseOnDisplaySleep"
         static let pauseOnBattery     = "pauseOnBattery"
@@ -208,13 +209,69 @@ enum Defaults {
         set { d.set(newValue, forKey: Key.phaseDurationSamples) }
     }
 
-    /// Networks this app has seen live. Distinct from the history: a
-    /// never-seen network should trigger exactly one scan, and the history
-    /// only learns about the network *because* of that scan — so keying the
-    /// trigger off history alone would fire it twice.
-    static var seenNetworks: Set<String> {
-        get { Set(d.stringArray(forKey: Key.seenNetworks) ?? []) }
-        set { d.set(Array(newValue), forKey: Key.seenNetworks) }
+    /// Superseded by `arrivalStates`. Kept readable so the one-time
+    /// migration can find it, and *not* written to any more — a build that
+    /// still wrote this would keep a second, diverging record of the same
+    /// fact. Delete once no supported version reads it.
+    static var legacySeenNetworks: Set<String> {
+        Set(d.stringArray(forKey: Key.seenNetworks) ?? [])
+    }
+
+    /// What has happened about checking each network, keyed by
+    /// `NetworkIdentity.canonical`.
+    ///
+    /// Stored as JSON in a single key rather than as a plist dictionary,
+    /// because the value is an enum with associated values. The
+    /// dictionary-of-dictionaries pattern `phaseDurationSamples` uses does
+    /// not stretch that far.
+    ///
+    /// A malformed or absent value reads as empty, which means every
+    /// network is `.unchecked` — the correct behaviour for a corrupt read
+    /// (check them again) rather than a crash. Per-entry decoding failures
+    /// cannot happen: `ArrivalState.init(from:)` decodes an unrecognised
+    /// state as `.unchecked` rather than throwing, precisely so one bad
+    /// entry cannot wipe the map.
+    static var arrivalStates: [String: ArrivalState] {
+        get {
+            guard let data = d.data(forKey: Key.arrivalStates) else { return [:] }
+            return (try? JSONDecoder().decode([String: ArrivalState].self, from: data)) ?? [:]
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            d.set(data, forKey: Key.arrivalStates)
+        }
+    }
+
+    /// Fold a legacy `seenNetworks` set into arrival states. Pure, so
+    /// `VerifyMode` can check it without touching the real defaults.
+    ///
+    /// **Fails closed.** Everything it can name becomes `.checked` at
+    /// `.distantPast`; everything it cannot name is dropped. The asymmetry
+    /// is deliberate: a network wrongly assumed seen loses one automatic
+    /// baseline and is one button away from getting it, while a network
+    /// wrongly assumed new can spend a few hundred megabytes of someone's
+    /// cellular data without asking.
+    ///
+    /// `.distantPast` rather than `Date()` so the entry is visibly a
+    /// migration artefact — nothing in the UI claims a real check happened
+    /// at that timestamp, because `runID` is nil and the card renders
+    /// nothing for `.checked`.
+    static func migratedArrivalStates(from legacy: Set<String>) -> [String: ArrivalState] {
+        var out: [String: ArrivalState] = [:]
+        for raw in legacy {
+            guard let id = NetworkIdentity.canonical(raw) else { continue }
+            out[id] = .checked(depth: .full, at: .distantPast, runID: nil)
+        }
+        return out
+    }
+
+    /// Run the migration once, on first launch of a build that has
+    /// `arrivalStates`. Idempotent: an existing value means it has already
+    /// run, and a second pass would resurrect networks the user has since
+    /// been re-checked on.
+    static func migrateArrivalStatesIfNeeded() {
+        guard d.data(forKey: Key.arrivalStates) == nil else { return }
+        arrivalStates = migratedArrivalStates(from: legacySeenNetworks)
     }
 
     // MARK: - Alerts
