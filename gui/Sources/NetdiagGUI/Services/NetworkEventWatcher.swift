@@ -32,6 +32,19 @@ final class NetworkEventWatcher: NSObject {
     private(set) var lastEventAt: Date?
     private(set) var pathSatisfied = true
     private(set) var pathUsesVPN = false
+    /// `NWPath.isExpensive` — cellular, which includes a personal hotspot.
+    /// Read by `ArrivalPolicy` so joining a phone's hotspot does not
+    /// silently spend the user's data allowance on a speed test.
+    ///
+    /// Defaults to `false`, i.e. "not expensive". A wrong `false` costs
+    /// data on one check; a wrong `true` would permanently downgrade every
+    /// arrival on ordinary Wi-Fi, which is the bug this whole change is
+    /// fixing. NWPathMonitor delivers a real path within milliseconds of
+    /// `start()`, and `ArrivalPolicy` will not decide before the first
+    /// monitor sample lands anyway.
+    private(set) var pathIsExpensive = false
+    /// `NWPath.isConstrained` — Low Data Mode.
+    private(set) var pathIsConstrained = false
 
     var onEvent: ((Event) -> Void)?
 
@@ -51,8 +64,11 @@ final class NetworkEventWatcher: NSObject {
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             let vpn = path.availableInterfaces.contains { $0.type == .other }
+            let expensive = path.isExpensive
+            let constrained = path.isConstrained
             Task { @MainActor in
-                self?.handlePath(satisfied: satisfied, usesVPN: vpn)
+                self?.handlePath(satisfied: satisfied, usesVPN: vpn,
+                                 expensive: expensive, constrained: constrained)
             }
         }
         monitor.start(queue: DispatchQueue(label: "me.brianfreeman.netdiag.path"))
@@ -66,7 +82,17 @@ final class NetworkEventWatcher: NSObject {
         pathMonitor = nil
     }
 
-    private func handlePath(satisfied: Bool, usesVPN: Bool) {
+    private func handlePath(satisfied: Bool, usesVPN: Bool,
+                            expensive: Bool, constrained: Bool) {
+        // Recorded unconditionally, and above the transition guard below.
+        // These two are *state* the arrival policy reads on demand, not
+        // events anyone subscribes to — and the guard exists to suppress
+        // duplicate emissions, not to suppress state. Updating them only
+        // on a satisfied/VPN transition would leave a hotspot's isExpensive
+        // stale at exactly the moment arrival reads it.
+        pathIsExpensive = expensive
+        pathIsConstrained = constrained
+
         // NWPathMonitor is chatty — it re-reports the same path on every
         // interface flap. Only forward real transitions, or the alert
         // engine's 30-second grace window would be permanently open and no
