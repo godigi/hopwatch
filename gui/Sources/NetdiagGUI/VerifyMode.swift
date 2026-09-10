@@ -79,6 +79,8 @@ private enum VerifyHarness {
         runSuitabilityPanelTests()
         runReportProvenanceTests()
         runTrendsClampTests()
+        runRunGroupTests()
+        runMonitorSeriesGapTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -914,6 +916,113 @@ private enum VerifyHarness {
         // spread, not a tail, and are drawn at full height.
         check(TrendsView.Clamp.forValues(band(37, spike: 2800) + [2800], p90: nil) == nil,
               "n = 38: two equal extremes are 5% of the data, not a tail")
+    }
+
+    // MARK: - RunGroup (coalescing and day grouping)
+
+    private static func runRunGroupTests() {
+        print("RunGroup (coalescing and day grouping):")
+        let cal = Calendar(identifier: .gregorian)
+        let now = Date()
+        let minAgo5 = now.addingTimeInterval(-300)
+        let minAgo10 = now.addingTimeInterval(-600)
+        let minAgo15 = now.addingTimeInterval(-900)
+        let yesterday = now.addingTimeInterval(-86400)
+
+        func makeRun(id: String, ts: Date, severity: String, rules: [String], mode: String? = "quick") -> HistoryDocument.Run {
+            HistoryDocument.Run(
+                ts: HistoryDocument.iso.string(from: ts),
+                runID: id,
+                networkID: "net1",
+                version: "0.14.0",
+                runMode: mode,
+                severity: severity,
+                diagnosisCount: rules.count,
+                rules: rules,
+                rootCause: rules.isEmpty ? nil : "Some issue",
+                metrics: [:]
+            )
+        }
+
+        let r1 = makeRun(id: "r1", ts: now, severity: "warn", rules: ["AV-1", "WI-1"])
+        let r2 = makeRun(id: "r2", ts: minAgo5, severity: "warn", rules: ["AV-1", "WI-1"])
+        let r3 = makeRun(id: "r3", ts: minAgo10, severity: "warn", rules: ["AV-1", "WI-1"])
+        let r4 = makeRun(id: "r4", ts: minAgo15, severity: "ok", rules: [])
+
+        // 1. Coalescing identical consecutive runs
+        let groups = RunGroup.coalesce([r1, r2, r3, r4], calendar: cal)
+        check(groups.count == 2, "3 identical consecutive runs + 1 ok run collapse into 2 groups (got \(groups.count))")
+        check(groups[0].count == 3, "first group has 3 runs")
+        check(groups[0].isSingle == false, "first group is not single")
+        check(groups[0].leadRun.id == "r1", "first group lead run is newest (r1)")
+        check(groups[0].oldestRun.id == "r3", "first group oldest run is r3")
+        check(groups[1].count == 1, "second group has 1 run")
+        check(groups[1].isSingle == true, "second group is single")
+
+        // 2. Midnight crossing does not coalesce across days
+        let rYesterday = makeRun(id: "ry", ts: yesterday, severity: "warn", rules: ["AV-1", "WI-1"])
+        let groupsAcrossMidnight = RunGroup.coalesce([r1, rYesterday], calendar: cal)
+        check(groupsAcrossMidnight.count == 2, "identical runs across midnight boundary stay separate (got \(groupsAcrossMidnight.count))")
+
+        // 3. DaySection grouping
+        let days = DaySection.group(groupsAcrossMidnight, calendar: cal)
+        check(days.count == 2, "2 days produced for runs across yesterday and today")
+        check(days[0].label == "Today", "first day section is Today")
+        check(days[1].label == "Yesterday", "second day section is Yesterday")
+    }
+
+    // MARK: - MonitorSample & MonitorSeries (gap_s)
+
+    private static func runMonitorSeriesGapTests() {
+        print("MonitorSeries (gap_s decoding and gap detection):")
+        let now = Date()
+        let t0 = now.addingTimeInterval(-60)
+        let t1 = now.addingTimeInterval(-40)
+        let t2 = now.addingTimeInterval(-20)
+
+        // Test 1: MonitorSample decodes gap_s
+        let jsonWithGap = """
+        {"seq": 5, "ts": "\(HistoryDocument.iso.string(from: t1))", "gap_s": 28800}
+        """.data(using: .utf8)!
+        let sampleWithGap = try? JSONDecoder().decode(MonitorSample.self, from: jsonWithGap)
+        check(sampleWithGap?.gapS == 28800, "MonitorSample decodes integer gap_s")
+
+        let jsonWithoutGap = """
+        {"seq": 6, "ts": "\(HistoryDocument.iso.string(from: t2))", "gap_s": null}
+        """.data(using: .utf8)!
+        let sampleWithoutGap = try? JSONDecoder().decode(MonitorSample.self, from: jsonWithoutGap)
+        check(sampleWithoutGap?.gapS == nil, "MonitorSample decodes null gap_s as nil")
+
+        // Helper to construct sample
+        func makeSample(date: Date, gapS: Int?, cadenceS: Int = 10, rtt: Double? = 15.0) -> MonitorSample {
+            var s = MonitorSample()
+            s.ts = HistoryDocument.iso.string(from: date)
+            s.refreshed = ["fast"]
+            s.gapS = gapS
+            s.status.cadenceS = cadenceS
+            s.gateway.rttAvgMs = rtt
+            return s
+        }
+
+        // Test 2: MonitorSeries detects gap when sample.gapS > 0 even if wall clock within cadence*2
+        let s0 = makeSample(date: t0, gapS: nil, cadenceS: 30)
+        let s1 = makeSample(date: t1, gapS: 120, cadenceS: 30) // 20s wall clock, but gapS = 120
+        let res1 = MonitorSeries.build([s0, s1], tier: "fast") { $0.gateway.rttAvgMs }
+        check(res1.gaps.count == 1, "sample.gapS marks a gap even when wall clock interval <= cadence*2")
+        check(res1.segments.count == 2 && res1.segments[0].count == 1 && res1.segments[1].count == 1, "gap splits segment into distinct segments")
+
+        // Test 3: MonitorSeries detects gap via cadence*2 fallback when sample.gapS is nil
+        let s1NoGap = makeSample(date: t1, gapS: nil, cadenceS: 5)
+        let s2 = makeSample(date: t2, gapS: nil, cadenceS: 5) // 20s wall clock, cadence=5, interval (20s) > 10s
+        let res2 = MonitorSeries.build([s1NoGap, s2], tier: "fast") { $0.gateway.rttAvgMs }
+        check(res2.gaps.count == 1, "nil gapS falls back to cadence*2 wall-clock heuristic")
+
+        // Test 4: Continuous series with gapS == nil and interval <= cadence*2 has no gaps
+        let s3 = makeSample(date: t0, gapS: nil, cadenceS: 10)
+        let s4 = makeSample(date: t0.addingTimeInterval(10), gapS: nil, cadenceS: 10)
+        let res3 = MonitorSeries.build([s3, s4], tier: "fast") { $0.gateway.rttAvgMs }
+        check(res3.gaps.isEmpty, "continuous stream produces no gaps")
+        check(res3.segments.count == 1 && res3.segments[0].count == 2, "continuous stream produces a single segment with all points")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

@@ -124,4 +124,18 @@ struct NetworkEventTests {
         let withoutNet = try JSONDecoder().decode(NetworkEvent.self, from: withoutNetJSON)
         #expect(withoutNet.network == nil)
     }
+
+    @Test func monitorSampleDecodesGapS() throws {
+        let withGapJSON = """
+        {"seq": 5, "gap_s": 28800}
+        """.data(using: .utf8)!
+        let withGap = try JSONDecoder().decode(MonitorSample.self, from: withGapJSON)
+        #expect(withGap.gapS == 28800)
+
+        let nullGapJSON = """
+        {"seq": 6, "gap_s": null}
+        """.data(using: .utf8)!
+        let nullGap = try JSONDecoder().decode(MonitorSample.self, from: nullGapJSON)
+        #expect(nullGap.gapS == nil)
+    }
 }

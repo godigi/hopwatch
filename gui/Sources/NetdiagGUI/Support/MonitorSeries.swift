@@ -62,17 +62,20 @@ enum MonitorSeries {
             let now = sample.timestamp
 
             if let previous {
-                // The tolerance comes from the samples themselves, so a
-                // monitor running at 2 s during a latency test and one
-                // running at 10 s are held to their own standards.
-                //
-                // Two cadences rather than one-and-a-bit: `cadence_s` is
-                // the sleep *between* probes, so a healthy stream's real
-                // interval is cadence plus probe time — the gateway ping
-                // alone is ~2 s of a 10 s cycle. A tighter tolerance would
-                // shred a perfectly continuous hour into phantom gaps.
-                let cadence = Double(previous.status.cadenceS ?? 0)
-                if cadence > 0, now.timeIntervalSince(previous.timestamp) > cadence * 2 {
+                // If the monitor CLI explicitly emitted a discontinuity via
+                // gap_s (sleep/stall measured monotonically by lib/monitor.sh),
+                // use that directly. Otherwise fall back to measuring wall clock
+                // against the cadence tolerance (two cadences, accounting for probe
+                // time on healthy samples).
+                let hasGap: Bool
+                if let gapS = sample.gapS {
+                    hasGap = gapS > 0
+                } else {
+                    let cadence = Double(previous.status.cadenceS ?? 0)
+                    hasGap = cadence > 0 && now.timeIntervalSince(previous.timestamp) > cadence * 2
+                }
+
+                if hasGap {
                     result.gaps.append(Gap(start: previous.timestamp, end: now))
                     closeSegment()
                 }

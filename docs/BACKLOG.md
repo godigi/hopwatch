@@ -10,7 +10,7 @@ Tasks are structured so that an autonomous or background agent session (e.g. run
 | ID | Title | Area | Status | Est. Size |
 |---|---|---|---|---|
 | [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Docs / Quality | **Done** | XS |
-| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Ready** | S |
+| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Done** | S |
 | [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | Architecture / Parity | **Ready** | M |
 | [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | macOS GUI | **Ready** | S |
 | [TASK-005](#task-005-device-inventory--surge-detection-lan-1) | Device inventory & surge detection (`LAN-1`) | CLI / Diagnosis | **Backlog** | M |
@@ -38,7 +38,7 @@ Tasks are structured so that an autonomous or background agent session (e.g. run
 
 ### TASK-002: Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift`
 - **Area**: macOS GUI / Live Chart
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
   - `gui/Sources/NetdiagGUI/Support/MonitorSeries.swift`

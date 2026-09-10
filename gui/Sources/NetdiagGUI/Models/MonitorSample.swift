@@ -18,6 +18,7 @@ struct MonitorSample: Decodable, Sendable {
     var version: String?
     var ts: String?
     var seq: Int?
+    var gapS: Int?
     /// Which cadence tiers refreshed this cycle. Everything outside this
     /// list is carried over from an earlier sample — a chart drawing a
     /// point needs to know that before it plots one.
@@ -55,6 +56,7 @@ struct MonitorSample: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schema, version, ts, seq, refreshed, link, network, vpn
         case gateway, internet, wifi, dns, tcp, status, changes
+        case gapS = "gap_s"
         case publicInfo = "public"
     }
 
@@ -279,6 +281,7 @@ extension MonitorSample {
         version = c.lenient(.version)
         ts = c.lenient(.ts)
         seq = c.lenient(.seq)
+        gapS = c.lenient(.gapS)
         refreshed = c.lenient(.refreshed, [])
         link = c.lenient(.link, Link())
         network = c.lenient(.network, NetworkIdentity())
