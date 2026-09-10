@@ -55,10 +55,13 @@ build:
 # when that framework actually exists, so the target still works unmodified
 # on a machine with Xcode installed.
 CLT_TESTING_FRAMEWORK := /Library/Developer/CommandLineTools/Library/Developer/Frameworks/Testing.framework
+CLT_DEVELOPER_USR_LIB := /Library/Developer/CommandLineTools/Library/Developer/usr/lib
 
 test:
 	@if [ -d "$(CLT_TESTING_FRAMEWORK)" ]; then \
-	  swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks; \
+	  swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+	             -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+	             -Xlinker -rpath -Xlinker $(CLT_DEVELOPER_USR_LIB); \
 	else \
 	  swift test; \
 	fi
@@ -67,6 +70,7 @@ bundle: build
 	@if [ -z "$(VERSION)" ]; then \
 	  echo "error: could not read NETDIAG_VERSION from ../bin/netdiag" >&2; exit 1; \
 	fi
+	@pkill -x NetdiagGUI 2>/dev/null || true
 	@rm -rf "$(APP_DIR)"
 	@mkdir -p "$(APP_DIR)/Contents/MacOS" "$(APP_DIR)/Contents/Resources"
 	@cp "$(BIN)" "$(APP_DIR)/Contents/MacOS/NetdiagGUI"
