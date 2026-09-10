@@ -54,7 +54,8 @@ setup() {
            THRESH_AV_OUTAGE_COUNT THRESH_AV_DOWNTIME_S \
            THRESH_AV_FLAP_MAX_S THRESH_AV_FLAP_COUNT \
            THRESH_AV_UNOBSERVED_NOTE_PCT \
-           THRESH_TRAFFIC_SAMPLE_S THRESH_TRAFFIC_BUSY_MBPS; do
+           THRESH_TRAFFIC_SAMPLE_S THRESH_TRAFFIC_BUSY_MBPS \
+           THRESH_LAN_ACTIVE_DEVICES; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }

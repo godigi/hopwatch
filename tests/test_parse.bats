@@ -27,6 +27,8 @@ setup() {
   . "$REPO/lib/headline.sh"
   # shellcheck source=../lib/wifi_common.sh
   . "$REPO/lib/wifi_common.sh"
+  # shellcheck source=../lib/arp.sh
+  . "$REPO/lib/arp.sh"
 }
 
 # ── N1: no network at all must not report "healthy" ──────────────────────
@@ -362,6 +364,43 @@ TSV
                     }' "$FIX/arp_an.txt" | sort -u)"
   duplicates="$(printf '%s\n' "$arp_pairs" | awk '{print $1}' | uniq -d | tr '\n' ' ')"
   [ -z "${duplicates// /}" ]
+}
+
+@test "ARP parser: counting active devices drops multicast, broadcast, and incomplete" {
+  count="$(arp_count_active_devices "$(< "$FIX/arp_an.txt")")"
+  [ "$count" -eq 9 ]
+
+  count_dup="$(arp_count_active_devices "$(< "$FIX/arp_dup.txt")")"
+  [ "$count_dup" -eq 4 ]
+}
+
+@test "ARP parser: active device count formatting handles singular and plural" {
+  [ "$(arp_format_active_devices 1)" = "1 active device" ]
+  [ "$(arp_format_active_devices 0)" = "0 active devices" ]
+  [ "$(arp_format_active_devices 2)" = "2 active devices" ]
+  [ "$(arp_format_active_devices 25)" = "25 active devices" ]
+}
+
+@test "LAN-1: triggers when active device count meets or exceeds threshold" {
+  # shellcheck source=../lib/diagnosis.sh
+  . "$REPO/lib/diagnosis.sh"
+  PUBLIC_OK=1 GATEWAY=192.168.1.1
+  ARP_ACTIVE_COUNT="$THRESH_LAN_ACTIVE_DEVICES"
+  DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
+  diagnosis_run >/dev/null
+  local rules=" ${DIAG_RULE[*]} "
+  [[ "$rules" == *" LAN-1 "* ]] || return 1
+}
+
+@test "LAN-1: stays quiet below threshold" {
+  # shellcheck source=../lib/diagnosis.sh
+  . "$REPO/lib/diagnosis.sh"
+  PUBLIC_OK=1 GATEWAY=192.168.1.1
+  ARP_ACTIVE_COUNT=$((THRESH_LAN_ACTIVE_DEVICES - 1))
+  DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
+  diagnosis_run >/dev/null
+  local rules=" ${DIAG_RULE[*]} "
+  [[ "$rules" != *" LAN-1 "* ]] || return 1
 }
 
 # ── DHCP lease-end date math ─────────────────────────────────────────────

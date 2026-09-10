@@ -1018,6 +1018,14 @@ it is macOS's own statement of which link the user thinks they are on.
   and "two devices share an address" don't share a message. They have
   different causes and different fixes.
 
+### LAN-1 — High active device count on local network
+
+- Trigger: active devices in `arp -an` reaches or exceeds `THRESH_LAN_ACTIVE_DEVICES`.
+- Severity: `info`.
+- Evidence: the count of active unicast devices detected on the subnet.
+- Recommendation: check for high-bandwidth local devices or consider moving heavy devices to wired ethernet or separate frequency bands.
+- Rationale: local LAN congestion and Wi-Fi airtime contention can cause sudden bufferbloat and throughput drops even when the ISP and gateway are operating normally.
+
 ### BL-1 — A metric regressed against this network's own history
 
 - Trigger: `baseline.regressions` is non-empty, which needs ≥ 3 prior runs

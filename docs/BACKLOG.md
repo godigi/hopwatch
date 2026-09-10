@@ -13,7 +13,7 @@ Tasks are structured so that an autonomous or background agent session (e.g. run
 | [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Done** | S |
 | [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | Architecture / Parity | **Done** | M |
 | [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | macOS GUI | **Done** | S |
-| [TASK-005](#task-005-device-inventory--surge-detection-lan-1) | Device inventory & surge detection (`LAN-1`) | CLI / Diagnosis | **Backlog** | M |
+| [TASK-005](#task-005-device-inventory--surge-detection-lan-1) | Device inventory & surge detection (`LAN-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Backlog** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build / Release | **Backlog** | M |
 
@@ -86,7 +86,7 @@ Tasks are structured so that an autonomous or background agent session (e.g. run
 
 ### TASK-005: Device inventory & surge detection (`LAN-1`)
 - **Area**: CLI / Rules Engine
-- **Status**: **Backlog**
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/arp.sh`
   - `lib/diagnosis.sh`

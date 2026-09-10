@@ -516,6 +516,11 @@ diagnosis_run() {
     add_diag critical DI-2 "Another device on your network is using the same IP address as one of these: ${ARP_DUPLICATE_IPS}. Both devices will randomly steal each other's traffic. Cause is usually a manually-set IP that collides with one the router handed out, or a second router on the network. Find and fix the duplicate."
   fi
 
+  # LAN-1 — active device count on the local network.
+  if [ -n "$ARP_ACTIVE_COUNT" ] && [ "$ARP_ACTIVE_COUNT" -ge "$THRESH_LAN_ACTIVE_DEVICES" ]; then
+    add_diag info LAN-1 "Your local network has $ARP_ACTIVE_COUNT active devices visible in the ARP table. High device density on the same subnet can cause local WiFi channel contention or switch congestion, explaining latency spikes or throughput drops even with a healthy broadband link."
+  fi
+
   # DH-1 — DHCP lease expires soon.
   if [ -n "$DHCP_TIME_REMAINING_S" ] && [ "$DHCP_TIME_REMAINING_S" -gt 0 ] && [ "$DHCP_TIME_REMAINING_S" -lt "$THRESH_DHCP_LEASE_WARN_S" ]; then
     add_diag warn DH-1 "Your Mac's network-address lease from the router expires in $((DHCP_TIME_REMAINING_S / 60)) minutes. Normally it renews automatically, but if your router is rebooting or out of addresses at that moment, you'll suddenly lose the network with no warning. Keep an eye out."

@@ -1169,6 +1169,27 @@ RULES: list[dict[str, object]] = [
         "fix_target": "your_router",
     },
     {
+        "id": "LAN-1",
+        "title": "High active device count on local network",
+        "category": "lan",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "Many active devices were detected on your local network "
+            "segment. High device density can cause local wireless channel "
+            "contention or switch queueing, explaining sudden bufferbloat "
+            "or throughput drops without an internet-side outage."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#lan-1--high-active-device-count-on-local-network",
+        "fix": (
+            "Check for high-bandwidth local transfers, backups, or "
+            "streaming devices on your network. Consider moving "
+            "high-traffic devices to wired ethernet or a dedicated "
+            "wireless band to reduce channel contention."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "ETH-1",
         "title": "Ethernet link slower than the port allows",
         "category": "lan",

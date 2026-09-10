@@ -444,3 +444,10 @@ THRESH_TRAFFIC_SAMPLE_S=2
 # link. Deliberately an absolute floor and not a fraction of capacity:
 # capacity is what the speed test measures, and it runs after this.
 THRESH_TRAFFIC_BUSY_MBPS=5
+
+# LAN-1 — active device count on the local network (from ARP cache).
+# A high number of active devices sharing the same subnet / wireless AP
+# increases channel contention, airtime utilization, and switch queueing,
+# which can explain bufferbloat and throughput drops under load.
+THRESH_LAN_ACTIVE_DEVICES=20
+
