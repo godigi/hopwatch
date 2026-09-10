@@ -40,6 +40,14 @@ struct NetworksView: View {
     @State private var mergeSource: HistoryDocument.Network?
     @State private var problemsOnly = false
 
+    enum CheckScope: String, CaseIterable, Identifiable {
+        case all = "All checks"
+        case fullOnly = "Full checks"
+        var id: String { rawValue }
+    }
+    @State private var checkScope = CheckScope.all
+    @State private var expandedGroupIDs: Set<String> = []
+
     private var store: HistoryStore { coordinator.history }
 
     /// The recency-ordered list, narrowed to the search query. Empty-query
@@ -284,29 +292,48 @@ struct NetworksView: View {
     // MARK: - Checks list (inline, no navigation push)
 
     private func checksList(_ net: HistoryDocument.Network) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Text("CHECKS")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9, weight: .semibold))
                     .kerning(0.5)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Picker("Scope", selection: $checkScope) {
+                    ForEach(CheckScope.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .frame(maxWidth: 190)
+
                 Toggle("Problems only", isOn: $problemsOnly)
                     .toggleStyle(.checkbox)
                     .font(.caption)
             }
-            let runs = networkRuns(net).sorted { $0.date > $1.date }
-            let visible = problemsOnly ? runs.filter(isProblem) : runs
-            if visible.isEmpty {
+            .padding(.bottom, 2)
+
+            let runs = visibleRuns(for: net)
+            let groups = RunGroup.coalesce(runs)
+            let days = DaySection.group(groups)
+
+            if days.isEmpty {
                 if problemsOnly {
-                    // `isProblem` below matches "warn" OR "critical" — this
-                    // used to say "No warnings", which read as false
-                    // reassurance on a network whose only issues were
-                    // critical rather than merely warn-level.
                     Text("No problems on this network")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 8)
+                } else if checkScope == .fullOnly && !networkRuns(net).isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No full checks recorded yet.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button("Show all checks (\(networkRuns(net).count) recorded)") {
+                            checkScope = .all
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                    .padding(.vertical, 8)
                 } else {
                     Text("No checks recorded for this network yet.")
                         .font(.callout)
@@ -314,45 +341,134 @@ struct NetworksView: View {
                         .padding(.vertical, 8)
                 }
             } else {
-                ForEach(visible.prefix(200)) { run in
-                    checkRow(run, net)
-                }
-                if visible.count > 200 {
-                    Text("Showing 200 of \(visible.count) checks")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(days) { day in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(day.label.uppercased())
+                                .font(.system(size: 10, weight: .semibold))
+                                .kerning(0.5)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+
+                            ForEach(day.groups) { group in
+                                runGroupRow(group, net)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    private func checkRow(_ run: HistoryDocument.Run, _ net: HistoryDocument.Network) -> some View {
+    private func runGroupRow(_ group: RunGroup, _ net: HistoryDocument.Network) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if group.isSingle {
+                checkRow(group.leadRun, net)
+            } else {
+                coalescedGroupHeader(group, net)
+                if expandedGroupIDs.contains(group.id) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(group.runs) { run in
+                            checkRow(run, net, isNested: true)
+                        }
+                    }
+                    .padding(.leading, 26)
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    private func coalescedGroupHeader(_ group: RunGroup, _ net: HistoryDocument.Network) -> some View {
+        let isExpanded = expandedGroupIDs.contains(group.id)
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: group.health.symbol)
+                .foregroundStyle(group.health.tint)
+                .frame(width: 16)
+            Text(group.timeDescription)
+                .monospacedDigit()
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 80, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(checkHeadline(for: group.leadRun))
+                        .foregroundStyle(group.leadRun.diagnosisCount == 0 ? .secondary : .primary)
+                        .lineLimit(1)
+                    Text("· \(group.count) identical checks")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if !group.rules.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(group.rules, id: \.self) { rule in
+                            RuleChip(ruleID: rule)
+                        }
+                    }
+                }
+            }
+            Spacer()
+            Button {
+                if isExpanded {
+                    expandedGroupIDs.remove(group.id)
+                } else {
+                    expandedGroupIDs.insert(group.id)
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(isExpanded ? "Hide" : "\(group.count) runs")
+                        .font(.caption2)
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isExpanded {
+                expandedGroupIDs.remove(group.id)
+            } else {
+                expandedGroupIDs.insert(group.id)
+            }
+        }
+    }
+
+    private func checkRow(_ run: HistoryDocument.Run, _ net: HistoryDocument.Network, isNested: Bool = false) -> some View {
         Group {
             if let runID = run.runID {
                 Button {
                     selectedRunRoute = RunRoute(runID: runID, networkID: net.id)
                 } label: {
-                    checkRowContent(run)
+                    checkRowContent(run, isNested: isNested)
                 }
                 .buttonStyle(.plain)
             } else {
-                checkRowContent(run)
+                checkRowContent(run, isNested: isNested)
                     .help("This check can't be opened — the netdiag CLI that recorded it predates run IDs.")
             }
         }
     }
 
-    private func checkRowContent(_ run: HistoryDocument.Run) -> some View {
+    private func checkRowContent(_ run: HistoryDocument.Run, isNested: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: run.health.symbol)
                 .foregroundStyle(run.health.tint)
                 .frame(width: 16)
             Text(run.date.formatted(date: .omitted, time: .shortened))
                 .monospacedDigit()
+                .font(isNested ? .caption2 : .body)
+                .foregroundStyle(isNested ? .secondary : .primary)
                 .frame(width: 76, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(run.headline)
+                Text(checkHeadline(for: run))
                     .foregroundStyle(run.diagnosisCount == 0 ? .secondary : .primary)
                     .lineLimit(1)
                 if !run.rules.isEmpty {
@@ -364,9 +480,30 @@ struct NetworksView: View {
                 }
             }
             Spacer()
+            if let mode = run.modeBadge {
+                Text(mode)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
+    }
+
+    private func checkHeadline(for run: HistoryDocument.Run) -> String {
+        if !run.rules.isEmpty,
+           let worst = NetdiagCoordinator.worstRule(among: run.rules, catalog: coordinator.rulesCatalog.catalog),
+           let title = worst.title, !title.isEmpty {
+            return title
+        }
+        if run.diagnosisCount == 0 {
+            return "No problems found"
+        }
+        return run.headline
     }
 
     // MARK: - Check detail (inline, with back button)
@@ -427,6 +564,17 @@ struct NetworksView: View {
     private func isCurrent(_ net: HistoryDocument.Network) -> Bool {
         guard let id = coordinator.monitor.latest?.network.historyJoinID else { return false }
         return store.canonicalID(id) == net.id
+    }
+
+    private func visibleRuns(for net: HistoryDocument.Network) -> [HistoryDocument.Run] {
+        var runs = networkRuns(net).sorted { $0.date > $1.date }
+        if checkScope == .fullOnly {
+            runs = runs.filter { $0.runMode == "full" || $0.runMode == nil }
+        }
+        if problemsOnly {
+            runs = runs.filter(isProblem)
+        }
+        return runs
     }
 
     private func networkRuns(_ net: HistoryDocument.Network) -> [HistoryDocument.Run] {
