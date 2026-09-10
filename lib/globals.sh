@@ -220,6 +220,9 @@ PATH_PROXY=0               # 1 = a web proxy or PAC is enabled [PX-1]
 PATH_PROXY_DETAIL=""       # host:port, or the PAC URL
 PATH_FILTERS=""            # NetworkExtension filter bundle ids [FW-1]
 PATH_FILTER_COUNT=0
+PATH_PRIVATE_RELAY=0       # 1 = iCloud Private Relay active for Safari/Mail [PR-1]
+PATH_ENCRYPTED_DNS=0       # 1 = Encrypted DNS profile (DoH/DoT) active [EDNS-1]
+PATH_ENCRYPTED_DNS_SERVER="" # server URL or address from profile
 
 # netdiag's own background watcher (lib/watchdog.sh) — not a property of
 # the network, and the only check here that judges netdiag itself. [ND-1]

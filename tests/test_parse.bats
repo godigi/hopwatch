@@ -1422,22 +1422,43 @@ diag_text_for() {
   assert_contains "$(diag_text_for FW-1)" "not a fault in itself"
 }
 
-@test "diagnosis: a clean path fires none of the three" {
+@test "diagnosis: iCloud Private Relay fires PR-1 as info" {
+  sp_setup
+  PATH_PRIVATE_RELAY=1
+  diagnosis_run >/dev/null
+  diag_has PR-1 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$MAX_SEVERITY" -eq 0 ] || { echo "PR-1 moved the exit code"; return 1; }
+  assert_contains "$(diag_text_for PR-1)" "iCloud Private Relay"
+  assert_contains "$(diag_text_for PR-1)" "Safari and Mail"
+}
+
+@test "diagnosis: Encrypted DNS profile fires EDNS-1 as info" {
+  sp_setup
+  PATH_ENCRYPTED_DNS=1 PATH_ENCRYPTED_DNS_SERVER="https://cloudflare-dns.com/dns-query"
+  diagnosis_run >/dev/null
+  diag_has EDNS-1 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$MAX_SEVERITY" -eq 0 ] || { echo "EDNS-1 moved the exit code"; return 1; }
+  assert_contains "$(diag_text_for EDNS-1)" "https://cloudflare-dns.com/dns-query"
+  assert_contains "$(diag_text_for EDNS-1)" "encrypted DNS profile"
+}
+
+@test "diagnosis: a clean path fires none of the path rules" {
   sp_setup
   diagnosis_run >/dev/null
-  for r in VPN-2 PX-1 FW-1; do
+  for r in VPN-2 PX-1 FW-1 PR-1 EDNS-1; do
     diag_has "$r" && { echo "$r fired on a clean path"; return 1; }
   done
   return 0
 }
 
 @test "diagnosis: the path rules never move the exit code" {
-  # All three are info by design. A split tunnel is not a fault, and
-  # exiting 1 or 2 on one would make every corporate Mac look broken.
+  # All path rules are info by design.
   sp_setup
   PATH_SPLIT_TUNNEL=1 PATH_SPLIT_TUNNEL_IFACES="utun4"
   PATH_PROXY=1 PATH_PROXY_DETAIL="p:1"
   PATH_FILTER_COUNT=1 PATH_FILTERS="com.example.f"
+  PATH_PRIVATE_RELAY=1
+  PATH_ENCRYPTED_DNS=1 PATH_ENCRYPTED_DNS_SERVER="https://example.com"
   diagnosis_run >/dev/null
   [ "$MAX_SEVERITY" -eq 0 ] || { echo "MAX_SEVERITY=$MAX_SEVERITY"; return 1; }
 }

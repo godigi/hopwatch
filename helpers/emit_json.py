@@ -589,6 +589,9 @@ def main() -> None:
             "proxy": _bool("PATH_PROXY"),
             "proxy_detail": _env("PATH_PROXY_DETAIL"),
             "network_filters": (_env("PATH_FILTERS") or "").split(),
+            "private_relay": _bool("PATH_PRIVATE_RELAY"),
+            "encrypted_dns": _bool("PATH_ENCRYPTED_DNS"),
+            "encrypted_dns_server": _env("PATH_ENCRYPTED_DNS_SERVER"),
         },
         # How this network has behaved over the window AV-1 judges,
         # read from the event journal. `null` when no journal exists —

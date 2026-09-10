@@ -598,13 +598,21 @@ software is worse than silence. What they add is the one sentence that
 stops a user trusting a clean report while their work applications are
 broken.
 
-**Two actors are deliberately absent.** iCloud Private Relay and
-encrypted DNS (DoH/DoT) both belong here, and neither ships, for the
-same reason: the detection has never been observed in its *positive*
-state. See `docs/design/networks-we-cannot-yet-describe.md` §2.2 and
-§2.3 — the Private Relay mechanism is proven and only its value mapping
-is unverified. A rule that fires on a value nobody has seen is a rule
-that has never been tested.
+### EDNS-1 — Encrypted DNS profile active
+
+- Trigger: a configuration profile installed on macOS (`profiles show -type configuration`) contains a `com.apple.dnsSettings.managed` payload.
+- Severity: `info`.
+- Evidence: the configured encrypted DNS server URL or address.
+
+An encrypted DNS profile sends DNS queries over an encrypted channel (DoH/DoT) rather than using standard unencrypted lookups. Standard DNS tests in netdiag are measured against local and public unencrypted resolvers for diagnostic baseline comparison, and may not reflect the resolver user applications actually query.
+
+### PR-1 — iCloud Private Relay active
+
+- Trigger: `PrivacyProxyServiceStatus` in `com.apple.networkserviceproxy` is non-zero.
+- Severity: `info`.
+- Evidence: Private Relay status active for Safari and Mail.
+
+iCloud Private Relay encrypts and routes Safari and Mail web requests through Apple dual-hop proxy relays. Diagnostic measurements run directly via curl and ping to measure the physical network, so user web browsing takes a different path than what is measured in the report.
 
 ### VPN-2 — A split tunnel carries part of your traffic
 

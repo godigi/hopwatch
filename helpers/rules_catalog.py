@@ -639,6 +639,29 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "EDNS-1",
+        "title": "Encrypted DNS profile active",
+        "category": "dns",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "An encrypted DNS profile is installed on this Mac, sending "
+            "DNS queries over an encrypted channel rather than unencrypted "
+            "UDP. Standard DNS tests in this report were measured against "
+            "local and public unencrypted resolvers for diagnostic "
+            "baseline comparison, and may not reflect the resolver your "
+            "applications actually use."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#edns-1--encrypted-dns-profile-active",
+        "fix": (
+            "Nothing to fix — this profile is configured to protect your "
+            "DNS privacy. If name resolution fails while this report looks "
+            "clean, inspect your profile in System Settings → Privacy & "
+            "Security → Profiles."
+        ),
+        "fix_target": "nobody",
+    },
+    {
         "id": "B1",
         "title": "Bufferbloat at the router",
         "category": "load",
@@ -1042,6 +1065,29 @@ RULES: list[dict[str, object]] = [
             "blocking and why."
         ),
         "fix_target": "network_operator",
+    },
+    {
+        "id": "PR-1",
+        "title": "iCloud Private Relay active",
+        "category": "topology",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "iCloud Private Relay is active for Safari and Mail, routing "
+            "browsing requests through Apple dual-hop proxies rather than "
+            "direct. netdiag's tests connect directly to measure your "
+            "physical network, so web browsing takes a different path "
+            "than the results shown here."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#pr-1--icloud-private-relay-active",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "Nothing to fix — this is working as Apple intended to protect "
+            "your privacy. If Safari feels slow while this report looks "
+            "clean, inspect your iCloud Private Relay settings in System "
+            "Settings → Apple Account → iCloud → Private Relay."
+        ),
+        "fix_target": "nobody",
     },
     {
         "id": "SP-1",

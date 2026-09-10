@@ -439,6 +439,13 @@ diagnosis_run() {
   if [ "${PATH_FILTER_COUNT:-0}" -gt 0 ]; then
     add_diag info FW-1 "Network filtering software is installed and sits in the path of your traffic (${PATH_FILTERS}). This is normal on a managed or security-conscious Mac and is not a fault in itself. It is worth knowing because it can produce exactly the symptoms this report is for — blocked connections, stalls, failures on some sites and not others — and none of those would show up as a problem with your network."
   fi
+  if [ "${PATH_PRIVATE_RELAY:-0}" -eq 1 ]; then
+    add_diag info PR-1 "iCloud Private Relay is active on this Mac — browser traffic in Safari and Mail routes through Apple's dual-hop privacy relays. netdiag's tests connect directly to measure your physical network, so actual web browsing takes a different path than the results shown here. If browsing feels slow or certain websites fail while this report looks clean, Private Relay is the more likely explanation."
+  fi
+  if [ "${PATH_ENCRYPTED_DNS:-0}" -eq 1 ]; then
+    local _edns_name="${PATH_ENCRYPTED_DNS_SERVER:-configured via profile}"
+    add_diag info EDNS-1 "An encrypted DNS profile is installed and active on this Mac (${_edns_name}). DNS queries from your browser and apps are sent over an encrypted channel (DoH/DoT) rather than using standard unencrypted lookups. The DNS measurements above were taken against local and public unencrypted resolvers for diagnostic baseline comparison, and may not reflect the resolver your traffic actually uses."
+  fi
 
   # DQ-1 — this run measured more than one network.
   #

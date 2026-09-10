@@ -162,3 +162,129 @@ Enabled: No'
   [ "$status" -eq 0 ]
   [ "$output" = "" ]
 }
+
+# ── iCloud Private Relay [PR-1] ──────────────────────────────────────────
+
+@test "path: private relay disabled produces 0" {
+  # Construct binary plist representing NSPServiceStatusManagerInfo with PrivacyProxyServiceStatus = 0
+  local input
+  input="$(python3 -c '
+import sys, plistlib
+inner = {
+    "$version": 100000,
+    "$archiver": "NSKeyedArchiver",
+    "$top": {"ServiceStatus": plistlib.UID(1)},
+    "$objects": [
+        "$null",
+        {"$class": plistlib.UID(2), "PrivacyProxyServiceStatus": 0},
+        {"$classname": "PrivacyProxyServiceStatus", "$classes": ["PrivacyProxyServiceStatus", "NSObject"]}
+    ]
+}
+outer = {"NSPServiceStatusManagerInfo": plistlib.dumps(inner, fmt=plistlib.FMT_BINARY)}
+sys.stdout.buffer.write(plistlib.dumps(outer, fmt=plistlib.FMT_XML))
+')"
+  run path_parse_private_relay <<< "$input"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ] || { echo "got '$output'"; return 1; }
+}
+
+@test "path: private relay enabled produces 1" {
+  # Construct binary plist with PrivacyProxyServiceStatus = 1
+  local input
+  input="$(python3 -c '
+import sys, plistlib
+inner = {
+    "$version": 100000,
+    "$archiver": "NSKeyedArchiver",
+    "$top": {"ServiceStatus": plistlib.UID(1)},
+    "$objects": [
+        "$null",
+        {"$class": plistlib.UID(2), "PrivacyProxyServiceStatus": 1},
+        {"$classname": "PrivacyProxyServiceStatus", "$classes": ["PrivacyProxyServiceStatus", "NSObject"]}
+    ]
+}
+outer = {"NSPServiceStatusManagerInfo": plistlib.dumps(inner, fmt=plistlib.FMT_BINARY)}
+sys.stdout.buffer.write(plistlib.dumps(outer, fmt=plistlib.FMT_XML))
+')"
+  run path_parse_private_relay <<< "$input"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ] || { echo "got '$output'"; return 1; }
+}
+
+@test "path: empty or malformed private relay input produces 0" {
+  run path_parse_private_relay <<< ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+  run path_parse_private_relay <<< "not a plist"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+# ── Encrypted DNS Profile [EDNS-1] ───────────────────────────────────────
+
+@test "path: empty profile output has no encrypted DNS" {
+  run path_parse_encrypted_dns_profile <<< ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+  run path_parse_encrypted_dns_profile <<< '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>'
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+}
+
+@test "path: encrypted DNS profile with ServerURL is parsed" {
+  local input='<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>_computerlevel</key>
+  <array>
+    <dict>
+      <key>ProfileItems</key>
+      <array>
+        <dict>
+          <key>PayloadType</key>
+          <string>com.apple.dnsSettings.managed</string>
+          <key>PayloadContent</key>
+          <dict>
+            <key>DNSSettings</key>
+            <dict>
+              <key>DNSProtocol</key>
+              <string>HTTPS</string>
+              <key>ServerURL</key>
+              <string>https://cloudflare-dns.com/dns-query</string>
+            </dict>
+          </dict>
+        </dict>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>'
+  run path_parse_encrypted_dns_profile <<< "$input"
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://cloudflare-dns.com/dns-query" ] || { echo "got '$output'"; return 1; }
+}
+
+@test "path: encrypted DNS profile with ServerAddresses is parsed" {
+  local input='<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key>
+  <string>com.apple.dnsSettings.managed</string>
+  <key>DNSSettings</key>
+  <dict>
+    <key>DNSProtocol</key>
+    <string>TLS</string>
+    <key>ServerAddresses</key>
+    <array>
+      <string>1.1.1.1</string>
+      <string>1.0.0.1</string>
+    </array>
+  </dict>
+</dict>
+</plist>'
+  run path_parse_encrypted_dns_profile <<< "$input"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.1.1.1, 1.0.0.1" ] || { echo "got '$output'"; return 1; }
+}

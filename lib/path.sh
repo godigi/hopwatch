@@ -126,12 +126,96 @@ path_parse_network_extensions() {
     END { for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? " " : ""), order[i] }'
 }
 
+# ── iCloud Private Relay [PR-1] ──────────────────────────────────────────
+#
+# Per-app, Safari-and-Mail only, no default route, no utun of its own.
+# Every measurement netdiag takes with curl bypasses it — so netdiag
+# reports the real ISP and real latency while Safari and Mail go through
+# Apple/Cloudflare proxy relays.
+#
+# PrivacyProxyServiceStatus under com.apple.networkserviceproxy decodes
+# cleanly without sudo. 0 is disabled/off; any non-zero value indicates
+# Private Relay is active/enabled.
+#
+# HARD PRIVACY CONSTRAINT: The same plist holds PrivacyProxyNetworkStatuses
+# (a location trail of joined network names). netdiag reads ONLY the scalar
+# PrivacyProxyServiceStatus.
+path_parse_private_relay() {
+  python3 -c '
+import sys, plistlib
+try:
+    data = sys.stdin.buffer.read()
+    if data:
+        outer = plistlib.loads(data)
+        info = outer.get("NSPServiceStatusManagerInfo")
+        if info:
+            inner = plistlib.loads(info)
+            top = inner.get("$top", {})
+            ref = top.get("ServiceStatus")
+            if ref is not None:
+                idx = ref.data if hasattr(ref, "data") else ref
+                objs = inner.get("$objects", [])
+                if isinstance(idx, int) and idx < len(objs):
+                    st = objs[idx].get("PrivacyProxyServiceStatus")
+                    if st is not None and st != 0:
+                        print("1")
+                        sys.exit(0)
+except Exception:
+    pass
+print("0")
+' 2>/dev/null || echo "0"
+}
+
+# ── Encrypted DNS (DoH/DoT) via Profile [EDNS-1] ─────────────────────────
+#
+# A configuration profile installs com.apple.dnsSettings.managed. When
+# active, system resolvers in scutil --dns may carry no traffic.
+# Outputs: "<server_url_or_address>" if configured, or empty string.
+path_parse_encrypted_dns_profile() {
+  python3 -c '
+import sys, plistlib
+try:
+    data = sys.stdin.buffer.read()
+    if data:
+        p = plistlib.loads(data)
+        def find_dns(obj):
+            if isinstance(obj, dict):
+                if obj.get("PayloadType") == "com.apple.dnsSettings.managed":
+                    settings = obj.get("PayloadContent", {}).get("DNSSettings", {})
+                    if not settings:
+                        settings = obj.get("DNSSettings", {})
+                    url = settings.get("ServerURL")
+                    if not url:
+                        addrs = settings.get("ServerAddresses")
+                        if isinstance(addrs, list) and addrs:
+                            url = ", ".join(str(a) for a in addrs)
+                        elif addrs:
+                            url = str(addrs)
+                    return url or "configured"
+                for v in obj.values():
+                    res = find_dns(v)
+                    if res: return res
+            elif isinstance(obj, list):
+                for v in obj:
+                    res = find_dns(v)
+                    if res: return res
+            return None
+        res = find_dns(p)
+        if res:
+            print(res)
+except Exception:
+    pass
+' 2>/dev/null || true
+}
+
 # ── Entry ────────────────────────────────────────────────────────────────
 # shellcheck disable=SC2034
 path_run() {
   PATH_SPLIT_TUNNEL=0; PATH_SPLIT_TUNNEL_IFACES=""
   PATH_PROXY=0; PATH_PROXY_DETAIL=""
   PATH_FILTERS=""; PATH_FILTER_COUNT=0
+  PATH_PRIVATE_RELAY=0
+  PATH_ENCRYPTED_DNS=0; PATH_ENCRYPTED_DNS_SERVER=""
 
   hdr "What else is in the path"
 
@@ -167,8 +251,30 @@ path_run() {
     info "Network filter extensions: $PATH_FILTERS"
   fi
 
+  # iCloud Private Relay [PR-1]
+  local nsp_data
+  nsp_data="$(with_timeout 5 defaults export com.apple.networkserviceproxy - 2>/dev/null || true)"
+  if [ -n "$nsp_data" ]; then
+    if [ "$(printf '%s' "$nsp_data" | path_parse_private_relay)" = "1" ]; then
+      PATH_PRIVATE_RELAY=1
+      info "iCloud Private Relay: active for Safari and Mail"
+    fi
+  fi
+
+  # Encrypted DNS profiles [EDNS-1]
+  local prof_data
+  prof_data="$(with_timeout 5 profiles show -type configuration -output stdout-xml 2>/dev/null || true)"
+  if [ -n "$prof_data" ]; then
+    PATH_ENCRYPTED_DNS_SERVER="$(printf '%s' "$prof_data" | path_parse_encrypted_dns_profile)"
+    if [ -n "$PATH_ENCRYPTED_DNS_SERVER" ]; then
+      PATH_ENCRYPTED_DNS=1
+      info "Encrypted DNS profile: $PATH_ENCRYPTED_DNS_SERVER"
+    fi
+  fi
+
   [ "$PATH_SPLIT_TUNNEL" -eq 0 ] && [ "$PATH_PROXY" -eq 0 ] \
-    && [ "$PATH_FILTER_COUNT" -eq 0 ] \
+    && [ "$PATH_FILTER_COUNT" -eq 0 ] && [ "$PATH_PRIVATE_RELAY" -eq 0 ] \
+    && [ "$PATH_ENCRYPTED_DNS" -eq 0 ] \
     && info "Nothing else in the path — this report describes your network directly."
 
   if [ -n "${NETDIAG_PAR_VARS:-}" ]; then
@@ -178,6 +284,9 @@ path_run() {
     setvar PATH_PROXY_DETAIL "$PATH_PROXY_DETAIL"
     setvar PATH_FILTERS "$PATH_FILTERS"
     setvar PATH_FILTER_COUNT "$PATH_FILTER_COUNT"
+    setvar PATH_PRIVATE_RELAY "$PATH_PRIVATE_RELAY"
+    setvar PATH_ENCRYPTED_DNS "$PATH_ENCRYPTED_DNS"
+    setvar PATH_ENCRYPTED_DNS_SERVER "$PATH_ENCRYPTED_DNS_SERVER"
   fi
   return 0
 }
