@@ -593,7 +593,7 @@ else
   exec 3>/dev/null
 fi
 
-LOG_DIR="$HOME/net-diag"
+LOG_DIR="${NETDIAG_LOG_DIR:-${LOG_DIR:-$HOME/net-diag}}"
 
 # Reject malformed mode values before dispatching to a loop or helper. A
 # bad --watch interval otherwise makes sleep return immediately and spins a
