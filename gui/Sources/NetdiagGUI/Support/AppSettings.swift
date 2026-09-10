@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 /// The observable face of `Defaults`.
 ///
@@ -71,6 +72,26 @@ final class AppSettings {
     var autoCheckUpdates: Bool {
         didSet { Defaults.autoCheckUpdates = autoCheckUpdates }
     }
+    var launchAtLogin: Bool {
+        didSet {
+            guard launchAtLogin != oldValue else { return }
+            do {
+                if launchAtLogin {
+                    if SMAppService.mainApp.status != .enabled {
+                        try SMAppService.mainApp.register()
+                    }
+                } else {
+                    if SMAppService.mainApp.status == .enabled {
+                        try SMAppService.mainApp.unregister()
+                    }
+                }
+            } catch {
+                // Revert to actual system status if register/unregister fails
+                // (e.g. unprivileged, running directly from CLI/debug, or user denied).
+                launchAtLogin = SMAppService.mainApp.status == .enabled
+            }
+        }
+    }
 
     /// Pass-through, not a preference: the on-demand latency test's own
     /// sampling window. See `Defaults.latencyTestInterval` for why it
@@ -101,5 +122,6 @@ final class AppSettings {
         hasOnboarded = Defaults.hasOnboarded
         locationBannerDismissed = Defaults.locationBannerDismissed
         autoCheckUpdates = Defaults.autoCheckUpdates
+        launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 }

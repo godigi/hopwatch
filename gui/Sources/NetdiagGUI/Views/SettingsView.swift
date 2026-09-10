@@ -79,6 +79,10 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Startup") {
+                Toggle("Launch netdiag at login", isOn: $appSettings.launchAtLogin)
+            }
+
             Section("Updates") {
                 Toggle("Automatically check for updates daily", isOn: $appSettings.autoCheckUpdates)
 

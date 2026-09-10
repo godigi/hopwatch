@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Foundation
+import ServiceManagement
 import os
 
 /// The app's runnable verification harness, reached with `--verify`.
@@ -81,6 +82,7 @@ private enum VerifyHarness {
         runTrendsClampTests()
         runRunGroupTests()
         runMonitorSeriesGapTests()
+        runLaunchAtLoginTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1023,6 +1025,26 @@ private enum VerifyHarness {
         let res3 = MonitorSeries.build([s3, s4], tier: "fast") { $0.gateway.rttAvgMs }
         check(res3.gaps.isEmpty, "continuous stream produces no gaps")
         check(res3.segments.count == 1 && res3.segments[0].count == 2, "continuous stream produces a single segment with all points")
+    }
+
+    // MARK: - Launch at login (SMAppService)
+
+    private static func runLaunchAtLoginTests() {
+        print("Launch at login (SMAppService & AppSettings):")
+        let serviceStatus = SMAppService.mainApp.status
+        // SMAppService status should be a valid known case (.enabled, .notRegistered, .requiresApproval, .notFound)
+        let validStatus = serviceStatus == .enabled || serviceStatus == .notRegistered || serviceStatus == .requiresApproval || serviceStatus == .notFound
+        check(validStatus, "SMAppService.mainApp.status returns a valid status")
+
+        let settings = AppSettings()
+        check(settings.launchAtLogin == (serviceStatus == .enabled), "AppSettings.launchAtLogin reflects SMAppService.mainApp.status")
+
+        // Test mutating launchAtLogin without crashing / handles error or success gracefully
+        let original = settings.launchAtLogin
+        settings.launchAtLogin = !original
+        // Revert back
+        settings.launchAtLogin = original
+        check(settings.launchAtLogin == (SMAppService.mainApp.status == .enabled), "AppSettings.launchAtLogin remains consistent after toggle attempt")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
