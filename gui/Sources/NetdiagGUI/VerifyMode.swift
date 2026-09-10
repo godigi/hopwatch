@@ -179,9 +179,10 @@ private enum VerifyHarness {
         print("Activity fold (episodes, not transitions)")
         let day = Date(timeIntervalSince1970: 1_700_000_000)
         func event(_ kind: String, _ rule: String?, _ offset: TimeInterval,
-                   _ summary: String = "Minor packet loss to router") -> NetworkEvent {
+                   _ summary: String = "Minor packet loss to router",
+                   _ network: String? = nil) -> NetworkEvent {
             NetworkEvent(date: day.addingTimeInterval(offset), kind: kind,
-                         summary: summary, ruleID: rule)
+                         summary: summary, ruleID: rule, network: network)
         }
 
         // One fired, one cleared → one row carrying the duration the two
@@ -256,6 +257,53 @@ private enum VerifyHarness {
               "and the floor actually renders — a `+` needs a duration to sit on")
         check(refired.first?.isOngoing == true,
               "still open: no clear was ever seen for it")
+
+        // An explicit monitor-started row closes open episodes as a lower bound,
+        // matching helpers/events.py:217.
+        let restartCloses = ActivityEntry.fold([
+            event("monitor-started", nil, 3000, "Monitoring started"),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(restartCloses.count, 1, "an open episode closed by monitor-started")
+        equal(restartCloses.first?.occurrences, 1, "counts as one occurrence")
+        equal(restartCloses.first?.totalDuration, 3000, "duration measured to restart")
+        check(restartCloses.first?.durationIsLowerBound == true, "marked as a lower bound")
+        check(restartCloses.first?.isOngoing == false, "closed by the restart, not ongoing")
+
+        // Monitor restarted mid-fault: first episode closed at restart,
+        // second episode opened by the new fire.
+        let restartAndRefire = ActivityEntry.fold([
+            event("rule-fired", "G3", 3001),
+            event("monitor-started", nil, 3000, "Monitoring started"),
+            event("rule-fired", "G3", 0),
+        ])
+        equal(restartAndRefire.count, 1, "folded into the day's rule row")
+        equal(restartAndRefire.first?.occurrences, 2, "as two distinct episodes")
+        check(restartAndRefire.first?.isOngoing == true, "second episode is still open")
+        equal(restartAndRefire.first?.totalDuration, 3000, "total duration from first episode")
+        check(restartAndRefire.first?.durationIsLowerBound == true, "first episode was a lower bound")
+
+        // Keyed on (network, rule). A clear on network B must not close
+        // network A's open episode when a laptop moves mid-fault.
+        let twoNetworks = ActivityEntry.fold([
+            event("rule-cleared", "G3", 300, "Resolved: Minor packet loss to router", "wifi:mac=bb"),
+            event("rule-fired", "G3", 0, "Minor packet loss to router", "wifi:mac=aa"),
+        ])
+        equal(twoNetworks.count, 1, "same day and rule merges into one row")
+        equal(twoNetworks.first?.occurrences, 2, "two distinct episodes")
+        check(twoNetworks.first?.isOngoing == true, "network A's episode is still open")
+        equal(twoNetworks.first?.totalDuration, nil,
+              "neither has an observed duration (net A is open, net B is an orphan clear)")
+
+        // And matching clears close only the matching network's episode.
+        let netACleared = ActivityEntry.fold([
+            event("rule-cleared", "G3", 300, "Resolved: Minor packet loss to router", "wifi:mac=aa"),
+            event("rule-fired", "G3", 100, "Minor packet loss to router", "wifi:mac=bb"),
+            event("rule-fired", "G3", 0, "Minor packet loss to router", "wifi:mac=aa"),
+        ])
+        equal(netACleared.first?.occurrences, 2, "two distinct episodes")
+        equal(netACleared.first?.totalDuration, 300, "only network A has a closed duration")
+        check(netACleared.first?.isOngoing == true, "network B is still open")
 
         // A clear whose fire is not in the slice being folded describes an
         // end with no beginning. There is no duration to state — but there

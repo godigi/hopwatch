@@ -84,4 +84,44 @@ struct NetworkEventTests {
             kind: "rule-fired", summary: firedSummary,
             date: now, in: [longAgoCleared, longAgoFired]))
     }
+
+    @Test func timeSinceLastIgnoresMonitorStarted() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let restart = event(minutesAgo: 1, kind: "monitor-started",
+                            summary: "Monitoring started", now: now)
+        let change = event(minutesAgo: 30, kind: "public-ip-changed",
+                           summary: "s", now: now)
+        #expect(NetworkEvent.timeSinceLast([restart, change], now: now) == 1800)
+        #expect(NetworkEvent.timeSinceLast([restart], now: now) == nil)
+    }
+
+    @Test func isRepeatDifferentiatesByNetwork() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let onNetA = NetworkEvent(date: now.addingTimeInterval(-300),
+                                  kind: "rule-fired", summary: "Issue G2 detected",
+                                  network: "wifi:mac=aa")
+        #expect(NetworkEvent.isRepeat(
+            kind: "rule-fired", summary: "Issue G2 detected", network: "wifi:mac=aa",
+            date: now, in: [onNetA]))
+        #expect(!NetworkEvent.isRepeat(
+            kind: "rule-fired", summary: "Issue G2 detected", network: "wifi:mac=bb",
+            date: now, in: [onNetA]))
+        #expect(!NetworkEvent.isRepeat(
+            kind: "rule-fired", summary: "Issue G2 detected", network: nil,
+            date: now, in: [onNetA]))
+    }
+
+    @Test func decodingSupportsOptionalNetwork() throws {
+        let withNetJSON = """
+        {"id": "00000000-0000-0000-0000-000000000001", "date": 1000, "kind": "rule-fired", "summary": "test", "network": "wifi:mac=aa"}
+        """.data(using: .utf8)!
+        let withNet = try JSONDecoder().decode(NetworkEvent.self, from: withNetJSON)
+        #expect(withNet.network == "wifi:mac=aa")
+
+        let withoutNetJSON = """
+        {"id": "00000000-0000-0000-0000-000000000002", "date": 1000, "kind": "rule-fired", "summary": "test"}
+        """.data(using: .utf8)!
+        let withoutNet = try JSONDecoder().decode(NetworkEvent.self, from: withoutNetJSON)
+        #expect(withoutNet.network == nil)
+    }
 }

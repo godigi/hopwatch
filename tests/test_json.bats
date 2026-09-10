@@ -41,13 +41,17 @@ for e in s:
   [ "$status" -le 2 ]
   printf '%s' "$output" | python3 -c '
 import json, sys
+sys.path.insert(0, "'"$HELPERS"'")
+import rules_catalog
 d = json.load(sys.stdin)
 by = {e["activity"]: e for e in d["suitability"]}
 fired = {x["rule"] for x in d["diagnosis"] if x.get("rule")}
-breakers = {"N1", "N1b", "N1c", "P1", "P2", "L1", "G2", "CP-1", "D2", "DI-1", "DI-2", "DH-3"}
-if not (fired & breakers):
+call_rules = {r["id"] for r in rules_catalog.RULES if "calls" in r.get("impacts", {})}
+if not (fired & call_rules):
     assert by["calls"]["verdict"] == "unmeasured", by["calls"]
     assert "latency under load" in by["calls"]["unmeasured_reason"], by["calls"]
+else:
+    assert by["calls"]["verdict"] in {"degraded", "broken"}, by["calls"]
 '
 }
 

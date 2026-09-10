@@ -388,12 +388,25 @@ final class NetdiagCoordinator {
         alerts.evaluate(sample: sample)
         considerInvestigationBurst(sample)
 
+        // The first cycle of a monitor process records monitor-started, matching
+        // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
+        // uses this boundary to close open episodes as lower bounds rather than
+        // silently spanning the restart with a "+".
+        if sample.seq == 1 {
+            eventLog.record(
+                kind: "monitor-started",
+                summary: "Monitoring started",
+                network: sample.network.id,
+                date: sample.timestamp)
+        }
+
         for change in sample.changes {
             eventLog.record(
                 kind: change.kind,
                 summary: change.summary,
                 ruleID: change.field == "status.rules"
                     ? (change.to ?? change.from) : nil,
+                network: sample.network.id,
                 date: sample.timestamp)
         }
 
@@ -818,7 +831,8 @@ final class NetdiagCoordinator {
         // alert *listens* for, which is why one L2 condition was logged as
         // "rule=L1" and the next identical one as "rule=L2".
         eventLog.record(kind: "alert", summary: def.title,
-                        ruleID: firingRules.sorted().first)
+                        ruleID: firingRules.sorted().first,
+                        network: monitor.latest?.network.id)
         guard Defaults.scanOnAlert else { return }
         // Loop guard, two clauses. A scan started by an alert never starts
         // another, and no scan starts while one is running. Between them

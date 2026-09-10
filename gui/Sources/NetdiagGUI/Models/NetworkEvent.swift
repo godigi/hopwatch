@@ -17,14 +17,18 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
     var kind: String = ""
     var summary: String = ""
     var ruleID: String? = nil
+    /// The network this event occurred on (e.g. "wifi:mac=…"), matching
+    /// the event journal and helpers/events.py.
+    var network: String? = nil
 
     init(id: UUID = UUID(), date: Date, kind: String,
-         summary: String, ruleID: String? = nil) {
+         summary: String, ruleID: String? = nil, network: String? = nil) {
         self.id = id
         self.date = date
         self.kind = kind
         self.summary = summary
         self.ruleID = ruleID
+        self.network = network
     }
 }
 
@@ -36,6 +40,7 @@ extension NetworkEvent {
         kind = c.lenient(.kind, "")
         summary = c.lenient(.summary, "")
         ruleID = c.lenient(.ruleID)
+        network = c.lenient(.network)
     }
 }
 
@@ -45,10 +50,13 @@ extension NetworkEvent {
         Array(events.sorted { $0.date > $1.date }.prefix(cap))
     }
 
-    /// Interval since the newest event, or nil when there is none.
+    /// Interval since the newest network change, or nil when there is none.
+    /// Excludes internal monitor-started lifecycle events so monitor restarts
+    /// do not reset the headline reassurance time.
     static func timeSinceLast(_ events: [NetworkEvent],
                               now: Date) -> TimeInterval? {
-        guard let newest = events.map(\.date).max() else { return nil }
+        let meaningful = events.filter { $0.kind != "monitor-started" }
+        guard let newest = meaningful.map(\.date).max() else { return nil }
         return now.timeIntervalSince(newest)
     }
 
@@ -61,13 +69,16 @@ extension NetworkEvent {
     /// A flapping condition or a resume-from-sleep burst repeats the
     /// same CLI phrase; storing every copy would evict real history.
     /// `events` must be newest-first (EventStore's invariant): the scan
-    /// stops at the first entry older than the window.
-    static func isRepeat(kind: String, summary: String, date: Date,
-                         in events: [NetworkEvent],
+    /// stops at the first entry older than the window. Events on different
+    /// networks are never coalesced.
+    static func isRepeat(kind: String, summary: String, network: String? = nil,
+                         date: Date, in events: [NetworkEvent],
                          window: TimeInterval = 600) -> Bool {
         for event in events {
             if date.timeIntervalSince(event.date) > window { break }
-            if event.kind == kind && event.summary == summary { return true }
+            if event.kind == kind && event.summary == summary && event.network == network {
+                return true
+            }
         }
         return false
     }

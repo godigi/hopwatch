@@ -34,15 +34,23 @@ final class EventStore {
     }
 
     func record(kind: String, summary: String, ruleID: String? = nil,
+                network: String? = nil,
                 date: Date = .now) {
         guard !summary.isEmpty else { return }
-        guard !NetworkEvent.isRepeat(kind: kind, summary: summary,
-                                     date: date, in: events) else {
-            return
+        // A monitor restart is an observation boundary, never a repeat.
+        // It must not be coalesced by isRepeat, or a restart within the
+        // 10-minute window would lose its restart signal.
+        if kind != "monitor-started" {
+            guard !NetworkEvent.isRepeat(kind: kind, summary: summary,
+                                         network: network,
+                                         date: date, in: events) else {
+                return
+            }
         }
         events = NetworkEvent.trimmed(
             events + [NetworkEvent(date: date, kind: kind,
-                                   summary: summary, ruleID: ruleID)],
+                                   summary: summary, ruleID: ruleID,
+                                   network: network)],
             cap: Self.cap)
         save()
     }
@@ -72,7 +80,13 @@ final class EventStore {
         if changed { save() }
     }
 
-    var lastEventDate: Date? { events.first?.date }
+    /// The newest event describing a network condition, ignoring internal
+    /// monitor-started restart markers.
+    var latestNetworkEvent: NetworkEvent? {
+        events.first(where: { $0.kind != "monitor-started" })
+    }
+
+    var lastEventDate: Date? { latestNetworkEvent?.date }
 
     private func load() {
         guard let url else { return }

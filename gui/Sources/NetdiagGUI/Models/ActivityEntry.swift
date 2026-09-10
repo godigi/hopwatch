@@ -67,9 +67,19 @@ struct ActivityEntry: Identifiable, Equatable {
 
 extension ActivityEntry {
 
+    /// Key for tracking an open episode. Keyed on (network, rule) rather
+    /// than rule alone, matching helpers/events.py: the same fault on two
+    /// networks is two episodes, and a laptop moving between them must not
+    /// have one network's clear close the other network's fault.
+    private struct Key: Hashable {
+        var network: String?
+        var ruleID: String
+    }
+
     /// One closed-or-open span of a single rule.
     private struct Episode {
         var ruleID: String
+        var network: String?
         var kind: String
         var summary: String
         var start: Date
@@ -100,10 +110,24 @@ extension ActivityEntry {
         let chronological = events.sorted { $0.date < $1.date }
 
         var episodes: [Episode] = []
-        var open: [String: Episode] = [:]
+        var open: [Key: Episode] = [:]
         var loose: [NetworkEvent] = []
 
         for event in chronological {
+            if event.kind == "monitor-started" {
+                // Everything still open was being watched by a process that is
+                // no longer running. Close each at this restart rather than
+                // letting it span a period nobody observed (matching
+                // helpers/events.py:217).
+                for (_, var existing) in open {
+                    existing.end = event.date
+                    existing.isLowerBound = true
+                    episodes.append(existing)
+                }
+                open.removeAll()
+                continue
+            }
+
             guard let ruleID = event.ruleID,
                   event.kind == "rule-fired" || event.kind == "rule-cleared" else {
                 // Alerts, VPN drops, interface changes, IP changes: discrete
@@ -112,40 +136,23 @@ extension ActivityEntry {
                 continue
             }
 
+            let key = Key(network: event.network, ruleID: ruleID)
             switch event.kind {
             case "rule-fired":
-                if open[ruleID] != nil {
-                    // A second `fired` with no `cleared` between. The monitor
-                    // only emits on transition, so this means it restarted
-                    // and lost its previous sample — the span in between was
-                    // not observed and must not be reported as though it
-                    // were continuous.
-                    //
-                    // Keep the *earlier* start, exactly as `helpers/events.py`
-                    // does (`episodes()` skips the second `rule-fired`): it is
-                    // the earliest moment the fault is known to have been
-                    // true, and the rule was still firing now, so the span
-                    // between the two is evidence, not invention. Only its
-                    // continuity is unobserved — hence the floor.
-                    //
-                    // The previous code closed the open episode at
-                    // `existing.end ?? existing.start`, and `end` is nil for
-                    // everything in `open` by construction. That made every
-                    // such episode zero-length, so the duration fell under the
-                    // one-second floor below, `totalDuration` came out nil,
-                    // and `isLowerBound` ended up qualifying a duration that
-                    // no longer existed: an hour-long fault rendered as a bare
-                    // occurrence with no duration and no `+`.
-                    open[ruleID]?.lastSeen = event.date
-                    open[ruleID]?.isLowerBound = true
+                if open[key] != nil {
+                    // A second `fired` on the same (network, rule) with no
+                    // `cleared` and no monitor-started between (e.g. legacy logs):
+                    // keep the earlier start, as helpers/events.py does.
+                    open[key]?.lastSeen = event.date
+                    open[key]?.isLowerBound = true
                     continue
                 }
-                open[ruleID] = Episode(ruleID: ruleID, kind: event.kind,
-                                       summary: event.summary, start: event.date,
-                                       end: nil, lastSeen: event.date,
-                                       isLowerBound: false)
+                open[key] = Episode(ruleID: ruleID, network: event.network, kind: event.kind,
+                                    summary: event.summary, start: event.date,
+                                    end: nil, lastSeen: event.date,
+                                    isLowerBound: false)
             case "rule-cleared":
-                if var existing = open.removeValue(forKey: ruleID) {
+                if var existing = open.removeValue(forKey: key) {
                     existing.end = event.date
                     episodes.append(existing)
                 } else {
@@ -168,7 +175,7 @@ extension ActivityEntry {
                     // then leaves `totalDuration` nil, so the row states the
                     // resolution and invents no duration for it.
                     episodes.append(Episode(
-                        ruleID: ruleID, kind: event.kind,
+                        ruleID: ruleID, network: event.network, kind: event.kind,
                         summary: event.summary, start: event.date,
                         end: event.date, lastSeen: event.date,
                         isLowerBound: false))
