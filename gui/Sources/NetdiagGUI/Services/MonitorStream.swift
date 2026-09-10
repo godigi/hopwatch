@@ -152,8 +152,12 @@ final class MonitorStream {
         // opposite of what the user asked for by starting the test.
         let fast = burstInterval ?? Defaults.fastInterval
         let degraded = burstInterval ?? Defaults.degradedInterval
+        let journalDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("net-diag")
+        try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
+        let journalPath = journalDir.appendingPathComponent("events.jsonl").path
         proc.arguments = [
             "--monitor",
+            "--journal",                   journalPath,
             "--monitor-fast-interval",     String(fast),
             "--monitor-degraded-interval", String(degraded),
             "--monitor-medium-interval",   String(Defaults.mediumInterval),

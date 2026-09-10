@@ -110,6 +110,14 @@ a default:
    rows, because there is only one place either could have read them
    from.
 
+5. **Event journaling is unified across GUI and CLI.** The GUI monitor
+   spawns `netdiag --monitor` with `--journal "$HOME/net-diag/events.jsonl"`,
+   writing to the identical journal path used by the background launchd
+   recorder agent (`netdiag --install-recorder`). Because both entry points
+   feed the exact same journal, availability rules (`AV-1` and `AV-2` in
+   `lib/availability.sh`) evaluate against complete, real transition history
+   whether full checks are triggered from the GUI or the terminal.
+
 ## Arrival state lives in the GUI, not the CLI (v0.14.0)
 
 "Have I checked this network before?" is a question about *this install's
