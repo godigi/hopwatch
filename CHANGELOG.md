@@ -98,10 +98,19 @@ the store detects truncation, which is a property of the whole store rather
 than evidence about one rule, and leaves the window case unfixed.
 
 21 new `--verify` assertions cover all three, each written to fail first.
-One difference with `helpers/events.py` remains by design: it marks a
-duration a lower bound only on an explicit `monitor-started` journal row,
-which `EventStore` has no equivalent of, so the GUI infers the restart from
-the fire-on-fire itself — the same conclusion from the only evidence it has.
+Full parity with `helpers/events.py` is now completed across two dimensions:
+
+**Monitor restarts bound open episodes:** `NetdiagCoordinator` now writes an
+explicit `monitor-started` event when `sample.seq == 1`. When folding history,
+`ActivityEntry.fold` matches `helpers/events.py` by closing any open episodes
+as lower bounds (`+`) measured up to the restart time, rather than leaving them
+falsely ongoing.
+
+**Episode keying differentiates by network:** `NetworkEvent` now carries an
+optional `network` identifier. `ActivityEntry.fold` keys open episodes on
+`(network, ruleID)` tuples instead of rule IDs alone, ensuring that moving
+between Wi-Fi networks (or roaming between BSSIDs) while a fault is active
+does not cross-close or improperly merge episodes across network boundaries.
 
 ### Fixed — a missing UPnP state counted as a measured path
 
