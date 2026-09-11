@@ -9,14 +9,17 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 | ID | Title | Track | Status | Est. Size |
 |---|---|---|---|---|
-| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Done** | XS |
-| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Done** | S |
-| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Done** | M |
-| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Done** | S |
-| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Done** | M |
-| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Done** | S |
-| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Done** | XS |
-| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Done** | S |
+| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Ready** | XS |
+| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Ready** | S |
+| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Ready** | M |
+| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Ready** | S |
+| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Ready** | M |
+| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Ready** | S |
+| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Ready** | XS |
+| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Ready** | S |
+| [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Ready** | XS |
+| [TASK-012](#task-012-share-diagnostics-menu-action--redacted-report-export) | "Share Diagnostics..." friendly menu action & redacted report export | GUI / Sharing | **Ready** | S |
+| [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Ready** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | Backlog | **Backlog** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Backlog | **Backlog** | M |
 
@@ -26,7 +29,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-001: Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md
 - **Area**: Documentation / Release Prep
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `CHANGELOG.md`
 - **Context**:
@@ -41,7 +44,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-002: Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift`
 - **Area**: macOS GUI / Live Chart
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
   - `gui/Sources/NetdiagGUI/Support/MonitorSeries.swift`
@@ -57,7 +60,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-003: Unify event journaling between GUI and CLI (`events.jsonl`) [Track E]
 - **Area**: Core Architecture / Availability
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/MonitorStream.swift`
   - `lib/availability.sh`
@@ -73,7 +76,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-004: Add "Launch at Login" support to GUI via `SMAppService` [Track E]
 - **Area**: macOS GUI / Settings
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
   - `gui/Sources/NetdiagGUI/Views/SettingsView.swift`
@@ -90,7 +93,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-005: Subnet crowding telemetry & device surge detection (`LAN-1`) [Track D]
 - **Area**: CLI & GUI / Diagnosis
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `helpers/emit_json.py`
   - `docs/JSON-SCHEMA.md`
@@ -112,7 +115,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-008: "Copy Diagnostic Summary for Support / Front Desk / Host" [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -134,7 +137,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-009: "Open Router Admin Page" quick action [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -149,7 +152,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-010: "Open Login Page" action on captive portal detection (`CP-1`) [Track C]
 - **Area**: macOS GUI / Captive Portal
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
   - `gui/Sources/NetdiagGUI/Views/LiveView.swift`
@@ -159,6 +162,55 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - In `AlertStageCard` (and Arrival/Live cards), when the active alert is `captive-portal`, surface an explicit action button: `[Open Login Page]`.
   - Clicking opens `http://captive.apple.com/hotspot-detect.html` in the default browser, reliably triggering the portal redirection.
   - Tested in `--verify` harness.
+
+---
+
+### TASK-011: Live Latency in the Menu Bar (`● 18ms`)
+- **Area**: macOS GUI / Telemetry & Menu Bar
+- **Status**: **Ready**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
+  - `gui/Sources/NetdiagGUI/NetdiagApp.swift`
+  - `gui/Sources/NetdiagGUI/Views/SettingsView.swift`
+- **Context**:
+  During video or voice calls, users want to know instantly if their connection is lagging without clicking the menu bar. Adding a "Dot and ping" menu bar style displays the latest ping (e.g. `● 18ms`, turning amber/red on spikes) directly in the menu bar.
+- **Acceptance Criteria**:
+  - Add `.dotAndPing` to `AppSettings.MenuBarStyle`.
+  - `MenuBarLabel` displays the live rounded RTT (from `coordinator.monitor.latest?.internet.rttMs` or `gateway.rttMs`) in monospace font next to the status dot.
+  - Dropdown Picker in `SettingsView` offers "Dot and ping time".
+  - Verified in Swift tests.
+
+---
+
+### TASK-012: "Share Diagnostics..." Action & Redacted Report Export
+- **Area**: macOS GUI / Sharing & Support
+- **Status**: **Ready**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
+- **Context**:
+  Users need an easy, user-friendly way to share diagnostic reports with IT helpdesks, landlords, or ISPs without leaking private information (passwords, MACs, public IP).
+- **Acceptance Criteria**:
+  - Add a friendly menu item / button: `"Share Diagnostics..."` in the report view and dropdown context menu.
+  - Exports or copies a redacted diagnostic summary (using the rules defined by `helpers/share.py`).
+  - Allows saving as `.json` or `.md` or copying directly to clipboard.
+  - Clean error handling and user feedback ("Diagnostic report copied").
+
+---
+
+### TASK-013: Prominent Speedometer & Throughput Gauge during Speed Test
+- **Area**: macOS GUI / Visual Polish
+- **Status**: **Ready**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Views/ScanProgressView.swift`
+  - `gui/Sources/NetdiagGUI/Models/ScanProgress.swift`
+- **Context**:
+  The speed test is the longest phase of a full scan (~25s). Currently, live throughput is shown only as a tiny 11pt inline caption. Giving it a prominent, tactile live readout (`↓ 245 Mbps`, `↑ 82 Mbps`) transforms the waiting experience.
+- **Acceptance Criteria**:
+  - During the `speedtest` phase, `ScanProgressView` renders a prominent live throughput display with directional indicator (`↓ Download` / `↑ Upload`) and live Mbps.
+  - Smooth animation as speed milestones arrive via fd-3 progress stream.
+  - Reverts gracefully when speed test finishes.
 
 ---
 
