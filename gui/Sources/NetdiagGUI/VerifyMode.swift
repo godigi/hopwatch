@@ -65,6 +65,7 @@ private enum VerifyHarness {
         runStageTests()
         runHealthResolverTests()
         runAlertAttributionTests()
+        runCaptivePortalActionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
         runNetworkIdentityFixtureTests()
@@ -167,6 +168,36 @@ private enum VerifyHarness {
         // also what the stage card renders.
         equal(degraded.title, snapshot.title,
               "the alert event's summary is the very string the stage card shows")
+        print("")
+    }
+
+    static func runCaptivePortalActionTests() {
+        print("Captive portal action (CP-1)")
+        guard let captiveDef = AlertDefinition.byID("captive-portal") else {
+            check(false, "captive-portal alert definition exists"); return
+        }
+        check(captiveDef.id == "captive-portal", "captive-portal definition id is captive-portal")
+        check(captiveDef.title == "This network needs you to sign in", "title is 'This network needs you to sign in'")
+
+        let snapshot = StageResolver.AlertSnapshot(
+            title: captiveDef.title,
+            body: captiveDef.interimBody,
+            raisedAt: Date(),
+            rules: ["CP-1"],
+            severityRank: 1,
+            id: "captive-portal"
+        )
+        equal(snapshot.id, "captive-portal", "snapshot carries alert ID")
+        check(snapshot.rules.contains("CP-1"), "snapshot contains CP-1")
+
+        let url = URL(string: "http://captive.apple.com/hotspot-detect.html")
+        equal(url?.host, "captive.apple.com", "hotspot detect host is captive.apple.com")
+        equal(url?.path, "/hotspot-detect.html", "hotspot detect path is /hotspot-detect.html")
+
+        // Verify AlertStageCard renders with captive portal action
+        let card = AlertStageCard(alert: snapshot, moreCount: 0, onOpen: {})
+        let rendered = renderImage(card.frame(width: 340).padding(4), size: NSSize(width: 348, height: 110))
+        check(rendered != nil, "AlertStageCard with captive portal renders successfully")
         print("")
     }
 
@@ -1683,12 +1714,17 @@ private enum VerifyHarness {
             ("alert-unranked", .init(title: "Connection is unstable",
                                      body: "Checking whether it's your Wi-Fi or your router…",
                                      raisedAt: Date(), rules: ["G2"], severityRank: 0)),
+            ("alert-captive-portal", .init(title: "This network needs you to sign in",
+                                           body: "Open your browser to sign in to this network.",
+                                           raisedAt: Date(), rules: [], severityRank: 1,
+                                           id: "captive-portal")),
         ]
         for (name, alert) in alertCases {
+            let height: CGFloat = (name == "alert-captive-portal") ? 116 : 88
             guard let image = renderImage(
                 AlertStageCard(alert: alert, moreCount: 0, onOpen: {})
                     .frame(width: 340).padding(4),
-                size: NSSize(width: 348, height: 88)) else {
+                size: NSSize(width: 348, height: height)) else {
                 print("  \u{2718} \(name) — could not allocate bitmap representation")
                 failures.append("render-\(name)")
                 continue

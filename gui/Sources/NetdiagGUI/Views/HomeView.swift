@@ -30,7 +30,10 @@ struct HomeView: View {
                             network: arrivalNetworkName,
                             progress: coordinator.isScanning ? coordinator.progress : nil,
                             intent: coordinator.arrivalIntent,
-                            onRunFullCheck: { coordinator.runDeclinedFullCheck() })
+                            onRunFullCheck: { coordinator.runDeclinedFullCheck() },
+                            isCaptivePortal: coordinator.monitor.latest?.publicInfo.captivePortal == true
+                                || (coordinator.monitor.latest?.status.rules.contains("CP-1") ?? false)
+                                || coordinator.alerts.active["captive-portal"] != nil)
 
                 // Only for scans the arrival card is not already showing —
                 // otherwise a new network renders two sets of progress rows.

@@ -113,6 +113,8 @@ struct LiveView: View {
             }
             .padding(12)
             .cardStyle()
+        } else if isCaptivePortal {
+            captivePortalCard
         } else {
             connectedCard
         }
@@ -147,6 +149,37 @@ struct LiveView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .cardStyle()
+    }
+
+    private var isCaptivePortal: Bool {
+        monitor.latest?.publicInfo.captivePortal == true
+            || (monitor.latest?.status.rules.contains("CP-1") ?? false)
+            || coordinator.alerts.active["captive-portal"] != nil
+    }
+
+    private var captivePortalCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "lock.shield.fill")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("This network needs you to sign in")
+                    .font(.callout).fontWeight(.semibold)
+                Text("Open the sign-in page to access the internet.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Login Page") {
+                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 2)
             }
             Spacer(minLength: 0)
         }

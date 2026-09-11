@@ -91,7 +91,8 @@ struct DropdownView: View {
                     // to order alerts, so the card's colour and the choice
                     // of *which* alert to show can't disagree.
                     severityRank: $0.rules
-                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0)
+                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
+                    id: $0.id)
             },
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
             linkUp: coordinator.monitor.latest?.link.up ?? true,

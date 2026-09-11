@@ -66,11 +66,13 @@ enum StageResolver {
         /// *lower*-priority `.watching` card two lines up correctly rendered
         /// the identical warn condition in amber.
         let severityRank: Int
+        let id: String?
         init(title: String, body: String, raisedAt: Date, rules: Set<String>,
-             severityRank: Int = 0) {
+             severityRank: Int = 0, id: String? = nil) {
             self.title = title; self.body = body
             self.raisedAt = raisedAt; self.rules = rules
             self.severityRank = severityRank
+            self.id = id
         }
     }
 

@@ -127,6 +127,8 @@ struct ArrivalCard: View {
     let progress: ScanProgress?
     var intent: ArrivalCopy.Intent = .starting
     var onRunFullCheck: () -> Void
+    var isCaptivePortal: Bool = false
+    var onOpenLoginPage: (() -> Void)? = nil
 
     var body: some View {
         if let copy = ArrivalCopy.forState(state, network: network, intent: intent) {
@@ -153,7 +155,17 @@ struct ArrivalCard: View {
                     ScanProgressView(progress: progress)
                 }
 
-                if let action = copy.actionTitle {
+                if isCaptivePortal {
+                    Button("Open Login Page") {
+                        if let onOpenLoginPage {
+                            onOpenLoginPage()
+                        } else if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else if let action = copy.actionTitle {
                     Button(action, action: onRunFullCheck)
                         .controlSize(.small)
                 }

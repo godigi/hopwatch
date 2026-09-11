@@ -50,6 +50,15 @@ struct AlertStageCard: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .padding(.vertical, 2)
+            } else if isCaptivePortal {
+                Button("Open Login Page") {
+                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.vertical, 2)
             }
             HStack {
                 Text(attribution)
@@ -103,6 +112,13 @@ struct AlertStageCard: View {
             return RelativeTime.string(from: alert.raisedAt)
         }
         return "rule \(rule) · \(RelativeTime.string(from: alert.raisedAt))"
+    }
+
+    private var isCaptivePortal: Bool {
+        alert.id == "captive-portal"
+            || alert.rules.contains("CP-1")
+            || alert.title.localizedCaseInsensitiveContains("sign in")
+            || alert.title.localizedCaseInsensitiveContains("captive")
     }
 }
 
