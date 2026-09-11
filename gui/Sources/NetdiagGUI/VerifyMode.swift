@@ -84,6 +84,7 @@ private enum VerifyHarness {
         runRunGroupTests()
         runMonitorSeriesGapTests()
         runLaunchAtLoginTests()
+        runMenuBarLatencyTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1076,6 +1077,19 @@ private enum VerifyHarness {
         // Revert back
         settings.launchAtLogin = original
         check(settings.launchAtLogin == (SMAppService.mainApp.status == .enabled), "AppSettings.launchAtLogin remains consistent after toggle attempt")
+    }
+
+    // MARK: - Menu-bar latency (dotAndPing)
+
+    private static func runMenuBarLatencyTests() {
+        print("Menu bar latency (dotAndPing & formatPing):")
+        check(MenuBarStyle.allCases.contains(.dotAndPing), "MenuBarStyle.allCases includes .dotAndPing")
+        check(MenuBarStyle.dotAndPing.rawValue == "dot+ping", "MenuBarStyle.dotAndPing rawValue is dot+ping")
+        check(MenuBarStyle.dotAndPing.label == "Dot and ping time", "MenuBarStyle.dotAndPing label is Dot and ping time")
+        check(MenuBarLabel.formatPing(internetRtt: 18.2, gatewayRtt: nil) == "18ms", "formatPing rounds internet RTT with ms")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4) == "5ms", "formatPing falls back to gateway RTT")
+        check(MenuBarLabel.formatPing(internetRtt: 25.1, gatewayRtt: 3.0) == "25ms", "formatPing prioritizes internet RTT")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil, "formatPing is nil when unmeasured")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

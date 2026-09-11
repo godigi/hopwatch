@@ -184,12 +184,24 @@ struct MenuBarLabel: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(nsImage: Self.dot(for: coordinator.currentHealth))
-            if appSettings.menuBarStyle != .dotOnly,
-               let flag = Flag.emoji(forISOCode: countryISO) {
-                Text(flag)
-            }
-            if appSettings.menuBarStyle == .dotFlagAndIP, let ip = publicIP {
-                Text(ip).font(Theme.Font.compactMonospace)
+            switch appSettings.menuBarStyle {
+            case .dotOnly:
+                EmptyView()
+            case .dotAndFlag:
+                if let flag = Flag.emoji(forISOCode: countryISO) {
+                    Text(flag)
+                }
+            case .dotFlagAndIP:
+                if let flag = Flag.emoji(forISOCode: countryISO) {
+                    Text(flag)
+                }
+                if let ip = publicIP {
+                    Text(ip).font(Theme.Font.compactMonospace)
+                }
+            case .dotAndPing:
+                if let ping = pingString {
+                    Text(ping).font(Theme.Font.compactMonospace)
+                }
             }
         }
     }
@@ -239,5 +251,19 @@ struct MenuBarLabel: View {
         // group, which is the part that actually changes.
         if ip.contains(":") { return "…\(ip.split(separator: ":").last ?? "")" }
         return ip
+    }
+
+    static func formatPing(internetRtt: Double?, gatewayRtt: Double?) -> String? {
+        guard let rtt = internetRtt ?? gatewayRtt, rtt >= 0 else { return nil }
+        return "\(Int(round(rtt)))ms"
+    }
+
+    private var pingString: String? {
+        Self.formatPing(
+            internetRtt: coordinator.monitor.latest?.internet.rttAvgMs
+                ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs,
+            gatewayRtt: coordinator.monitor.latest?.gateway.rttAvgMs
+                ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs
+        )
     }
 }

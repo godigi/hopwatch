@@ -299,6 +299,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
     case dotOnly = "dot"
     case dotAndFlag = "dot+flag"
     case dotFlagAndIP = "dot+flag+ip"
+    case dotAndPing = "dot+ping"
 
     var id: String { rawValue }
 
@@ -307,6 +308,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
         case .dotOnly:      return "Status dot only"
         case .dotAndFlag:   return "Status dot and country flag"
         case .dotFlagAndIP: return "Status dot, flag, and IP address"
+        case .dotAndPing:   return "Dot and ping time"
         }
     }
 }
