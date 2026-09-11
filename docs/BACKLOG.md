@@ -134,7 +134,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-009: "Open Router Admin Page" quick action [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`

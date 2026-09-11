@@ -25,6 +25,8 @@ struct AlertStageCard: View {
     /// navigate to — Activity's "Active now" list renders the same card and
     /// a "See all alerts" link pointing at itself would be furniture.
     var onOpen: (() -> Void)?
+    var actionButtonTitle: String? = nil
+    var onAction: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -42,6 +44,12 @@ struct AlertStageCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let actionButtonTitle, let onAction {
+                Button(actionButtonTitle, action: onAction)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .padding(.vertical, 2)
             }
             HStack {
                 Text(attribution)

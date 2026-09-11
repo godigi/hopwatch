@@ -230,10 +230,30 @@ struct DropdownView: View {
     }
 
     private func alertStage(_ alert: StageResolver.AlertSnapshot) -> some View {
-        AlertStageCard(
+        var actionTitle: String? = nil
+        var action: (() -> Void)? = nil
+
+        if alert.rules.contains("CP-1") || alert.title.localizedCaseInsensitiveContains("sign in") || alert.title.localizedCaseInsensitiveContains("captive") || (coordinator.monitor.latest?.publicInfo.captivePortal == true) {
+            actionTitle = "Open Login Page"
+            action = {
+                if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        } else if isRouterAlert(alert), let routerURL = routerAdminURL {
+            actionTitle = "Open Router Admin Page"
+            action = {
+                NSWorkspace.shared.open(routerURL)
+            }
+        }
+
+        return AlertStageCard(
             alert: alert,
             moreCount: max(coordinator.alerts.activeSorted.count - 1, 0),
-            onOpen: openActivity)
+            onOpen: openActivity,
+            actionButtonTitle: actionTitle,
+            onAction: action
+        )
     }
 
     private var testingStage: some View {
@@ -655,6 +675,12 @@ struct DropdownView: View {
                 copySupportSummary()
             }
 
+            if let routerURL = routerAdminURL {
+                dropdownButton("Open Router Admin Page", icon: "network") {
+                    NSWorkspace.shared.open(routerURL)
+                }
+            }
+
             // Open Dashboard + Pause/Resume above the line, Settings + Quit
             // below — the same horizontal inset the rows themselves use
             // (via `dropdownButton`) so it doesn't run flush to the panel
@@ -748,6 +774,32 @@ struct DropdownView: View {
             try? await Task.sleep(for: .seconds(2))
             didCopySupport = false
         }
+    }
+
+    private var isNetworkOwned: Bool {
+        coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
+            || (coordinator.monitor.latest?.network.isMine ?? false)
+    }
+
+    private var routerGatewayIP: String? {
+        coordinator.monitor.latest?.link.gateway
+            ?? coordinator.latestRun?.snapshot.gateway.ip
+            ?? coordinator.hydratedReport?.run.gateway.ip
+    }
+
+    private var routerAdminURL: URL? {
+        guard isNetworkOwned else { return nil }
+        return IPAddressValidation.routerAdminURL(for: routerGatewayIP)
+    }
+
+    private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
+        for ruleID in alert.rules {
+            let rule = coordinator.rulesCatalog.catalog?[ruleID]
+            if rule?.fixTarget == "your_router" || rule?.category == "router" || ruleID.hasPrefix("G") || ruleID.hasPrefix("B") {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Kept glance values (unchanged from the pre-redesign dropdown)

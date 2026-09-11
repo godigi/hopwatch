@@ -913,10 +913,41 @@ struct RunReportView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        if isRouterIssue(d), let url = routerAdminURL {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Label("Open Router Admin Page", systemImage: "arrow.up.right.square")
+                            }
+                            .controlSize(.small)
+                            .padding(.top, 2)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private var isNetworkOwned: Bool {
+        snapshot.network.isMine || coordinator.history.isOwned(networkID: snapshot.network.id)
+    }
+
+    private var routerGatewayIP: String? {
+        snapshot.gateway.ip ?? snapshot.interfaceInfo.gateway
+    }
+
+    private var routerAdminURL: URL? {
+        guard isNetworkOwned else { return nil }
+        return IPAddressValidation.routerAdminURL(for: routerGatewayIP)
+    }
+
+    private func isRouterIssue(_ d: RunSnapshot.Diagnosis) -> Bool {
+        guard let ruleID = d.rule else { return false }
+        let rule = coordinator.rulesCatalog.catalog?[ruleID]
+        return rule?.fixTarget == "your_router"
+            || rule?.category == "router"
+            || ruleID.hasPrefix("G")
+            || ruleID.hasPrefix("B")
     }
 }
 
