@@ -541,10 +541,10 @@ struct RunReportView: View {
                            informational: true))
         }
         // Same conditional shape, same reason.
-        if !s.duplicateIPs.isEmpty || fired("Local network") {
+        if !s.duplicateIPs.isEmpty || (s.lan?.arpActiveCount ?? 0) > 0 || fired("Local network") {
             out.append(Row(label: "Local network",
                            value: localNetworkValue,
-                           health: health(["DI-1", "DI-2", "ETH-1", "ETH-2", "DH-1", "DH-3"],
+                           health: health(["DI-1", "DI-2", "ETH-1", "ETH-2", "DH-1", "DH-3", "LAN-1"],
                                           "Local network"),
                            metricKey: nil,
                            glossaryKey: nil,
@@ -766,6 +766,10 @@ struct RunReportView: View {
         if !snapshot.duplicateIPs.isEmpty {
             let n = snapshot.duplicateIPs.count
             return "duplicate address\(n == 1 ? "" : "es") on the LAN"
+        }
+        if let count = snapshot.lan?.arpActiveCount, count > 0 {
+            let noun = count == 1 ? "active device" : "active devices"
+            return "\(count) \(noun) on subnet"
         }
         // The row is only built when something here fired, so reaching
         // this line means a lan/dhcp rule is describing it. Point at that

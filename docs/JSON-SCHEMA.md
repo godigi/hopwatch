@@ -49,6 +49,7 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 | `speedtest` | object | on by default since v0.6.0. `null` when the test was skipped — `--no-speed`, `--quick` without an explicit `--speed`, no speedtest CLI installed, no internet to test against, or `interface.metered` is `true` (see `MET-1`) |
 | `ntp` | object | `drift_seconds`, `using_network_time`, `server` |
 | `duplicate_ips` | array | IPs seen with more than one MAC in the ARP table |
+| `lan` | object | `arp_active_count` — active unicast device count on the subnet from the ARP table |
 | `dhcp` | object | lease detail; see the `dns_servers` note below |
 | `mtr` | object | `target`, `duration_s`, `hops[]`, `first_lossy_hop` |
 | `wan` | object | `load_balancing`, `double_nat`, `upnp` — see below |

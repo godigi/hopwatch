@@ -1541,6 +1541,17 @@ private enum VerifyHarness {
         equal(oldCatalog?["G2"]?.fixAway, nil, "fix_away is nil against a pre-schema-5 catalog")
         equal(oldCatalog?["G2"]?.fixTarget, nil, "fix_target is nil against a pre-schema-5 catalog")
         equal(oldCatalog?["G2"]?.impacts, nil, "impacts is nil against a pre-schema-5 catalog")
+
+        // 6. LAN block decoding: arpActiveCount decodes directly and via helper
+        let snapWithLAN = decodeSnapshot("""
+        {"lan": {"arp_active_count": 18}}
+        """)
+        equal(snapWithLAN?.lan?.arpActiveCount, 18, "lan.arpActiveCount decodes integer")
+        equal(snapWithLAN?.arpActiveCount, 18, "snapshot.arpActiveCount reflects lan.arpActiveCount")
+
+        let snapWithoutLAN = decodeSnapshot("{}")
+        equal(snapWithoutLAN?.lan?.arpActiveCount, nil, "missing lan block leaves lan nil")
+        equal(snapWithoutLAN?.arpActiveCount, nil, "missing lan block leaves arpActiveCount nil")
     }
 
     // MARK: - 2. Stage-card visual contract (offscreen render → PNG)

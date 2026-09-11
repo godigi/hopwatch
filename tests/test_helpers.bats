@@ -241,6 +241,18 @@ _write_history() {
   [[ "$output" == *"time to reach your router"* ]] || return 1
 }
 
+@test "baseline: a surge in active devices on the same network is reported" {
+  hist="$TMP/h.jsonl"; cur="$TMP/c.json"
+  for _ in $(seq 1 5); do
+    printf '{"network":{"id":"wifi:ssid=Home"},"lan":{"arp_active_count":4}}\n' >> "$hist"
+  done
+  printf '{"network":{"id":"wifi:ssid=Home"},"lan":{"arp_active_count":12}}' > "$cur"
+  run python3 "$REPO/helpers/baseline.py" --history "$hist" --current "$cur"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq_get compared_runs)" = "5" ]
+  [[ "$output" == *"active devices on your network"* ]] || return 1
+}
+
 @test "baseline: a run with no network identity is not compared" {
   hist="$TMP/h.jsonl"; cur="$TMP/c.json"
   _write_history "$hist" "wifi:ssid=Home" 5 3.0

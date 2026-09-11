@@ -93,6 +93,7 @@ METRICS: list[tuple[str, str, str, float | None]] = [
     ("speedtest.down_mbps",       "download speed",                      "drop", None),
     ("speedtest.up_mbps",         "upload speed",                        "drop", None),
     ("public.isp",                "your internet provider",              "change", None),
+    ("lan.arp_active_count",      "active devices on your network",      "spike", 3.0),
 ]
 
 # path -> absolute floor in the metric's own unit. Built in main() from
@@ -186,7 +187,7 @@ def evaluate(current: dict, history: list[dict],
         except (TypeError, ValueError):
             continue
 
-        if kind == "spike" and factor is not None and med > 0 and cur_f > med * factor:
+        if kind == "spike" and factor is not None and med > 0 and cur_f >= med * factor:
             # The ratio test alone is satisfied; a floored metric also
             # needs the *current* value itself to be bad, not merely a
             # large multiple of an already-tiny median.

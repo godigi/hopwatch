@@ -685,6 +685,9 @@ def main() -> None:
         },
         "duplicate_ips": (_env("ARP_DUPLICATE_IPS").split()
                           if _env("ARP_DUPLICATE_IPS") else []),
+        "lan": {
+            "arp_active_count": _maybe_int("ARP_ACTIVE_COUNT"),
+        },
         "dhcp": {
             "server": _env("DHCP_SERVER"),
             "lease_start": _env("DHCP_LEASE_START"),

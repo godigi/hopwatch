@@ -122,3 +122,32 @@ for e in d["suitability"]:
         assert e["because"], e
 '
 }
+
+@test "json: emit_json includes lan.arp_active_count when set" {
+  local py
+  py="$(command -v python3)"
+  [ -n "$py" ]
+  run env -i NETDIAG_ARP_ACTIVE_COUNT=15 "$py" "$REPO/helpers/emit_json.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert "lan" in d, "missing lan block"
+assert d["lan"]["arp_active_count"] == 15, d["lan"]
+'
+}
+
+@test "json: emit_json includes lan.arp_active_count as null when unset" {
+  local py
+  py="$(command -v python3)"
+  [ -n "$py" ]
+  run env -i "$py" "$REPO/helpers/emit_json.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert "lan" in d, "missing lan block"
+assert d["lan"]["arp_active_count"] is None, d["lan"]
+'
+}
+

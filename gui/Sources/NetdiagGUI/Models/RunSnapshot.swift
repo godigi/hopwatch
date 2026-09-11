@@ -51,6 +51,8 @@ struct RunSnapshot: Decodable, Sendable {
     var speedtest: Speedtest?
     var ntp: NTP = .init()
     var duplicateIPs: [String] = []
+    var lan: LAN?
+    var arpActiveCount: Int? { lan?.arpActiveCount }
     var dhcp: DHCP = .init()
     var mtr: MTR = .init()
     var timings: Timings = .init()
@@ -88,7 +90,7 @@ struct RunSnapshot: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case version, timestamp, network, wifi, gateway, dns, traceroute
-        case bufferbloat, mtu, ipv6, wan, vpn, speedtest, ntp, dhcp, mtr, timings
+        case bufferbloat, mtu, ipv6, wan, vpn, speedtest, ntp, lan, dhcp, mtr, timings
         case suitability, diagnosis, watcher, availability, traffic
         case runMode = "run_mode"
         case runID = "run_id"
@@ -348,6 +350,14 @@ struct RunSnapshot: Decodable, Sendable {
         }
     }
 
+    struct LAN: Decodable, Sendable {
+        var arpActiveCount: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case arpActiveCount = "arp_active_count"
+        }
+    }
+
     struct DHCP: Decodable, Sendable {
         var server: String?
         var leaseEnd: String?
@@ -598,6 +608,7 @@ extension RunSnapshot {
         speedtest = c.lenient(.speedtest)
         ntp = c.lenient(.ntp, .init())
         duplicateIPs = c.lenient(.duplicateIPs, [])
+        lan = c.lenient(.lan)
         dhcp = c.lenient(.dhcp, .init())
         mtr = c.lenient(.mtr, .init())
         timings = c.lenient(.timings, .init())
