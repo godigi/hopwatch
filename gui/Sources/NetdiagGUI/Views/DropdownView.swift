@@ -27,6 +27,7 @@ struct DropdownView: View {
     /// `wifiCell` — see `resolvedRSSI`'s header. Refreshed by the `.task`
     /// below, at most once per incoming monitor sample.
     @State private var coreWLANRSSI: Int?
+    @State private var didCopySupport = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -649,6 +650,11 @@ struct DropdownView: View {
                 coordinator.setMonitoring(enabled: enabled)
             }
 
+            dropdownButton(didCopySupport ? "Copied Summary!" : "Copy for Support",
+                           icon: didCopySupport ? "checkmark" : "doc.on.doc") {
+                copySupportSummary()
+            }
+
             // Open Dashboard + Pause/Resume above the line, Settings + Quit
             // below — the same horizontal inset the rows themselves use
             // (via `dropdownButton`) so it doesn't run flush to the panel
@@ -707,6 +713,41 @@ struct DropdownView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(HighlightingButtonStyle())
+    }
+
+    private func copySupportSummary() {
+        let text: String
+        let owned = coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
+        if let latestSample = coordinator.monitor.latest {
+            text = SupportSummaryFormatter.format(
+                sample: latestSample,
+                alert: coordinator.alerts.activeSorted.first.map {
+                    StageResolver.AlertSnapshot(
+                        title: $0.title, body: $0.body,
+                        raisedAt: $0.raisedAt, rules: $0.rules,
+                        severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0
+                    )
+                },
+                catalog: coordinator.rulesCatalog.catalog,
+                networkIsOwned: owned
+            )
+        } else {
+            text = SupportSummaryFormatter.format(
+                SupportSummaryFormatter.Parameters(
+                    networkName: coordinator.wifiDisplayName ?? "Unknown Network",
+                    observedProblem: "Network issue detected",
+                    localVerification: "Laptop link is idle; issue is on the network/router side",
+                    concreteAction: "Please restart floor access point / router"
+                )
+            )
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Task { @MainActor in
+            didCopySupport = true
+            try? await Task.sleep(for: .seconds(2))
+            didCopySupport = false
+        }
     }
 
     // MARK: - Kept glance values (unchanged from the pre-redesign dropdown)

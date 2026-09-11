@@ -55,6 +55,7 @@ enum Defaults {
         static let binaryPath         = "netdiagBinaryPath"
         static let networkNames       = "networkNames"
         static let networkMerges      = "networkMerges"
+        static let networkOwned       = "networkOwned"
         static let seenNetworks       = "seenNetworks"
         static let arrivalStates      = "arrivalStates"
         static let hasOnboarded       = "hasOnboarded"
@@ -193,6 +194,11 @@ enum Defaults {
     static var networkMerges: [String: String] {
         get { d.dictionary(forKey: Key.networkMerges) as? [String: String] ?? [:] }
         set { d.set(newValue, forKey: Key.networkMerges) }
+    }
+
+    static var networkOwned: Set<String> {
+        get { Set(d.stringArray(forKey: Key.networkOwned) ?? []) }
+        set { d.set(Array(newValue).sorted(), forKey: Key.networkOwned) }
     }
 
     // MARK: - Scan progress weighting

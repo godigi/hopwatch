@@ -118,6 +118,19 @@ struct MonitorSample: Decodable, Sendable {
             return NetdiagGUI.NetworkIdentity.canonical(id ?? "")
         }
 
+        /// Whether the user controls the equipment on this network (e.g. home/office router).
+        var isMine: Bool {
+            get {
+                if let explicit = explicitMine { return explicit }
+                guard let nid = historyJoinID ?? id else { return false }
+                return Defaults.networkOwned.contains(nid) || (self.id.map { Defaults.networkOwned.contains($0) } ?? false)
+            }
+            set {
+                explicitMine = newValue
+            }
+        }
+        var explicitMine: Bool?
+
         enum CodingKeys: String, CodingKey {
             case id, label
             case groupId = "group_id"

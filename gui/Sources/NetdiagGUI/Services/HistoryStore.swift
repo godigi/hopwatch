@@ -117,6 +117,24 @@ final class HistoryStore {
         Defaults.networkNames = customNames
     }
 
+    func isOwned(networkID: String?) -> Bool {
+        guard let networkID, !networkID.isEmpty else { return false }
+        let key = canonicalID(networkID)
+        return Defaults.networkOwned.contains(key) || Defaults.networkOwned.contains(networkID)
+    }
+
+    func setOwned(_ owned: Bool, for networkID: String) {
+        let key = canonicalID(networkID)
+        var set = Defaults.networkOwned
+        if owned {
+            set.insert(key)
+        } else {
+            set.remove(key)
+            set.remove(networkID)
+        }
+        Defaults.networkOwned = set
+    }
+
     // MARK: - Manual merge
 
     /// Follows the merge chain to the group a key ultimately belongs to.

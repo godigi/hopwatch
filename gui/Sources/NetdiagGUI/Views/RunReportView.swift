@@ -54,6 +54,7 @@ struct RunReportView: View {
 
     @State private var shareError: String?
     @State private var didCopy = false
+    @State private var didCopySupport = false
     @State private var homeDetailsExpanded = false
 
     var body: some View {
@@ -131,6 +132,14 @@ struct RunReportView: View {
             }
             .controlSize(.small)
             .disabled(didCopy || rawJSON == nil)
+
+            Button(didCopySupport ? "Copied!" : "Copy for Support") {
+                copySupportSummary()
+            }
+            .controlSize(.small)
+            .disabled(didCopySupport)
+            .help("Copies a non-technical summary suitable for front desk, host, or network support.")
+
             Text("Plain text, with your network name, IP addresses and location masked.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -141,6 +150,22 @@ struct RunReportView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(2)
             }
+        }
+    }
+
+    private func copySupportSummary() {
+        let isOwned = snapshot.network.id.map { coordinator.history.isOwned(networkID: $0) } ?? false
+        let text = SupportSummaryFormatter.format(
+            snapshot: snapshot,
+            catalog: coordinator.rulesCatalog.catalog,
+            networkIsOwned: isOwned
+        )
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Task { @MainActor in
+            didCopySupport = true
+            try? await Task.sleep(for: .seconds(2))
+            didCopySupport = false
         }
     }
 

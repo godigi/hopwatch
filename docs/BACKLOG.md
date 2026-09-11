@@ -112,7 +112,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-008: "Copy Diagnostic Summary for Support / Front Desk / Host" [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
