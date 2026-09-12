@@ -25,8 +25,9 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
-| [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | Ready | S |
-| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | Ready | S |
+| [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
+| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
+| [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -438,4 +439,40 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Rule `D5` triggers in `lib/diagnosis.sh` when primary fails but secondary succeeds.
   - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
   - Unit tests in `tests/test_dns.bats` prove fallback detection with zero regressions.
+  - Passes `bats tests/` and `make test`.
+
+---
+
+### TASK-021: Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz)
+- **Area**: macOS CLI & GUI / Wi-Fi Bands & Roaming
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/wifi_common.sh`
+  - `lib/constants.sh`
+  - `lib/diagnosis.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `helpers/rules_catalog.py`
+  - `tests/test_diagnosis_wifi.bats`
+- **Context**:
+  Modern routers broadcast a unified SSID across both 2.4 GHz and 5 GHz (or 6 GHz) bands. When MacBooks wake from sleep or connect from afar, they often grab the 2.4 GHz beacon because 2.4 GHz propagates further through walls. Even when the user walks right next to the router, macOS does not aggressively roam to 5 GHz if the 2.4 GHz connection is deemed "acceptable".
+  The user remains trapped on 2.4 GHz, suffering from Bluetooth interference, microwave leakage, and speed caps of 40–70 Mbps when 400–1000 Mbps on 5/6 GHz is available right beside them.
+- **Accuracy & Anti-False-Positive Guardrails**:
+  To prevent nagging or wrongly prompting the user to toggle Wi-Fi when toggling wouldn't help:
+  1. **Strict 5 GHz Signal Floor**: A 5 GHz or 6 GHz BSSID on the **same SSID** must be detected with strong signal: `RSSI >= -65 dBm` (well above Apple's -75 dBm roam threshold). If 5 GHz is weak (-78 dBm), macOS is *right* to stay on 2.4 GHz, so do not fire.
+  2. **Substantial Delta**: The 5 GHz candidate must provide an advantageous link (e.g. within 12 dBm of the 2.4 GHz beacon).
+  3. **Current Link Suboptimal**: The current 2.4 GHz link is experiencing congestion (`tx_rate < 100 Mbps` or channel width 20 MHz).
+  4. **Informative / Low Severity**: Scored as `info` (or gentle `warn` only when active traffic speed is capped), so it never alarms the user as an "outage".
+- **Architectural Design**:
+  - `lib/wifi_common.sh` scans current SSID BSSIDs.
+  - Detect if current connection is 2.4 GHz (channels 1–14).
+  - Check if same SSID has a 5 GHz (channels 36–165) or 6 GHz BSSID with `RSSI >= -65 dBm`.
+  - Emit rule `W6`:
+    - Severity: `info` (or `warn` if `tx_rate <= 54 Mbps`).
+    - Impacts: video calls (degraded), ordinary browsing (degraded).
+    - Fix target: `you`
+    - Text: *"Your Mac is connected to the 2.4 GHz band (${WIFI_CHAN}, ${WIFI_TX_RATE} Mbps) while a faster 5 GHz band on \\\"${WIFI_SSID}\\\" is available with strong signal (${CANDIDATE_5GHZ_RSSI} dBm). Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."*
+- **Acceptance Criteria**:
+  - `W6` only fires when a 5 GHz BSSID on the same SSID has `RSSI >= -65 dBm`. Never fires if 5 GHz is weak or absent.
+  - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
+  - Comprehensive unit test in `tests/test_diagnosis_wifi.bats` covering edge cases (strong 5 GHz, weak 5 GHz, separate SSIDs).
   - Passes `bats tests/` and `make test`.
