@@ -27,8 +27,9 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
 | [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
 | [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
-| [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | Ready | S |
-| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | Ready | M |
+| [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
+| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | **Done** | M |
+| [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -513,3 +514,40 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Unit tests verify `B1`/`B2` grade D on a 300 Mbps connection emits `warn` instead of `critical`.
   - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
   - All existing BATS tests continue to pass.
+
+---
+
+### TASK-023: Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`)
+- **Area**: CLI / Diagnosis & Safety
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/diagnosis.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `helpers/rules_catalog.py`
+  - `tests/test_diagnosis_dns.bats`
+  - `tests/test_diagnosis_v6.bats`
+  - `tests/test_diagnosis_bufferbloat.bats`
+  - `tests/test_rules_catalog.bats`
+- **Context**:
+  A core design rule of `netdiag` is **"Do No Harm"**: A diagnostic tool must never recommend a permanent, hard-coded system configuration change to solve a transient network symptom.
+  Currently, several rules advise non-technical users to take actions that create long-term foot-guns:
+  1. **Rules `D1` and `D3` (DNS Flakiness / Latency)**: Currently advises: *"Switch your DNS to 1.1.1.1 or 8.8.8.8 in System Settings"*. Hardcoding public DNS on a MacBook's network adapter **permanently breaks future captive portal logins** in airports and hotels (which require local router DNS interception) and breaks internal domain resolution (`printer.local`, corporate split DNS).
+  2. **Rule `V6-2` (Unresponsive IPv6 DNS)**: Currently advises: *"disable IPv6 in System Settings → Network"*. Disabling IPv6 leaves the Mac unable to connect to modern IPv6-only networks (common in European mobile networks and cellular hotspots).
+  3. **Rule `B1` (Bufferbloat)**: Currently advises: *"replace the router with one that supports SQM"*. This induces unnecessary panic and expense; enabling QoS on consumer routers often disables hardware NAT offloading and slashes overall throughput.
+- **Remediation Refinements ("Do No Harm")**:
+  - **`D1` / `D3` Rewrite**:
+    - Avoid telling users to permanently hardcode system DNS adapter settings.
+    - Recommend non-destructive fixes:
+      *"Restart your router to refresh its DNS cache. If on public/hotel Wi-Fi, toggle Wi-Fi off and on. For encrypted browsing without breaking local networks, consider an Encrypted DNS browser profile or app."*
+  - **`V6-2` Rewrite**:
+    - Never advise disabling IPv6 on the client Mac.
+    - Recommend router-side remedies:
+      *"Your router's IPv6 configuration appears stalled. Restart your router to re-acquire its IPv6 prefix lease. No settings changes are needed on your Mac."*
+  - **`B1` Rewrite**:
+    - Demote tone from hardware crisis to bandwidth hygiene:
+      *"Your router delays latency-sensitive traffic during heavy simultaneous downloads or uploads. If video calls stutter while others are streaming, pause large background downloads during meetings, or configure QoS/SQM in your router's admin page."* (Removes "replace your router").
+- **Acceptance Criteria**:
+  - `lib/diagnosis.sh` strings updated to eliminate hardcoding DNS, disabling IPv6, or demanding router replacement.
+  - `helpers/rules_catalog.py` fixes and remediation targets aligned.
+  - Unit tests updated to match new copy and ensure no regressions.
+  - Passes `bats tests/` and `make test`.
