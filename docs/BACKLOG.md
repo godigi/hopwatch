@@ -30,10 +30,10 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
 | [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | **Done** | M |
 | [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | **Done** | S |
-| [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
-| [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
-| [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
-| [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | **Done** | S |
+| [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | Ready | M |
+| [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | Ready | S |
+| [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | Ready | S |
+| [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | Ready | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -560,7 +560,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-024: Network Memory & Historical Performance Card for Known Networks
 - **Area**: macOS GUI / History & Travel Log
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Support/NetworkHistoryStore.swift` (new helper)
   - `gui/Sources/NetdiagGUI/Views/HistoryView.swift`
@@ -592,7 +592,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-025: Smart, Rate-Limited macOS System Notifications on Network Degradation
 - **Area**: macOS GUI / System Alerts & Background Monitoring
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Support/NotificationManager.swift` (new helper)
   - `gui/Sources/NetdiagGUI/Support/NetdiagCoordinator.swift`
@@ -620,7 +620,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-026: Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor
 - **Area**: macOS CLI & GUI / Telemetry & Quality
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `lib/monitor.sh`
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
@@ -652,7 +652,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-027: Remediation Feedback & Resolution Banner (Closed-Loop Confirmation)
 - **Area**: macOS GUI / UX & User Delight
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Support/StageResolver.swift`
   - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
