@@ -32,6 +32,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | **Done** | S |
 | [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
+| [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -613,3 +614,35 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Emits rate-limited notifications on genuine loss/outage transitions.
   - Setting toggle in GUI allows users to disable or customize notification sensitivity.
   - Verified in test suite.
+
+---
+
+### TASK-026: Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor
+- **Area**: macOS CLI & GUI / Telemetry & Quality
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/monitor.sh`
+  - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
+  - `gui/Sources/NetdiagGUI/Support/MonitorSeries.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/VerifyMode.swift`
+  - `gui/Tests/NetdiagGUITests/`
+- **Context**:
+  Users rely on their laptops for real-time, latency-sensitive activities (gaming, Zoom/Meet calls, SSH terminal sessions, live streaming). While average ping latency might look acceptable (e.g. 35 ms), sudden variance (**jitter**) or micro-bursts of loss cause audio clipping, frame skips, and input lag.
+  Currently, `netdiag` monitors RTT and loss, but does not calculate instantaneous jitter in the live stream, nor does it translate raw latency numbers into an immediate, universal **Stability Index** that users can understand without needing network engineering expertise.
+- **Architectural Design**:
+  1. **Telemetry & Monotonic Jitter Calculation**:
+     - `lib/monitor.sh` tracks successive valid RTT measurements and computes the moving jitter ($|RTT_t - RTT_{t-1}|$ smoothed via RFC 3550 exponential moving average).
+     - Emits `jitter_ms` in the monitor JSON stream (or decoded from consecutive samples in Swift).
+     - `MonitorSample.swift` decodes `jitter_ms: Double?`.
+  2. **Real-Time Stability Index (Zero Clicks)**:
+     - In the unified telemetry card (`DropdownView`), alongside ping and loss, display a clean activity readiness badge:
+       - 🟢 **Optimal**: RTT < 35ms, Jitter < 8ms, Loss 0% (Flawless for competitive gaming, live streaming, 4K calls).
+       - 🟡 **Variable / High Jitter**: RTT 35–90ms or Jitter > 20ms (Acceptable for browsing/streaming; occasional micro-stutter in live calls/games).
+       - 🔴 **Unstable**: Packet loss > 2% or Jitter > 50ms or RTT > 150ms (Expect dropouts, buffering, and call audio glitching).
+  3. **Zero Extra Overhead**:
+     - Derived entirely from the existing lightweight 1-packet-per-second monitor probe. No extra packets sent, zero battery impact, no buttons required.
+- **Acceptance Criteria**:
+  - `MonitorSample` decodes `jitter_ms` and `MonitorSeries` calculates moving jitter.
+  - `DropdownView` renders the real-time stability badge with accessible status glyphs.
+  - Fully verified in `swift run -c debug NetdiagGUI --verify` and test suite.
