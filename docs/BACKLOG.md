@@ -24,6 +24,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-015](#task-015-what-does-this-mean-plain-english-tooltips-on-technical-metrics) | "What Does This Mean?" Plain-English tooltips on technical metrics | GUI / UX | **Done** | S |
 | [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
+| [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -342,3 +343,40 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Hop chain renders in SwiftUI with accessible symbols and color states.
   - Clear plain-English reassurance explaining which hops are working and which hop failed.
   - Passes all verification suites: `swift run -c debug NetdiagGUI --verify` and `make -C gui test`.
+
+---
+
+### TASK-018: Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`)
+- **Area**: CLI / Diagnosis & Wi-Fi Link Quality
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/wifi_common.sh`
+  - `lib/constants.sh`
+  - `lib/diagnosis.sh`
+  - `lib/headline.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `tests/test_diagnosis_wifi.bats`
+  - `gui/Sources/NetdiagGUI/Support/HopAttributionResolver.swift`
+- **Context**:
+  Users frequently encounter situations where Wi-Fi is the root cause of network degradation (and moving closer immediately resolves it), yet traditional tools and the OS signal indicator display "Excellent Signal" (e.g. -50 to -55 dBm).
+  This occurs because RSSI measures only the router's beacon power received by the Mac, ignoring:
+  1. **Asymmetric Transmit Power**: The wall-powered router transmits at 200–500 mW, while the battery-operated MacBook transmits at 30–50 mW. The Mac hears the router fine, but the router cannot hear the Mac's return frames through obstacles.
+  2. **Tx Rate Collapse**: Physical multipath interference causes 802.11 modulation downshifting (e.g. from 866 Mbps down to 12–54 Mbps) despite high RSSI.
+  3. **High RF Noise / Low SNR**: Strong signal buried under heavy ambient noise (e.g. -55 dBm signal with -70 dBm noise yields an unusable 15 dB SNR).
+- **Architectural Rules & Detection**:
+  - **Rule `W4` (Wi-Fi Rate Collapse)**:
+    - Triggers when `tx_rate` falls below threshold (e.g. `< 54 Mbps` on Wi-Fi 5/6, or `< 20%` of expected PHY mode rate) while RSSI appears strong (`>= -65 dBm`).
+    - *Diagnosis*: "Your Wi-Fi signal power reads strong (${WIFI_RSSI} dBm), but your negotiated transmit rate has collapsed to ${WIFI_TX_RATE} Mbps due to physical obstacles or radio interference. Moving closer to your router will restore full throughput."
+  - **Rule `W5` (Asymmetric Wi-Fi Link / Return Path Degradation)**:
+    - Triggers when gateway packet loss (`GW_LOSS > 5%`) or extreme local gateway jitter occurs on Wi-Fi even though RSSI is healthy (`>= -65 dBm`).
+    - Prevents `G2` from falsely advising "reboot the router or call your ISP".
+    - *Diagnosis*: "Your Mac hears a strong signal from your router (${WIFI_RSSI} dBm), but packet loss (${GW_LOSS}%) indicates your router is struggling to hear your Mac through walls or interference. Try moving closer to the router."
+  - **SNR Floor Elevation**:
+    - Ensure SNR (`RSSI - Noise`) `< 20 dB` triggers a dedicated link-quality warning even if RSSI is in the "green" range.
+  - **Hop Attribution Integration**:
+    - Update `HopAttributionResolver` (from TASK-017) to evaluate `Effective Wi-Fi Quality` ($f(\text{RSSI}, \text{SNR}, \text{Tx Rate}, \text{GW Loss})$) so the local Wi-Fi hop correctly takes the culprit badge rather than passing blame to the Router or ISP.
+- **Acceptance Criteria**:
+  - `lib/constants.sh` adds thresholds (`THRESH_WIFI_TX_COLLAPSE_MBPS=54`, `THRESH_WIFI_SNR_MIN_DB=20`).
+  - `lib/diagnosis.sh` implements `W4` and `W5` with strict unit tests in `tests/test_diagnosis_wifi.bats`.
+  - `docs/DIAGNOSIS-RULES.md` documents `W4` and `W5` rationale and remedies.
+  - Passes all tests in `bats tests/` and `make test`.
