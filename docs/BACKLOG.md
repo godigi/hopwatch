@@ -22,6 +22,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Ready** | S |
 | [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Ready** | M |
 | [TASK-015](#task-015-what-does-this-mean-plain-english-tooltips-on-technical-metrics) | "What Does This Mean?" Plain-English tooltips on technical metrics | GUI / UX | **Ready** | S |
+| [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Ready** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | Backlog | **Backlog** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Backlog | **Backlog** | M |
 
@@ -274,3 +275,26 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Add native `.help(...)` or subtle info popover triggers on metric labels in `RunReportView` and `DropdownView`.
   - Explanations focus on real-world impact (e.g. why bufferbloat causes video call audio glitches, why MTU matters for VPNs).
   - Verified in Swift tests.
+
+---
+
+### TASK-016: Dropdown View Redesign (Unified Telemetry Card, Integrated Action & Cohesive Visual Hierarchy)
+- **Area**: macOS GUI / Dropdown & Visual Polish
+- **Status**: **Ready**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
+  - `gui/Sources/NetdiagGUI/VerifyMode.swift`
+- **Context**:
+  The current dropdown stacks 7 disjointed elements vertically with awkward sandwiching (the primary check button sits in the middle of live telemetry, separating the status card from the sparkline and instrument grid). The goal is a cohesive, modern macOS Control Center-style layout where **100% of the content remains immediately visible with zero clicks or disclosures**, but with vastly improved visual hierarchy.
+- **Key Architectural Sections**:
+  1. **Status Header & Integrated Action**: Status card ("All good — watching on HomeNet 5G") with an integrated, sleek "Run Check" action button, removing the awkward floating sandwich button.
+  2. **Performance & Live Heartbeat (Unified Card)**: Fuses the live ping, packet loss, and heartbeat sparkline into one cohesive card, paired beside live throughput (Down/Up speeds and last check age).
+  3. **Connection Path & Context Strip**: A 4-item pill row cleanly displaying local first hop (Wi-Fi signal, Router latency) and network identity (VPN state, Country/Public IP).
+  4. **Recent Activity Stream**: Formats the 24-hour events with aligned relative timestamps, status glyphs (resolved check, roam icon, alert icon), and clean summary text.
+  5. **Utility Footer**: Streamlined bottom bar for Dashboard, Pause, Settings, and Quit.
+- **Acceptance Criteria**:
+  - All existing features and information remain 100% visible on launch (no collapsing or expanding required).
+  - "Run Full Check" is cleanly integrated into the header/stage card.
+  - Live ping, packet loss, and the sparkline are visually united in a single card.
+  - Passes all tests in `--verify` harness (`swift run -c debug NetdiagGUI --verify`).
