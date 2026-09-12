@@ -5,8 +5,39 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-lightgrey.svg)](#requirements)
 
-> Comprehensive network diagnostic CLI for macOS — finds the root cause of
-> internet problems in one run instead of forcing you to chain eight commands.
+> **The zero-jargon network monitor and diagnostic companion for macOS.**  
+> Know instantly whether an issue is your Wi-Fi, your router, or your internet provider. Available as a **native macOS menu bar app** and a comprehensive CLI.
+
+<p align="center">
+  <a href="https://github.com/godigi/netdiag/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_macOS-DMG-007AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  </a>
+</p>
+
+---
+
+## Quick Install
+
+### 1. Download Netdiag for Mac (Recommended)
+Download the latest **[Netdiag.dmg](https://github.com/godigi/netdiag/releases/latest)**, open it, and drag `Netdiag.app` into your Applications folder.
+- **Live Menu Bar Monitor**: See real-time ping latency (`● 18ms`) and network status at a glance.
+- **Hop Attribution Chain**: Pinpoints whether the culprit is your Wi-Fi link, your local router, or your ISP.
+- **Automatic In-App Updates**: Silently keeps you up to date with zero maintenance.
+
+### 2. Homebrew Cask
+```sh
+brew install --cask godigi/netdiag/netdiag
+```
+
+### 3. Terminal CLI Only
+```sh
+curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash
+```
+Then run `netdiag`. That fetches netdiag into `~/.local/share/netdiag` and places a symlink on your PATH.
+
+---
+
+## Overview
 
 `netdiag` runs a battery of macOS-native checks (interface, WiFi, gateway,
 DNS, traceroute, bufferbloat, PMTU, mtr, IPv6, VPN, TCP reach, WiFi scan +
@@ -45,19 +76,6 @@ you where to look first. For *intermittent* problems — where the failure
 window is gone by the time you can investigate — `netdiag --watch` or the
 `--install-watcher` LaunchAgent runs it on a cron so the baseline catches
 the regression on the next pass.
-
-## Install
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash
-```
-
-Then run `netdiag`.
-
-That fetches netdiag into `~/.local/share/netdiag`, puts a `netdiag`
-symlink on your PATH, and installs Homebrew's bash 5 if you don't have it
-(macOS ships bash 3.2, which netdiag can't run on). Re-running the same
-command updates an existing install via `git pull`.
 
 If you'd rather read the script before piping it to a shell — a reasonable
 habit — clone instead:

@@ -6,6 +6,19 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Network Memory & Historical Performance Card for Known Networks [TASK-024]
+
+- **Network Memory Synthesis (`NetworkHistoryStore`)**: Synthesizes a persistent historical memory profile for each known network from recorded checks and runs. Tracks typical baseline metrics (median gateway/internet latency, typical jitter, typical and peak download/upload speeds, uptime/incident count) and computes an overall network reliability percentage and grade (Excellent, Good, Fair, Degraded).
+- **Network Detail Card (`NetworkDetailCard`)**: Renders a dedicated memory card displaying throughput, latency/jitter, reliability rating chips, and an automated "Today vs Typical for this network" comparison panel that highlights latency deltas (e.g. "4 ms faster than typical"), packet loss status, and download speed percentages.
+- **Integrated into GUI Views**: Embedded in `NetworksView` (replacing the basic stats row with the comprehensive memory card and displaying summary rating chips in the sidebar) and in `HomeView` when returning to known networks with 2+ checks.
+
+### Improved — In-App Auto-Updater & macOS DMG Distribution
+
+- **DMG & ZIP Dual Asset Support**: `UpdateChecker` now natively handles both `.dmg` disk image files and `.zip` archives from GitHub Releases. Uses `/usr/bin/hdiutil attach` and `/usr/bin/ditto` to cleanly mount and extract updates, finding the inner `Netdiag.app` bundle even in nested structures.
+- **Gatekeeper Quarantine Stripping**: Automatically invokes `xattr -rd com.apple.quarantine` on the newly installed `/Applications/Netdiag.app` before relaunching, ensuring seamless auto-updates without macOS Gatekeeper "app is damaged" security blocks.
+- **Release Automation**: Updated `gui/Makefile` and `.github/workflows/release.yml` to package and attach both `Netdiag-${VERSION}.dmg` and `Netdiag-${VERSION}.zip` to every release.
+- **Repository Documentation**: Redesigned `README.md` with direct DMG download badges, copyable Homebrew cask instructions, and clear multi-option installation paths.
+
 ### Changed — aligned diagnosis remediation with "Do No Harm" standard [D1, D2, D3, D4, V6-2, B1]
 
 A core netdiag tenet is **"Do No Harm"**: diagnostic advice must never recommend permanent, hard-coded client-side system configuration changes to solve transient network symptoms:

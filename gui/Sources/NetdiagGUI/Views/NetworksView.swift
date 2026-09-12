@@ -136,33 +136,41 @@ struct NetworksView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(visibleNetworks) { net in
-                    HStack(spacing: 6) {
-                        Text(store.displayName(for: net.id))
+                    let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(store.displayName(for: net.id))
+                                .lineLimit(1)
+                            if isCurrent(net) {
+                                Image(systemName: "circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.system(size: 8))
+                            }
+                            Spacer(minLength: 4)
+                            // Last-seen rather than another badge: the row
+                            // already identifies, this tells you how stale that
+                            // identity is — "the café, 3 weeks ago" — which is
+                            // the thing you actually scan the list for.
+                            if let last = net.lastSeenDate {
+                                Text(RelativeTime.string(from: last))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .help("Last seen \(last.formatted(date: .abbreviated, time: .shortened))")
+                            }
+                        }
+                        Text(mem.summaryChipText)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        if isCurrent(net) {
-                            Image(systemName: "circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.system(size: 8))
-                        }
-                        Spacer(minLength: 4)
-                        // Last-seen rather than another badge: the row
-                        // already identifies, this tells you how stale that
-                        // identity is — "the café, 3 weeks ago" — which is
-                        // the thing you actually scan the list for.
-                        if let last = net.lastSeenDate {
-                            Text(RelativeTime.string(from: last))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .help("Last seen \(last.formatted(date: .abbreviated, time: .shortened))")
-                        }
                     }
+                    .padding(.vertical, 2)
                     .tag(net.id)
                 }
             }
             .searchable(text: $searchQuery, placement: .toolbar,
                         prompt: "Search by name, SSID, gateway or ISP")
         }
-        .frame(width: 240)
+        .frame(width: 250)
     }
 
     // MARK: - Right column: detail pane
@@ -187,19 +195,19 @@ struct NetworksView: View {
     // MARK: - Network overview (header + stats + controls + checks)
 
     private func networkOverview(_ net: HistoryDocument.Network) -> some View {
-        ScrollView {
+        let runs = networkRuns(net)
+        let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id), runs: runs)
+        let comp: NetworkComparison? = {
+            if isCurrent(net), let latest = coordinator.monitor.latest {
+                return NetworkHistoryStore.compare(sample: latest, baseline: mem)
+            }
+            return nil
+        }()
+        return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 nameHeader(net)
-                statsRow(net)
+                NetworkDetailCard(memory: mem, comparison: comp)
                 controlsRow(net)
-                if !net.gateways.isEmpty || !net.isps.isEmpty {
-                    Text([net.gateways.joined(separator: ", "),
-                          net.isps.joined(separator: ", ")]
-                            .filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .textSelection(.enabled)
-                }
                 if !net.bridgedFrom.isEmpty {
                     Text("includes: \(net.bridgedFrom.joined(separator: ", "))")
                         .font(.caption2).foregroundStyle(.tertiary)

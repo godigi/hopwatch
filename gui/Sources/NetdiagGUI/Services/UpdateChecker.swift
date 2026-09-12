@@ -143,37 +143,50 @@ final class UpdateChecker {
                 let extractDir = tempDir.appendingPathComponent("Extracted")
                 try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
 
-                let isZip = archivePath.pathExtension.lowercased() == "zip"
-                if isZip {
+                let ext = archivePath.pathExtension.lowercased()
+                var appPath: String?
+
+                if ext == "zip" {
                     let ditto = Process()
                     ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
                     ditto.arguments = ["-xk", archivePath.path, extractDir.path]
                     try ditto.run()
                     ditto.waitUntilExit()
 
-                    // Locate Netdiag.app inside extractDir
-                    let fileManager = FileManager.default
-                    let contents = try fileManager.contentsOfDirectory(atPath: extractDir.path)
-                    var appPath: String?
-                    if contents.contains("Netdiag.app") {
-                        appPath = extractDir.appendingPathComponent("Netdiag.app").path
-                    } else {
-                        // Search subdirectories
-                        for item in contents {
-                            let sub = extractDir.appendingPathComponent(item)
-                            if sub.lastPathComponent == "Netdiag.app" {
-                                appPath = sub.path
-                                break
-                            }
-                        }
+                    appPath = findApp(in: extractDir)
+                } else if ext == "dmg" {
+                    // Mount DMG without user interaction
+                    let mountPoint = tempDir.appendingPathComponent("Volume")
+                    try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+
+                    let hdiutil = Process()
+                    hdiutil.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+                    hdiutil.arguments = ["attach", archivePath.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet", "-noautoopen"]
+                    try hdiutil.run()
+                    hdiutil.waitUntilExit()
+
+                    defer {
+                        // Unmount when finished
+                        let detach = Process()
+                        detach.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+                        detach.arguments = ["detach", mountPoint.path, "-force", "-quiet"]
+                        try? detach.run()
+                        detach.waitUntilExit()
                     }
 
-                    if let appPath {
-                        self.downloadProgress = 1.0
-                        self.statusMessage = "Relaunching…"
-                        self.replaceAndRelaunch(withAppAt: appPath)
-                        return
+                    if let sourceApp = findApp(in: mountPoint) {
+                        let copiedApp = extractDir.appendingPathComponent("Netdiag.app")
+                        try? FileManager.default.removeItem(at: copiedApp)
+                        try FileManager.default.copyItem(at: URL(fileURLWithPath: sourceApp), to: copiedApp)
+                        appPath = copiedApp.path
                     }
+                }
+
+                if let appPath {
+                    self.downloadProgress = 1.0
+                    self.statusMessage = "Relaunching…"
+                    self.replaceAndRelaunch(withAppAt: appPath)
+                    return
                 }
 
                 // If unpack did not locate a direct .app, open release page
@@ -186,18 +199,36 @@ final class UpdateChecker {
         }
     }
 
+    /// Helper to locate Netdiag.app in a directory or its immediate children
+    private func findApp(in directory: URL) -> String? {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: directory.path) else { return nil }
+        if contents.contains("Netdiag.app") {
+            return directory.appendingPathComponent("Netdiag.app").path
+        }
+        for item in contents {
+            let sub = directory.appendingPathComponent(item)
+            if sub.lastPathComponent == "Netdiag.app" {
+                return sub.path
+            }
+        }
+        return nil
+    }
+
     /// Opens the GitHub release page in default browser.
     func openReleasePage() {
         let url = availableRelease?.htmlUrl ?? releaseWebFallback
         NSWorkspace.shared.open(url)
     }
 
-    /// Spawns a background script that waits for current process to exit, swaps /Applications/Netdiag.app, and relaunches.
+    /// Spawns a background script that waits for current process to exit, swaps /Applications/Netdiag.app,
+    /// strips Gatekeeper quarantine flags, and relaunches.
     private func replaceAndRelaunch(withAppAt newAppPath: String) {
         let script = """
         sleep 1
         rm -rf /Applications/Netdiag.app
         cp -R "\(newAppPath)" /Applications/Netdiag.app
+        xattr -rd com.apple.quarantine /Applications/Netdiag.app 2>/dev/null || true
         open /Applications/Netdiag.app
         """
 

@@ -175,6 +175,8 @@ check:
 
 DMG_NAME := Netdiag-$(VERSION).dmg
 DMG_PATH := $(BUILD_DIR)/$(DMG_NAME)
+ZIP_NAME := Netdiag-$(VERSION).zip
+ZIP_PATH := $(BUILD_DIR)/$(ZIP_NAME)
 
 dmg: sign
 	@if [ -z "$(VERSION)" ]; then \
@@ -190,6 +192,9 @@ dmg: sign
 	  -ov -format UDZO "$(DMG_PATH)"
 	@rm -rf "$(BUILD_DIR)/dmg"
 	@echo "built: $(DMG_PATH)"
+	@echo "packaging ZIP: $(ZIP_PATH)"
+	@ditto -c -k --keepParent "$(APP_DIR)" "$(ZIP_PATH)"
+	@echo "built: $(ZIP_PATH)"
 
 clean:
 	swift package clean

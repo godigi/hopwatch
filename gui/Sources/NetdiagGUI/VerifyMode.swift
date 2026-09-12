@@ -89,6 +89,7 @@ private enum VerifyHarness {
         runSpeedometerTests()
         runMetricGlossaryTests()
         runHopAttributionTests()
+        runNetworkMemoryTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1226,6 +1227,74 @@ private enum VerifyHarness {
         )
         check(clearRes.culprit == .none, "Zero faults attributes to none (All Clear)")
         check(clearRes.wifiHealth == .healthy && clearRes.routerHealth == .healthy && clearRes.ispHealth == .healthy, "All hops healthy on zero faults")
+    }
+
+    private static func runNetworkMemoryTests() {
+        print("Network Memory (NetworkHistoryStore):")
+        var statGW = HistoryDocument.MetricStat()
+        statGW.median = 12.0
+        var statInet = HistoryDocument.MetricStat()
+        statInet.median = 18.0
+        var statDown = HistoryDocument.MetricStat()
+        statDown.median = 350.0
+        var statUp = HistoryDocument.MetricStat()
+        statUp.median = 40.0
+
+        let net = HistoryDocument.Network(
+            id: "mac:00:11:22:33:44:55",
+            label: "HomeNet 5G",
+            synthesized: false,
+            bridgedFrom: [],
+            firstSeen: "2026-09-01T10:00:00Z",
+            lastSeen: "2026-09-12T10:00:00Z",
+            runCount: 10,
+            checkCount: 10,
+            gateways: ["192.168.1.1"],
+            isps: ["Comcast"],
+            ssids: ["HomeNet 5G"],
+            metricSamples: [:],
+            metricStats: [
+                "gateway_rtt_ms": statGW,
+                "inet_rtt_ms": statInet,
+                "speed_down_mbps": statDown,
+                "speed_up_mbps": statUp,
+            ],
+            severityCounts: ["ok": 9, "warn": 1, "critical": 0],
+            judged: nil
+        )
+
+        var run1 = HistoryDocument.Run()
+        run1.metrics = ["speedtest.down_mbps": 480.0, "speedtest.up_mbps": 50.0]
+
+        let memory = NetworkHistoryStore.memory(for: net, displayName: "HomeNet 5G", runs: [run1])
+        check(memory.typicalGatewayLatencyMs == 12.0, "typical gateway latency synthesized")
+        check(memory.typicalDownMbps == 350.0, "typical download speed synthesized")
+        check(memory.peakDownMbps == 480.0, "peak download speed synthesized from historical runs")
+        check(memory.reliabilityPercent == 90.0, "reliability percent computed from checks and incidents")
+        check(memory.reliabilityGrade == "Good", "reliability grade is Good at 90%")
+        check(memory.summaryChipText.contains("350 Mbps"), "summary chip text contains download speed")
+        check(memory.summaryChipText.contains("90% reliable"), "summary chip text contains reliability")
+
+        // Snapshot comparison
+        var snap = RunSnapshot()
+        snap.gateway.rttAvgMs = 8.0 // 4ms faster
+        snap.gateway.lossPct = 0.0
+        snap.speedtest = RunSnapshot.Speedtest(downMbps: 450.0, upMbps: 45.0)
+
+        let compSnap = NetworkHistoryStore.compare(snapshot: snap, baseline: memory)
+        check(compSnap.gatewayLatencyVerdict == .faster, "snapshot gateway latency is faster")
+        check(compSnap.lossVerdict == .normal, "snapshot loss is normal")
+        check(compSnap.downSpeedVerdict == .faster, "snapshot download is faster")
+        check(compSnap.summaryDescription.contains("faster than typical"), "snapshot summary notes faster latency")
+
+        // Monitor sample comparison
+        var sample = MonitorSample()
+        sample.gateway.rttAvgMs = 22.0 // 10ms slower
+        sample.gateway.lossPct = 5.0   // loss degraded
+        let compSample = NetworkHistoryStore.compare(sample: sample, baseline: memory)
+        check(compSample.gatewayLatencyVerdict == .slower, "sample gateway latency is slower")
+        check(compSample.lossVerdict == .degraded, "sample loss is degraded")
+        check(compSample.summaryDescription.contains("5% packet loss"), "sample summary notes packet loss")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

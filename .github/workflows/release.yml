@@ -143,6 +143,7 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           dmg="gui/build/Netdiag-${VERSION}.dmg"
+          zip="gui/build/Netdiag-${VERSION}.zip"
           # A pre-1.0 tag is still marked as a normal release; the
           # distinction this repo cares about is documented-vs-not, which
           # the verify step above already enforces.
@@ -160,5 +161,9 @@ jobs:
           if [ -f "$dmg" ]; then
             echo "Uploading $dmg to Release $TAG"
             gh release upload "$TAG" "$dmg" --clobber
+          fi
+          if [ -f "$zip" ]; then
+            echo "Uploading $zip to Release $TAG"
+            gh release upload "$TAG" "$zip" --clobber
           fi
           gh release view "$TAG" --json tagName,name,isDraft,isPrerelease,assets

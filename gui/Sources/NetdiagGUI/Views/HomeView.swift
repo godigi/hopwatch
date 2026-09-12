@@ -80,6 +80,18 @@ struct HomeView: View {
                     emptyState
                 }
 
+                if let mem = currentNetworkMemory, mem.checkCount >= 2 {
+                    let comp: NetworkComparison? = {
+                        if let snap = currentRunResult?.snapshot {
+                            return NetworkHistoryStore.compare(snapshot: snap, baseline: mem)
+                        } else if let sample = coordinator.monitor.latest {
+                            return NetworkHistoryStore.compare(sample: sample, baseline: mem)
+                        }
+                        return nil
+                    }()
+                    NetworkDetailCard(memory: mem, comparison: comp)
+                }
+
                 if let result = currentRunResult {
                     expertDisclosure(result)
                 }
@@ -424,6 +436,20 @@ struct HomeView: View {
     }
 
     // MARK: - Expert layer
+
+    private var currentNetworkMemory: NetworkMemory? {
+        guard let netID = coordinator.arrivalNetworkID ?? currentRunResult?.snapshot.network.id else { return nil }
+        let canon = coordinator.history.canonicalID(netID)
+        guard let net = coordinator.history.mergedNetworks.first(where: { $0.id == canon }) else {
+            return nil
+        }
+        let runs = coordinator.history.runs(networkID: net.id, window: .all)
+        return NetworkHistoryStore.memory(
+            for: net,
+            displayName: coordinator.history.displayName(for: net.id),
+            runs: runs
+        )
+    }
 
     /// Whichever report is on screen, as the `RunResult` the expert
     /// disclosure and the raw-JSON viewer inside it both expect.
