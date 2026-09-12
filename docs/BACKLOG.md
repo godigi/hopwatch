@@ -25,6 +25,8 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
+| [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
+| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -380,3 +382,60 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - `lib/diagnosis.sh` implements `W4` and `W5` with strict unit tests in `tests/test_diagnosis_wifi.bats`.
   - `docs/DIAGNOSIS-RULES.md` documents `W4` and `W5` rationale and remedies.
   - Passes all tests in `bats tests/` and `make test`.
+
+---
+
+### TASK-019: Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`)
+- **Area**: macOS CLI & GUI / Wi-Fi Jitter & Diagnosis
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/wifi_common.sh`
+  - `lib/diagnosis.sh`
+  - `lib/constants.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `helpers/rules_catalog.py`
+  - `tests/test_diagnosis_wifi.bats`
+- **Context**:
+  macOS uses `awdl0` (Apple Wireless Direct Link) for AirDrop, AirPlay, Sidecar, and Universal Control. The Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 & 149) for nearby Apple devices. During these discovery hops, network packets stall, causing periodic 200–500 ms latency spikes and micro-freezes in video calls (Zoom, Google Meet, Teams) and gaming. Users mistakenly blame their ISP or router.
+- **Architectural Design**:
+  - Check `awdl0` status via `ifconfig awdl0` (active flags, broadcast state).
+  - Correlate with ping RTT jitter: when base ping is low (<30 ms) but exhibits periodic 200–600 ms spikes with zero overall packet loss, evaluate AWDL presence.
+  - Implement rule `AWDL-1`:
+    - Severity: `warn`
+    - Impacts: video calls (degraded), gaming (degraded).
+    - Fix target: `you`
+    - Text: *"Periodic 200–500ms latency spikes detected matching Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping. If experiencing video call freezes or audio stutter, set AirDrop to 'Receiving Off' in Control Center or disconnect Sidecar."*
+- **Acceptance Criteria**:
+  - `AWDL-1` rule defined in `lib/diagnosis.sh` and cataloged in `helpers/rules_catalog.py`.
+  - Comprehensive unit test in `tests/test_diagnosis_wifi.bats`.
+  - `docs/DIAGNOSIS-RULES.md` updated with technical background and remediation steps.
+  - Passes `bats tests/` and `make test`.
+
+---
+
+### TASK-020: Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`)
+- **Area**: macOS CLI & GUI / DNS Health & Diagnosis
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/dns.sh`
+  - `lib/diagnosis.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `helpers/rules_catalog.py`
+  - `tests/test_dns.bats`
+- **Context**:
+  macOS typically configures multiple DNS resolvers from DHCP or VPN profiles (e.g. Primary `192.168.1.1`, Secondary `8.8.8.8`). When the primary resolver becomes unresponsive or hangs, macOS waits for a 2-to-5 second timeout before silently failing over to the secondary resolver.
+  From the user's perspective, web pages take several seconds just to begin loading ("hanging"), yet standard speed tests and superficial DNS checks report that the internet is "Working" because the secondary resolver eventually succeeded.
+- **Architectural Design**:
+  - In `lib/dns.sh`, test each configured system resolver independently (using `dig +time=1 +tries=1 @<resolver>`).
+  - Measure per-resolver response status:
+    - If Resolver #1 times out / fails, but Resolver #2 (or subsequent) responds promptly, emit rule `D5`:
+      - Severity: `warn`
+      - Impacts: ordinary browsing (degraded).
+      - Fix target: `your_router` or `you`.
+      - Text: *"Your primary DNS server (${PRIMARY_DNS}) is not responding. macOS is experiencing a multi-second delay waiting for timeouts before silently falling back to secondary DNS (${SECONDARY_DNS}). This causes web pages and links to hesitate for several seconds before opening. Update your DNS settings or restart your router."*
+- **Acceptance Criteria**:
+  - `lib/dns.sh` benchmarks individual resolvers when multiple exist.
+  - Rule `D5` triggers in `lib/diagnosis.sh` when primary fails but secondary succeeds.
+  - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
+  - Unit tests in `tests/test_dns.bats` prove fallback detection with zero regressions.
+  - Passes `bats tests/` and `make test`.
