@@ -23,6 +23,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Done** | M |
 | [TASK-015](#task-015-what-does-this-mean-plain-english-tooltips-on-technical-metrics) | "What Does This Mean?" Plain-English tooltips on technical metrics | GUI / UX | **Done** | S |
 | [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
+| [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -298,3 +299,46 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - "Run Full Check" is cleanly integrated into the header/stage card.
   - Live ping, packet loss, and the sparkline are visually united in a single card.
   - Passes all tests in `--verify` harness (`swift run -c debug NetdiagGUI --verify`).
+
+---
+
+### TASK-017: Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP)
+- **Area**: macOS GUI / Diagnosis & UX
+- **Status**: **Done**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Support/HopAttributionResolver.swift` (new helper)
+  - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/VerifyMode.swift`
+  - `gui/Tests/NetdiagGUITests/`
+- **Context**:
+  Users consistently confuse "Wi-Fi" with "Internet" (e.g. rebooting their router or complaining about local signal when the problem is an external ISP outage, or vice versa). While `lib/diagnosis.sh` accurately calculates the fault domain (`G1` vs `G2` for Wi-Fi vs Gateway, `B1` vs `B2` for local bufferbloat vs ISP bufferbloat, `P1`/`P2` for ISP down, `TCP-1` for ICMP blocks), this intelligence is presented as dense rule text that non-technical users find difficult to decipher.
+- **Architectural Design**:
+  1. **Pure Attribution Resolver (`HopAttributionResolver.swift`)**:
+     - Takes `DiagnosticReport` / `RunStatus` snapshots and resolves the network path into 3 distinct segments:
+       - **Segment 1: Wi-Fi / Local Link** (Mac ➔ Access Point/Router): Checks RSSI, SNR, noise, channel interference, Wi-Fi gateway loss (`G1`).
+       - **Segment 2: Router / Local Gateway** (Access Point ➔ WAN Gateway): Checks router response time, router loss without Wi-Fi degradation (`G2`), local bufferbloat (`B1`), subnet crowding (`LAN-1`).
+       - **Segment 3: Internet & ISP** (WAN Gateway ➔ Global CDN / 1.1.1.1 / 8.8.8.8): Checks WAN packet loss (`P1`, `P2`), ISP bufferbloat (`B2`), DNS latency (`D1`, `D2`), captive portal (`CP-1`).
+     - Identifies the primary **Culprit** (or confirms "All Clear").
+     - Emits structured reassurance text (e.g., *"Your Wi-Fi signal is excellent (-48 dBm). The issue is upstream with your Internet Service Provider."*).
+  2. **Visual Hop Chain Component**:
+     - Displays a clean, intuitive 3-hop horizontal node chain:
+       `[Mac] ──(Wi-Fi)──► [Router] ──(Broadband)──► [Internet]`
+     - Each node and link has visual state indicators:
+       - 🟢 Healthy / Low Latency
+       - 🟡 Warning / Elevated Latency / Bufferbloat
+       - 🔴 Broken / Packet Loss / Unreachable
+     - A prominent **Culprit Badge** points directly to the failing hop (e.g. `[ Culprit: ISP Outage ]` or `[ Culprit: Weak Wi-Fi ]`).
+  3. **Integration**:
+     - Embedded prominently at the top of `RunReportView` (Full Check Results) above the detailed metrics table.
+     - Condensed compact chain integrated into the `DropdownView` status card when a diagnosis or fault is active.
+- **Acceptance Criteria**:
+  - `HopAttributionResolver` pure unit tests covering:
+    - Wi-Fi signal degraded vs Gateway loss (`G1` -> Wi-Fi culprit).
+    - Gateway loss with strong Wi-Fi (`G2` -> Router culprit).
+    - Router healthy, Internet ping 100% loss (`P1`/`P2` -> ISP culprit).
+    - Local bufferbloat (`B1` -> Router culprit) vs ISP bufferbloat (`B2` -> ISP culprit).
+    - All clear (All hops green, zero culprits).
+  - Hop chain renders in SwiftUI with accessible symbols and color states.
+  - Clear plain-English reassurance explaining which hops are working and which hop failed.
+  - Passes all verification suites: `swift run -c debug NetdiagGUI --verify` and `make -C gui test`.
