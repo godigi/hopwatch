@@ -6,6 +6,17 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) [TASK-027]
+
+- **Closed-Loop Resolution Stage (`StageResolver`)**: Added `.resolved(ResolutionSnapshot)` stage to the dropdown stage resolver, providing immediate, uplifting confirmation when user actions (moving closer to Wi-Fi, switching bands, captive portal login) or network recoveries succeed.
+- **Ephemeral Resolution Engine (`NetdiagCoordinator`)**: Detects transitions from degraded to healthy states and synthesizes measured metric improvements:
+  - *Wi-Fi Band Upgrade*: Confirms movement from 2.4 GHz to 5/6 GHz channels with negotiated rate gains.
+  - *Wi-Fi Signal Recovery*: Reports quantitative RSSI increases (e.g. jumping from -78 dBm to -46 dBm Excellent).
+  - *Network Stabilized*: Confirms packet loss elimination (0% loss) alongside measured ping latency.
+  - *Captive Portal Online*: Confirms web authentication success and active internet connectivity.
+- **Resolution Banner Card (`DropdownView`)**: Renders an uplifting green banner in the dropdown stage card with confirmation iconography, plain-English summary of measured improvement, and an inline dismiss button (fades smoothly to idle after 45 seconds).
+- **Test Coverage**: Added test suite `ResolutionFeedbackTests.swift`, verification checks in `VerifyMode.swift`, and offscreen snapshot `stage-resolved.png`.
+
 ### Added — Live Jitter Tracking & Real-Time Connection Stability Badge [TASK-026]
 
 - **Burst Probe Jitter Extraction (`lib/monitor.sh`)**: Extracts instantaneous standard deviation jitter directly from the existing probe bursts (`ping_parse_summary` stddev) for both gateway and internet targets without sending any additional probe packets.

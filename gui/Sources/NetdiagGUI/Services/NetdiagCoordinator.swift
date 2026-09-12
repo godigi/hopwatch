@@ -121,6 +121,59 @@ final class NetdiagCoordinator {
     /// from the monitor so the transition is exact even when a burst
     /// restart resets the monitor's own sample window.
     private var lastSeverity: String = "ok"
+
+    // MARK: - Remediation Resolution Feedback (TASK-027)
+
+    struct ResolutionEvent: Sendable, Equatable, Identifiable {
+        let id: UUID
+        let title: String
+        let message: String
+        let timestamp: Date
+        let icon: String
+        var dismissed: Bool
+
+        init(id: UUID = UUID(), title: String, message: String, timestamp: Date = Date(), icon: String = "checkmark.circle.fill", dismissed: Bool = false) {
+            self.id = id
+            self.title = title
+            self.message = message
+            self.timestamp = timestamp
+            self.icon = icon
+            self.dismissed = dismissed
+        }
+
+        var snapshot: StageResolver.ResolutionSnapshot {
+            StageResolver.ResolutionSnapshot(title: title, message: message, timestamp: timestamp, icon: icon)
+        }
+
+        var isCurrent: Bool {
+            !dismissed && Date().timeIntervalSince(timestamp) < 45.0
+        }
+    }
+
+    private(set) var recentResolutions: [ResolutionEvent] = []
+    private var lastSample: MonitorSample?
+    private var lastUnhealthySample: MonitorSample?
+    private var previousActiveAlerts: [String: AlertEngine.ActiveAlert] = [:]
+
+    var activeResolution: ResolutionEvent? {
+        recentResolutions.last(where: { $0.isCurrent })
+    }
+
+    func dismissActiveResolution() {
+        for idx in recentResolutions.indices where recentResolutions[idx].isCurrent {
+            recentResolutions[idx].dismissed = true
+        }
+    }
+
+    func recordResolution(title: String, message: String, icon: String = "checkmark.circle.fill") {
+        let event = ResolutionEvent(title: title, message: message, timestamp: Date(), icon: icon)
+        recentResolutions.append(event)
+        if recentResolutions.count > 10 {
+            recentResolutions.removeFirst(recentResolutions.count - 10)
+        }
+        log.info("resolution recorded: \(title, privacy: .public) — \(message, privacy: .public)")
+    }
+
     private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "coordinator")
 
     // MARK: - Lifecycle
@@ -396,6 +449,7 @@ final class NetdiagCoordinator {
                 latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs
             )
         }
+        evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
 
         // The first cycle of a monitor process records monitor-started, matching
@@ -654,6 +708,79 @@ final class NetdiagCoordinator {
     /// while the problem is being confirmed. After the burst, sustained
     /// degraded (3 s) takes over for as long as severity stays warn/
     /// critical — `MON_DEGRADED` follows severity in `lib/monitor.sh`'s
+    private func evaluateResolutions(sample: MonitorSample) {
+        // Only evaluate resolutions if the link is up and the connection is currently healthy
+        guard sample.link.up, sample.status.severity == "ok", alerts.active.isEmpty else {
+            if sample.status.severity == "critical" || sample.status.severity == "warn" || sample.publicInfo.captivePortal == true || !alerts.active.isEmpty {
+                lastUnhealthySample = sample
+            }
+            previousActiveAlerts = alerts.active
+            lastSample = sample
+            return
+        }
+
+        // We are currently healthy. Check if we just transitioned from an unhealthy state
+        if let prev = lastUnhealthySample {
+            // Case 1: Captive Portal Authentication Succeeded
+            if prev.publicInfo.captivePortal == true && sample.publicInfo.captivePortal == false {
+                recordResolution(
+                    title: "Online",
+                    message: "Captive portal authentication succeeded. Internet access active.",
+                    icon: "checkmark.circle.fill"
+                )
+            }
+            // Case 2: Wi-Fi Band Switch (2.4 GHz to 5 GHz / 6 GHz)
+            else if let prevCh = prev.wifi?.channel, let prevChNum = Int(prevCh), prevChNum <= 14,
+                    let currCh = sample.wifi?.channel, let currChNum = Int(currCh), currChNum >= 32 {
+                recordResolution(
+                    title: "Wi-Fi Improved",
+                    message: "Moved from 2.4 GHz to 5 GHz (Ch \(currCh)). Negotiated higher throughput.",
+                    icon: "wifi"
+                )
+            }
+            // Case 3: Wi-Fi Signal Restored
+            else if let prevRssi = prev.wifi?.rssi, prevRssi <= -75,
+                    let currRssi = sample.wifi?.rssi, currRssi >= -65 {
+                recordResolution(
+                    title: "Signal Restored",
+                    message: "Wi-Fi signal jumped from \(prevRssi) dBm to \(currRssi) dBm (Excellent).",
+                    icon: "wifi"
+                )
+            }
+            // Case 4: Network Packet Loss Stabilized
+            else if (prev.gateway.lossPct ?? 0) > 0 || (prev.internet.lossPct ?? 0) > 0,
+                    (sample.gateway.lossPct ?? 0) == 0 && (sample.internet.lossPct ?? 0) == 0 {
+                let ping = sample.internet.rttAvgMs ?? sample.gateway.rttAvgMs
+                let pingText = ping.map { "\(Int($0.rounded())) ms ping" } ?? "low latency"
+                recordResolution(
+                    title: "Network Stabilized",
+                    message: "Packet loss resolved (0% loss, \(pingText)).",
+                    icon: "checkmark.circle.fill"
+                )
+            }
+            // Case 5: Previous active alert cleared
+            else if let clearedAlert = previousActiveAlerts.values.first {
+                recordResolution(
+                    title: "Issue Resolved",
+                    message: "\(clearedAlert.title) is back to normal.",
+                    icon: "checkmark.circle.fill"
+                )
+            }
+            // Reset lastUnhealthySample now that it's been resolved
+            lastUnhealthySample = nil
+        } else if let clearedAlert = previousActiveAlerts.values.first {
+            // Even if lastUnhealthySample wasn't retained, an alert cleared
+            recordResolution(
+                title: "Issue Resolved",
+                message: "\(clearedAlert.title) is back to normal.",
+                icon: "checkmark.circle.fill"
+            )
+        }
+
+        previousActiveAlerts = alerts.active
+        lastSample = sample
+    }
+
     /// `_mon_rules`. Fires only on the genuine ok/info → warn/critical
     /// edge, not on every warn/critical sample, so a sustained outage
     /// gets one surge at onset and a steady 3 s after, not a restart

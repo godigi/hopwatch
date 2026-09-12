@@ -29,6 +29,7 @@ enum StageResolver {
         case testing
         case paused(String?)
         case alerted(AlertSnapshot)
+        case resolved(ResolutionSnapshot)
         /// The monitor is alive or reconnecting, but no current router/web
         /// probe has produced a result yet. This is intentionally neutral:
         /// Wi-Fi association alone is not an all-clear.
@@ -76,6 +77,22 @@ enum StageResolver {
         }
     }
 
+    /// A snapshot of a recent remediation resolution that confirmed recovery.
+    struct ResolutionSnapshot: Equatable, Sendable, Identifiable {
+        var id: String { "\(title)-\(timestamp.timeIntervalSince1970)" }
+        let title: String
+        let message: String
+        let timestamp: Date
+        let icon: String
+
+        init(title: String, message: String, timestamp: Date = Date(), icon: String = "checkmark.circle.fill") {
+            self.title = title
+            self.message = message
+            self.timestamp = timestamp
+            self.icon = icon
+        }
+    }
+
     /// Everything `resolve` needs, as plain values. Built at the call site
     /// from the coordinator's observable state.
     struct Inputs: Sendable {
@@ -95,12 +112,14 @@ enum StageResolver {
         let severity: String
         let linkUp: Bool
         let measurementState: String
+        let activeResolution: ResolutionSnapshot?
         init(isScanning: Bool, isArrivalCheck: Bool = false,
              monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
              activeAlert: AlertSnapshot?, severity: String, linkUp: Bool,
-             measurementState: String = "unknown") {
+             measurementState: String = "unknown",
+             activeResolution: ResolutionSnapshot? = nil) {
             self.isScanning = isScanning
             self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
@@ -112,6 +131,7 @@ enum StageResolver {
             self.severity = severity
             self.linkUp = linkUp
             self.measurementState = measurementState
+            self.activeResolution = activeResolution
         }
     }
 
@@ -137,7 +157,11 @@ enum StageResolver {
         switch i.severity {
         case "critical": return .watching(severity: .critical)
         case "warn":     return .watching(severity: .warn)
-        default:         return .healthy
+        default:
+            if let res = i.activeResolution {
+                return .resolved(res)
+            }
+            return .healthy
         }
     }
 }

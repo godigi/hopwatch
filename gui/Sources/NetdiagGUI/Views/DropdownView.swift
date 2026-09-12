@@ -102,7 +102,8 @@ struct DropdownView: View {
             },
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
             linkUp: coordinator.monitor.latest?.link.up ?? true,
-            measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown"
+            measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
+            activeResolution: coordinator.activeResolution?.snapshot
         ))
     }
 
@@ -110,6 +111,7 @@ struct DropdownView: View {
     private var stageSection: some View {
         switch stage {
         case .healthy: healthyStage
+        case .resolved(let res): resolvedStage(res)
         case .watching(let sev): watchingStage(sev)
         case .alerted(let alert): alertStage(alert)
         case .checking: checkingStage
@@ -118,6 +120,43 @@ struct DropdownView: View {
         case .paused(let reason): pausedStage(reason)
         case .skewed(let message): skewedStage(message)
         }
+    }
+
+    private func resolvedStage(_ res: StageResolver.ResolutionSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: res.icon)
+                            .foregroundStyle(.green)
+                            .imageScale(.medium)
+                        Text(res.title)
+                            .font(.callout).fontWeight(.semibold)
+                            .foregroundStyle(.green)
+                    }
+                    Text(res.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    coordinator.dismissActiveResolution()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+                .contentShape(Rectangle())
+                .help("Dismiss")
+            }
+        }
+        .padding(Theme.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
     }
 
     private var healthyStage: some View {

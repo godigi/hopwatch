@@ -92,6 +92,7 @@ private enum VerifyHarness {
         runNetworkMemoryTests()
         runNotificationManagerTests()
         runConnectionStabilityTests()
+        runResolutionFeedbackTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1379,6 +1380,25 @@ private enum VerifyHarness {
         check(MonitorSeries.movingJitter(samples: [sLive]) == 4.2, "movingJitter prioritizes live burst jitter")
     }
 
+    private static func runResolutionFeedbackTests() {
+        print("Remediation Feedback & Resolution Banner (TASK-027):")
+        let res1 = NetdiagCoordinator.ResolutionEvent(title: "Wi-Fi Improved", message: "Moved from 2.4 GHz to 5 GHz (Ch 52).")
+        check(res1.isCurrent, "fresh resolution event is current")
+        check(!res1.dismissed, "new resolution event is not dismissed")
+
+        var resDismissed = res1
+        resDismissed.dismissed = true
+        check(!resDismissed.isCurrent, "dismissed resolution event is not current")
+
+        let oldDate = Date().addingTimeInterval(-60)
+        let resOld = NetdiagCoordinator.ResolutionEvent(title: "Signal Restored", message: "Wi-Fi signal jumped from -78 dBm to -46 dBm.", timestamp: oldDate)
+        check(!resOld.isCurrent, "resolution older than 45s has expired")
+
+        let snap = res1.snapshot
+        check(snap.title == "Wi-Fi Improved", "snapshot preserves title")
+        check(snap.message == "Moved from 2.4 GHz to 5 GHz (Ch 52).", "snapshot preserves message")
+    }
+
     private static func check(_ condition: Bool, _ name: String) {
         if condition {
             print("  \u{2714} \(name)")
@@ -1398,7 +1418,8 @@ private enum VerifyHarness {
                                pauseReason: String? = nil,
                                lastError: String? = nil,
                                monitorRunning: Bool = true,
-                               measurementState: String = "measured") -> StageResolver.Inputs {
+                               measurementState: String = "measured",
+                               activeResolution: StageResolver.ResolutionSnapshot? = nil) -> StageResolver.Inputs {
         StageResolver.Inputs(
             isScanning: isScanning,
             isArrivalCheck: isArrivalCheck,
@@ -1410,7 +1431,8 @@ private enum VerifyHarness {
             activeAlert: activeAlert,
             severity: severity,
             linkUp: linkUp,
-            measurementState: measurementState
+            measurementState: measurementState,
+            activeResolution: activeResolution
         )
     }
 
@@ -1440,6 +1462,19 @@ private enum VerifyHarness {
                                                 rules: ["P1"])
         equal(StageResolver.resolve(inputs(severity: "critical", activeAlert: alert)),
               .alerted(alert), "active alert → alerted (overrides watching)")
+
+        // Resolution stage (TASK-027): An active resolution produces .resolved when healthy
+        let res = StageResolver.ResolutionSnapshot(title: "Wi-Fi Improved", message: "Moved from 2.4 GHz to 5 GHz (Ch 52).")
+        equal(StageResolver.resolve(inputs(severity: "ok", activeResolution: res)),
+              .resolved(res), "active resolution → resolved when healthy")
+        equal(StageResolver.resolve(inputs(severity: "warn", activeResolution: res)),
+              .watching(severity: .warn), "warn severity precedes resolved")
+        equal(StageResolver.resolve(inputs(severity: "critical", activeResolution: res)),
+              .watching(severity: .critical), "critical severity precedes resolved")
+        equal(StageResolver.resolve(inputs(severity: "ok", activeAlert: alert, activeResolution: res)),
+              .alerted(alert), "active alert precedes resolved")
+        equal(StageResolver.resolve(inputs(severity: "ok", linkUp: false, activeResolution: res)),
+              .watching(severity: .critical), "link down precedes resolved")
 
         // Precedence: each earlier guard beats the later ones. Testing each
         // guard with every later signal live proves the order is load-bearing,
@@ -1945,6 +1980,10 @@ private enum VerifyHarness {
                 content(icon: "exclamationmark.triangle", tint: .yellow,
                         title: "The netdiag command needs attention", tertiary: "cli too old")
                     .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .resolved(let res):
+                content(icon: res.icon, tint: .green,
+                        title: res.title, tertiary: res.message)
+                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         }
 
@@ -1994,6 +2033,7 @@ private enum VerifyHarness {
             ("skewed",            .skewed("netdiag CLI is too old"),         "The bundled netdiag is older than this app expects."),
             ("testing",           .testing,                                  "Running a full check…"),
             ("checking",          .checking,                                 "Waiting for a live reading…"),
+            ("resolved",          .resolved(.init(title: "Wi-Fi Improved", message: "Moved from 2.4 GHz to 5 GHz (Ch 52).")), "Moved from 2.4 GHz to 5 GHz (Ch 52)."),
         ]
         // The alerted stage is rendered from `AlertStageCard` — the real
         // view the dropdown and Activity both use — rather than from the

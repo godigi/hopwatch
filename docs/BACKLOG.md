@@ -33,7 +33,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
 | [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
-| [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | Ready | S |
+| [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -652,7 +652,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-027: Remediation Feedback & Resolution Banner (Closed-Loop Confirmation)
 - **Area**: macOS GUI / UX & User Delight
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Support/StageResolver.swift`
   - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
