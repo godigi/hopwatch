@@ -50,6 +50,14 @@ diag_sev_for() {
   return 1
 }
 
+diag_text_for() {
+  local rule="$1" i
+  for i in "${!DIAG_RULE[@]}"; do
+    if [ "${DIAG_RULE[$i]}" = "$rule" ]; then printf '%s\n' "${DIAG[$i]}"; return 0; fi
+  done
+  return 1
+}
+
 @test "diagnosis: M1 stays silent on VPN with standard tunnel MTU (1380 bytes)" {
   accuracy_baseline
   VPN_ACTIVE=1
@@ -127,3 +135,81 @@ diag_sev_for() {
   [ "$(diag_sev_for B1)" = "critical" ]
   [ "$(diag_sev_for B2)" = "critical" ]
 }
+
+@test "remediation: D1 never instructs modifying System Settings network adapter DNS" {
+  accuracy_baseline
+  PUBLIC_OK=1
+  DNS_OK=0
+  DNS_LINES="1.1.1.1|apple.com||FAIL"
+  diagnosis_run >/dev/null
+  diag_has D1 || { echo "D1 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for D1)"
+  [[ "$text" != *"System Settings"* ]]
+  [[ "$text" == *"Restart your router"* ]] || [[ "$text" == *"Encrypted DNS"* ]]
+}
+
+@test "remediation: D2 never instructs modifying System Settings network adapter DNS" {
+  accuracy_baseline
+  PUBLIC_OK=0
+  DNS_OK=0
+  DNS_LINES="1.1.1.1|apple.com||FAIL"
+  diagnosis_run >/dev/null
+  diag_has D2 || { echo "D2 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for D2)"
+  [[ "$text" != *"System Settings"* ]]
+  [[ "$text" == *"restart your router"* ]]
+}
+
+@test "remediation: D3 never instructs modifying System Settings network adapter DNS" {
+  accuracy_baseline
+  SYS_RES="192.168.1.1"
+  SYS_RES_MS=350
+  DNS_OK=1
+  diagnosis_run >/dev/null
+  diag_has D3 || { echo "D3 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for D3)"
+  [[ "$text" != *"System Settings"* ]]
+  [[ "$text" == *"Restart your router"* ]]
+}
+
+@test "remediation: D4 never instructs modifying System Settings network adapter DNS" {
+  accuracy_baseline
+  DNS_NXDOMAIN_HIJACK_IP="198.105.254.11"
+  diagnosis_run >/dev/null
+  diag_has D4 || { echo "D4 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for D4)"
+  [[ "$text" != *"System Settings"* ]]
+  [[ "$text" == *"Encrypted DNS"* ]]
+}
+
+@test "remediation: V6-2 advises router restart and never advises disabling IPv6 on Mac" {
+  accuracy_baseline
+  IPV6_DNS_FAIL="2001:4860:4860::8888"
+  DNS_OK=1
+  diagnosis_run >/dev/null
+  diag_has V6-2 || { echo "V6-2 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for V6-2)"
+  [[ "$text" != *"disable IPv6"* ]]
+  [[ "$text" != *"Link-local"* ]]
+  [[ "$text" == *"Restart your router"* ]]
+  [[ "$text" == *"no settings changes are needed on your Mac"* ]]
+}
+
+@test "remediation: B1 emphasizes bandwidth hygiene and never advises replacing the router" {
+  accuracy_baseline
+  BUFFERBLOAT_GW_GRADE="D"
+  BUFFERBLOAT_GW_DELTA=180
+  SPEEDTEST_DOWN_MBPS=25
+  diagnosis_run >/dev/null
+  diag_has B1 || { echo "B1 did not fire"; return 1; }
+  local text
+  text="$(diag_text_for B1)"
+  [[ "$text" != *"replace"* ]]
+  [[ "$text" == *"pause"* ]] || [[ "$text" == *"QoS"* ]]
+}
+

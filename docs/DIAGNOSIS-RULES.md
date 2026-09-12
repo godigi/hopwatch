@@ -362,7 +362,7 @@ decides a critical diagnosis. It costs ~4 s.
 
 - Trigger: `dns.ok == false AND public.ok == true`
 - Severity: `warn`
-- Recommendation: change resolver (1.1.1.1 or 8.8.8.8).
+- Recommendation: restart the router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks or captive portals, consider Encrypted DNS (DoH) in your browser. Do not hardcode static DNS in macOS network adapter settings.
 
 ### D2 — No name lookups working at all
 
@@ -370,7 +370,7 @@ decides a critical diagnosis. It costs ~4 s.
   and `public.ok == false`.
 - **Severity:** warn. The connection failure it accompanies is already
   critical; a second critical would double-count one fault.
-- **Recommendation:** fix the connection first, then re-test DNS.
+- **Recommendation:** fix the connection first; if lookups still fail once it is back, restart the router to refresh its DNS resolver.
 
 **Precedence: D1 and D2 are mutually exclusive**, split on `public.ok`.
 D1 is the partial case and says "everything else works, so it's your
@@ -392,7 +392,7 @@ paper over this would have been the wrong fix in the wrong file.
 - Trigger: `dns.resolver_ms > 250 AND dns.ok == true`
 - Severity: `warn`
 - Evidence: query response time in ms from primary system resolver.
-- Recommendation: change resolver to Cloudflare (1.1.1.1) or Google (8.8.8.8) in network settings.
+- Recommendation: restart the router to clear slow DNS proxying, or enable Encrypted DNS in your browser for snappier browsing without breaking captive portals.
 - Rationale: High DNS latency stalls initial TCP/TLS connections for every new domain or hyperlink clicked.
 
 ### D4 — DNS hijacking and search redirection
@@ -400,7 +400,7 @@ paper over this would have been the wrong fix in the wrong file.
 - Trigger: non-existent domain query returns an IP address instead of NXDOMAIN
 - Severity: `warn`
 - Evidence: redirected IP returned by system resolver.
-- Recommendation: switch to public DNS (1.1.1.1 / 8.8.8.8) or enable Encrypted DNS (DoH).
+- Recommendation: turn on Encrypted DNS (DoH) in your browser or configure standard resolvers on the router to prevent ISP tracking.
 - Rationale: ISPs intercept failed queries to show search ads or track user activity.
 
 ### D5 — Unresponsive primary DNS resolver (silent fallback)
@@ -416,7 +416,7 @@ paper over this would have been the wrong fix in the wrong file.
 - Trigger: `bufferbloat.gw_grade ∈ {C, D, F}`
 - Severity: `warn` (C, or D/F when bandwidth ≥ 150 Mbps) / `critical` (D, F on constrained or unmeasured links)
 - Evidence: idle gw RTT, loaded gw RTT, delta in ms, grade.
-- Recommendation: router queue management under saturation. Enable Smart Queue Management (SQM)
+- Recommendation: pause heavy downloads during calls or games, or enable Smart Queue Management (SQM)
   or QoS in router admin settings.
 - Rationale: the latency spike happens before traffic ever leaves the LAN,
   so the queue depth lives in your router's WAN egress buffer. On fast connections (≥ 150 Mbps),
@@ -478,7 +478,7 @@ All of the below are implemented and can fire.
 - Trigger: an IPv6 nameserver is configured in system settings but fails to respond while IPv4 DNS works.
 - Severity: `warn`
 - Evidence: unresponsive IPv6 nameserver address from `scutil --dns`.
-- Recommendation: update router IPv6 configuration or disable IPv6 in network settings if unsupported by ISP.
+- Recommendation: restart the router to refresh its IPv6 prefix lease and DNS advertisement, or check its IPv6 DNS configuration in the router admin page. Do not disable IPv6 on the Mac.
 - Rationale: macOS queries IPv6 DNS first, waiting 2–3 seconds for a timeout before falling back to IPv4.
 ### VPN-1 — VPN is carrying the default route
 

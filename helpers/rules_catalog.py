@@ -679,16 +679,17 @@ RULES: list[dict[str, object]] = [
         "scope": "both",
         "blurb": (
             "The internet itself is reachable, but some name lookups are "
-            "failing, which points at a flaky DNS resolver. Switching to "
-            "a public resolver such as Cloudflare's or Google's in your "
-            "network settings usually clears it up."
+            "failing, which points at a flaky DNS resolver. Restarting your "
+            "router or toggling Wi-Fi usually clears it up without risking "
+            "configuration conflicts."
         ),
         "doc": "DIAGNOSIS-RULES.md#d1--partial-dns-internet-reachable",
         "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
         "fix": (
-            "Switch to a public DNS resolver such as Cloudflare or Google "
-            "in System Settings → Network → Details → DNS — that usually "
-            "clears the flakiness immediately."
+            "Restart your router to refresh its DNS cache and upstream "
+            "connection. If on public or hotel Wi-Fi, toggle Wi-Fi off and "
+            "back on. For encrypted lookups without breaking local captive "
+            "portals, consider enabling Encrypted DNS in your browser."
         ),
         "fix_target": "you",
     },
@@ -703,8 +704,7 @@ RULES: list[dict[str, object]] = [
             "wider internet is unreachable too — so this is most likely a "
             "symptom of the connection being down rather than a DNS fault "
             "in its own right. Fix the connection first. If lookups still "
-            "fail once it is back, switch your DNS to Cloudflare or "
-            "Google in System Settings."
+            "fail once it is back, restart your router."
         ),
         "doc": "DIAGNOSIS-RULES.md#d2--no-name-lookups-working-at-all",
         "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
@@ -712,9 +712,8 @@ RULES: list[dict[str, object]] = [
         "fix": (
             "Fix the connection first — DNS failing alongside everything "
             "else is usually a symptom of that, not a fault of its own. "
-            "If lookups still fail once the connection is back, switch to "
-            "a public resolver such as Cloudflare or Google in System "
-            "Settings → Network → Details → DNS."
+            "If lookups still fail once the connection is back, restart "
+            "your router to refresh its DNS resolver."
         ),
         "fix_target": "you",
     },
@@ -727,16 +726,16 @@ RULES: list[dict[str, object]] = [
         "blurb": (
             "Your configured DNS server takes a long time to answer "
             "name lookups, so every new website or link you click pauses "
-            "before it begins loading. Switching to a fast public resolver "
-            "like Cloudflare's or Google's in your network settings clears "
-            "the delay."
+            "before it begins loading. Restarting your router or enabling "
+            "Encrypted DNS in your browser clears the delay."
         ),
         "doc": "DIAGNOSIS-RULES.md#d3--slow-dns-resolver-latency",
         "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
         "fix": (
-            "Switch to a public resolver such as Cloudflare or Google in "
-            "System Settings → Network → Details → DNS — it's usually "
-            "noticeably faster than an ISP's default."
+            "Restart your router to clear slow DNS proxying. To bypass "
+            "sluggish provider resolvers safely without breaking captive "
+            "portals or local devices, consider enabling Encrypted DNS in "
+            "your browser."
         ),
         "fix_target": "you",
     },
@@ -749,16 +748,16 @@ RULES: list[dict[str, object]] = [
         "blurb": (
             "Your DNS server intercepts mistyped website addresses and "
             "redirects them to an advertising or search portal rather than "
-            "reporting that the address does not exist. Switching to a "
-            "standard public resolver or enabling Encrypted DNS stops "
-            "the redirection."
+            "reporting that the address does not exist. Enabling Encrypted "
+            "DNS in your browser stops the redirection without breaking "
+            "local network features."
         ),
         "doc": "DIAGNOSIS-RULES.md#d4--dns-hijacking-and-search-redirection",
         "impacts": {"vpn": "degraded", "browsing": "degraded"},
         "fix": (
-            "Switch to a public resolver such as Cloudflare or Google, or "
-            "turn on Encrypted DNS (DNS-over-HTTPS), in System Settings → "
-            "Network → Details → DNS to stop the redirection."
+            "Turn on Encrypted DNS (DNS-over-HTTPS) in your browser, or "
+            "configure standard resolvers on your router, to prevent ISP "
+            "search interception."
         ),
         "fix_target": "you",
     },
@@ -818,11 +817,11 @@ RULES: list[dict[str, object]] = [
         "severity": "varies",
         "scope": "scan",
         "blurb": (
-            "Your router gets sluggish whenever something is downloading "
-            "or uploading heavily, adding noticeable extra delay that "
-            "makes calls and games feel laggy or worse. Enabling Smart "
-            "Queue Management (SQM) or QoS in the router's admin page "
-            "fixes the underlying queueing problem."
+            "Your router delays latency-sensitive traffic during heavy "
+            "simultaneous downloads or uploads, adding noticeable extra "
+            "delay that makes calls and games feel laggy. Pausing heavy "
+            "background downloads during calls or enabling Smart Queue "
+            "Management (SQM) in the router's admin page keeps latency steady."
         ),
         "doc": "DIAGNOSIS-RULES.md#b1--bufferbloat-at-gateway-hop",
         # Load-conditional, so not `broken`. Bufferbloat only bites while
@@ -835,9 +834,9 @@ RULES: list[dict[str, object]] = [
         "impacts": {"calls": "degraded", "streaming": "degraded",
                     "gaming": "degraded", "vpn": "degraded"},
         "fix": (
-            "Turn on Smart Queue Management (SQM) or QoS in the router's "
-            "admin page — that fixes the underlying queueing problem "
-            "directly, keeping latency steady during heavy traffic."
+            "Pause heavy downloads during calls or games, or enable Smart "
+            "Queue Management (SQM) or QoS in the router's admin page to "
+            "prioritize interactive traffic."
         ),
         "fix_away": (
             "Ask whoever runs this network whether their router supports "
@@ -972,12 +971,17 @@ RULES: list[dict[str, object]] = [
         "doc": "DIAGNOSIS-RULES.md#v6-2--unresponsive-ipv6-dns-resolver",
         "impacts": {"streaming": "degraded", "browsing": "degraded"},
         "fix": (
-            "In System Settings → Network → [WiFi/Ethernet] → Details → "
-            "TCP/IP, set Configure IPv6 to Link-local Only to stop your "
-            "Mac waiting on a broken resolver. Updating the router's "
-            "IPv6 DNS settings is the other fix, if you control it."
+            "Restart your router to re-acquire its IPv6 prefix lease and "
+            "refresh its DNS advertisement, or update its IPv6 DNS "
+            "configuration in the router admin page. No settings changes "
+            "are needed on your Mac."
         ),
-        "fix_target": "you",
+        "fix_away": (
+            "Ask whoever runs this network to restart the router or check "
+            "its IPv6 DNS configuration. No settings changes are needed on "
+            "your Mac."
+        ),
+        "fix_target": "your_router",
     },
     {
         "id": "V6-3",

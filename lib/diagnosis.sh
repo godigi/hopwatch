@@ -324,21 +324,21 @@ diagnosis_run() {
   # D5 handles the specific silent fallback case: primary resolver is dead
   # and secondary answers, causing multi-second timeout delays on every query.
   if [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$PUBLIC_OK" -eq 0 ]; then
-    add_diag warn D2 "No name lookups are working at all — every DNS server your Mac tried failed to answer. On its own that would point at your DNS settings, but nothing else on the internet is reachable either, so this is most likely a symptom rather than the cause. Fix the connection first; if lookups still fail once it's back, switch your DNS to 1.1.1.1 (Cloudflare) or 8.8.8.8 (Google) in System Settings → Network → Details → DNS."
+    add_diag warn D2 "No name lookups are working at all — every DNS server your Mac tried failed to answer. On its own that would point at your DNS settings, but nothing else on the internet is reachable either, so this is most likely a symptom rather than the cause. Fix the connection first; if lookups still fail once it's back, restart your router."
   elif [ "${DNS_PRIMARY_FAIL:-0}" -eq 1 ] && [ "${DNS_FALLBACK_OK:-0}" -eq 1 ]; then
     add_diag warn D5 "Your primary DNS server (${PRIMARY_DNS}) is not responding. macOS is experiencing a multi-second delay waiting for timeouts before silently falling back to secondary DNS (${SECONDARY_DNS:-a secondary resolver}). This causes web pages and links to hesitate for several seconds before opening. Update your DNS settings or restart your router."
   elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$PUBLIC_OK" -eq 1 ]; then
-    add_diag warn D1 "The internet works but some name lookups are failing — your DNS server is flaky. Switch your DNS to 1.1.1.1 (Cloudflare) or 8.8.8.8 (Google) in System Settings → Network → Details → DNS."
+    add_diag warn D1 "The internet works but some name lookups are failing — your DNS server is flaky. Restart your router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks, consider Encrypted DNS in your browser."
   fi
 
   # D3 — slow DNS resolver (> 250 ms)
   if [ -n "$SYS_RES_MS" ] && is_numeric "$SYS_RES_MS" && [ "$SYS_RES_MS" -gt "$THRESH_DNS_LATENCY_WARN_MS" ] && [ "${DNS_OK:-0}" -eq 1 ]; then
-    add_diag warn D3 "Your DNS server ($SYS_RES) is very slow to respond (${SYS_RES_MS} ms) — every new website or link you click will pause before opening. Switch your DNS to 1.1.1.1 (Cloudflare) or 8.8.8.8 (Google) in System Settings → Network → Details → DNS for noticeably snappier browsing."
+    add_diag warn D3 "Your DNS server ($SYS_RES) is very slow to respond (${SYS_RES_MS} ms) — every new website or link you click will pause before opening. Restart your router to refresh its DNS proxy, or enable Encrypted DNS in your browser for noticeably snappier browsing."
   fi
 
   # D4 — DNS hijacking / search redirection
   if [ -n "${DNS_NXDOMAIN_HIJACK_IP:-}" ]; then
-    add_diag warn D4 "Your internet provider is intercepting mistyped website addresses and redirecting them to a search/advertising page ($DNS_NXDOMAIN_HIJACK_IP) instead of returning an error. Switch your DNS to 1.1.1.1 or 8.8.8.8 or turn on Encrypted DNS (DNS-over-HTTPS) to prevent ISP tracking."
+    add_diag warn D4 "Your internet provider is intercepting mistyped website addresses and redirecting them to a search/advertising page ($DNS_NXDOMAIN_HIJACK_IP) instead of returning an error. Turn on Encrypted DNS (DNS-over-HTTPS) in your browser, or configure DNS at the router level, to prevent ISP tracking."
   fi
 
   # B1/B2 — bufferbloat at gateway or ISP hop.
@@ -349,12 +349,12 @@ diagnosis_run() {
   fi
 
   case "${BUFFERBLOAT_GW_GRADE:-}" in
-    C)   add_diag warn B1 "Your router gets a bit sluggish under load — when something is downloading or uploading heavily, calls and games will feel laggy (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade C). Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page." ;;
+    C)   add_diag warn B1 "Your router gets a bit sluggish under load — when something is downloading or uploading heavily, calls and games will feel laggy (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade C). Fix: pause heavy downloads during calls, or enable \"Smart Queue Management\" or \"QoS\" in your router's admin page." ;;
     D|F)
       if [ "$_is_fast_pipe" -eq 1 ]; then
-        add_diag warn B1 "Your router gets sluggish under heavy saturation (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). On a fast connection, this rarely impacts ordinary usage unless saturated by large simultaneous downloads. Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
+        add_diag warn B1 "Your router gets sluggish under heavy saturation (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). On a fast connection, this rarely impacts ordinary usage unless saturated by large simultaneous downloads. Fix: pause heavy background downloads during calls, or enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
       else
-        add_diag critical B1 "Your router chokes under load — whenever someone's downloading or uploading, Zoom / FaceTime / WhatsApp calls will glitch and games will lag badly (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
+        add_diag critical B1 "Your router delays latency-sensitive traffic under heavy simultaneous downloads or uploads — Zoom / FaceTime / WhatsApp calls will glitch and games will lag badly (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). Fix: pause large background downloads during calls, or enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
       fi
       ;;
   esac
@@ -412,7 +412,7 @@ diagnosis_run() {
 
   # V6-2 — unresponsive IPv6 DNS resolver causing fallback stalls
   if [ -n "${IPV6_DNS_FAIL:-}" ] && [ "${DNS_OK:-0}" -eq 1 ]; then
-    add_diag warn V6-2 "Your router gave your Mac an IPv6 DNS server ($IPV6_DNS_FAIL), but it isn't responding. Every website you visit pauses for 2 to 3 seconds while your Mac waits for IPv6 to time out before falling back to IPv4. Fix: Update your router's IPv6 settings or disable IPv6 in System Settings → Network."
+    add_diag warn V6-2 "Your router gave your Mac an IPv6 DNS server ($IPV6_DNS_FAIL), but it isn't responding. Every website you visit pauses for 2 to 3 seconds while your Mac waits for IPv6 to time out before falling back to IPv4. Restart your router to refresh its IPv6 DNS configuration; no settings changes are needed on your Mac."
   fi
 
   # VPN-1 — a VPN is carrying the default route. info, never a fault: the

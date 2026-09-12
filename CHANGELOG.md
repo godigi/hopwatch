@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Changed — aligned diagnosis remediation with "Do No Harm" standard [D1, D2, D3, D4, V6-2, B1]
+
+A core netdiag tenet is **"Do No Harm"**: diagnostic advice must never recommend permanent, hard-coded client-side system configuration changes to solve transient network symptoms:
+
+- **DNS Remediation Safety (`D1`, `D2`, `D3`, `D4`)**: Eliminated advice telling users to manually hardcode public DNS (`1.1.1.1` or `8.8.8.8`) into macOS `System Settings → Network → Details → DNS`. Hardcoded adapter DNS permanently breaks captive portal logins at hotels and airports (which depend on local router DNS interception) and breaks internal domain resolution (`.local`, mDNS, corporate split DNS). Remediation now focuses on non-destructive actions: restarting the router to refresh its DNS cache, toggling Wi-Fi, or enabling application-level Encrypted DNS (DNS-over-HTTPS) in browsers.
+- **IPv6 Preservation (`V6-2`)**: Removed harmful recommendations to disable IPv6 or set "Link-local Only" in macOS network settings when an IPv6 DNS server fails to respond. Disabling IPv6 permanently breaks connectivity to modern IPv6-only networks. Remediation now targets the router: restarting the router to re-acquire its IPv6 prefix lease and refresh its advertised DNS, with explicit reassurance that no settings changes are needed on the Mac.
+- **Bufferbloat Traffic Hygiene (`B1`)**: Replaced hardware-replacement recommendations and alarmist wording with practical traffic hygiene guidance: pausing heavy background downloads during video calls or configuring Smart Queue Management (SQM) / QoS in router settings.
+
 ### Improved — anti-false-positive guardrails for MTU, DHCP, and bufferbloat [M1, DH-1, B1, B2]
 
 Diagnostic accuracy depends on suppressing false alarms on functioning networks and keeping remediation advice proportional and non-destructive:
