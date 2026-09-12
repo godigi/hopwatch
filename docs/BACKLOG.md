@@ -28,8 +28,10 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
 | [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
 | [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
-| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | Ready | M |
-| [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | Ready | S |
+| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | **Done** | M |
+| [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | **Done** | S |
+| [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
+| [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -551,3 +553,63 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - `helpers/rules_catalog.py` fixes and remediation targets aligned.
   - Unit tests updated to match new copy and ensure no regressions.
   - Passes `bats tests/` and `make test`.
+
+---
+
+### TASK-024: Network Memory & Historical Performance Card for Known Networks
+- **Area**: macOS GUI / History & Travel Log
+- **Status**: **Done**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Support/NetworkHistoryStore.swift` (new helper)
+  - `gui/Sources/NetdiagGUI/Views/HistoryView.swift`
+  - `gui/Sources/NetdiagGUI/Views/NetworkDetailCard.swift`
+  - `helpers/history.py`
+  - `gui/Tests/NetdiagGUITests/`
+- **Context**:
+  Travelers, remote workers, and consultants regularly move between multiple networks (home, office, local cafés, Airbnbs, client sites, co-working spaces). While `netdiag` captures journaled runs, the GUI currently presents history as a linear stream of raw runs rather than an organized "memory" of distinct networks.
+  Users have no easy way to answer: *"How did this cafe's Wi-Fi perform last week?"* or *"Was my home connection faster before the ISP upgraded the firmware?"*
+- **Architectural Design**:
+  1. **Network Memory Store**:
+     - Groups historical snapshots by stable network identity (`group_key`: gateway MAC when available, SSID fallback).
+     - Computes aggregated summary metrics per network:
+       - Typical latency & jitter
+       - Tested download/upload speeds (peak vs typical)
+       - Reliability grade (uptime %, disconnect count)
+       - Last seen date
+  2. **Past Networks View in GUI**:
+     - Accessible from Dashboard or History tab.
+     - Lists saved networks with quick rating chips (e.g. `[ HomeNet 5G: 450 Mbps, 12ms, 100% reliable ]`, `[ Airport Lounge: 15 Mbps, 85ms, 4% loss ]`).
+     - Detail card shows historical comparison: "Today vs Typical for this network".
+- **Acceptance Criteria**:
+  - `NetworkHistoryStore` aggregates multiple runs per unique network.
+  - GUI renders a clean list of past networks with performance ratings.
+  - Privacy preserved: local on-device storage only (`~/.local/share/netdiag/` or App Support).
+  - Passes all verify suites: `swift run -c debug NetdiagGUI --verify` and `make -C gui test`.
+
+---
+
+### TASK-025: Smart, Rate-Limited macOS System Notifications on Network Degradation
+- **Area**: macOS GUI / System Alerts & Background Monitoring
+- **Status**: **Done**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Support/NotificationManager.swift` (new helper)
+  - `gui/Sources/NetdiagGUI/Support/NetdiagCoordinator.swift`
+  - `gui/Sources/NetdiagGUI/Views/SettingsView.swift`
+- **Context**:
+  The background monitor continuously tracks latency and packet loss. However, when a user is working full-screen in Xcode, Figma, Keynote, or on a browser, they cannot see the menu bar icon turn amber or red.
+  Without notifications, they only discover network degradation after a web form submission fails or a stream buffers.
+- **Architectural Design & Anti-Spam Guardrails**:
+  1. **Native `UserNotifications` Framework**:
+     - Emits standard macOS banner notifications for critical network state changes.
+  2. **Strict Rate-Limiting & Suppression**:
+     - **No spam**: Only notify on *state transitions* (e.g. Healthy ➔ Outage, or Healthy ➔ High Packet Loss > 10%).
+     - Cooldown timer: Maximum 1 degradation notification per 30 minutes for the same ongoing fault.
+     - Immediate notification when connection is fully restored: *"Wi-Fi Restored: Reconnected to HomeNet (14ms latency)"*.
+  3. **User Preferences**:
+     - Toggle in `SettingsView`: "Show system notifications for network drops and outages" (default: enabled).
+     - Option to alert only on complete outages vs performance degradation.
+- **Acceptance Criteria**:
+  - `NotificationManager` manages `UNUserNotificationCenter` requests and authorizations.
+  - Emits rate-limited notifications on genuine loss/outage transitions.
+  - Setting toggle in GUI allows users to disable or customize notification sensitivity.
+  - Verified in test suite.
