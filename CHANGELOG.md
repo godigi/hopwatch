@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — effective Wi-Fi health and asymmetric link / rate-collapse detection [W4, W5]
+
+A strong Wi-Fi signal icon (e.g. -50 dBm RSSI) does not guarantee a healthy wireless link. Two common failure modes were previously misattributed or undetected:
+
+- **Wi-Fi Transmit Rate Collapse (`W4`)**: Despite strong signal reception (RSSI $\ge -65$ dBm), severe interference or physical obstructions can collapse the negotiated physical transmit rate down to 54 Mbps or lower (802.11a/g fallback). Rule `W4` (warn) alerts to this collapse, guiding users to move closer or switch to 5 GHz / 6 GHz rather than assuming link health.
+- **Asymmetric Wi-Fi Link & Return Path Loss (`W5`)**: High-powered access points transmit up to +30 dBm EIRP while MacBooks transmit around +15 dBm. Through obstacles, the Mac receives a strong signal from the router, but the router fails to decode the Mac's return packets, causing high gateway packet loss. Previously, this fired `G2` ("Local router packet loss"), falsely advising users to restart their router. Rule `W5` (warn) detects this return-path asymmetry, replacing `G2` and accurately pointing to Wi-Fi attenuation.
+- Integrated into `HopAttributionResolver` (culprit attribution to Wi-Fi with tailored reassurance), `RunReportView` (Wi-Fi signal row health aggregation), and rules catalog documentation.
+
 ### Added — visual hop attribution chain and culprit badge [GUI]
 
 When users encounter connection issues, the first question they ask is: "Is it my Wi-Fi, my router, or my internet provider?"

@@ -335,6 +335,60 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "W4",
+        "title": "Wi-Fi transmit rate collapsed",
+        "category": "wifi",
+        "severity": "warn",
+        "scope": "scan",
+        "blurb": (
+            "Your Wi-Fi signal reads strong but the negotiated transmit "
+            "rate has collapsed due to interference or multipath obstacles, "
+            "severely limiting throughput. Moving closer to the access "
+            "point or switching bands helps restore full link speed."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#w4--wi-fi-transmit-rate-collapsed",
+        "impacts": {
+            "calls": "degraded",
+            "streaming": "degraded",
+            "gaming": "degraded",
+            "vpn": "degraded",
+            "browsing": "degraded",
+        },
+        "fix": (
+            "Move closer to your router or access point, avoid thick walls "
+            "or metal obstructions, or switch to the 5 GHz or 6 GHz band."
+        ),
+        "fix_target": "you",
+    },
+    {
+        "id": "W5",
+        "title": "Asymmetric Wi-Fi link (return path loss)",
+        "category": "wifi",
+        "also": "router",
+        "severity": "warn",
+        "scope": "scan",
+        "blurb": (
+            "Your Mac hears a strong signal from the router, but the router "
+            "struggles to hear your Mac through walls or interference, "
+            "causing packet loss on the return path. Moving closer to the "
+            "router balances transmission power."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#w5--asymmetric-wi-fi-link-return-path-loss",
+        "impacts": {
+            "calls": "degraded",
+            "streaming": "degraded",
+            "gaming": "degraded",
+            "vpn": "degraded",
+            "browsing": "degraded",
+        },
+        "fix": (
+            "Move closer to your router or place the router higher up. "
+            "Wall-powered routers transmit much louder than battery-powered "
+            "laptops, creating an unbalanced connection at range."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "WS-1",
         "title": "WiFi channel is congested",
         "category": "wifi",

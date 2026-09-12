@@ -137,6 +137,14 @@ diagnosis_run() {
     fi
   fi
 
+  # W4 — Wi-Fi rate collapse: negotiated transmit rate collapsed despite strong RSSI.
+  if [ "$IS_WIFI" -eq 1 ] && [ -n "${WIFI_TX:-}" ] && is_numeric "${WIFI_TX:-}" \
+     && [ -n "${WIFI_RSSI:-}" ] && is_numeric "${WIFI_RSSI:-}" \
+     && [ "$WIFI_RSSI" -ge "$THRESH_WIFI_COLLAPSE_MIN_RSSI" ] \
+     && [ "$WIFI_TX" -lt "$THRESH_WIFI_TX_COLLAPSE_MBPS" ]; then
+    add_diag warn W4 "Your Wi-Fi signal power reads strong (${WIFI_RSSI} dBm), but your negotiated transmit rate has collapsed to ${WIFI_TX} Mbps due to physical obstacles or radio interference. Moving closer to your router will restore full throughput."
+  fi
+
   # TCP-1 — TCP works, ICMP is filtered. Decided before G1/G2/G3 because it
   # decides whether they fire at all, and mirrored exactly in
   # lib/monitor.sh's _mon_rules (tests/test_monitor.bats holds the two to
@@ -179,13 +187,13 @@ diagnosis_run() {
     fi
   fi
 
-  # G1/G2/G3 — gateway loss. All three describe trouble on the connection
+  # G1/G2/G3/W5 — gateway loss. All four describe trouble on the connection
   # between the Mac and the router *inside the home* — never the ISP or the
   # wider internet — and say so in plain words, because a reader who
   # doesn't know the difference between "router" and "internet" reads any
   # mention of packet loss as "my internet is down". Each names the most
-  # likely cause too: Wi-Fi signal/interference, or on ethernet, the
-  # cable/port — mirrored from the same branch G3 uses below.
+  # likely cause too: Wi-Fi signal/interference, asymmetric link, or on
+  # ethernet, the cable/port — mirrored from the same branch G3 uses below.
   if [ "$_gw_icmp_filtered" -eq 1 ]; then
     : # TCP-1 has already described this link.
   elif loss_at_least "$GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
@@ -197,6 +205,9 @@ diagnosis_run() {
       # branch states the loss and points at the diagnosis that explains
       # it rather than offering a second, contradictory fix.
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. That is what the half-duplex ethernet link above causes, so fix the negotiation first rather than the router; collisions on a half-duplex link produce exactly this."
+    elif [ "$IS_WIFI" -eq 1 ] && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
+         && [ "$WIFI_RSSI" -ge "$THRESH_WIFI_ASYMMETRIC_MIN_RSSI" ]; then
+      add_diag warn W5 "Your Mac hears a strong signal from your router (${WIFI_RSSI} dBm), but packet loss (${GW_LOSS}%) indicates your router is struggling to hear your Mac through walls or interference. Try moving closer to the router."
     else
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. Try rebooting the router (unplug it for 30 seconds, then plug it back in) or moving closer to it; on ethernet, check the cable."
     fi

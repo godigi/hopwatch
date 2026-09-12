@@ -1191,6 +1191,18 @@ private enum VerifyHarness {
         )
         check(b2Res.culprit == .isp, "B2 upstream bufferbloat attributes to ISP")
 
+        let w4Res = HopAttributionResolver.resolve(
+            rules: ["W4"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0
+        )
+        check(w4Res.culprit == .wifi, "W4 transmit rate collapse attributes to Wi-Fi")
+        check(w4Res.wifiHealth == .warning, "W4 Wi-Fi health is warning")
+
+        let w5Res = HopAttributionResolver.resolve(
+            rules: ["W5"], isWifi: true, wifiRSSI: -58, gatewayRTT: 2.0, gatewayLoss: 15.0
+        )
+        check(w5Res.culprit == .wifi, "W5 asymmetric Wi-Fi link attributes to Wi-Fi")
+        check(w5Res.wifiHealth == .warning, "W5 Wi-Fi health is warning")
+
         let clearRes = HopAttributionResolver.resolve(
             rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0
         )

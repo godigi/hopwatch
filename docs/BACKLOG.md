@@ -25,8 +25,8 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
-| [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
-| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
+| [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | Ready | S |
+| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | Ready | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -387,7 +387,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-019: Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`)
 - **Area**: macOS CLI & GUI / Wi-Fi Jitter & Diagnosis
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `lib/wifi_common.sh`
   - `lib/diagnosis.sh`
@@ -415,7 +415,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-020: Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`)
 - **Area**: macOS CLI & GUI / DNS Health & Diagnosis
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `lib/dns.sh`
   - `lib/diagnosis.sh`

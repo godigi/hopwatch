@@ -95,4 +95,29 @@ import Testing
         #expect(result.ispHealth == .healthy)
         #expect(result.reassurance.contains("cleanly") || result.reassurance.contains("healthy"))
     }
+
+    @Test func wifiRateCollapseAndAsymmetricLinkAttributeToWifi() {
+        // W4: Transmit rate collapse
+        let w4 = HopAttributionResolver.resolve(
+            rules: ["W4"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 2.0
+        )
+        #expect(w4.culprit == .wifi)
+        #expect(w4.wifiHealth == .warning)
+        #expect(w4.reassurance.contains("rate has collapsed"))
+
+        // W5: Asymmetric Wi-Fi return path loss
+        let w5 = HopAttributionResolver.resolve(
+            rules: ["W5"],
+            isWifi: true,
+            wifiRSSI: -60,
+            gatewayRTT: 2.0,
+            gatewayLoss: 15.0
+        )
+        #expect(w5.culprit == .wifi)
+        #expect(w5.wifiHealth == .warning)
+        #expect(w5.reassurance.contains("asymmetric link"))
+    }
 }

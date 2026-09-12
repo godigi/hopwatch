@@ -90,7 +90,8 @@ wifi_parse_wdutil() {
     /^[[:space:]]*Noise[[:space:]]*:/ {
       v=$2; gsub(/[[:space:]]*dBm/,"",v); noise=v }
     /^[[:space:]]*Channel[[:space:]]*:/ {chan=$2}
-    /Tx Rate/ {tx=$2}
+    /Tx Rate/ {
+      v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
     /PHY Mode/{phy=$2}
     END{printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
         rssi, noise, chan, tx, phy, ssid, bssid}'

@@ -160,6 +160,14 @@ THRESH_WIFI_DISCONNECTS=3
 THRESH_WIFI_STICKY_DELTA_DBM=15
 THRESH_WIFI_STICKY_MAX_RSSI=-75
 THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI=-60
+# W4 — Wi-Fi rate collapse: negotiated transmit rate collapsed despite strong RSSI.
+THRESH_WIFI_TX_COLLAPSE_MBPS=54
+THRESH_WIFI_COLLAPSE_MIN_RSSI=-65
+# W5 — asymmetric Wi-Fi link: return path loss when router beacon is strong.
+THRESH_WIFI_ASYMMETRIC_MIN_RSSI=-65
+THRESH_WIFI_ASYMMETRIC_LOSS_PCT=5
+# Minimum SNR floor (mirrors THRESH_WIFI_SNR_LOW_DB for naming parity).
+THRESH_WIFI_SNR_MIN_DB=20
 
 # Presentation cutoffs shared by the report card and section output.
 THRESH_LATENCY_JITTER_WARN_MS=30

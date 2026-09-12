@@ -153,7 +153,21 @@ runs stop filing under the synthetic "unknown" network.
 - Severity: `info`
 - Recommendation: toggle Wi-Fi off and back on to associate with the closer access point.
 
-> **G1, G2 and G3 all fire only when `TCP-1` does not.** A gateway that
+### W4 — Wi-Fi transmit rate collapsed
+
+- Trigger: `is_wifi AND wifi.rssi >= -65 AND wifi.tx_rate < 54 Mbps`
+- Severity: `warn`
+- Recommendation: move closer to the router or switch to 5 GHz / 6 GHz band to restore throughput.
+- Rationale: High RSSI confirms beacon reception from a high-power router, but multipath reflections or local RF noise have forced the 802.11 rate control algorithm down to legacy rates.
+
+### W5 — Asymmetric Wi-Fi link (return path loss)
+
+- Trigger: `is_wifi AND wifi.rssi >= -65 AND gateway.loss_pct >= 5%`
+- Severity: `warn`
+- Recommendation: move closer to the router.
+- Rationale: Wall-powered access points transmit at 200–500 mW, but battery-powered laptops transmit at only 30–50 mW. The Mac receives strong signal, but return packets are dropped through walls or interference. Firing W5 correctly attributes loss to Wi-Fi rather than falsely accusing the router hardware (G2) or ISP.
+
+> **G1, G2, G3 and W5 all fire only when `TCP-1` does not.** A gateway that
 > drops pings while still carrying TCP is filtering, not failing; see the
 > precedence note under TCP-1 below. The trigger lines here read as
 > `... AND NOT TCP-1`.

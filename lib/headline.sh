@@ -147,6 +147,11 @@ headline_run() {
     local sev=ok
     loss_at_least "$GW_LOSS" "$LOSS_WARN_PCT" && sev=warn
     loss_at_least "$GW_LOSS" "$LOSS_CRIT_PCT" && sev=bad
+    if [ "$IS_WIFI" -eq 1 ] && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
+       && [ "$WIFI_RSSI" -ge "$THRESH_WIFI_ASYMMETRIC_MIN_RSSI" ] \
+       && loss_at_least "$GW_LOSS" "$THRESH_WIFI_ASYMMETRIC_LOSS_PCT"; then
+      sev=warn
+    fi
     local rline
     rline="$GATEWAY · ${GW_LOSS%.*}% loss · $(printf '%.1f' "$GW_LATENCY" 2>/dev/null || printf '%s' "$GW_LATENCY") ms"
     [ -n "$GW_JITTER" ] && rline="$rline · ±$(printf '%.1f' "$GW_JITTER" 2>/dev/null || printf '%s' "$GW_JITTER") ms jitter"
