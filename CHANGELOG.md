@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — unresponsive primary DNS resolver & silent fallback delay detection [D5]
+
+When a router DHCP configuration or network admin assigns an unreachable primary DNS server alongside a functional secondary resolver (e.g. dead local gateway DNS proxy or dead local Pi-hole with public secondary DNS), every application-level domain lookup incurs a hidden 1–5 second timeout delay before macOS falls back to the secondary resolver. Browsing feels sluggish even though internet connectivity tests pass:
+
+- **Rule `D5` (warn)**: Triggers when the system's primary DNS resolver completely fails to respond (`DNS_PRIMARY_FAIL=1`), but one or more configured secondary fallback resolvers respond successfully (`DNS_FALLBACK_OK=1`). Suppresses generic flaky DNS warning `D1` to provide actionable guidance pinpointing the unresponsive primary resolver.
+- Detects multi-resolver configurations via `SYS_RES_ALL` in `lib/dns.sh` and benchmarks primary vs secondary resolvers independently.
+- Integrated into `HopAttributionResolver` (attributes culprit to ISP/DNS with reassuring guidance), `RunReportView` (Name lookups row health evaluation), and diagnostic rules catalog.
+
 ### Added — Apple Wireless Direct Link (AirDrop/Sidecar) latency spike detection [AWDL-1]
 
 macOS uses Apple Wireless Direct Link (`awdl0`) for peer-to-peer ecosystem features (AirDrop, AirPlay, Sidecar, Universal Control). The Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 and 149) for nearby Apple devices. During these discovery hops, network packets stall, causing periodic 200–500 ms latency spikes and micro-stutter in Zoom, Google Meet, Teams, and online gaming while overall packet loss remains 0% and base ping is low:

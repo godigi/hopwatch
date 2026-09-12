@@ -26,7 +26,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
 | [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
-| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | Ready | S |
+| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
 | [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | Ready | S |
 | [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | Ready | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
@@ -417,7 +417,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-020: Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`)
 - **Area**: macOS CLI & GUI / DNS Health & Diagnosis
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/dns.sh`
   - `lib/diagnosis.sh`
@@ -446,7 +446,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-021: Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz)
 - **Area**: macOS CLI & GUI / Wi-Fi Bands & Roaming
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `lib/wifi_common.sh`
   - `lib/constants.sh`
@@ -471,7 +471,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
     - Severity: `info` (or `warn` if `tx_rate <= 54 Mbps`).
     - Impacts: video calls (degraded), ordinary browsing (degraded).
     - Fix target: `you`
-    - Text: *"Your Mac is connected to the 2.4 GHz band (${WIFI_CHAN}, ${WIFI_TX_RATE} Mbps) while a faster 5 GHz band on \\\"${WIFI_SSID}\\\" is available with strong signal (${CANDIDATE_5GHZ_RSSI} dBm). Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."*
+    - Text: *"Your Mac is connected to the 2.4 GHz band (${WIFI_CHAN}, ${WIFI_TX_RATE} Mbps) while a faster 5 GHz band on \"${WIFI_SSID}\" is available with strong signal (${CANDIDATE_5GHZ_RSSI} dBm). Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."*
 - **Acceptance Criteria**:
   - `W6` only fires when a 5 GHz BSSID on the same SSID has `RSSI >= -65 dBm`. Never fires if 5 GHz is weak or absent.
   - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
@@ -482,7 +482,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-022: Anti-False-Positive Guardrails for MTU, DHCP Leases, and Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`)
 - **Area**: CLI / Diagnosis & Precision Accuracy
-- **Status**: **Done**
+- **Status**: Ready
 - **Files to touch**:
   - `lib/diagnosis.sh`
   - `lib/constants.sh`

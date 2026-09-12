@@ -142,6 +142,10 @@ SYS_RES_MS=""            # primary resolver response latency in ms
 DNS_NXDOMAIN_HIJACK_IP="" # IP returned for non-existent domain (if hijacked)
 IPV6_DNS_FAIL=""         # unresponsive IPv6 nameserver (if any)
 DNS_LINES=""             # one "resolver|name|answer|OK|FAIL" per line
+DNS_PRIMARY_FAIL=0       # 1 = primary configured resolver timed out / failed
+DNS_FALLBACK_OK=0        # 1 = secondary configured resolver answered
+PRIMARY_DNS=""           # address of failing primary DNS resolver
+SECONDARY_DNS=""         # address of responding secondary DNS resolver
 
 # IPv6 (lib/ipv6.sh)
 IPV6_AVAILABLE=0

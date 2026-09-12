@@ -1209,6 +1209,12 @@ private enum VerifyHarness {
         check(awdlRes.culprit == .wifi, "AWDL-1 channel hopping attributes to Wi-Fi")
         check(awdlRes.wifiHealth == .warning, "AWDL-1 Wi-Fi health is warning")
 
+        let d5Res = HopAttributionResolver.resolve(
+            rules: ["D5"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 15.0, inetLoss: 0.0
+        )
+        check(d5Res.culprit == .isp, "D5 unresponsive primary DNS attributes to ISP")
+        check(d5Res.ispHealth == .warning, "D5 ISP health is warning")
+
         let clearRes = HopAttributionResolver.resolve(
             rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0
         )

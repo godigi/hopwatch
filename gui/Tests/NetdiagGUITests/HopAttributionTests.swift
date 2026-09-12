@@ -130,5 +130,19 @@ import Testing
         #expect(awdl.culprit == .wifi)
         #expect(awdl.wifiHealth == .warning)
         #expect(awdl.reassurance.contains("Apple Wireless Direct Link"))
+
+        // D5: Primary DNS unresponsive, falling back to secondary
+        let d5 = HopAttributionResolver.resolve(
+            rules: ["D5"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 1.5,
+            gatewayLoss: 0.0,
+            inetRTT: 15.0,
+            inetLoss: 0.0
+        )
+        #expect(d5.culprit == .isp)
+        #expect(d5.ispHealth == .warning)
+        #expect(d5.reassurance.contains("primary DNS server is unresponsive"))
     }
 }

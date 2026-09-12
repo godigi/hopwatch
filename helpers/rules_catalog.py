@@ -740,6 +740,32 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "D5",
+        "title": "Primary DNS unresponsive with silent fallback delay",
+        "category": "dns",
+        "severity": "warn",
+        "scope": "scan",
+        "blurb": (
+            "Your primary DNS server is unresponsive. macOS waits for "
+            "lookup timeouts before silently falling back to a secondary "
+            "resolver, adding delay to every new page or connection. "
+            "Removing the dead server or restarting the router eliminates "
+            "the delay."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#d5--unresponsive-primary-dns-resolver-silent-fallback",
+        "impacts": {
+            "calls": "degraded",
+            "streaming": "degraded",
+            "browsing": "degraded",
+        },
+        "fix": (
+            "Remove the unresponsive DNS server from System Settings → "
+            "Network → Details → DNS, or restart your router if it provides "
+            "local DNS."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "EDNS-1",
         "title": "Encrypted DNS profile active",
         "category": "dns",

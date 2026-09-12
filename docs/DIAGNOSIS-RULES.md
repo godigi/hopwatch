@@ -396,6 +396,14 @@ paper over this would have been the wrong fix in the wrong file.
 - Recommendation: switch to public DNS (1.1.1.1 / 8.8.8.8) or enable Encrypted DNS (DoH).
 - Rationale: ISPs intercept failed queries to show search ads or track user activity.
 
+### D5 — Unresponsive primary DNS resolver (silent fallback)
+
+- Trigger: `primary_dns_fail AND secondary_dns_ok`
+- Severity: `warn`
+- Evidence: primary resolver failing all queries while secondary resolver responds.
+- Recommendation: remove the unresponsive DNS server from System Settings or restart the router.
+- Rationale: macOS queries resolvers in the order configured. When the primary resolver fails or drops packets, the OS resolver must wait for a 2-to-5 second timeout before retransmitting the query to the secondary resolver. Web browsing and apps suffer constant hesitations and stalls even though lookups eventually succeed.
+
 ### B1 — Bufferbloat at gateway hop
 
 - Trigger: `bufferbloat.gw_grade ∈ {C, D, F}`

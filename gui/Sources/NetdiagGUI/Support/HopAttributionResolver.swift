@@ -104,7 +104,7 @@ public enum HopAttributionResolver {
     private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3"]
 
     private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1", "N1b", "L1", "CP-1", "D1"]
-    private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "M1", "SP-1", "BL-1"]
+    private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "D5", "M1", "SP-1", "BL-1"]
 
     // MARK: - Resolution
 
@@ -193,6 +193,8 @@ public enum HopAttributionResolver {
             let localStatus = parts.joined(separator: " and ")
             if ruleSet.contains("CP-1") {
                 reassurance = "\(localStatus). A captive portal login is blocking access to the internet."
+            } else if ruleSet.contains("D5") {
+                reassurance = "\(localStatus). Your primary DNS server is unresponsive and queries are silently falling back to a secondary resolver."
             } else if ruleSet.contains("B2") {
                 reassurance = "\(localStatus). The latency surge is occurring upstream in your ISP's network."
             } else {
