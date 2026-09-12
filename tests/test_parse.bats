@@ -999,6 +999,7 @@ sp_setup() {
   PATH_PROXY=0 PATH_PROXY_DETAIL="" PATH_FILTERS="" PATH_FILTER_COUNT=0
   NETWORK_CHANGED_MID_RUN=0
   WIFI_NAME_HIDDEN=0 WIFI_PRIVILEGED=0 WIFI_DISCONNECT_COUNT=0
+  WIFI_MULTI_AP=0 WIFI_CANDIDATE_BSSID="" WIFI_CANDIDATE_RSSI="" WIFI_CANDIDATE_SSID=""
   EXPERT=0
   DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
 }
@@ -1574,4 +1575,148 @@ v6_setup() {
   diag_has N1c || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
   diag_has V6-3 && { echo "V6-3 stole the portal case"; return 1; }
   return 0
+}
+
+# ── W3: sticky access point ──────────────────────────────────────────────
+
+@test "wifi_parse_candidates: extracts multi_ap and best candidate from system_profiler" {
+  local sp="          Current Network Information:
+            HomeWiFi:
+              PHY Mode: 802.11ax
+              Channel: 36 (5GHz, 40MHz)
+              Signal / Noise: -78 dBm / -96 dBm
+          Other Local Wi-Fi Networks:
+            Neighbor:
+              Signal / Noise: -40 dBm / -96 dBm
+            HomeWiFi:
+              BSSID: 11:22:33:44:55:66
+              Signal / Noise: -50 dBm / -96 dBm
+            HomeWiFi:
+              BSSID: 22:33:44:55:66:77
+              Signal / Noise: -65 dBm / -96 dBm"
+  run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '1\t11:22:33:44:55:66\t-50\tHomeWiFi')" ]
+}
+
+@test "wifi_parse_candidates: ignores same BSSID as current" {
+  local sp="          Other Local Wi-Fi Networks:
+            Neighbor:
+              Signal / Noise: -40 dBm / -96 dBm
+            HomeWiFi:
+              BSSID: aa:bb:cc:dd:ee:ff
+              Signal / Noise: -50 dBm / -96 dBm"
+  run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '0\t\t\t')" ]
+}
+
+@test "wifi_parse_candidates: returns single AP when target not in other networks" {
+  local sp="          Other Local Wi-Fi Networks:
+            Neighbor1:
+              Signal / Noise: -40 dBm / -96 dBm
+            Neighbor2:
+              Signal / Noise: -55 dBm / -96 dBm"
+  run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '0\t\t\t')" ]
+}
+
+@test "diagnosis: W3 fires as info when associated with distant AP on multi-AP network" {
+  sp_setup
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-75
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-50
+  diagnosis_run >/dev/null
+  diag_has W3 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$MAX_SEVERITY" -eq 0 ]
+  local i
+  for i in "${!DIAG_RULE[@]}"; do
+    if [ "${DIAG_RULE[$i]}" = "W3" ]; then
+      [ "${DIAG_SEV[$i]}" = "info" ]
+    fi
+  done
+  assert_contains "$(diag_text_for W3)" "Toggle Wi-Fi off and back on"
+  assert_contains "$(diag_text_for W3)" "25 dBm stronger"
+}
+
+@test "diagnosis: W3 stays silent when delta is less than 15 dBm" {
+  sp_setup
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-78
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-65
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired unexpectedly"; return 1; }
+}
+
+@test "diagnosis: W3 stays silent on single AP" {
+  sp_setup
+  WIFI_MULTI_AP=0
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-78
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-50
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired on single AP"; return 1; }
+}
+
+@test "diagnosis: W3 stays silent when candidate is on a different SSID" {
+  sp_setup
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-78
+  WIFI_CANDIDATE_SSID="OtherNetwork"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-50
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired for different SSID"; return 1; }
+}
+
+@test "diagnosis: W3 stays silent when current RSSI is not poor (-70 dBm)" {
+  sp_setup
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-70
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-50
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired with non-poor RSSI"; return 1; }
+}
+
+@test "diagnosis: W3 stays silent when candidate RSSI is weak (-65 dBm)" {
+  sp_setup
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff"
+  WIFI_RSSI=-85
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-65
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired when candidate is weak"; return 1; }
+}
+
+@test "diagnosis: W3 stays silent on wired connection" {
+  sp_setup
+  IS_WIFI=0
+  WIFI_MULTI_AP=1
+  WIFI_SSID="Home"
+  WIFI_RSSI=-78
+  WIFI_CANDIDATE_SSID="Home"
+  WIFI_CANDIDATE_RSSI=-50
+  diagnosis_run >/dev/null
+  ! diag_has W3 || { echo "W3 fired on wired"; return 1; }
 }

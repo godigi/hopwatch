@@ -155,6 +155,11 @@ THRESH_WIFI_CHANNEL_NEIGHBOURS=3
 # WD-1 — disconnects within WIFI_DISCONNECT_WINDOW_HOURS before the link
 # counts as flapping.
 THRESH_WIFI_DISCONNECTS=3
+# W3 — sticky access point: associated with a distant AP when a much stronger
+# candidate on the same SSID is available.
+THRESH_WIFI_STICKY_DELTA_DBM=15
+THRESH_WIFI_STICKY_MAX_RSSI=-75
+THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI=-60
 
 # Presentation cutoffs shared by the report card and section output.
 THRESH_LATENCY_JITTER_WARN_MS=30

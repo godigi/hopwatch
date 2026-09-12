@@ -55,7 +55,9 @@ setup() {
            THRESH_AV_FLAP_MAX_S THRESH_AV_FLAP_COUNT \
            THRESH_AV_UNOBSERVED_NOTE_PCT \
            THRESH_TRAFFIC_SAMPLE_S THRESH_TRAFFIC_BUSY_MBPS \
-           THRESH_LAN_ACTIVE_DEVICES; do
+           THRESH_LAN_ACTIVE_DEVICES \
+           THRESH_WIFI_STICKY_DELTA_DBM THRESH_WIFI_STICKY_MAX_RSSI \
+           THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }
@@ -193,6 +195,20 @@ setup() {
   DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
   diagnosis_run >/dev/null
   [[ " ${DIAG_RULE[*]} " == *" WS-1 "* ]] || return 1
+}
+
+@test "sticky AP emits W3 when candidate is stronger" {
+  # shellcheck source=../lib/diagnosis.sh
+  . "$REPO/lib/diagnosis.sh"
+  GATEWAY=192.168.1.1 IS_WIFI=1 WIFI_MULTI_AP=1 WIFI_SSID="Home"
+  WIFI_BSSID="aa:bb:cc:dd:ee:ff" WIFI_RSSI=-78 WIFI_SNR=30
+  WIFI_CANDIDATE_SSID="Home" WIFI_CANDIDATE_BSSID="11:22:33:44:55:66"
+  WIFI_CANDIDATE_RSSI=-50
+  WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS=0 PUBLIC_OK=1 PUBLIC_CHECKED=1
+  GW_LOSS=0
+  DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
+  diagnosis_run >/dev/null
+  [[ " ${DIAG_RULE[*]} " == *" W3 "* ]] || return 1
 }
 
 # ── grade_bufferbloat reads the same table ───────────────────────────────

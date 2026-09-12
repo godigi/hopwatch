@@ -67,6 +67,10 @@ WIFI_NAME_HIDDEN=0       # 1 = macOS withheld the SSID [WI-1]
 # lib/wifi.sh), or "" (no name at all). A stored run must never claim to
 # have seen something it was told.
 WIFI_SSID_SOURCE=""
+WIFI_MULTI_AP=0              # 1 = multiple BSSIDs/APs detected on this SSID
+WIFI_CANDIDATE_BSSID=""      # BSSID of candidate alternative AP
+WIFI_CANDIDATE_RSSI=""       # RSSI of candidate alternative AP
+WIFI_CANDIDATE_SSID=""       # SSID of candidate alternative AP
 
 # VPN (lib/vpn.sh)
 VPN_ACTIVE=0

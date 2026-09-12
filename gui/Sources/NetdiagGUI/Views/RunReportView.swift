@@ -576,7 +576,7 @@ struct RunReportView: View {
             }
             out.append(Row(label: "Wi-Fi signal",
                            value: signalValue,
-                           health: health(["W1", "W2", "WS-1", "WD-1"], "Wi-Fi signal"),
+                           health: health(["W1", "W2", "W3", "WS-1", "WD-1"], "Wi-Fi signal"),
                            metricKey: "wifi_rssi_dbm",
                            glossaryKey: "wifi_signal",
                            medianFormatter: { "\(Int($0.rounded())) dBm" },

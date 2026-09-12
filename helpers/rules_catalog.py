@@ -311,6 +311,30 @@ RULES: list[dict[str, object]] = [
         "fix_target": "your_router",
     },
     {
+        "id": "W3",
+        "title": "Associated with distant access point (sticky AP)",
+        "category": "wifi",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "Your Mac is connected to a distant access point on this network "
+            "while a much stronger access point is available. Reconnecting "
+            "usually prompts macOS to choose the nearer one."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#w3--associated-with-distant-access-point-sticky-ap",
+        "impacts": {
+            "calls": "degraded",
+            "streaming": "degraded",
+            "gaming": "degraded",
+            "vpn": "degraded",
+        },
+        "fix": (
+            "Toggle Wi-Fi off and back on to force macOS to associate with "
+            "the closer access point."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "WS-1",
         "title": "WiFi channel is congested",
         "category": "wifi",

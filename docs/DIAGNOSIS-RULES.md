@@ -147,6 +147,12 @@ runs stop filing under the synthetic "unknown" network.
 - Severity: `warn`
 - Recommendation: change channel — interference on the current one.
 
+### W3 — Associated with distant access point (sticky AP)
+
+- Trigger: `wifi.rssi <= -75 AND wifi.candidate_rssi >= -60 AND (candidate_rssi - rssi) >= 15`
+- Severity: `info`
+- Recommendation: toggle Wi-Fi off and back on to associate with the closer access point.
+
 > **G1, G2 and G3 all fire only when `TCP-1` does not.** A gateway that
 > drops pings while still carrying TCP is filtering, not failing; see the
 > precedence note under TCP-1 below. The trigger lines here read as

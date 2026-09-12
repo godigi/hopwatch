@@ -20,7 +20,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Done** | XS |
 | [TASK-012](#task-012-share-diagnostics-menu-action--redacted-report-export) | "Share Diagnostics..." friendly menu action & redacted report export | GUI / Sharing | **Done** | S |
 | [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Done** | S |
-| [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Ready** | M |
+| [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | Backlog | **Backlog** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Backlog | **Backlog** | M |
 
@@ -30,7 +30,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-001: Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md
 - **Area**: Documentation / Release Prep
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `CHANGELOG.md`
 - **Context**:
@@ -45,7 +45,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-002: Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift`
 - **Area**: macOS GUI / Live Chart
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
   - `gui/Sources/NetdiagGUI/Support/MonitorSeries.swift`
@@ -61,7 +61,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-003: Unify event journaling between GUI and CLI (`events.jsonl`) [Track E]
 - **Area**: Core Architecture / Availability
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/MonitorStream.swift`
   - `lib/availability.sh`
@@ -77,7 +77,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-004: Add "Launch at Login" support to GUI via `SMAppService` [Track E]
 - **Area**: macOS GUI / Settings
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
   - `gui/Sources/NetdiagGUI/Views/SettingsView.swift`
@@ -94,7 +94,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-005: Subnet crowding telemetry & device surge detection (`LAN-1`) [Track D]
 - **Area**: CLI & GUI / Diagnosis
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `helpers/emit_json.py`
   - `docs/JSON-SCHEMA.md`
@@ -116,7 +116,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-008: "Copy Diagnostic Summary for Support / Front Desk / Host" [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -138,7 +138,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-009: "Open Router Admin Page" quick action [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -153,7 +153,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-010: "Open Login Page" action on captive portal detection (`CP-1`) [Track C]
 - **Area**: macOS GUI / Captive Portal
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
   - `gui/Sources/NetdiagGUI/Views/LiveView.swift`
@@ -168,7 +168,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-011: Live Latency in the Menu Bar (`● 18ms`)
 - **Area**: macOS GUI / Telemetry & Menu Bar
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
   - `gui/Sources/NetdiagGUI/NetdiagApp.swift`
@@ -217,7 +217,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-014: Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`)
 - **Area**: Wi-Fi / Diagnosis & Roaming
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/thresholds.sh`
   - `lib/wifi.sh`

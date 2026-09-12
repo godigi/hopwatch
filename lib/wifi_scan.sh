@@ -7,10 +7,14 @@
 # APs, so we can only count channel utilisation, not compare signal
 # strength.
 #
-# Reads:  IS_WIFI, QUICK
+# Reads:  IS_WIFI, QUICK, WIFI_SSID, WIFI_BSSID
 # Writes: WIFI_SCAN_CURRENT_CHANNEL, WIFI_SCAN_CURRENT_BAND,
-#         WIFI_SCAN_NEIGHBOR_COUNT, WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS
+#         WIFI_SCAN_NEIGHBOR_COUNT, WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS,
+#         WIFI_MULTI_AP, WIFI_CANDIDATE_BSSID, WIFI_CANDIDATE_RSSI, WIFI_CANDIDATE_SSID
 # Entry:  wifi_scan_run
+
+# shellcheck source=lib/wifi_common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/wifi_common.sh"
 
 wifi_scan_run() {
   [ "$IS_WIFI" -eq 1 ] || { progress_skip "not on wifi"; return 0; }
@@ -55,10 +59,27 @@ wifi_scan_run() {
       | awk '{printf "      ch %-4s × %d\n", $2, $1}' | log_pipe
   fi
 
+  local sp_cand_parsed
+  sp_cand_parsed="$(wifi_parse_candidates "$sp_out" "${WIFI_SSID:-}" "${WIFI_BSSID:-}")"
+  {
+    IFS=$'\t' read -r WIFI_MULTI_AP WIFI_CANDIDATE_BSSID WIFI_CANDIDATE_RSSI WIFI_CANDIDATE_SSID
+  } <<<"$sp_cand_parsed"
+  if [ "${WIFI_MULTI_AP:-0}" -eq 1 ]; then
+    if [ -n "$WIFI_CANDIDATE_RSSI" ]; then
+      info "Multi-AP network: candidate AP detected (${WIFI_CANDIDATE_RSSI} dBm${WIFI_CANDIDATE_BSSID:+, $WIFI_CANDIDATE_BSSID})"
+    else
+      info "Multi-AP network: multiple access points detected for ${WIFI_SSID:-this network}"
+    fi
+  fi
+
   if [ -n "${NETDIAG_PAR_VARS:-}" ]; then
     setvar WIFI_SCAN_CURRENT_CHANNEL "$WIFI_SCAN_CURRENT_CHANNEL"
     setvar WIFI_SCAN_CURRENT_BAND "$WIFI_SCAN_CURRENT_BAND"
     setvar WIFI_SCAN_NEIGHBOR_COUNT "$WIFI_SCAN_NEIGHBOR_COUNT"
     setvar WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS "$WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS"
+    setvar WIFI_MULTI_AP "$WIFI_MULTI_AP"
+    setvar WIFI_CANDIDATE_BSSID "$WIFI_CANDIDATE_BSSID"
+    setvar WIFI_CANDIDATE_RSSI "$WIFI_CANDIDATE_RSSI"
+    setvar WIFI_CANDIDATE_SSID "$WIFI_CANDIDATE_SSID"
   fi
 }

@@ -123,6 +123,19 @@ diagnosis_run() {
      && [ "$WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS" -gt "$THRESH_WIFI_CHANNEL_NEIGHBOURS" ]; then
     add_diag warn WS-1 "Your WiFi channel is crowded (${WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS} neighbouring networks). If performance is inconsistent, choose a less busy channel or let the router select one automatically."
   fi
+  if [ "$IS_WIFI" -eq 1 ] && [ "${WIFI_MULTI_AP:-0}" -eq 1 ] \
+     && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
+     && [ "$WIFI_RSSI" -le "$THRESH_WIFI_STICKY_MAX_RSSI" ] \
+     && [ -n "$WIFI_CANDIDATE_RSSI" ] && is_numeric "$WIFI_CANDIDATE_RSSI" \
+     && [ "$WIFI_CANDIDATE_RSSI" -ge "$THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI" ] \
+     && [ -n "$WIFI_SSID" ] && [ "$WIFI_SSID" != "<redacted>" ] \
+     && [ "${WIFI_CANDIDATE_SSID:-$WIFI_SSID}" = "$WIFI_SSID" ] \
+     && [ -z "${WIFI_CANDIDATE_BSSID:-}" -o "${WIFI_CANDIDATE_BSSID:-}" != "$WIFI_BSSID" ]; then
+    local _sticky_delta=$(( WIFI_CANDIDATE_RSSI - WIFI_RSSI ))
+    if [ "$_sticky_delta" -ge "$THRESH_WIFI_STICKY_DELTA_DBM" ]; then
+      add_diag info W3 "Your Mac is connected to a distant access point (${WIFI_RSSI} dBm) while a closer access point on \"${WIFI_SSID}\" is available (${WIFI_CANDIDATE_RSSI} dBm, ${_sticky_delta} dBm stronger). Toggle Wi-Fi off and back on to associate with the closer access point."
+    fi
+  fi
 
   # TCP-1 — TCP works, ICMP is filtered. Decided before G1/G2/G3 because it
   # decides whether they fire at all, and mirrored exactly in

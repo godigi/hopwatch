@@ -95,3 +95,74 @@ wifi_parse_wdutil() {
     END{printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
         rssi, noise, chan, tx, phy, ssid, bssid}'
 }
+
+# Multi-AP detection and candidate access point scrape from `system_profiler SPAirPortDataType`.
+# $1 = system_profiler output, $2 = target SSID, $3 = current BSSID (optional).
+# Prints 4 TAB-separated fields:
+#   multi_ap (1 or 0), candidate_bssid, candidate_rssi, candidate_ssid
+# Candidate is chosen as the AP on the same SSID (with different BSSID) with the highest RSSI.
+wifi_parse_candidates() {
+  local sp="$1" target="$2" cur_bssid="${3:-}"
+  printf '%s\n' "$sp" | awk -v target="$target" -v cur_bssid="$cur_bssid" '
+    BEGIN {
+      in_other = 0; cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""
+      best_rssi = -999; best_bssid = ""; best_ssid = ""; multi_ap = 0
+    }
+    function flush_entry() {
+      if (in_other && cur_ssid != "") {
+        if (target != "" && target != "<redacted>" && cur_ssid == target) {
+          if (cur_bssid_entry == "" || cur_bssid == "" || tolower(cur_bssid_entry) != tolower(cur_bssid)) {
+            multi_ap = 1
+            if (cur_rssi != "" && cur_rssi ~ /^-?[0-9]+$/) {
+              if (cur_rssi + 0 > best_rssi) {
+                best_rssi = cur_rssi + 0
+                best_bssid = cur_bssid_entry
+                best_ssid = cur_ssid
+              }
+            }
+          }
+        }
+      }
+      cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""
+    }
+    /Current Network Information:/ { flush_entry(); in_other = 0; next }
+    /Other Local Wi-Fi Networks:/   { flush_entry(); in_other = 1; next }
+    /^[[:space:]]{0,10}[A-Za-z0-9]/ && in_other {
+      flush_entry(); in_other = 0; next
+    }
+    in_other && /^[[:space:]]{12}[^[:space:]]/ {
+      flush_entry()
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/:[[:space:]]*$/, "", line)
+      cur_ssid = line
+      next
+    }
+    in_other && cur_ssid != "" {
+      if ($0 ~ /^[[:space:]]+(BSSID|MAC Address):[[:space:]]*/) {
+        line = $0
+        sub(/^[[:space:]]+(BSSID|MAC Address):[[:space:]]*/, "", line)
+        sub(/[[:space:]]+$/, "", line)
+        cur_bssid_entry = line
+      } else if ($0 ~ /^[[:space:]]+Signal[[:space:]]*\/[[:space:]]*Noise:[[:space:]]*/) {
+        line = $0
+        sub(/^[[:space:]]+Signal[[:space:]]*\/[[:space:]]*Noise:[[:space:]]*/, "", line)
+        if (match(line, /-?[0-9]+/)) {
+          cur_rssi = substr(line, RSTART, RLENGTH)
+        }
+      } else if ($0 ~ /^[[:space:]]+(Signal|RSSI):[[:space:]]*/) {
+        line = $0
+        sub(/^[[:space:]]+(Signal|RSSI):[[:space:]]*/, "", line)
+        if (match(line, /-?[0-9]+/)) {
+          cur_rssi = substr(line, RSTART, RLENGTH)
+        }
+      }
+    }
+    END {
+      flush_entry()
+      cand_rssi_str = (best_rssi > -999) ? best_rssi "" : ""
+      printf "%d\t%s\t%s\t%s\n", multi_ap, best_bssid, cand_rssi_str, best_ssid
+    }
+  '
+}
+
