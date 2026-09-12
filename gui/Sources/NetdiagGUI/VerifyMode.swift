@@ -90,6 +90,7 @@ private enum VerifyHarness {
         runMetricGlossaryTests()
         runHopAttributionTests()
         runNetworkMemoryTests()
+        runNotificationManagerTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1295,6 +1296,54 @@ private enum VerifyHarness {
         check(compSample.gatewayLatencyVerdict == .slower, "sample gateway latency is slower")
         check(compSample.lossVerdict == .degraded, "sample loss is degraded")
         check(compSample.summaryDescription.contains("5% packet loss"), "sample summary notes packet loss")
+    }
+
+    private static func runNotificationManagerTests() {
+        print("Notification Manager (NotificationManager):")
+        let mgr = NotificationManager()
+        mgr.setAuthorizedForTesting(false)
+        mgr.notificationsEnabled = true
+
+        let unauth = mgr.canNotify(id: "test", isOutage: true)
+        check(!unauth.allowed, "unauthorized notification is blocked")
+
+        mgr.setAuthorizedForTesting(true)
+        mgr.notificationsEnabled = false
+        let disabled = mgr.canNotify(id: "test", isOutage: true)
+        check(!disabled.allowed, "disabled notification is blocked")
+
+        mgr.notificationsEnabled = true
+        mgr.scope = .outagesOnly
+        let degBlocked = mgr.canNotify(id: "wifi-unstable", isOutage: false)
+        check(!degBlocked.allowed, "outages-only scope suppresses degradation")
+        let outageAllowed = mgr.canNotify(id: "connection-lost", isOutage: true)
+        check(outageAllowed.allowed, "outages-only scope permits outage")
+
+        // 30 minute cooldown
+        mgr.scope = .all
+        var delivered: [String] = []
+        var removed: [String] = []
+        mgr.onPostNotification = { id, _, _, _ in delivered.append(id) }
+        mgr.onRemoveNotification = { id in removed.append(id) }
+
+        let t0 = Date()
+        let post1 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t0)
+        check(post1, "first degradation alert delivers")
+        check(delivered.count == 1, "notification was posted")
+
+        let t1 = t0.addingTimeInterval(300) // 5 minutes later
+        let post2 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t1)
+        check(!post2, "repeat alert within 30 minutes is rate-limited")
+
+        let t2 = t0.addingTimeInterval(1801) // 30 mins later
+        let post3 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t2)
+        check(post3, "repeat alert after 30 minutes is permitted")
+
+        // Restoration notification
+        let restored = mgr.deliverRestored(networkName: "HomeNet 5G", latencyMs: 14.0)
+        check(restored, "restoration notification delivers after fault")
+        check(removed.contains("netdiag.wifi-unstable"), "previous degradation banner removed on restoration")
+        check(mgr.announcedFaults.isEmpty, "announced faults cleared on restoration")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

@@ -47,7 +47,15 @@ final class AlertEngine {
     }
 
     private(set) var active: [String: ActiveAlert] = [:]
-    private(set) var notificationsAuthorized = false
+    var notificationManager: NotificationManager
+
+    var notificationsAuthorized: Bool {
+        notificationManager.isAuthorized
+    }
+
+    init(notificationManager: NotificationManager? = nil) {
+        self.notificationManager = notificationManager ?? NotificationManager()
+    }
 
     /// Set by the app when a scan starts, so alerts are held rather than
     /// fired against measurements the app's own traffic is distorting.
@@ -80,23 +88,11 @@ final class AlertEngine {
     // MARK: - Permission
 
     func requestAuthorization() async {
-        let center = UNUserNotificationCenter.current()
-        do {
-            notificationsAuthorized = try await center.requestAuthorization(
-                options: [.alert, .sound])
-        } catch {
-            // Requesting from a process with no bundle identity throws.
-            // That is a build problem (running .build/release/NetdiagGUI
-            // instead of the assembled .app), not something the user did.
-            log.error("notification authorization failed: \(error.localizedDescription, privacy: .public)")
-            notificationsAuthorized = false
-        }
+        await notificationManager.requestAuthorization()
     }
 
     func refreshAuthorization() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        notificationsAuthorized = settings.authorizationStatus == .authorized
-            || settings.authorizationStatus == .provisional
+        await notificationManager.refreshAuthorization()
     }
 
     // MARK: - Global suppressors
@@ -204,7 +200,7 @@ final class AlertEngine {
             alert.body = summary
             alert.enrichedByScan = true
             active[id] = alert
-            deliver(id: id, title: alert.title, body: summary, replacing: true)
+            deliver(id: id, title: alert.title, body: summary, isOutage: def.isOutage, replacing: true)
         }
     }
 
@@ -296,7 +292,7 @@ final class AlertEngine {
                                      raisedAt: now, enrichedByScan: bodyOverride != nil,
                                      rules: firingRules)
         lastNotifiedAt[def.id] = now
-        deliver(id: def.id, title: def.title, body: body, replacing: false)
+        deliver(id: def.id, title: def.title, body: body, isOutage: def.isOutage, replacing: false)
         log.info("alert fired: \(def.id, privacy: .public)")
 
         // Only live alerts trigger a scan. A scan-only alert was produced
@@ -307,31 +303,18 @@ final class AlertEngine {
 
     // MARK: - Delivery
 
-    private func deliver(id: String, title: String, body: String, replacing: Bool) {
-        guard notificationsAuthorized else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        if !body.isEmpty { content.body = body }
-        content.sound = replacing ? nil : .default
-
-        // Same identifier for the fire and the enrichment, so the second
-        // one updates the banner in place instead of stacking a duplicate
-        // in Notification Center.
-        let request = UNNotificationRequest(identifier: "netdiag.\(id)",
-                                            content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+    private func deliver(id: String, title: String, body: String, isOutage: Bool, replacing: Bool) {
+        notificationManager.deliverDegradation(
+            id: id,
+            title: title,
+            body: body,
+            isOutage: isOutage,
+            replacing: replacing
+        )
     }
 
     private func deliverResolved(id: String, title: String) {
-        guard notificationsAuthorized else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "\(title) — resolved"
-        content.sound = nil
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "netdiag.\(id).resolved",
-                                  content: content, trigger: nil))
-        UNUserNotificationCenter.current()
-            .removeDeliveredNotifications(withIdentifiers: ["netdiag.\(id)"])
+        notificationManager.deliverAlertResolved(id: id, title: title)
     }
 
     // MARK: - Housekeeping

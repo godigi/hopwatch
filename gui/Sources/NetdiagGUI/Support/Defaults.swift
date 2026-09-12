@@ -40,6 +40,8 @@ enum Defaults {
             Key.scanOnNewNetwork: true,
             Key.scanOnAlert: true,
             Key.hasOnboarded: false,
+            Key.notificationsEnabled: true,
+            Key.notificationScope: "all",
         ])
         return defaults
     }()
@@ -64,6 +66,8 @@ enum Defaults {
         static let scanOnNewNetwork   = "scanOnNewNetwork"
         static let scanOnAlert        = "scanOnAlert"
         static let disabledAlerts     = "disabledAlerts"
+        static let notificationsEnabled = "notificationsEnabled"
+        static let notificationScope  = "notificationScope"
         static let autoCheckUpdates   = "autoCheckUpdates"
         static let lastUpdateCheck    = "lastUpdateCheck"
         static let locationBannerDismissed = "locationBannerDismissed"
@@ -293,6 +297,16 @@ enum Defaults {
     }
 
     static func isAlertEnabled(_ id: String) -> Bool { !disabledAlerts.contains(id) }
+
+    static var notificationsEnabled: Bool {
+        get { d.object(forKey: Key.notificationsEnabled) as? Bool ?? true }
+        set { d.set(newValue, forKey: Key.notificationsEnabled) }
+    }
+
+    static var notificationScope: String {
+        get { d.string(forKey: Key.notificationScope) ?? "all" }
+        set { d.set(newValue, forKey: Key.notificationScope) }
+    }
 }
 
 enum MenuBarStyle: String, CaseIterable, Identifiable {

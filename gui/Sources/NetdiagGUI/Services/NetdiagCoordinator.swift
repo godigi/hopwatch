@@ -16,6 +16,7 @@ final class NetdiagCoordinator {
     let events = NetworkEventWatcher()
     let history = HistoryStore()
     let details = RunDetailStore()
+    let notifications = NotificationManager()
     let alerts = AlertEngine()
     let watcher = WatcherControl()
     /// The CLI's rules catalog — see that store's header for why it's
@@ -129,6 +130,9 @@ final class NetdiagCoordinator {
         // sample before migrating would treat every already-seen network
         // as unchecked and re-baseline the world.
         Defaults.migrateArrivalStatesIfNeeded()
+        alerts.notificationManager = notifications
+        notifications.notificationsEnabled = appSettings.notificationsEnabled
+        notifications.scope = appSettings.notificationScope
         alerts.inNetworkGracePeriod = { [weak events] in
             events?.withinGracePeriod() ?? false
         }
@@ -386,6 +390,12 @@ final class NetdiagCoordinator {
         refreshLiveWiFi()
         adoptLiveSSIDAsNameIfNeeded()
         alerts.evaluate(sample: sample)
+        if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
+            notifications.deliverRestored(
+                networkName: liveSSID ?? sample.network.label ?? "Network",
+                latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs
+            )
+        }
         considerInvestigationBurst(sample)
 
         // The first cycle of a monitor process records monitor-started, matching

@@ -6,6 +6,13 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Smart, Rate-Limited macOS System Notifications on Network Degradation [TASK-025]
+
+- **Native Notification Manager (`NotificationManager`)**: Emits standard macOS banner notifications via `UNUserNotificationCenter` for critical network state transitions (e.g. healthy to complete outage or high packet loss).
+- **Anti-Spam Rate Limiting & Cooldown**: Enforces a strict 30-minute cooldown timer per ongoing fault category to eliminate notification fatigue during ongoing network instability.
+- **Closed-Loop Restoration Alert**: Emits an immediate, reassuring notification (*"Wi-Fi Restored: Reconnected to HomeNet 5G (14ms latency)"*) the moment the connection recovers, and automatically dismisses stale degradation banners from Notification Center.
+- **User Preferences**: Added dedicated controls in `SettingsView` allowing users to toggle system notifications on/off and select alert sensitivity between all degradation and complete outages only.
+
 ### Added — Network Memory & Historical Performance Card for Known Networks [TASK-024]
 
 - **Network Memory Synthesis (`NetworkHistoryStore`)**: Synthesizes a persistent historical memory profile for each known network from recorded checks and runs. Tracks typical baseline metrics (median gateway/internet latency, typical jitter, typical and peak download/upload speeds, uptime/incident count) and computes an overall network reliability percentage and grade (Excellent, Good, Fair, Degraded).

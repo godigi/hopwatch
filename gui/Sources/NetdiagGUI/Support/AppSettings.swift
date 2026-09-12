@@ -72,6 +72,12 @@ final class AppSettings {
     var autoCheckUpdates: Bool {
         didSet { Defaults.autoCheckUpdates = autoCheckUpdates }
     }
+    var notificationsEnabled: Bool {
+        didSet { Defaults.notificationsEnabled = notificationsEnabled }
+    }
+    var notificationScope: NotificationScope {
+        didSet { Defaults.notificationScope = notificationScope.rawValue }
+    }
     var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != oldValue else { return }
@@ -122,6 +128,8 @@ final class AppSettings {
         hasOnboarded = Defaults.hasOnboarded
         locationBannerDismissed = Defaults.locationBannerDismissed
         autoCheckUpdates = Defaults.autoCheckUpdates
+        notificationsEnabled = Defaults.notificationsEnabled
+        notificationScope = NotificationScope(rawValue: Defaults.notificationScope) ?? .all
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 }

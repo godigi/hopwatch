@@ -205,6 +205,28 @@ struct SettingsView: View {
                 }
             }
 
+            Section("System Notifications") {
+                Toggle("Show system notifications for network drops and outages", isOn: $appSettings.notificationsEnabled)
+                    .onChange(of: appSettings.notificationsEnabled) { _, new in
+                        coordinator.notifications.notificationsEnabled = new
+                    }
+
+                if appSettings.notificationsEnabled {
+                    Picker("Notification sensitivity", selection: $appSettings.notificationScope) {
+                        ForEach(NotificationScope.allCases) { scope in
+                            Text(scope.label).tag(scope)
+                        }
+                    }
+                    .onChange(of: appSettings.notificationScope) { _, new in
+                        coordinator.notifications.scope = new
+                    }
+                }
+
+                Text("Alerts are rate-limited to at most one per 30 minutes for an ongoing fault. An immediate notification confirms when your network recovers.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Automation") {
                 Toggle("Run a check automatically when something breaks", isOn: $appSettings.scanOnAlert)
                 Text("An automatic check skips the speed test, so it won't slow down a connection that is already struggling.")

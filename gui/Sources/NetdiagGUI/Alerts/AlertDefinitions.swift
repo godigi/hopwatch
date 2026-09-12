@@ -48,6 +48,12 @@ struct AlertDefinition: Identifiable, Sendable {
     /// condition that comes and goes.
     let oncePerNetwork: Bool
 
+    /// True if this alert represents a total network loss or outage rather than
+    /// performance degradation (e.g. packet loss or jitter).
+    var isOutage: Bool {
+        id == "connection-lost" || rules.contains("P1") || rules.contains("P2") || rules.contains("N1") || rules.contains("N1b")
+    }
+
     /// One mechanism-only sentence for Settings: which category of thing
     /// this watches and how its timing works, built only from this
     /// struct's own dwell/cooldown/scanOnly/oncePerNetwork fields. Unlike
