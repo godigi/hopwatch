@@ -26,9 +26,9 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-017](#task-017-visual-hop-attribution-chain--culprit-badge-mac--wi-fi--router--isp) | Visual Hop Attribution Chain & Culprit Badge (Mac ➔ Wi-Fi ➔ Router ➔ ISP) | GUI / Diagnosis | **Done** | M |
 | [TASK-018](#task-018-effective-wi-fi-health--asymmetric-link--rate-collapse-detection-w4-w5) | Effective Wi-Fi Health & Asymmetric Link / Rate-Collapse Detection (`W4`, `W5`) | Wi-Fi / Diagnosis | **Done** | M |
 | [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
-| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
-| [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
-| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | **Done** | M |
+| [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | Ready | S |
+| [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | Ready | S |
+| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | Ready | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -389,7 +389,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-019: Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`)
 - **Area**: macOS CLI & GUI / Wi-Fi Jitter & Diagnosis
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/wifi_common.sh`
   - `lib/diagnosis.sh`

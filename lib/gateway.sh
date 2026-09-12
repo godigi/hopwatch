@@ -4,7 +4,7 @@
 # Report card can flag unstable LAN links.
 #
 # Reads:  GATEWAY
-# Writes: GW_LOSS, GW_LATENCY, GW_JITTER
+# Writes: GW_LOSS, GW_LATENCY, GW_JITTER, GW_RTT_MAX
 # Entry:  gateway_run
 
 gateway_run() {
@@ -34,6 +34,8 @@ gateway_run() {
   printf '%s\n' "$ping_out" >> "$LOG"
   parsed="$(ping_parse_summary "$ping_out")"
   IFS='|' read -r GW_LOSS GW_LATENCY GW_JITTER <<<"$parsed"
+  GW_RTT_MAX="$(ping_parse_max "$ping_out")"
+  is_numeric "$GW_RTT_MAX" || GW_RTT_MAX=""
   # No summary means the probe did not measure loss. Keep it empty so the
   # diagnosis layer cannot turn a command failure into a confident 100%
   # loss claim.

@@ -4,7 +4,7 @@
 #
 # Reads:  INTERFACE
 # Writes: IS_WIFI, WIFI_SSID, WIFI_BSSID, WIFI_SEC, WIFI_RSSI, WIFI_NOISE,
-#         WIFI_SNR, WIFI_CHAN, WIFI_PHY, WIFI_TX
+#         WIFI_SNR, WIFI_CHAN, WIFI_PHY, WIFI_TX, WIFI_AWDL_ACTIVE
 # Entry:  wifi_run
 
 # Writes IS_WIFI, WIFI_* — read by diagnosis.sh / output.sh / emit_json.py.
@@ -39,6 +39,11 @@ wifi_run() {
     fi
   fi
   if [ "$IS_WIFI" -eq 1 ]; then
+    # Check AWDL (Apple Wireless Direct Link) status for AirDrop/Sidecar channel hopping
+    local awdl_out=""
+    awdl_out="$(ifconfig awdl0 2>/dev/null || true)"
+    WIFI_AWDL_ACTIVE="$(wifi_parse_awdl_active "$awdl_out")"
+
     # Try wdutil for rich info (needs sudo). Non-interactive: only attempt if
     # cached creds.
     local wdutil_out=""

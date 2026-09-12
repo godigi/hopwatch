@@ -589,6 +589,13 @@ ping_parse_summary() {
   printf '%s|%s|%s' "$loss" "$avg" "$jitter"
 }
 
+# Extracts max RTT from ping summary: round-trip min/avg/max/stddev = ...
+ping_parse_max() {
+  local out="${1:-}"
+  printf '%s\n' "$out" \
+    | awk -F'[ /]' '/round-trip|rtt/{print $(NF-2); exit}'
+}
+
 # ── Bufferbloat grading ──────────────────────────────────────────────────
 # Waveform/DSLReports thresholds, held in lib/thresholds.sh alongside every
 # other cutoff a diagnosis rule fires on: A < +5ms, B < +30ms, C < +60ms,

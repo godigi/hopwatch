@@ -167,6 +167,13 @@ runs stop filing under the synthetic "unknown" network.
 - Recommendation: move closer to the router.
 - Rationale: Wall-powered access points transmit at 200–500 mW, but battery-powered laptops transmit at only 30–50 mW. The Mac receives strong signal, but return packets are dropped through walls or interference. Firing W5 correctly attributes loss to Wi-Fi rather than falsely accusing the router hardware (G2) or ISP.
 
+### AWDL-1 — Apple Wireless Direct Link channel hopping
+
+- Trigger: `is_wifi AND wifi.awdl_active AND gateway.loss_pct < 10% AND gateway.rtt_avg <= 35ms AND (gateway.rtt_max >= 200ms OR gateway.jitter >= 40ms)`
+- Severity: `warn`
+- Recommendation: set AirDrop receiving to "Off" in Control Center, or disconnect Sidecar and AirPlay while on video calls or gaming.
+- Rationale: Apple Wireless Direct Link (AWDL) is used by macOS for peer-to-peer Apple ecosystem features (AirDrop, AirPlay, Sidecar, Universal Control). To discover peers, the Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 and 149). While off-channel, traffic stalls in network buffers, causing periodic 200–500 ms latency spikes and micro-stutter in Zoom, Google Meet, Microsoft Teams, and real-time gaming even though overall packet loss is 0% and base ping is low.
+
 > **G1, G2, G3 and W5 all fire only when `TCP-1` does not.** A gateway that
 > drops pings while still carrying TCP is filtering, not failing; see the
 > precedence note under TCP-1 below. The trigger lines here read as

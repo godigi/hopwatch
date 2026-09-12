@@ -71,6 +71,7 @@ WIFI_MULTI_AP=0              # 1 = multiple BSSIDs/APs detected on this SSID
 WIFI_CANDIDATE_BSSID=""      # BSSID of candidate alternative AP
 WIFI_CANDIDATE_RSSI=""       # RSSI of candidate alternative AP
 WIFI_CANDIDATE_SSID=""       # SSID of candidate alternative AP
+WIFI_AWDL_ACTIVE=0           # 1 = Apple Wireless Direct Link (awdl0) is active
 
 # VPN (lib/vpn.sh)
 VPN_ACTIVE=0
@@ -81,6 +82,7 @@ VPN_NAME=""
 GW_LOSS=""
 GW_LATENCY=""
 GW_JITTER=""           # stddev from ping summary, ms
+GW_RTT_MAX=""          # max round-trip latency from ping summary, ms
 
 # The packet-loss thresholds (LOSS_WARN_PCT, LOSS_CRIT_PCT) and the probe
 # geometry (LOSS_PROBE_COUNT, LOSS_PROBE_INTERVAL) moved to

@@ -175,3 +175,73 @@ assert_contains() {
   [ "$(diag_sev_for W2)" = "warn" ]
   assert_contains "$(diag_text_for W2)" "interference (SNR 15 dB)"
 }
+
+# ── AWDL-1: Apple Wireless Direct Link channel hopping ─────────────────────
+
+@test "diagnosis: AWDL-1 fires when awdl0 is active and ping exhibits large RTT spike" {
+  wifi_baseline
+  WIFI_AWDL_ACTIVE=1
+  GW_LOSS=0
+  GW_LATENCY=12.5
+  GW_RTT_MAX=245.8
+  diagnosis_run >/dev/null
+  diag_has AWDL-1 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$(diag_sev_for AWDL-1)" = "warn" ]
+  assert_contains "$(diag_text_for AWDL-1)" "Apple Wireless Direct Link (AirDrop/Sidecar)"
+  assert_contains "$(diag_text_for AWDL-1)" "up to 245 ms"
+}
+
+@test "diagnosis: AWDL-1 fires on high jitter even when max RTT is omitted" {
+  wifi_baseline
+  WIFI_AWDL_ACTIVE=1
+  GW_LOSS=0
+  GW_LATENCY=14.0
+  GW_JITTER=48.2
+  GW_RTT_MAX=""
+  diagnosis_run >/dev/null
+  diag_has AWDL-1 || { echo "AWDL-1 did not fire on jitter; rules: ${DIAG_RULE[*]}"; return 1; }
+  assert_contains "$(diag_text_for AWDL-1)" "up to 48 ms"
+}
+
+@test "diagnosis: AWDL-1 stays silent when awdl0 is inactive" {
+  wifi_baseline
+  WIFI_AWDL_ACTIVE=0
+  GW_LOSS=0
+  GW_LATENCY=12.0
+  GW_RTT_MAX=300.0
+  GW_JITTER=55.0
+  diagnosis_run >/dev/null
+  ! diag_has AWDL-1 || { echo "AWDL-1 fired with inactive AWDL"; return 1; }
+}
+
+@test "diagnosis: AWDL-1 stays silent on wired Ethernet" {
+  wifi_baseline
+  IS_WIFI=0
+  WIFI_AWDL_ACTIVE=1
+  GW_LOSS=0
+  GW_LATENCY=2.0
+  GW_RTT_MAX=300.0
+  diagnosis_run >/dev/null
+  ! diag_has AWDL-1 || { echo "AWDL-1 fired on wired Ethernet"; return 1; }
+}
+
+@test "diagnosis: AWDL-1 stays silent when baseline ping is high" {
+  wifi_baseline
+  WIFI_AWDL_ACTIVE=1
+  GW_LOSS=0
+  GW_LATENCY=65.0
+  GW_RTT_MAX=350.0
+  diagnosis_run >/dev/null
+  ! diag_has AWDL-1 || { echo "AWDL-1 fired when baseline ping was already high"; return 1; }
+}
+
+@test "diagnosis: AWDL-1 stays silent when gateway has loss" {
+  wifi_baseline
+  WIFI_AWDL_ACTIVE=1
+  GW_LOSS=15.0
+  GW_LATENCY=12.0
+  GW_RTT_MAX=350.0
+  diagnosis_run >/dev/null
+  ! diag_has AWDL-1 || { echo "AWDL-1 fired when gateway had loss"; return 1; }
+}
+

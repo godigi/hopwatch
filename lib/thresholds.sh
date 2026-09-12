@@ -464,3 +464,11 @@ THRESH_TRAFFIC_BUSY_MBPS=5
 # which can explain bufferbloat and throughput drops under load.
 THRESH_LAN_ACTIVE_DEVICES=20
 
+# AWDL-1 — Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping latency spikes.
+# When AWDL is active, macOS periodically leaves the current AP channel to scan
+# social channels (44 & 149), causing 200-500ms latency spikes without packet loss.
+THRESH_AWDL_BASE_RTT_MAX_MS=35
+THRESH_AWDL_SPIKE_RTT_MIN_MS=200
+THRESH_AWDL_JITTER_MIN_MS=40
+
+

@@ -119,5 +119,16 @@ import Testing
         #expect(w5.culprit == .wifi)
         #expect(w5.wifiHealth == .warning)
         #expect(w5.reassurance.contains("asymmetric link"))
+
+        // AWDL-1: Apple Wireless Direct Link channel hopping
+        let awdl = HopAttributionResolver.resolve(
+            rules: ["AWDL-1"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 12.0
+        )
+        #expect(awdl.culprit == .wifi)
+        #expect(awdl.wifiHealth == .warning)
+        #expect(awdl.reassurance.contains("Apple Wireless Direct Link"))
     }
 }

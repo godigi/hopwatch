@@ -145,6 +145,17 @@ diagnosis_run() {
     add_diag warn W4 "Your Wi-Fi signal power reads strong (${WIFI_RSSI} dBm), but your negotiated transmit rate has collapsed to ${WIFI_TX} Mbps due to physical obstacles or radio interference. Moving closer to your router will restore full throughput."
   fi
 
+  # AWDL-1 — Apple Wireless Direct Link channel hopping: periodic latency spikes
+  if [ "$IS_WIFI" -eq 1 ] && [ "${WIFI_AWDL_ACTIVE:-0}" -eq 1 ] \
+     && loss_below "$GW_LOSS" "$LOSS_WARN_PCT" \
+     && [ -n "${GW_LATENCY:-}" ] && is_numeric "$GW_LATENCY" \
+     && [ "${GW_LATENCY%.*}" -le "$THRESH_AWDL_BASE_RTT_MAX_MS" ] \
+     && { { [ -n "${GW_RTT_MAX:-}" ] && is_numeric "$GW_RTT_MAX" && [ "${GW_RTT_MAX%.*}" -ge "$THRESH_AWDL_SPIKE_RTT_MIN_MS" ]; } \
+       || { [ -n "${GW_JITTER:-}" ] && is_numeric "$GW_JITTER" && [ "${GW_JITTER%.*}" -ge "$THRESH_AWDL_JITTER_MIN_MS" ]; }; }; then
+    local _awdl_disp="${GW_RTT_MAX:-${GW_JITTER}}"
+    add_diag warn AWDL-1 "Periodic latency spikes (up to ${_awdl_disp%.*} ms) detected matching Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping. Base router ping is fast (${GW_LATENCY} ms avg), but periodic background channel scans stall packets. If experiencing video call freezes or audio stutter, set AirDrop to 'Receiving Off' in Control Center or disconnect Sidecar."
+  fi
+
   # TCP-1 — TCP works, ICMP is filtered. Decided before G1/G2/G3 because it
   # decides whether they fire at all, and mirrored exactly in
   # lib/monitor.sh's _mon_rules (tests/test_monitor.bats holds the two to

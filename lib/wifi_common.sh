@@ -167,3 +167,17 @@ wifi_parse_candidates() {
   '
 }
 
+# Parses `ifconfig awdl0` output ($1). Prints 1 if AWDL is active/running, 0 otherwise.
+wifi_parse_awdl_active() {
+  local out="${1:-}"
+  printf '%s\n' "$out" | awk '
+    /^[[:space:]]*status:[[:space:]]*active/ { active=1 }
+    /flags=.*<.*UP.*>/                       { up=1 }
+    /flags=.*<.*RUNNING.*>/                  { running=1 }
+    END {
+      if (active || (up && running)) { print 1 } else { print 0 }
+    }
+  '
+}
+
+

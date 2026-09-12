@@ -60,7 +60,9 @@ setup() {
            THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI \
            THRESH_WIFI_TX_COLLAPSE_MBPS THRESH_WIFI_COLLAPSE_MIN_RSSI \
            THRESH_WIFI_ASYMMETRIC_MIN_RSSI THRESH_WIFI_ASYMMETRIC_LOSS_PCT \
-           THRESH_WIFI_SNR_MIN_DB; do
+           THRESH_WIFI_SNR_MIN_DB \
+           THRESH_AWDL_BASE_RTT_MAX_MS THRESH_AWDL_SPIKE_RTT_MIN_MS \
+           THRESH_AWDL_JITTER_MIN_MS; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }

@@ -1203,6 +1203,12 @@ private enum VerifyHarness {
         check(w5Res.culprit == .wifi, "W5 asymmetric Wi-Fi link attributes to Wi-Fi")
         check(w5Res.wifiHealth == .warning, "W5 Wi-Fi health is warning")
 
+        let awdlRes = HopAttributionResolver.resolve(
+            rules: ["AWDL-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 12.0
+        )
+        check(awdlRes.culprit == .wifi, "AWDL-1 channel hopping attributes to Wi-Fi")
+        check(awdlRes.wifiHealth == .warning, "AWDL-1 Wi-Fi health is warning")
+
         let clearRes = HopAttributionResolver.resolve(
             rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0
         )

@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Apple Wireless Direct Link (AirDrop/Sidecar) latency spike detection [AWDL-1]
+
+macOS uses Apple Wireless Direct Link (`awdl0`) for peer-to-peer ecosystem features (AirDrop, AirPlay, Sidecar, Universal Control). The Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 and 149) for nearby Apple devices. During these discovery hops, network packets stall, causing periodic 200–500 ms latency spikes and micro-stutter in Zoom, Google Meet, Teams, and online gaming while overall packet loss remains 0% and base ping is low:
+
+- **Rule `AWDL-1` (warn)**: Triggers when `awdl0` is active on Wi-Fi and ping probes to the local gateway exhibit pronounced latency spikes ($\text{RTT}_{\max} \ge 200\text{ ms}$ or jitter $\ge 40\text{ ms}$) despite clean packet delivery ($\text{loss} < 10\%$) and fast baseline ping ($\text{RTT}_{\text{avg}} \le 35\text{ ms}$).
+- Guides users to set AirDrop receiving to "Off" in Control Center or disconnect Sidecar when needing jitter-free video calls or low-latency gaming.
+- Integrated into `HopAttributionResolver` (attributes culprit to Wi-Fi with tailored advice), `RunReportView` (Wi-Fi signal row health evaluation), and diagnostic rules catalog.
+
 ### Added — effective Wi-Fi health and asymmetric link / rate-collapse detection [W4, W5]
 
 A strong Wi-Fi signal icon (e.g. -50 dBm RSSI) does not guarantee a healthy wireless link. Two common failure modes were previously misattributed or undetected:

@@ -389,6 +389,29 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "AWDL-1",
+        "title": "Apple Wireless Direct Link latency spikes",
+        "category": "wifi",
+        "severity": "warn",
+        "scope": "scan",
+        "blurb": (
+            "Apple Wireless Direct Link is active for AirDrop, AirPlay, or "
+            "Sidecar. The Wi-Fi radio periodically leaves the current channel "
+            "to scan social channels, introducing latency spikes and "
+            "micro-stutters during video calls or multiplayer gaming."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#awdl-1--apple-wireless-direct-link-channel-hopping",
+        "impacts": {
+            "calls": "degraded",
+            "gaming": "degraded",
+        },
+        "fix": (
+            "Set AirDrop receiving to Off in Control Center, or disconnect "
+            "Sidecar and AirPlay while on important calls or gaming."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "WS-1",
         "title": "WiFi channel is congested",
         "category": "wifi",
