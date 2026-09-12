@@ -388,11 +388,14 @@ def main() -> None:
         "gateway": {
             "loss_pct": _f("GW_LOSS"),
             "rtt_avg_ms": _f("GW_RTT"),
+            "rtt_jitter_ms": _f("GW_JITTER"),
         },
         "internet": {
             "loss_pct": _f("INET_LOSS"),
             "rtt_avg_ms": _f("INET_RTT"),
+            "rtt_jitter_ms": _f("INET_JITTER"),
         },
+        "jitter_ms": _f("INET_JITTER") if _f("INET_JITTER") is not None else _f("GW_JITTER"),
         "wifi": ({
             "rssi": _i("WIFI_RSSI"),
             "noise": _i("WIFI_NOISE"),

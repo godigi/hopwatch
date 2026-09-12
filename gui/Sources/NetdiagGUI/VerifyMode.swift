@@ -91,6 +91,7 @@ private enum VerifyHarness {
         runHopAttributionTests()
         runNetworkMemoryTests()
         runNotificationManagerTests()
+        runConnectionStabilityTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1344,6 +1345,38 @@ private enum VerifyHarness {
         check(restored, "restoration notification delivers after fault")
         check(removed.contains("netdiag.wifi-unstable"), "previous degradation banner removed on restoration")
         check(mgr.announcedFaults.isEmpty, "announced faults cleared on restoration")
+    }
+
+    private static func runConnectionStabilityTests() {
+        print("Connection Stability & Jitter Tracking (TASK-026):")
+        let opt = ConnectionStability.evaluate(rtt: 20.0, jitter: 3.5, loss: 0.0)
+        check(opt.level == .optimal, "low latency and jitter evaluate to .optimal")
+        check(opt.tint == .green, "optimal stability has green tint")
+
+        let variable = ConnectionStability.evaluate(rtt: 55.0, jitter: 12.0, loss: 0.0)
+        check(variable.level == .variable, "mild latency and jitter evaluate to .variable")
+        check(variable.label == "Variable", "variable label is Variable")
+
+        let highJitter = ConnectionStability.evaluate(rtt: 30.0, jitter: 25.0, loss: 0.0)
+        check(highJitter.level == .variable, "high jitter evaluates to .variable")
+        check(highJitter.label == "High Jitter", "jitter > 20ms sets label to High Jitter")
+
+        let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 3.5)
+        check(unstableLoss.level == .unstable, "loss > 2% evaluates to .unstable")
+
+        let unstableJitter = ConnectionStability.evaluate(rtt: 20.0, jitter: 60.0, loss: 0.0)
+        check(unstableJitter.level == .unstable, "jitter > 50ms evaluates to .unstable")
+
+        // Moving jitter RFC 3550 fallback
+        let s1 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 20.0))
+        let s2 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 36.0))
+        let moving = MonitorSeries.movingJitter(samples: [s1, s2])
+        check(moving != nil && abs((moving ?? 0) - 16.0) < 0.01, "moving jitter computes RTT delta correctly")
+
+        // Live burst jitter priority
+        let sLive = MonitorSample(jitterMs: 4.2)
+        check(sLive.liveJitterMs == 4.2, "sample exposes top-level jitter_ms via liveJitterMs")
+        check(MonitorSeries.movingJitter(samples: [sLive]) == 4.2, "movingJitter prioritizes live burst jitter")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

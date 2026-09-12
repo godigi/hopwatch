@@ -32,7 +32,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-023](#task-023-audit--align-diagnosis-remediation-with-do-no-harm-standard-d1-d3-v6-2-b1) | Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`) | Diagnosis / Safety | **Done** | S |
 | [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
-| [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | Ready | S |
+| [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
 | [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | Ready | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
@@ -620,7 +620,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-026: Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor
 - **Area**: macOS CLI & GUI / Telemetry & Quality
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/monitor.sh`
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`

@@ -471,6 +471,25 @@ struct DropdownView: View {
                 }
                 .font(.system(size: 8))
                 .foregroundStyle(.tertiary)
+
+                if coordinator.monitor.isRunning && !coordinator.monitor.isPaused {
+                    HStack(spacing: 4) {
+                        Image(systemName: stability.icon)
+                            .font(.system(size: 8))
+                            .foregroundStyle(stability.tint)
+                        Text(stability.label)
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(stability.tint)
+                        if let jitter = currentJitter {
+                            Text("· \(String(format: "%.0f ms jitter", jitter))")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 1)
+                    .help(stability.description)
+                }
             }
             .frame(maxWidth: .infinity)
 
@@ -532,6 +551,19 @@ struct DropdownView: View {
 
     private var firedRules: Set<String> {
         Set(coordinator.monitor.latest?.status.rules ?? [])
+    }
+
+    private var currentJitter: Double? {
+        if let live = coordinator.monitor.latest?.liveJitterMs {
+            return live
+        }
+        return MonitorSeries.movingJitter(samples: coordinator.monitor.recent)
+    }
+
+    private var stability: ConnectionStability {
+        let rtt = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.monitor.latest?.gateway.rttAvgMs
+        let loss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.monitor.latest?.gateway.lossPct
+        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
     }
 
     private var internetValue: (text: String, tint: Color) {

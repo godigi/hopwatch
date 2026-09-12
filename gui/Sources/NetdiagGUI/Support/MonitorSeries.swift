@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Turns a run of monitor samples into line segments, leaving the gaps as
 /// gaps.
@@ -108,5 +109,99 @@ enum MonitorSeries {
 
         closeSegment()
         return result
+    }
+
+    /// Computes moving RFC 3550 jitter across a sequence of samples:
+    /// D(i-1, i) = |RTT_i - RTT_{i-1}|
+    /// J_i = J_{i-1} + (|D| - J_{i-1}) / 16.0
+    /// If samples already have measured probe burst jitter, prioritizes the latest sample's
+    /// `liveJitterMs`, falling back to the inter-sample RFC 3550 moving estimate.
+    static func movingJitter(samples: [MonitorSample]) -> Double? {
+        if let latestJitter = samples.reversed().compactMap(\.liveJitterMs).first {
+            return latestJitter
+        }
+
+        var prevRTT: Double? = nil
+        var currentJitter: Double = 0.0
+        var count = 0
+
+        for s in samples {
+            guard let rtt = s.internet.rttAvgMs ?? s.gateway.rttAvgMs else { continue }
+            if let p = prevRTT {
+                let diff = abs(rtt - p)
+                if count == 0 {
+                    currentJitter = diff
+                } else {
+                    currentJitter += (diff - currentJitter) / 16.0
+                }
+                count += 1
+            }
+            prevRTT = rtt
+        }
+        return count > 0 ? currentJitter : nil
+    }
+}
+
+/// Real-time connection stability rating evaluated from RTT, jitter, and packet loss.
+struct ConnectionStability: Sendable, Equatable {
+    enum Level: String, Sendable, CaseIterable {
+        case optimal = "Optimal"
+        case variable = "Variable"
+        case unstable = "Unstable"
+    }
+
+    let level: Level
+    let label: String
+    let description: String
+    let icon: String
+
+    var tint: Color {
+        switch level {
+        case .optimal: return .green
+        case .variable: return .yellow
+        case .unstable: return .red
+        }
+    }
+
+    /// Evaluates stability index according to TASK-026:
+    /// - Optimal (green): RTT < 35ms, Jitter < 8ms, Loss == 0%
+    /// - Variable (yellow): RTT 35–90ms or Jitter > 8ms (and <= 50ms) or RTT > 90ms (and <= 150ms)
+    /// - Unstable (red): Packet loss > 2% or Jitter > 50ms or RTT > 150ms
+    static func evaluate(rtt: Double?, jitter: Double?, loss: Double?) -> ConnectionStability {
+        guard let rtt else {
+            return ConnectionStability(
+                level: .variable,
+                label: "Unknown",
+                description: "Waiting for latency measurements",
+                icon: "questionmark.circle"
+            )
+        }
+
+        let l = loss ?? 0.0
+        let j = jitter ?? 0.0
+
+        if l > 2.0 || j > 50.0 || rtt > 150.0 {
+            return ConnectionStability(
+                level: .unstable,
+                label: "Unstable",
+                description: "Expect dropouts, buffering, and call audio glitching",
+                icon: "exclamationmark.triangle.fill"
+            )
+        } else if rtt > 35.0 || j > 8.0 || l > 0.0 {
+            let label = j > 20.0 ? "High Jitter" : "Variable"
+            return ConnectionStability(
+                level: .variable,
+                label: label,
+                description: "Acceptable for browsing/streaming; occasional micro-stutter in live calls/games",
+                icon: "waveform.path.ecg"
+            )
+        } else {
+            return ConnectionStability(
+                level: .optimal,
+                label: "Optimal",
+                description: "Flawless for competitive gaming, live streaming, and 4K calls",
+                icon: "checkmark.circle.fill"
+            )
+        }
     }
 }

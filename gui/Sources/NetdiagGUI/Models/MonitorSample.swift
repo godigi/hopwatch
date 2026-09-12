@@ -19,6 +19,7 @@ struct MonitorSample: Decodable, Sendable {
     var ts: String?
     var seq: Int?
     var gapS: Int?
+    var jitterMs: Double?
     /// Which cadence tiers refreshed this cycle. Everything outside this
     /// list is carried over from an earlier sample — a chart drawing a
     /// point needs to know that before it plots one.
@@ -33,6 +34,11 @@ struct MonitorSample: Decodable, Sendable {
     var tcp: TCP = .init()
     var publicInfo: PublicInfo = .init()
     var status: Status = .init()
+
+    /// Effective instantaneous jitter in ms, prioritizing internet then gateway.
+    var liveJitterMs: Double? {
+        jitterMs ?? internet.rttJitterMs ?? gateway.rttJitterMs
+    }
 
     /// Field-level differences from the previous sample, phrased by the
     /// CLI (schema 2+). Absent — and therefore empty — when nothing
@@ -57,6 +63,7 @@ struct MonitorSample: Decodable, Sendable {
         case schema, version, ts, seq, refreshed, link, network, vpn
         case gateway, internet, wifi, dns, tcp, status, changes
         case gapS = "gap_s"
+        case jitterMs = "jitter_ms"
         case publicInfo = "public"
     }
 
@@ -153,20 +160,24 @@ struct MonitorSample: Decodable, Sendable {
         /// treating the first as the second produced false criticals.
         var lossPct: Double?
         var rttAvgMs: Double?
+        var rttJitterMs: Double?
 
         enum CodingKeys: String, CodingKey {
             case lossPct = "loss_pct"
             case rttAvgMs = "rtt_avg_ms"
+            case rttJitterMs = "rtt_jitter_ms"
         }
     }
 
     struct Internet: Decodable, Sendable {
         var lossPct: Double?
         var rttAvgMs: Double?
+        var rttJitterMs: Double?
 
         enum CodingKeys: String, CodingKey {
             case lossPct = "loss_pct"
             case rttAvgMs = "rtt_avg_ms"
+            case rttJitterMs = "rtt_jitter_ms"
         }
     }
 
@@ -295,6 +306,7 @@ extension MonitorSample {
         ts = c.lenient(.ts)
         seq = c.lenient(.seq)
         gapS = c.lenient(.gapS)
+        jitterMs = c.lenient(.jitterMs)
         refreshed = c.lenient(.refreshed, [])
         link = c.lenient(.link, Link())
         network = c.lenient(.network, NetworkIdentity())
@@ -358,6 +370,7 @@ extension MonitorSample.Gateway {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lossPct = c.lenient(.lossPct)
         rttAvgMs = c.lenient(.rttAvgMs)
+        rttJitterMs = c.lenient(.rttJitterMs)
     }
 }
 
@@ -366,6 +379,7 @@ extension MonitorSample.Internet {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lossPct = c.lenient(.lossPct)
         rttAvgMs = c.lenient(.rttAvgMs)
+        rttJitterMs = c.lenient(.rttJitterMs)
     }
 }
 

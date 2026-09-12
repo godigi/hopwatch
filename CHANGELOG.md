@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Live Jitter Tracking & Real-Time Connection Stability Badge [TASK-026]
+
+- **Burst Probe Jitter Extraction (`lib/monitor.sh`)**: Extracts instantaneous standard deviation jitter directly from the existing probe bursts (`ping_parse_summary` stddev) for both gateway and internet targets without sending any additional probe packets.
+- **Structured Jitter Streaming (`helpers/monitor_sample.py`)**: Exports `rtt_jitter_ms` on gateway and internet objects alongside top-level `jitter_ms` to the monitor JSON feed.
+- **Live Stability Evaluation (`ConnectionStability`)**: Implemented RFC 3550 exponential moving jitter smoothing (`MonitorSeries.movingJitter`) and an instantaneous connection stability engine categorizing connection readiness into Optimal (🟢), Variable (🟡), and Unstable (🔴) based on RTT, jitter, and packet loss.
+- **Zero-Click Stability Badge (`DropdownView`)**: Embeds a real-time stability badge under the latency heartbeat strip with status glyphs, tooltips, and live jitter readouts for instant visibility into gaming, video call, and streaming readiness.
+- **Test Coverage**: Added test assertions in `tests/test_monitor.bats`, Swift testing suite in `ConnectionStabilityTests.swift`, and `--verify` check in `VerifyMode.swift`.
+
 ### Added — Smart, Rate-Limited macOS System Notifications on Network Degradation [TASK-025]
 
 - **Native Notification Manager (`NotificationManager`)**: Emits standard macOS banner notifications via `UNUserNotificationCenter` for critical network state transitions (e.g. healthy to complete outage or high packet loss).

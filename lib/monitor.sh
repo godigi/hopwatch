@@ -351,7 +351,7 @@ _mon_loss_fold() {
 }
 
 _mon_probe_gateway() {
-  MON_GW_LOSS=""; MON_GW_RTT=""
+  MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
   [ -n "$MON_GATEWAY" ] || return 0
   local out summary
   # -q: summary only. The scanner keeps the per-packet lines because it
@@ -377,8 +377,12 @@ _mon_probe_gateway() {
   summary="$(_mon_loss_fold "$MON_GW_HIST" "$out" "$MONITOR_PING_COUNT")"
   MON_GW_HIST="${summary%%|*}"
   MON_GW_LOSS="${summary#*|}"
-  MON_GW_RTT="$(ping_parse_summary "$out" | cut -d'|' -f2)"
+  local _gw_parsed
+  _gw_parsed="$(ping_parse_summary "$out")"
+  MON_GW_RTT="$(printf '%s' "$_gw_parsed" | cut -d'|' -f2)"
   is_numeric "$MON_GW_RTT"  || MON_GW_RTT=""
+  MON_GW_JITTER="$(printf '%s' "$_gw_parsed" | cut -d'|' -f3)"
+  is_numeric "$MON_GW_JITTER" || MON_GW_JITTER=""
 }
 
 # ── Medium tier ──────────────────────────────────────────────────────────
@@ -420,7 +424,7 @@ _mon_probe_tcp() {
 }
 
 _mon_probe_internet() {
-  MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""
+  MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
   local out out_alt summary summary_alt tmp_dir target target_alt
   target="${INET_TARGET:-1.1.1.1}"
@@ -458,8 +462,12 @@ _mon_probe_internet() {
   summary_alt="$(_mon_loss_fold "$MON_INET_HIST_ALT" "$out_alt" "$MONITOR_INET_PING_COUNT")"
   MON_INET_HIST_ALT="${summary_alt%%|*}"
   MON_INET_LOSS_ALT="${summary_alt#*|}"
-  MON_INET_RTT="$(ping_parse_summary "$out" | cut -d'|' -f2)"
+  local _inet_parsed
+  _inet_parsed="$(ping_parse_summary "$out")"
+  MON_INET_RTT="$(printf '%s' "$_inet_parsed" | cut -d'|' -f2)"
   is_numeric "$MON_INET_RTT"  || MON_INET_RTT=""
+  MON_INET_JITTER="$(printf '%s' "$_inet_parsed" | cut -d'|' -f3)"
+  is_numeric "$MON_INET_JITTER" || MON_INET_JITTER=""
 }
 
 # Probe normal HTTPS traffic, not just Wi-Fi association or ICMP. A Mac can
@@ -811,8 +819,10 @@ _mon_emit() {
   NETDIAG_MON_VPN_NAME="$MON_VPN_NAME" \
   NETDIAG_MON_GW_LOSS="$MON_GW_LOSS" \
   NETDIAG_MON_GW_RTT="$MON_GW_RTT" \
+  NETDIAG_MON_GW_JITTER="${MON_GW_JITTER:-}" \
   NETDIAG_MON_INET_LOSS="$MON_INET_LOSS" \
   NETDIAG_MON_INET_RTT="$MON_INET_RTT" \
+  NETDIAG_MON_INET_JITTER="${MON_INET_JITTER:-}" \
   NETDIAG_MON_WIFI_RSSI="$MON_WIFI_RSSI" \
   NETDIAG_MON_WIFI_NOISE="$MON_WIFI_NOISE" \
   NETDIAG_MON_WIFI_SNR="$MON_WIFI_SNR" \

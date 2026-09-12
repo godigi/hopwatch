@@ -1266,3 +1266,19 @@ import json, sys
 assert json.load(sys.stdin)['gap_s'] is None
 "
 }
+
+@test "monitor: gateway and internet jitter and top-level jitter_ms are emitted" {
+  run env NETDIAG_MON_SEQ=5 \
+    NETDIAG_MON_GW_JITTER="0.75" \
+    NETDIAG_MON_INET_JITTER="3.42" \
+    python3 "$REPO/helpers/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+assert data['gateway']['rtt_jitter_ms'] == 0.75
+assert data['internet']['rtt_jitter_ms'] == 3.42
+assert data['jitter_ms'] == 3.42
+"
+}
+
