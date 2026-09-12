@@ -33,6 +33,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-024](#task-024-network-memory--historical-performance-card-for-known-networks) | Network Memory & Historical Performance Card for Known Networks | GUI / Travel & History | **Done** | M |
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
 | [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
+| [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | **Done** | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -646,3 +647,34 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - `MonitorSample` decodes `jitter_ms` and `MonitorSeries` calculates moving jitter.
   - `DropdownView` renders the real-time stability badge with accessible status glyphs.
   - Fully verified in `swift run -c debug NetdiagGUI --verify` and test suite.
+
+---
+
+### TASK-027: Remediation Feedback & Resolution Banner (Closed-Loop Confirmation)
+- **Area**: macOS GUI / UX & User Delight
+- **Status**: **Done**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Support/StageResolver.swift`
+  - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/VerifyMode.swift`
+  - `gui/Tests/NetdiagGUITests/`
+- **Context**:
+  When `netdiag` advises a user to take action (e.g. *"Your Wi-Fi signal is weak, move closer"* or *"Connected to 2.4 GHz band, toggle Wi-Fi to join 5 GHz"* or captive portal authentication), the user takes the physical action.
+  Currently, once the condition clears, the dropdown simply reverts to its default idle state (*"All good — watching on HomeNet"*).
+  The user is left with a broken feedback loop: they are unsure whether what they just did actually succeeded, or if the alert just timed out.
+- **Architectural Design**:
+  1. **Resolution Event Tracking in `NetdiagCoordinator`**:
+     - Maintain an ephemeral `recentResolutions: [ResolutionEvent]` tracking active alerts that successfully transition from non-healthy (warning/critical) back to healthy within the session.
+     - Store pre-resolution and post-resolution metrics (e.g. band switched from `2.4 GHz` to `5 GHz`, RSSI jumped from `-78 dBm` to `-45 dBm`, packet loss dropped from `15%` to `0%`).
+  2. **Resolution Banner in Stage Card**:
+     - When a resolution event occurs within the last 60 seconds, `StageResolver` presents a temporary, uplifting **Resolution Stage** (`.resolved(summary)`):
+       - 🟢 *“✓ Wi-Fi Improved: Moved from 2.4 GHz to 5 GHz (Ch 52). Negotiated rate increased from 54 Mbps to 650 Mbps.”*
+       - 🟢 *“✓ Signal Restored: Wi-Fi signal jumped from -78 dBm to -46 dBm (Excellent).”*
+       - 🟢 *“✓ Network Stabilized: Packet loss resolved (0% loss, 18ms ping).”*
+       - 🟢 *“✓ Online: Captive portal authentication succeeded. Internet access active.”*
+     - Fades smoothly back to normal idle `.watching` after 45 seconds or on dismiss.
+- **Acceptance Criteria**:
+  - `StageResolver` resolves `.resolved` state when an alert clears and presents actionable metric improvements.
+  - Off-screen snapshot and `--verify` tests prove `.resolved` rendering contract.
+  - Passes all verification suites: `swift run -c debug NetdiagGUI --verify` and `make -C gui test`.
