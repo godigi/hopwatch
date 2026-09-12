@@ -28,6 +28,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-019](#task-019-apple-wireless-direct-link-awdl--airdrop-latency-spike-detection-awdl-1) | Apple Wireless Direct Link (AWDL / AirDrop) Latency Spike Detection (`AWDL-1`) | Wi-Fi / Jitter | **Done** | S |
 | [TASK-020](#task-020-unresponsive-primary-dns-resolver--silent-fallback-delay-d5) | Unresponsive Primary DNS Resolver & Silent Fallback Delay (`D5`) | DNS / Latency | **Done** | S |
 | [TASK-021](#task-021-suboptimal-wi-fi-band-trapping-detection-w6) | Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz) | Wi-Fi / Bands | **Done** | S |
+| [TASK-022](#task-022-anti-false-positive-guardrails-for-mtu-dhcp-leases-and-bufferbloat-severity-m1-dh-1-b1-b2) | Anti-False-Positive Guardrails for MTU, DHCP Leases & Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`) | Diagnosis / Accuracy | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -476,3 +477,39 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
   - Comprehensive unit test in `tests/test_diagnosis_wifi.bats` covering edge cases (strong 5 GHz, weak 5 GHz, separate SSIDs).
   - Passes `bats tests/` and `make test`.
+
+---
+
+### TASK-022: Anti-False-Positive Guardrails for MTU, DHCP Leases, and Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`)
+- **Area**: CLI / Diagnosis & Precision Accuracy
+- **Status**: **Done**
+- **Files to touch**:
+  - `lib/diagnosis.sh`
+  - `lib/constants.sh`
+  - `docs/DIAGNOSIS-RULES.md`
+  - `helpers/rules_catalog.py`
+  - `tests/test_diagnosis_mtu.bats`
+  - `tests/test_diagnosis_dhcp.bats`
+  - `tests/test_diagnosis_bufferbloat.bats`
+- **Context**:
+  An audit of the diagnosis engine revealed three rules with high false-positive rates that create phantom anxiety or mislead users into unnecessary actions:
+  1. **Rule `M1` (Path MTU below 1500)**: Accuses active VPNs of "breaking websites" because the tunnel MTU is 1380–1420 bytes. Nearly all modern VPN protocols (WireGuard, Tailscale, Cloudflare WARP, IPsec) deliberately configure sub-1500 MTUs for encryption overhead, and TCP MSS clamping handles this transparently.
+  2. **Rule `DH-1` (DHCP lease expires soon)**: Warns that users will "suddenly lose the network with no warning" if lease time remaining is < 60 minutes. Many legitimate public/hotel networks set 30-to-60 minute leases to recycle IPs, and macOS silently renews at 50% time (T1).
+  3. **Rules `B1`/`B2` (Bufferbloat)**: Flags `critical` severity on high-speed fiber lines (>200 Mbps) during synthetic artificial speed test bursts, advising users to replace their routers or enable SQM even though the line never saturates in ordinary daily usage.
+- **Architectural Guardrails**:
+  - **`M1` VPN Awareness**:
+    - When `VPN_ACTIVE=1` or `PATH_SPLIT_TUNNEL=1`, suppress `critical`/`warn` for standard VPN MTUs (1280–1499 bytes). Down-grade to an `info` note or silent no-op.
+    - Only emit `warn` on VPNs if MTU < 1280 (violating standard IPv6 minimum transmission units).
+    - On direct physical links (non-VPN), preserve existing MTU warning logic.
+  - **`DH-1` T2 Phase Timing**:
+    - Change threshold from `< 60 minutes` to `< 10 minutes` (or `< 15%` of total lease duration) to target actual renewal distress rather than normal short leases.
+    - Wording softened: "Your DHCP lease has not renewed yet (expires in X minutes)..."
+  - **`B1`/`B2` High-Bandwidth Proportional Severity**:
+    - On connections with download/upload throughput > 150 Mbps, demote grade `D`/`F` bufferbloat from `critical` to `warn`.
+    - Restrict `critical` bufferbloat to constrained connections (< 30 Mbps) where latency spikes genuinely ruin active video calls and voice chats.
+- **Acceptance Criteria**:
+  - Unit tests verify `M1` does not fire `critical` on a VPN with MTU 1380.
+  - Unit tests verify `DH-1` does not fire on a 1-hour lease with 45 minutes remaining.
+  - Unit tests verify `B1`/`B2` grade D on a 300 Mbps connection emits `warn` instead of `critical`.
+  - Cataloged in `helpers/rules_catalog.py` and documented in `docs/DIAGNOSIS-RULES.md`.
+  - All existing BATS tests continue to pass.
