@@ -447,7 +447,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-021: Suboptimal Wi-Fi Band Trapping Detection (`W6`) (2.4 GHz vs 5/6 GHz)
 - **Area**: macOS CLI & GUI / Wi-Fi Bands & Roaming
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/wifi_common.sh`
   - `lib/constants.sh`

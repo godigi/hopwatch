@@ -6,6 +6,15 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — suboptimal Wi-Fi band trapping detection [W6]
+
+Modern dual-band routers broadcast a unified SSID across both 2.4 GHz and 5 GHz (or 6 GHz) frequencies. When MacBooks wake from sleep or connect from afar, they often associate with the 2.4 GHz beacon. Even after moving close to the router, macOS does not aggressively roam to 5 GHz if the 2.4 GHz connection is deemed "acceptable", trapping the user on congested 2.4 GHz channels with throughput caps:
+
+- **Rule `W6` (info / warn)**: Triggers when the Mac is associated with a 2.4 GHz channel (channels 1–14) while a faster 5 GHz or 6 GHz band on the same network is available with strong signal ($\text{RSSI} \ge -65\text{ dBm}$) and an advantageous signal delta ($\le 12\text{ dBm}$ difference). Escalates to `warn` if the 2.4 GHz link transmit rate is severely restricted ($\text{Tx} \le 54\text{ Mbps}$).
+- Guides users to toggle Wi-Fi off and back on to prompt macOS to associate with the 5 GHz band.
+- Built with strict anti-false-positive guardrails: stays silent if the 5 GHz signal is weak, if the signal delta exceeds 12 dBm, or if the Mac is already connected to 5 GHz.
+- Integrated into `HopAttributionResolver` (attributes culprit to Wi-Fi with tailored reassurance), `RunReportView` (Wi-Fi signal row health check list), and diagnostic rules catalog.
+
 ### Added — unresponsive primary DNS resolver & silent fallback delay detection [D5]
 
 When a router DHCP configuration or network admin assigns an unreachable primary DNS server alongside a functional secondary resolver (e.g. dead local gateway DNS proxy or dead local Pi-hole with public secondary DNS), every application-level domain lookup incurs a hidden 1–5 second timeout delay before macOS falls back to the secondary resolver. Browsing feels sluggish even though internet connectivity tests pass:

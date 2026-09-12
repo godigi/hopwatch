@@ -99,15 +99,18 @@ wifi_parse_wdutil() {
 
 # Multi-AP detection and candidate access point scrape from `system_profiler SPAirPortDataType`.
 # $1 = system_profiler output, $2 = target SSID, $3 = current BSSID (optional).
-# Prints 4 TAB-separated fields:
-#   multi_ap (1 or 0), candidate_bssid, candidate_rssi, candidate_ssid
-# Candidate is chosen as the AP on the same SSID (with different BSSID) with the highest RSSI.
+# Prints 7 TAB-separated fields:
+#   multi_ap (1 or 0), candidate_bssid, candidate_rssi, candidate_ssid,
+#   candidate_5g_bssid, candidate_5g_rssi, candidate_5g_chan
+# Best candidate is chosen as the AP on the same SSID (with different BSSID) with highest RSSI.
+# 5G candidate is chosen as the AP on 5GHz/6GHz on the same SSID with highest RSSI.
 wifi_parse_candidates() {
   local sp="$1" target="$2" cur_bssid="${3:-}"
   printf '%s\n' "$sp" | awk -v target="$target" -v cur_bssid="$cur_bssid" '
     BEGIN {
-      in_other = 0; cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""
+      in_other = 0; cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""; cur_chan = ""; cur_band = ""
       best_rssi = -999; best_bssid = ""; best_ssid = ""; multi_ap = 0
+      best_5g_rssi = -999; best_5g_bssid = ""; best_5g_chan = ""
     }
     function flush_entry() {
       if (in_other && cur_ssid != "") {
@@ -120,11 +123,20 @@ wifi_parse_candidates() {
                 best_bssid = cur_bssid_entry
                 best_ssid = cur_ssid
               }
+              is_5g = 0
+              if (cur_band ~ /5|6/ || (cur_chan != "" && cur_chan + 0 >= 36 && cur_chan + 0 <= 196)) {
+                is_5g = 1
+              }
+              if (is_5g && (cur_rssi + 0 > best_5g_rssi)) {
+                best_5g_rssi = cur_rssi + 0
+                best_5g_bssid = cur_bssid_entry
+                best_5g_chan = cur_chan
+              }
             }
           }
         }
       }
-      cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""
+      cur_ssid = ""; cur_bssid_entry = ""; cur_rssi = ""; cur_chan = ""; cur_band = ""
     }
     /Current Network Information:/ { flush_entry(); in_other = 0; next }
     /Other Local Wi-Fi Networks:/   { flush_entry(); in_other = 1; next }
@@ -145,6 +157,14 @@ wifi_parse_candidates() {
         sub(/^[[:space:]]+(BSSID|MAC Address):[[:space:]]*/, "", line)
         sub(/[[:space:]]+$/, "", line)
         cur_bssid_entry = line
+      } else if ($0 ~ /^[[:space:]]+Channel:[[:space:]]*/) {
+        line = $0
+        if (match(line, /[0-9]+/)) {
+          cur_chan = substr(line, RSTART, RLENGTH)
+        }
+        if (match(line, /\(([^,]+)/)) {
+          cur_band = substr(line, RSTART+1, RLENGTH-1)
+        }
       } else if ($0 ~ /^[[:space:]]+Signal[[:space:]]*\/[[:space:]]*Noise:[[:space:]]*/) {
         line = $0
         sub(/^[[:space:]]+Signal[[:space:]]*\/[[:space:]]*Noise:[[:space:]]*/, "", line)
@@ -162,7 +182,8 @@ wifi_parse_candidates() {
     END {
       flush_entry()
       cand_rssi_str = (best_rssi > -999) ? best_rssi "" : ""
-      printf "%d\t%s\t%s\t%s\n", multi_ap, best_bssid, cand_rssi_str, best_ssid
+      cand_5g_rssi_str = (best_5g_rssi > -999) ? best_5g_rssi "" : ""
+      printf "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", multi_ap, best_bssid, cand_rssi_str, best_ssid, best_5g_bssid, cand_5g_rssi_str, best_5g_chan
     }
   '
 }

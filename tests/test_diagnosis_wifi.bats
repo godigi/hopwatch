@@ -33,6 +33,13 @@ wifi_baseline() {
   WIFI_RSSI=-50
   WIFI_SNR=35
   WIFI_TX=866
+  WIFI_CHAN="36"
+  WIFI_SCAN_CURRENT_CHANNEL="36"
+  WIFI_SCAN_CURRENT_BAND="5GHz"
+  WIFI_CANDIDATE_5GHZ_RSSI=""
+  WIFI_CANDIDATE_5GHZ_BSSID=""
+  WIFI_CANDIDATE_5GHZ_CHAN=""
+  WIFI_AWDL_ACTIVE=0
   WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS=0
   DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
 }
@@ -243,5 +250,98 @@ assert_contains() {
   GW_RTT_MAX=350.0
   diagnosis_run >/dev/null
   ! diag_has AWDL-1 || { echo "AWDL-1 fired when gateway had loss"; return 1; }
+}
+
+# ── W6: Suboptimal Wi-Fi band trapping (2.4 GHz vs 5 GHz) ──────────────────
+
+@test "diagnosis: W6 fires as info when on 2.4 GHz and strong 5 GHz candidate is available" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="6"
+  WIFI_SCAN_CURRENT_CHANNEL="6"
+  WIFI_SCAN_CURRENT_BAND="2GHz"
+  WIFI_TX=144
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  WIFI_CANDIDATE_5GHZ_CHAN="36"
+  diagnosis_run >/dev/null
+  diag_has W6 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$(diag_sev_for W6)" = "info" ]
+  assert_contains "$(diag_text_for W6)" "connected to the 2.4 GHz band (channel 6, 144 Mbps)"
+  assert_contains "$(diag_text_for W6)" "faster 5 GHz band on \"HomeNet\" is available with strong signal (-58 dBm)"
+  assert_contains "$(diag_text_for W6)" "Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz"
+}
+
+@test "diagnosis: W6 escalates to warn when transmit rate is collapsed (<= 54 Mbps)" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="6"
+  WIFI_SCAN_CURRENT_CHANNEL="6"
+  WIFI_SCAN_CURRENT_BAND="2GHz"
+  WIFI_TX=48
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  diagnosis_run >/dev/null
+  diag_has W6 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$(diag_sev_for W6)" = "warn" ]
+  assert_contains "$(diag_text_for W6)" "48 Mbps"
+}
+
+@test "diagnosis: W6 stays silent when 5 GHz candidate is weak (< -65 dBm)" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="6"
+  WIFI_SCAN_CURRENT_CHANNEL="6"
+  WIFI_SCAN_CURRENT_BAND="2GHz"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-72
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired when 5 GHz candidate is weak (-72 dBm)"; return 1; }
+}
+
+@test "diagnosis: W6 stays silent when delta between 2.4 GHz and 5 GHz is too large (> 12 dBm)" {
+  wifi_baseline
+  WIFI_RSSI=-48
+  WIFI_CHAN="6"
+  WIFI_SCAN_CURRENT_CHANNEL="6"
+  WIFI_SCAN_CURRENT_BAND="2GHz"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-64 # delta = 16 dBm > 12 dBm
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired when delta was 16 dBm"; return 1; }
+}
+
+@test "diagnosis: W6 stays silent when already connected to 5 GHz" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="36"
+  WIFI_SCAN_CURRENT_CHANNEL="36"
+  WIFI_SCAN_CURRENT_BAND="5GHz"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired when already on 5 GHz"; return 1; }
+}
+
+@test "diagnosis: W6 stays silent on wired connection" {
+  wifi_baseline
+  IS_WIFI=0
+  WIFI_CHAN="6"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired on wired link"; return 1; }
+}
+
+@test "diagnosis: W6 stays silent when candidate BSSID is the current BSSID" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="6"
+  WIFI_SCAN_CURRENT_CHANNEL="6"
+  WIFI_SCAN_CURRENT_BAND="2GHz"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:ff" # matches current WIFI_BSSID
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired for current BSSID"; return 1; }
 }
 

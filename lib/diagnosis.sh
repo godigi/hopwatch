@@ -137,6 +137,40 @@ diagnosis_run() {
     fi
   fi
 
+  # W6 — suboptimal Wi-Fi band trapping: connected to 2.4 GHz when 5 GHz is available
+  if [ "$IS_WIFI" -eq 1 ] && [ -n "$WIFI_SSID" ] && [ "$WIFI_SSID" != "<redacted>" ] \
+     && [ -n "$WIFI_CANDIDATE_5GHZ_RSSI" ] && is_numeric "$WIFI_CANDIDATE_5GHZ_RSSI" \
+     && [ "$WIFI_CANDIDATE_5GHZ_RSSI" -ge "$THRESH_WIFI_BAND_5GHZ_MIN_RSSI" ] \
+     && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
+     && [ -z "${WIFI_CANDIDATE_5GHZ_BSSID:-}" -o "${WIFI_CANDIDATE_5GHZ_BSSID:-}" != "$WIFI_BSSID" ]; then
+    local _cur_ch="${WIFI_CHAN:-${WIFI_SCAN_CURRENT_CHANNEL:-}}"
+    local _cur_band="${WIFI_SCAN_CURRENT_BAND:-}"
+    local _cur_ch_num="${_cur_ch%% *}"
+    local _is_24ghz=0
+    if [ -n "$_cur_ch_num" ] && is_numeric "$_cur_ch_num" \
+       && [ "$_cur_ch_num" -ge "$THRESH_WIFI_24GHZ_MIN_CHANNEL" ] \
+       && [ "$_cur_ch_num" -le "$THRESH_WIFI_24GHZ_MAX_CHANNEL" ]; then
+      _is_24ghz=1
+    elif [ -n "$_cur_band" ]; then
+      case "$_cur_band" in (*2*) _is_24ghz=1 ;; esac
+    fi
+    if [ "$_is_24ghz" -eq 1 ]; then
+      local _band_delta=$(( WIFI_RSSI - WIFI_CANDIDATE_5GHZ_RSSI ))
+      if [ "$_band_delta" -le "$THRESH_WIFI_BAND_TRAP_MAX_DELTA_DBM" ]; then
+        local _tx_str=""
+        local _ch_disp="channel ${_cur_ch_num:-2.4 GHz}"
+        if [ -n "${WIFI_TX:-}" ] && is_numeric "${WIFI_TX:-}"; then
+          _tx_str=", ${WIFI_TX} Mbps"
+        fi
+        if [ -n "${WIFI_TX:-}" ] && is_numeric "${WIFI_TX:-}" && [ "$WIFI_TX" -le "$THRESH_WIFI_BAND_TRAP_WARN_TX_MBPS" ]; then
+          add_diag warn W6 "Your Mac is connected to the 2.4 GHz band (${_ch_disp}${_tx_str}) while a faster 5 GHz band on \"${WIFI_SSID}\" is available with strong signal (${WIFI_CANDIDATE_5GHZ_RSSI} dBm). Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."
+        else
+          add_diag info W6 "Your Mac is connected to the 2.4 GHz band (${_ch_disp}${_tx_str}) while a faster 5 GHz band on \"${WIFI_SSID}\" is available with strong signal (${WIFI_CANDIDATE_5GHZ_RSSI} dBm). Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."
+        fi
+      fi
+    fi
+  fi
+
   # W4 — Wi-Fi rate collapse: negotiated transmit rate collapsed despite strong RSSI.
   if [ "$IS_WIFI" -eq 1 ] && [ -n "${WIFI_TX:-}" ] && is_numeric "${WIFI_TX:-}" \
      && [ -n "${WIFI_RSSI:-}" ] && is_numeric "${WIFI_RSSI:-}" \

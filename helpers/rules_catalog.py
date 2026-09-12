@@ -335,6 +335,29 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "W6",
+        "title": "Connected to slow 2.4 GHz band when 5 GHz is available",
+        "category": "wifi",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "Your Mac is connected to the slower 2.4 GHz band even though a "
+            "faster 5 GHz or 6 GHz band on the same network is available with "
+            "strong signal. Reconnecting prompts macOS to join the faster band."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#w6--connected-to-slow-24-ghz-band-when-5-ghz-is-available",
+        "impacts": {
+            "calls": "degraded",
+            "browsing": "degraded",
+            "streaming": "degraded",
+        },
+        "fix": (
+            "Toggle Wi-Fi off and back on to prompt macOS to connect to the "
+            "faster 5 GHz band."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "W4",
         "title": "Wi-Fi transmit rate collapsed",
         "category": "wifi",

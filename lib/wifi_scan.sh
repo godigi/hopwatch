@@ -62,7 +62,8 @@ wifi_scan_run() {
   local sp_cand_parsed
   sp_cand_parsed="$(wifi_parse_candidates "$sp_out" "${WIFI_SSID:-}" "${WIFI_BSSID:-}")"
   {
-    IFS=$'\t' read -r WIFI_MULTI_AP WIFI_CANDIDATE_BSSID WIFI_CANDIDATE_RSSI WIFI_CANDIDATE_SSID
+    IFS=$'\t' read -r WIFI_MULTI_AP WIFI_CANDIDATE_BSSID WIFI_CANDIDATE_RSSI WIFI_CANDIDATE_SSID \
+      WIFI_CANDIDATE_5GHZ_BSSID WIFI_CANDIDATE_5GHZ_RSSI WIFI_CANDIDATE_5GHZ_CHAN
   } <<<"$sp_cand_parsed"
   if [ "${WIFI_MULTI_AP:-0}" -eq 1 ]; then
     if [ -n "$WIFI_CANDIDATE_RSSI" ]; then
@@ -70,6 +71,9 @@ wifi_scan_run() {
     else
       info "Multi-AP network: multiple access points detected for ${WIFI_SSID:-this network}"
     fi
+  fi
+  if [ -n "$WIFI_CANDIDATE_5GHZ_RSSI" ]; then
+    info "Candidate 5GHz AP detected on ${WIFI_SSID:-this network} (${WIFI_CANDIDATE_5GHZ_RSSI} dBm${WIFI_CANDIDATE_5GHZ_CHAN:+, ch $WIFI_CANDIDATE_5GHZ_CHAN})"
   fi
 
   if [ -n "${NETDIAG_PAR_VARS:-}" ]; then
@@ -81,5 +85,8 @@ wifi_scan_run() {
     setvar WIFI_CANDIDATE_BSSID "$WIFI_CANDIDATE_BSSID"
     setvar WIFI_CANDIDATE_RSSI "$WIFI_CANDIDATE_RSSI"
     setvar WIFI_CANDIDATE_SSID "$WIFI_CANDIDATE_SSID"
+    setvar WIFI_CANDIDATE_5GHZ_BSSID "$WIFI_CANDIDATE_5GHZ_BSSID"
+    setvar WIFI_CANDIDATE_5GHZ_RSSI "$WIFI_CANDIDATE_5GHZ_RSSI"
+    setvar WIFI_CANDIDATE_5GHZ_CHAN "$WIFI_CANDIDATE_5GHZ_CHAN"
   fi
 }

@@ -153,6 +153,13 @@ runs stop filing under the synthetic "unknown" network.
 - Severity: `info`
 - Recommendation: toggle Wi-Fi off and back on to associate with the closer access point.
 
+### W6 — Connected to slow 2.4 GHz band when 5 GHz is available
+
+- Trigger: `is_wifi AND channel in [1..14] AND wifi.candidate_5ghz_rssi >= -65 AND (rssi - candidate_5ghz_rssi) <= 12`
+- Severity: `info` (or `warn` if `wifi.tx_rate <= 54 Mbps`)
+- Recommendation: toggle Wi-Fi off and back on to prompt macOS to connect to the faster 5 GHz band.
+- Rationale: Routers broadcasting a unified SSID often trap devices on the 2.4 GHz band after waking from sleep or moving from far away. Because macOS considers the existing 2.4 GHz association "good enough", it does not roam to 5 GHz. The connection remains bottlenecked by 2.4 GHz channel congestion and lower modulation rates despite a strong 5 GHz or 6 GHz signal being available right beside the user.
+
 ### W4 — Wi-Fi transmit rate collapsed
 
 - Trigger: `is_wifi AND wifi.rssi >= -65 AND wifi.tx_rate < 54 Mbps`

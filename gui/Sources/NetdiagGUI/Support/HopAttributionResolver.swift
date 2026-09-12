@@ -98,7 +98,7 @@ public enum HopAttributionResolver {
     // MARK: - Rule Classifications
 
     private static let wifiCriticalRules: Set<String> = ["G1", "W1", "WD-1"]
-    private static let wifiWarningRules: Set<String> = ["W2", "W3", "WS-1", "W4", "W5", "AWDL-1"]
+    private static let wifiWarningRules: Set<String> = ["W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
 
     private static let routerCriticalRules: Set<String> = ["G2", "DI-1"]
     private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3"]
@@ -157,6 +157,8 @@ public enum HopAttributionResolver {
             headline = "Local Wi-Fi Signal Degraded"
             if ruleSet.contains("AWDL-1") {
                 reassurance = "Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping is causing periodic latency spikes. Setting AirDrop to 'Receiving Off' in Control Center restores steady ping."
+            } else if ruleSet.contains("W6") {
+                reassurance = "Your Mac is connected to the slower 2.4 GHz band while a faster 5 GHz band is available. Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."
             } else if ruleSet.contains("W4") {
                 reassurance = "Your Wi-Fi signal appears strong, but your transmit rate has collapsed. Moving closer or switching Wi-Fi bands will restore link speed."
             } else if ruleSet.contains("W5") {

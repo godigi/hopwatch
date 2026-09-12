@@ -144,5 +144,16 @@ import Testing
         #expect(d5.culprit == .isp)
         #expect(d5.ispHealth == .warning)
         #expect(d5.reassurance.contains("primary DNS server is unresponsive"))
+
+        // W6: Suboptimal 2.4 GHz band trapping
+        let w6 = HopAttributionResolver.resolve(
+            rules: ["W6"],
+            isWifi: true,
+            wifiRSSI: -55,
+            gatewayRTT: 2.0
+        )
+        #expect(w6.culprit == .wifi)
+        #expect(w6.wifiHealth == .warning)
+        #expect(w6.reassurance.contains("slower 2.4 GHz band"))
     }
 }

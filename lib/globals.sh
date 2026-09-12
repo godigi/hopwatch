@@ -71,6 +71,9 @@ WIFI_MULTI_AP=0              # 1 = multiple BSSIDs/APs detected on this SSID
 WIFI_CANDIDATE_BSSID=""      # BSSID of candidate alternative AP
 WIFI_CANDIDATE_RSSI=""       # RSSI of candidate alternative AP
 WIFI_CANDIDATE_SSID=""       # SSID of candidate alternative AP
+WIFI_CANDIDATE_5GHZ_BSSID="" # BSSID of candidate 5GHz/6GHz AP on same SSID
+WIFI_CANDIDATE_5GHZ_RSSI=""  # RSSI of candidate 5GHz/6GHz AP on same SSID
+WIFI_CANDIDATE_5GHZ_CHAN=""  # Channel of candidate 5GHz/6GHz AP on same SSID
 WIFI_AWDL_ACTIVE=0           # 1 = Apple Wireless Direct Link (awdl0) is active
 
 # VPN (lib/vpn.sh)

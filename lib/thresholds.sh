@@ -166,6 +166,12 @@ THRESH_WIFI_COLLAPSE_MIN_RSSI=-65
 # W5 — asymmetric Wi-Fi link: return path loss when router beacon is strong.
 THRESH_WIFI_ASYMMETRIC_MIN_RSSI=-65
 THRESH_WIFI_ASYMMETRIC_LOSS_PCT=5
+# W6 — suboptimal Wi-Fi band trapping: Mac connected to 2.4 GHz while strong 5 GHz is available.
+THRESH_WIFI_BAND_5GHZ_MIN_RSSI=-65
+THRESH_WIFI_BAND_TRAP_MAX_DELTA_DBM=12
+THRESH_WIFI_BAND_TRAP_WARN_TX_MBPS=54
+THRESH_WIFI_24GHZ_MIN_CHANNEL=1
+THRESH_WIFI_24GHZ_MAX_CHANNEL=14
 # Minimum SNR floor (mirrors THRESH_WIFI_SNR_LOW_DB for naming parity).
 THRESH_WIFI_SNR_MIN_DB=20
 
