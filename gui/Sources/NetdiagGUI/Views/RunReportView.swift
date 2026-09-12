@@ -270,6 +270,7 @@ struct RunReportView: View {
                         if let key = row.glossaryKey { HelpHint(key: key) }
                     }
                     .frame(width: 156, alignment: .leading)
+                    .help(row.glossaryKey.flatMap { MetricGlossary.help(for: $0) } ?? "")
                     Text(row.value)
                         .foregroundStyle(row.valueTint
                             ?? (row.measured ? Color.primary : Color.secondary))
@@ -604,16 +605,16 @@ struct RunReportView: View {
                        value: ipv6Value,
                        health: health(["V6-1", "V6-2"], "IPv6"),
                        metricKey: nil,
-                       glossaryKey: nil,
+                       glossaryKey: "ipv6",
                        medianFormatter: nil,
-                           informational: true))
+                       informational: true))
         out.append(Row(label: "VPN",
                        value: s.vpn.active ? (s.vpn.name ?? s.vpn.type ?? "active") : "not active",
                        health: health(["VPN-1", "VPN-2"], "VPN"),
                        metricKey: nil,
-                       glossaryKey: nil,
+                       glossaryKey: "vpn",
                        medianFormatter: nil,
-                           informational: true))
+                       informational: true))
         // Hidden on an ordinary single-router network, which is almost
         // every network — but never hidden while a rule about it is
         // firing, or the finding below would have no row to sit against.
@@ -623,7 +624,7 @@ struct RunReportView: View {
                            value: natTopologyValue,
                            health: health(["NAT-1", "WAN-1"], "NAT topology"),
                            metricKey: nil,
-                           glossaryKey: nil,
+                           glossaryKey: "nat_topology",
                            medianFormatter: nil,
                            informational: true))
         }
@@ -634,7 +635,7 @@ struct RunReportView: View {
                            health: health(["DI-1", "DI-2", "ETH-1", "ETH-2", "DH-1", "DH-3", "LAN-1"],
                                           "Local network"),
                            metricKey: nil,
-                           glossaryKey: nil,
+                           glossaryKey: "local_network",
                            medianFormatter: nil,
                            informational: true))
         }
@@ -656,7 +657,7 @@ struct RunReportView: View {
                            value: Self.availabilityValue(av),
                            health: health(["AV-1"], "Availability"),
                            metricKey: nil,
-                           glossaryKey: nil,
+                           glossaryKey: "availability",
                            medianFormatter: nil,
                            informational: true))
         }
@@ -669,7 +670,7 @@ struct RunReportView: View {
                            value: Self.trafficValue(traffic),
                            health: health(["TR-1"], "Local traffic"),
                            metricKey: nil,
-                           glossaryKey: nil,
+                           glossaryKey: "traffic",
                            medianFormatter: nil,
                            informational: true))
         }
@@ -678,7 +679,7 @@ struct RunReportView: View {
                            value: Self.watcherValue(watcher),
                            health: health(["ND-1"], "Background watcher"),
                            metricKey: nil,
-                           glossaryKey: nil,
+                           glossaryKey: "watcher",
                            medianFormatter: nil,
                            informational: true))
         }

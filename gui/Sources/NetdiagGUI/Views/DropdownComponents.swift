@@ -129,6 +129,12 @@ struct InstrumentCell: View {
     let value: String
     var unit: String? = nil
     var tint: Color = .primary
+    var help: String? = nil
+
+    private var resolvedHelp: String {
+        if let help, !help.isEmpty { return help }
+        return MetricGlossary.entry(for: label)?.fullHelp ?? ""
+    }
 
     var body: some View {
         VStack(spacing: 2) {
@@ -149,6 +155,7 @@ struct InstrumentCell: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .help(resolvedHelp)
         .accessibilityElement(children: .combine)
     }
 }

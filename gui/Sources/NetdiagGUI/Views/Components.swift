@@ -272,8 +272,25 @@ struct HelpHint: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
     @State private var showPopover = false
 
+    private var catalogMetric: RulesCatalog.Metric? {
+        coordinator.rulesCatalog.catalog?.metric(key)
+    }
+
+    private var helpText: String? {
+        if let help = catalogMetric?.help, !help.isEmpty {
+            return help
+        }
+        return MetricGlossary.entry(for: key)?.fullHelp
+    }
+
+    private var titleText: String {
+        catalogMetric?.label
+            ?? MetricGlossary.entry(for: key)?.title
+            ?? key
+    }
+
     var body: some View {
-        if let metric = coordinator.rulesCatalog.catalog?.metric(key), let help = metric.help, !help.isEmpty {
+        if let help = helpText, !help.isEmpty {
             Button { showPopover = true } label: {
                 Image(systemName: "questionmark.circle")
                     .foregroundStyle(.secondary)
@@ -283,14 +300,14 @@ struct HelpHint: View {
             .help(help)
             .popover(isPresented: $showPopover, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(metric.label ?? key).font(.headline)
+                    Text(titleText).font(.headline)
                     Text(help)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 .padding(12)
-                .frame(width: 260, alignment: .leading)
+                .frame(width: 280, alignment: .leading)
             }
         }
     }

@@ -87,6 +87,7 @@ private enum VerifyHarness {
         runMenuBarLatencyTests()
         runDiagnosticShareTests()
         runSpeedometerTests()
+        runMetricGlossaryTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1140,6 +1141,21 @@ private enum VerifyHarness {
         progress.ingest(line: #"{"t":"phase","name":"speedtest","state":"done","rc":0,"ms":24000}"#)
         check(!progress.isSpeedTesting, "isSpeedTesting reverts to false on phase done")
         check(progress.speed == nil, "speed reverts to nil on phase done")
+    }
+
+    // MARK: - Metric Glossary
+
+    private static func runMetricGlossaryTests() {
+        print("Metric glossary (MetricGlossary):")
+        let required = ["bufferbloat", "mtu", "rssi", "snr", "ipv6", "vpn", "upnp", "clock", "dns", "packet_loss"]
+        for key in required {
+            let e = MetricGlossary.entry(for: key)
+            check(e != nil, "glossary entry for \(key) exists")
+            check(e?.fullHelp.contains("Impact:") == true, "glossary entry for \(key) includes impact")
+        }
+        check(MetricGlossary.entry(for: "Under load")?.key == "bufferbloat", "label Under load resolves to bufferbloat")
+        check(MetricGlossary.entry(for: "Wi-Fi signal")?.key == "rssi", "label Wi-Fi signal resolves to rssi")
+        check(MetricGlossary.entry(for: "Packet size (MTU)")?.key == "mtu", "label Packet size (MTU) resolves to mtu")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
