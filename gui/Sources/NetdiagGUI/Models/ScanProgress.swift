@@ -61,10 +61,58 @@ final class ScanProgress {
     /// Ookla streams its stages; `speedtest-cli` does not. `progress == nil`
     /// means the stage is known and its fraction is not — which renders as
     /// an indeterminate bar rather than as invented motion.
-    struct Speed: Equatable {
+    struct Speed: Equatable, Sendable {
+        enum Direction: String, Equatable, Sendable {
+            case download
+            case upload
+            case ping
+            case prep
+            case other
+        }
+
         var stage: String
         var progress: Double?
         var mbps: Double?
+        var downloadMbps: Double?
+        var uploadMbps: Double?
+
+        init(stage: String, progress: Double? = nil, mbps: Double? = nil,
+             downloadMbps: Double? = nil, uploadMbps: Double? = nil) {
+            self.stage = stage
+            self.progress = progress
+            self.mbps = mbps
+            self.downloadMbps = downloadMbps
+            self.uploadMbps = uploadMbps
+        }
+
+        var direction: Direction {
+            let lower = stage.lowercased()
+            if lower.contains("down") { return .download }
+            if lower.contains("up") { return .upload }
+            if lower.contains("ping") { return .ping }
+            if lower.contains("start") || lower.contains("init") { return .prep }
+            return .other
+        }
+
+        var directionSymbol: String? {
+            switch direction {
+            case .download: return "↓"
+            case .upload:   return "↑"
+            case .ping:     return "●"
+            case .prep:     return "⋯"
+            case .other:    return nil
+            }
+        }
+
+        var directionLabel: String {
+            switch direction {
+            case .download: return "↓ Download"
+            case .upload:   return "↑ Upload"
+            case .ping:     return "Ping"
+            case .prep:     return "Preparing"
+            case .other:    return stage.isEmpty ? "Speed test" : PhaseLabel.humanised(stage)
+            }
+        }
     }
 
     struct Bufferbloat: Equatable {
@@ -97,6 +145,14 @@ final class ScanProgress {
 
     /// The phase currently running, for the dropdown's one-line summary.
     var runningPhase: Phase? { phases.first { $0.state == .running } }
+
+    /// True while the speed test phase is actively running.
+    var isSpeedTesting: Bool {
+        if let speedPhase = phases.first(where: { $0.name == "speedtest" }) {
+            return speedPhase.state == .running
+        }
+        return speed != nil && !isFinished
+    }
 
     // MARK: - Lifecycle
 
@@ -156,16 +212,33 @@ final class ScanProgress {
                 phases[index].state = .done
                 phases[index].rc = event.rc
                 phases[index].ms = event.ms
+                if name == "speedtest" {
+                    speed = nil
+                }
             case "skip":
                 phases[index].state = .skipped
                 phases[index].why = event.why
+                if name == "speedtest" {
+                    speed = nil
+                }
             default:
                 break
             }
 
         case "speed":
-            speed = Speed(stage: event.stage ?? "", progress: event.progress,
-                          mbps: event.mbps)
+            let stage = event.stage ?? ""
+            let lower = stage.lowercased()
+            var dl = speed?.downloadMbps
+            var ul = speed?.uploadMbps
+            if lower.contains("down") {
+                if let m = event.mbps { dl = m }
+            } else if lower.contains("up") {
+                if let m = event.mbps { ul = m }
+            } else if lower.contains("result") {
+                if dl == nil, let m = event.mbps { dl = m }
+            }
+            speed = Speed(stage: stage, progress: event.progress,
+                          mbps: event.mbps, downloadMbps: dl, uploadMbps: ul)
 
         case "bufferbloat":
             bufferbloat = Bufferbloat(stage: event.stage ?? "", progress: event.progress,
@@ -194,6 +267,8 @@ final class ScanProgress {
         guard !isFinished else { return }
         isFinished = true
         exitCode = code
+        speed = nil
+        bufferbloat = nil
         // Anything unresolved when the run ends never reported. `.running`
         // counts as unresolved for the same reason `.pending` does: the row
         // has no result and never will, and a spinner that outlives its

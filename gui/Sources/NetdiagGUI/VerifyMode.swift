@@ -86,6 +86,7 @@ private enum VerifyHarness {
         runLaunchAtLoginTests()
         runMenuBarLatencyTests()
         runDiagnosticShareTests()
+        runSpeedometerTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1105,6 +1106,40 @@ private enum VerifyHarness {
 
         let nowName = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: nil)
         check(nowName.hasPrefix("netdiag-report-") && nowName.hasSuffix(".md"), "defaultFileName handles nil timestamp")
+    }
+
+    // MARK: - Speedometer & Throughput Gauge
+
+    @MainActor
+    private static func runSpeedometerTests() {
+        print("Speedometer & throughput gauge (ScanProgress):")
+        let progress = ScanProgress()
+        check(!progress.isSpeedTesting, "isSpeedTesting is false before start")
+
+        progress.ingest(line: #"{"t":"plan","mode":"full","phases":["gateway","speedtest","mtr"]}"#)
+        check(!progress.isSpeedTesting, "isSpeedTesting is false on plan")
+
+        progress.ingest(line: #"{"t":"phase","name":"speedtest","state":"start"}"#)
+        check(progress.isSpeedTesting, "isSpeedTesting is true on speedtest start")
+
+        progress.ingest(line: #"{"t":"speed","stage":"download","progress":0.5,"mbps":312.4}"#)
+        check(progress.speed?.direction == .download, "speed direction is download")
+        check(progress.speed?.directionSymbol == "↓", "direction symbol is down arrow")
+        check(progress.speed?.directionLabel == "↓ Download", "direction label is Download with down arrow")
+        check(progress.speed?.mbps == 312.4, "mbps reflects live throughput")
+        check(progress.speed?.downloadMbps == 312.4, "downloadMbps is recorded")
+
+        progress.ingest(line: #"{"t":"speed","stage":"upload","progress":0.8,"mbps":95.2}"#)
+        check(progress.speed?.direction == .upload, "speed direction switches to upload")
+        check(progress.speed?.directionSymbol == "↑", "direction symbol is up arrow")
+        check(progress.speed?.directionLabel == "↑ Upload", "direction label is Upload with up arrow")
+        check(progress.speed?.mbps == 95.2, "mbps reflects live upload throughput")
+        check(progress.speed?.downloadMbps == 312.4, "downloadMbps is preserved during upload stage")
+        check(progress.speed?.uploadMbps == 95.2, "uploadMbps is recorded")
+
+        progress.ingest(line: #"{"t":"phase","name":"speedtest","state":"done","rc":0,"ms":24000}"#)
+        check(!progress.isSpeedTesting, "isSpeedTesting reverts to false on phase done")
+        check(progress.speed == nil, "speed reverts to nil on phase done")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

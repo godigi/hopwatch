@@ -25,11 +25,17 @@ struct ScanProgressView: View {
             if progress.hasPlan {
                 overallBar
                 summary
+                if progress.isSpeedTesting, let speed = progress.speed {
+                    SpeedometerGaugeView(speed: speed)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.98)),
+                            removal: .opacity
+                        ))
+                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)],
                           alignment: .leading, spacing: 4) {
                     ForEach(progress.phases) { row($0) }
                 }
-                if let speed = progress.speed { speedRow(speed) }
             } else {
                 // No plan yet. Either the run has not announced one, or the
                 // installed netdiag predates --progress and never will —
@@ -41,6 +47,7 @@ struct ScanProgressView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: progress.isSpeedTesting)
     }
 
     /// The determinate bar. Its fraction comes from `PhaseWeights`, weighted
@@ -155,27 +162,6 @@ struct ScanProgressView: View {
         }
     }
 
-    /// Ookla streams its stages; `speedtest-cli` does not. A missing
-    /// fraction shows an indeterminate bar rather than invented motion.
-    @ViewBuilder
-    private func speedRow(_ speed: ScanProgress.Speed) -> some View {
-        HStack(spacing: 8) {
-            if let fraction = speed.progress {
-                ProgressView(value: min(max(fraction, 0), 1))
-                    .frame(width: 90)
-            } else {
-                ProgressView().controlSize(.small)
-            }
-            Text(speed.stage.isEmpty ? "Speed test" : PhaseLabel.humanised(speed.stage))
-            if let mbps = speed.mbps {
-                Text(String(format: "%.1f Mbps", mbps)).monospacedDigit()
-            }
-            Spacer(minLength: 0)
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
     static func formatted(ms: Int) -> String {
         ms >= 1000 ? String(format: "%.1fs", Double(ms) / 1000) : "\(ms)ms"
     }
@@ -191,6 +177,218 @@ struct ScanProgressView: View {
     }
 }
 
+/// A tactile speedometer dial with needle and gradient arc scaled dynamically to connection speed.
+struct SpeedometerDialView: View {
+    let mbps: Double?
+    let isUpload: Bool
+
+    // Dynamic scale based on speed
+    var maxScale: Double {
+        guard let speed = mbps, speed > 0 else { return 100 }
+        if speed <= 50 { return 100 }
+        if speed <= 250 { return 300 }
+        if speed <= 500 { return 600 }
+        if speed <= 1000 { return 1200 }
+        return 2500
+    }
+
+    var fraction: Double {
+        guard let speed = mbps, speed > 0 else { return 0 }
+        return min(max(speed / maxScale, 0), 1)
+    }
+
+    var startAngle: Angle { .degrees(140) }
+    var endAngle: Angle { .degrees(400) }
+    var sweepAngle: Double { 260 }
+
+    var currentAngle: Angle {
+        .degrees(140 + fraction * sweepAngle)
+    }
+
+    var gradientColors: [Color] {
+        if isUpload {
+            return [Color.teal, Color.green]
+        } else {
+            return [Color.blue, Color.cyan]
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 + 10)
+            let radius = min(geo.size.width / 2 - 8, geo.size.height - 18)
+            let needleLength = radius - 8
+
+            ZStack {
+                // Background track
+                Path { path in
+                    path.addArc(center: center, radius: radius,
+                                startAngle: startAngle, endAngle: endAngle, clockwise: false)
+                }
+                .stroke(Color.secondary.opacity(0.2), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+
+                // Active filled arc
+                if fraction > 0.005 {
+                    Path { path in
+                        path.addArc(center: center, radius: radius,
+                                    startAngle: startAngle, endAngle: currentAngle, clockwise: false)
+                    }
+                    .stroke(LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing),
+                            style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                }
+
+                // Needle
+                Path { path in
+                    path.move(to: center)
+                    let rad = currentAngle.radians
+                    let tip = CGPoint(x: center.x + CGFloat(cos(rad)) * needleLength,
+                                      y: center.y + CGFloat(sin(rad)) * needleLength)
+                    path.addLine(to: tip)
+                }
+                .stroke(LinearGradient(colors: gradientColors, startPoint: .center, endPoint: .topLeading),
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+
+                // Pivot hub
+                Circle()
+                    .fill(Color.primary.opacity(0.8))
+                    .frame(width: 8, height: 8)
+                    .position(center)
+
+                // Scale ticks / labels at bottom corners
+                Text("0")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .position(x: center.x - radius + 2, y: center.y + 12)
+
+                Text(formattedScale(maxScale))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .position(x: center.x + radius - 2, y: center.y + 12)
+            }
+        }
+        .frame(width: 100, height: 74)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: mbps)
+    }
+
+    private func formattedScale(_ val: Double) -> String {
+        if val >= 1000 {
+            return String(format: "%.0fG", val / 1000)
+        }
+        return "\(Int(val))"
+    }
+}
+
+/// Prominent live throughput hero card rendered during the speedtest phase.
+struct SpeedometerGaugeView: View {
+    let speed: ScanProgress.Speed
+
+    var isDownload: Bool { speed.direction == .download }
+    var isUpload: Bool { speed.direction == .upload }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            // Header: Directional badge & previous milestones
+            HStack(spacing: 8) {
+                directionBadge
+                Spacer()
+                if let dl = speed.downloadMbps, isUpload {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.green)
+                        Text(String(format: "↓ %.1f Mbps", dl))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                }
+            }
+
+            // Main gauge & live throughput
+            HStack(alignment: .center, spacing: 16) {
+                SpeedometerDialView(mbps: speed.mbps, isUpload: isUpload)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    // Big readout
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(speed.mbps.map { String(format: "%.1f", $0) } ?? "--")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text("Mbps")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: speed.mbps)
+
+                    // Stage progress bar
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let progress = speed.progress {
+                            ProgressView(value: min(max(progress, 0), 1))
+                                .animation(.easeInOut(duration: 0.2), value: progress)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+
+                        HStack {
+                            Text(stageCaption)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            if let progress = speed.progress {
+                                Text("\(Int((progress * 100).rounded()))%")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .cardStyle()
+    }
+
+    private var directionBadge: some View {
+        HStack(spacing: 5) {
+            if isDownload {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.blue)
+                Text("Download")
+                    .foregroundStyle(.primary)
+            } else if isUpload {
+                Image(systemName: "arrow.up.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Upload")
+                    .foregroundStyle(.primary)
+            } else if speed.direction == .ping {
+                Image(systemName: "waveform.path")
+                    .foregroundStyle(.orange)
+                Text("Ping")
+                    .foregroundStyle(.primary)
+            } else {
+                Image(systemName: "speedometer")
+                    .foregroundStyle(.secondary)
+                Text(speed.stage.isEmpty ? "Speed Test" : PhaseLabel.humanised(speed.stage))
+                    .foregroundStyle(.primary)
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background((isDownload ? Color.blue : (isUpload ? Color.green : Color.secondary)).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var stageCaption: String {
+        if isDownload { return "Measuring download bandwidth…" }
+        if isUpload { return "Measuring upload bandwidth…" }
+        if speed.direction == .ping { return "Measuring latency and jitter…" }
+        return speed.stage.isEmpty ? "Connecting to server…" : PhaseLabel.humanised(speed.stage)
+    }
+}
+
 /// The one-line form, for the dropdown. Same model, no room for a grid or a
 /// bar — so the one-line equivalent of `overallBar` is text, appended to the
 /// count rather than replacing it, and only once it is learned. The speed
@@ -201,7 +399,7 @@ struct ScanProgressLine: View {
     var progress: ScanProgress
 
     var body: some View {
-        if let speed = progress.speed {
+        if progress.isSpeedTesting, let speed = progress.speed {
             Text(speedLabel(speed))
         } else if progress.hasPlan {
             Text(countLabel).monospacedDigit()
@@ -234,8 +432,9 @@ struct ScanProgressLine: View {
     }
 
     private func speedLabel(_ speed: ScanProgress.Speed) -> String {
+        let arrow = speed.directionSymbol.map { "\($0) " } ?? ""
         let stage = speed.stage.isEmpty ? "Speed test" : PhaseLabel.humanised(speed.stage)
-        guard let mbps = speed.mbps else { return stage }
-        return String(format: "%@ · %.1f Mbps", stage, mbps)
+        guard let mbps = speed.mbps else { return "\(arrow)\(stage)" }
+        return String(format: "%@%@ · %.1f Mbps", arrow, stage, mbps)
     }
 }
