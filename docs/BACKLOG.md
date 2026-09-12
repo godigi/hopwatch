@@ -523,7 +523,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-023: Audit & Align Diagnosis Remediation with "Do No Harm" Standard (`D1`, `D3`, `V6-2`, `B1`)
 - **Area**: CLI / Diagnosis & Safety
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/diagnosis.sh`
   - `docs/DIAGNOSIS-RULES.md`
