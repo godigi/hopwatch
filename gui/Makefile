@@ -40,7 +40,7 @@ IDENTITY_NAME := netdiag-dev
 SIGN_IDENTITY := $(shell security find-identity -v -p codesigning 2>/dev/null \
                    | grep -F '"$(IDENTITY_NAME)"' | head -1 | awk '{print $$2}')
 
-.PHONY: all build bundle sign run install clean identity check test
+.PHONY: all build bundle sign run install clean identity check test dmg
 
 all: sign
 
@@ -173,6 +173,25 @@ check:
 	    echo "<not bundled yet — run 'make bundle'>"; \
 	  fi
 
+DMG_NAME := Netdiag-$(VERSION).dmg
+DMG_PATH := $(BUILD_DIR)/$(DMG_NAME)
+
+dmg: sign
+	@if [ -z "$(VERSION)" ]; then \
+	  echo "error: could not read NETDIAG_VERSION from ../bin/netdiag" >&2; exit 1; \
+	fi
+	@echo "building DMG: $(DMG_PATH)"
+	@rm -f "$(DMG_PATH)"
+	@mkdir -p "$(BUILD_DIR)/dmg"
+	@rm -rf "$(BUILD_DIR)/dmg/"*
+	@cp -R "$(APP_DIR)" "$(BUILD_DIR)/dmg/"
+	@ln -s /Applications "$(BUILD_DIR)/dmg/Applications"
+	@hdiutil create -volname "$(APP)" -srcfolder "$(BUILD_DIR)/dmg" \
+	  -ov -format UDZO "$(DMG_PATH)"
+	@rm -rf "$(BUILD_DIR)/dmg"
+	@echo "built: $(DMG_PATH)"
+
 clean:
 	swift package clean
 	rm -rf "$(BUILD_DIR)"
+

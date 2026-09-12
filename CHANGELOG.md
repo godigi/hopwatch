@@ -6,6 +6,90 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — sticky access point detection on multi-AP Wi-Fi networks [W3]
+
+In multi-AP environments (mesh networks, campuses, hotels), macOS frequently
+stays associated with a distant, weak access point (e.g. -78 dBm) even though
+a much stronger AP (e.g. -50 dBm) broadcasting the same SSID is nearby.
+
+Rule `W3` (info) detects this "sticky AP" state:
+- Scrapes alternative BSSIDs and RSSIs from `system_profiler SPAirPortDataType`.
+- Validates that multiple APs exist on the current network (`WIFI_MULTI_AP=1`).
+- Alerts when the current signal is poor (`wifi.rssi <= -75 dBm`), a candidate
+  AP on the same SSID is strong (`wifi.candidate_rssi >= -60 dBm`), and the
+  difference is at least 15 dBm (`THRESH_WIFI_STICKY_DELTA_DBM`).
+- Advises toggling Wi-Fi off and back on to force macOS's association daemon to
+  re-evaluate and pick the stronger access point.
+
+### Added — prominent speedometer dial and live throughput gauge [GUI]
+
+During full scans, the speed test is the longest running phase (~25s). Live
+throughput was previously constrained to a tiny 11pt inline caption.
+
+`ScanProgressView` now features a prominent, animated vector speedometer dial
+(`SpeedometerDialView`) and hero throughput gauge (`SpeedometerGaugeView`):
+- Dynamic scaling across broadband tiers (up to 1,000 Mbps).
+- Directional indicator (`↓ Download` / `↑ Upload`) and live Mbps readout.
+- In-flight milestone accumulation via the fd-3 progress stream, reverting
+  gracefully once the phase completes.
+
+### Added — live ping and latency display in the menu bar [GUI]
+
+Users on voice or video calls need to know immediately if their connection is
+lagging without opening the menu or dashboard.
+
+- Added `.dotAndPing` style to `AppSettings.MenuBarStyle`, configurable from
+  `SettingsView`.
+- Renders the live rounded RTT (`● 18ms`) in a clean monospace font directly in
+  the macOS menu bar, tinting amber and red as latency spikes occur.
+
+### Added — one-click quick actions for captive portals and router admin [GUI]
+
+- **Captive Portals (`CP-1`)**: When arriving at a captive portal, macOS often
+  fails to trigger the captive assistant. The Arrival and Alert stage cards now
+  surface an explicit `[Open Login Page]` action button that opens
+  `http://captive.apple.com/hotspot-detect.html` in the default browser.
+- **Router Admin Page**: When a router or bufferbloat issue (`B1`, `G2`) is
+  detected on an owned network (`network.isMine == true`), a quick action button
+  safely navigates directly to `http://<gateway_ip>` for private RFC1918 addresses.
+
+### Added — "Share Diagnostics..." action and Support Summary export [GUI]
+
+- **Share Diagnostics**: Exports or copies a redacted diagnostic summary in
+  clean `.json` or `.md` format (via `helpers/share.py`) without leaking MACs,
+  passwords, or public IP addresses.
+- **Copy for Support**: One-click action in `RunReportView` that formats a
+  plain-English, jargon-free report designed specifically for hotel front desks,
+  Airbnb hosts, and ISP customer support.
+
+### Added — subnet crowding telemetry and device surge detection [LAN-1]
+
+- `helpers/emit_json.py` now exports `arp_active_count` under the `lan` block.
+- `RunReportView` displays active device counts in the LAN summary card.
+- `helpers/baseline.py` flags a device count surge (`LAN-1`) when the current
+  active count triples the historical median on a known private network.
+
+### Added — native "Launch at Login" support via SMAppService [GUI]
+
+- Integrated macOS 13+ `SMAppService.mainApp` in `AppSettings` and `SettingsView`,
+  allowing the menu bar app to launch automatically at login cleanly without
+  legacy background helper bundles.
+
+### Changed — unified event journaling between GUI and CLI [Track E]
+
+- `MonitorStream.spawn` passes `--journal "$HOME/net-diag/events.jsonl"`, giving
+  the GUI monitor and CLI scans a shared, single source of truth for network
+  transitions and enabling availability rules (`AV-1`/`AV-2`) during full checks.
+
+### Added — distributable DMG packaging and Homebrew Cask formula
+
+- Added `make -C gui dmg` and root `Makefile` targets to build compressed,
+  read-only DMGs (`Netdiag-<version>.dmg`) with drag-and-drop `/Applications`
+  installation.
+- Added `Casks/netdiag.rb` for automated Homebrew Cask installation.
+- Configured `.github/workflows/release.yml` to package and attach the DMG
+  artifact to GitHub Releases.
+
 ### Fixed — `--events` dropped the outage that began before the window
 
 `netdiag --events=24` omitted any fault that started more than a day ago
@@ -3575,7 +3659,7 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/godigi/netdiag/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
