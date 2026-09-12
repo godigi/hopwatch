@@ -37,8 +37,9 @@ usage() {
   cat <<'HELP'
 install.sh — install netdiag on macOS.
 
-Usage: install.sh [--prefix DIR] [--no-brew] [--uninstall]
+Usage: install.sh [--app] [--prefix DIR] [--no-brew] [--uninstall]
 
+  --app          install the native macOS Menu Bar App (Netdiag.app) and CLI
   --prefix DIR   install the symlink here (default: /usr/local/bin when
                  writable, otherwise ~/bin, created if missing)
   --no-brew      skip the Homebrew bash 5 bootstrap
@@ -49,12 +50,25 @@ Environment:
   NETDIAG_REPO   clone URL (default the public GitHub repo)
 
 When piping from curl, pass flags after `-s --`:
+  curl -fsSL <url> | bash -s -- --app
   curl -fsSL <url> | bash -s -- --prefix ~/.local/bin
 HELP
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --app)
+      SELF="${BASH_SOURCE[0]:-}"
+      SELF_DIR=""
+      if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+        SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+      fi
+      if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/install-app.sh" ]; then
+        exec "$SELF_DIR/install-app.sh"
+      else
+        exec curl -fsSL "https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh" | bash
+      fi
+      ;;
     --prefix)
       # Guard before indexing $2 — under `set -u` a bare --prefix aborts
       # with "unbound variable" instead of a usable message.
@@ -165,3 +179,6 @@ esac
 
 note ""
 note "run 'netdiag' for a full check, or 'netdiag --quick' for a fast one."
+note ""
+note "tip: to install the native macOS menu bar app (Netdiag.app), run:"
+note "  curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash"

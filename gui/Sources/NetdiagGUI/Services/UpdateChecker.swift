@@ -122,8 +122,8 @@ final class UpdateChecker {
 
         guard !isDownloading else { return }
         isDownloading = true
-        downloadProgress = 0.1
-        statusMessage = "Downloading v\(release.cleanVersion)…"
+        downloadProgress = 0.05
+        statusMessage = "Connecting…"
 
         Task { [weak self] in
             guard let self else { return }
@@ -132,9 +132,16 @@ final class UpdateChecker {
                 let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("NetdiagUpdate-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-                let (downloadedURL, _) = try await URLSession.shared.download(from: downloadURL)
-                self.downloadProgress = 0.7
-                self.statusMessage = "Installing update…"
+                self.statusMessage = "Downloading v\(release.cleanVersion)…"
+                let downloader = FileDownloader()
+                let downloadedURL = try await downloader.download(from: downloadURL) { [weak self] progress in
+                    Task { @MainActor in
+                        self?.downloadProgress = progress
+                    }
+                }
+
+                self.downloadProgress = 0.9
+                self.statusMessage = "Extracting update…"
 
                 let archivePath = tempDir.appendingPathComponent(asset?.name ?? "update.zip")
                 try FileManager.default.moveItem(at: downloadedURL, to: archivePath)
@@ -199,6 +206,30 @@ final class UpdateChecker {
         }
     }
 
+    /// Determines the installation destination for the updated app bundle.
+    /// Prefers the currently running bundle if it is an installed .app, otherwise
+    /// checks /Applications, then ~/Applications.
+    var targetAppURL: URL {
+        let currentBundle = Bundle.main.bundleURL
+        if currentBundle.pathExtension == "app" {
+            let parent = currentBundle.deletingLastPathComponent()
+            if FileManager.default.isWritableFile(atPath: currentBundle.path) ||
+               FileManager.default.isWritableFile(atPath: parent.path) {
+                return currentBundle
+            }
+        }
+
+        let sysApps = URL(fileURLWithPath: "/Applications/Netdiag.app")
+        let userApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Netdiag.app")
+
+        if FileManager.default.isWritableFile(atPath: "/Applications") {
+            return sysApps
+        } else if FileManager.default.isWritableFile(atPath: userApps.deletingLastPathComponent().path) {
+            return userApps
+        }
+        return sysApps
+    }
+
     /// Helper to locate Netdiag.app in a directory or its immediate children
     private func findApp(in directory: URL) -> String? {
         let fm = FileManager.default
@@ -221,15 +252,43 @@ final class UpdateChecker {
         NSWorkspace.shared.open(url)
     }
 
-    /// Spawns a background script that waits for current process to exit, swaps /Applications/Netdiag.app,
-    /// strips Gatekeeper quarantine flags, and relaunches.
+    /// Spawns a background script that waits for current process to exit, atomically swaps
+    /// the target app bundle with automatic rollback, strips Gatekeeper quarantine flags, and relaunches.
     private func replaceAndRelaunch(withAppAt newAppPath: String) {
+        let targetPath = targetAppURL.path
+        let targetDir = (targetPath as NSString).deletingLastPathComponent
+
         let script = """
         sleep 1
-        rm -rf /Applications/Netdiag.app
-        cp -R "\(newAppPath)" /Applications/Netdiag.app
-        xattr -rd com.apple.quarantine /Applications/Netdiag.app 2>/dev/null || true
-        open /Applications/Netdiag.app
+        TARGET="\(targetPath)"
+        NEW_APP="\(newAppPath)"
+        TARGET_DIR="\(targetDir)"
+
+        mkdir -p "$TARGET_DIR" 2>/dev/null || true
+        TMP_STAGING="${TARGET}.new.$$"
+        BACKUP="${TARGET}.old.$$"
+
+        rm -rf "$TMP_STAGING" "$BACKUP"
+        cp -R "$NEW_APP" "$TMP_STAGING" || exit 1
+
+        # Strip all Gatekeeper quarantine & provenance attributes recursively
+        xattr -cr "$TMP_STAGING" 2>/dev/null || true
+
+        if [ -d "$TARGET" ]; then
+            mv "$TARGET" "$BACKUP" 2>/dev/null || rm -rf "$TARGET"
+        fi
+
+        if mv "$TMP_STAGING" "$TARGET" 2>/dev/null; then
+            rm -rf "$BACKUP" 2>/dev/null || true
+        elif [ -d "$BACKUP" ]; then
+            # Rollback if move failed
+            mv "$BACKUP" "$TARGET" 2>/dev/null || true
+            exit 1
+        fi
+
+        # Ensure target is clean and executable
+        xattr -cr "$TARGET" 2>/dev/null || true
+        open "$TARGET"
         """
 
         let process = Process()
@@ -238,5 +297,44 @@ final class UpdateChecker {
         try? process.run()
 
         NSApp.terminate(nil)
+    }
+}
+
+/// Helper delegate for downloading files with real progress reporting.
+private final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    var onProgress: (@Sendable (Double) -> Void)?
+    private var continuation: CheckedContinuation<URL, Error>?
+
+    func download(from url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        self.onProgress = progress
+        return try await withCheckedThrowingContinuation { cont in
+            self.continuation = cont
+            let config = URLSessionConfiguration.default
+            let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+            let task = session.downloadTask(with: url)
+            task.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let tempTarget = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        do {
+            try FileManager.default.moveItem(at: location, to: tempTarget)
+            continuation?.resume(returning: tempTarget)
+        } catch {
+            continuation?.resume(throwing: error)
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        let fraction = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+        onProgress?(min(0.95, max(0.05, fraction)))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            continuation?.resume(throwing: error)
+        }
     }
 }

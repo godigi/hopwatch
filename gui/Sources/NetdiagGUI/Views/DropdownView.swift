@@ -37,6 +37,8 @@ struct DropdownView: View {
             stageSection
                 .padding(.horizontal, Theme.Spacing.md)
 
+            updateBanner
+
             performanceCard
                 .padding(.horizontal, Theme.Spacing.md)
 
@@ -377,6 +379,63 @@ struct DropdownView: View {
         .padding(Theme.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
+    }
+
+    // MARK: - Update Banner
+
+    @ViewBuilder
+    private var updateBanner: some View {
+        let checker = coordinator.updateChecker
+        if checker.hasUpdate || checker.isDownloading {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 13))
+                    Text(checker.isDownloading ? checker.statusMessage : "Update available: v\(checker.availableRelease?.cleanVersion ?? "")")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                    if !checker.isDownloading {
+                        Button {
+                            checker.downloadAndInstallUpdate()
+                        } label: {
+                            Text("Update & Relaunch")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .controlSize(.small)
+                    }
+                }
+
+                if checker.isDownloading {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ProgressView(value: checker.downloadProgress)
+                            .progressViewStyle(.linear)
+                        HStack {
+                            Text(checker.statusMessage)
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(Int(checker.downloadProgress * 100))%")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else if let notes = checker.availableRelease?.shortReleaseNotes {
+                    Text(notes)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(Theme.Spacing.sm)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.card)
+                    .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+            )
+            .padding(.horizontal, Theme.Spacing.md)
+        }
     }
 
     // MARK: - Performance & Live Heartbeat (Unified Card)

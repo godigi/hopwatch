@@ -19,12 +19,20 @@ All notable changes to `netdiag` are recorded here. Format follows
 - **Network Detail Card (`NetworkDetailCard`)**: Renders a dedicated memory card displaying throughput, latency/jitter, reliability rating chips, and an automated "Today vs Typical for this network" comparison panel that highlights latency deltas (e.g. "4 ms faster than typical"), packet loss status, and download speed percentages.
 - **Integrated into GUI Views**: Embedded in `NetworksView` (replacing the basic stats row with the comprehensive memory card and displaying summary rating chips in the sidebar) and in `HomeView` when returning to known networks with 2+ checks.
 
-### Improved — In-App Auto-Updater & macOS DMG Distribution
+### Added — Instant 1-Line App Installer & Seamless macOS Setup (`install-app.sh`)
 
-- **DMG & ZIP Dual Asset Support**: `UpdateChecker` now natively handles both `.dmg` disk image files and `.zip` archives from GitHub Releases. Uses `/usr/bin/hdiutil attach` and `/usr/bin/ditto` to cleanly mount and extract updates, finding the inner `Netdiag.app` bundle even in nested structures.
-- **Gatekeeper Quarantine Stripping**: Automatically invokes `xattr -rd com.apple.quarantine` on the newly installed `/Applications/Netdiag.app` before relaunching, ensuring seamless auto-updates without macOS Gatekeeper "app is damaged" security blocks.
-- **Release Automation**: Updated `gui/Makefile` and `.github/workflows/release.yml` to package and attach both `Netdiag-${VERSION}.dmg` and `Netdiag-${VERSION}.zip` to every release.
-- **Repository Documentation**: Redesigned `README.md` with direct DMG download badges, copyable Homebrew cask instructions, and clear multi-option installation paths.
+- **1-Line Mac App Installer (`install-app.sh`)**: Zero-friction installer `curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash` that queries GitHub Releases, downloads the latest `Netdiag.dmg`, installs `Netdiag.app` to `/Applications`, links the `netdiag` CLI to PATH, completely strips Gatekeeper quarantine attributes, and launches the app in seconds.
+- **Unified CLI `install.sh --app`**: Enhanced `install.sh` with an `--app` flag to seamlessly install the native menu bar app and CLI in a single step.
+- **Visual ASCII Architecture & Telemetry Preview**: Added a high-fidelity ASCII representation of the live menu bar item (`● 18ms`) and hop attribution chain (`Mac ➔ Wi-Fi ➔ Router ➔ ISP`) directly to the top of `README.md`.
+- **Streamlined Quick Install Options**: Reorganized `README.md` into 4 frictionless options with copy-paste commands, including Homebrew tap commands and a copyable 1-line Gatekeeper fix (`xattr -cr /Applications/Netdiag.app`).
+
+### Improved — In-App Auto-Updater & Safe Atomic Installation
+
+- **Prominent In-App Update Banner (`DropdownView`)**: Replaced the subtle footer link with a dedicated, high-visibility update card that highlights new versions, previews release notes, provides a one-click `Update & Relaunch` action, and renders a live download progress bar.
+- **Real-Time Network Download Progress (`FileDownloader`)**: Integrated an `URLSessionDownloadDelegate` that streams byte-level download progress directly to the UI rather than jumping between arbitrary percentage steps.
+- **Dynamic Target Path & Safe Atomic Swap**: Upgraded `UpdateChecker` to dynamically detect the running app's location (`targetAppURL`), stage updates to a temporary directory, create a backup of the existing version, atomically swap binaries, and automatically roll back if replacement fails.
+- **Comprehensive Gatekeeper Quarantine Clearing**: Recursively clears all Apple quarantine and provenance attributes (`xattr -cr`) on the staged bundle to guarantee flawless relaunch on macOS 14 Sonoma and macOS 15 Sequoia.
+- **Unit Test Coverage (`UpdateCheckerTests`)**: Added a full test suite verifying `SemanticVersion` comparison, release JSON decoding, release note extraction, and asset archive filtering.
 
 ### Changed — aligned diagnosis remediation with "Do No Harm" standard [D1, D2, D3, D4, V6-2, B1]
 

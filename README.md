@@ -14,26 +14,52 @@
   </a>
 </p>
 
+```
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │  ● 18ms   (Menu Bar)                                                   │
+ ├────────────────────────────────────────────────────────────────────────┤
+ │  🟢 All good — watching on HomeNet 5G                                  │
+ │                                                                        │
+ │  HOP ATTRIBUTION CHAIN:                                                │
+ │  [Mac] ────(Wi-Fi: -46 dBm)────> [Router] ────(18ms RTT)────> [ISP]    │
+ │   🟢            🟢                  🟢                🟢               │
+ │                                                                        │
+ │  LIVE TELEMETRY:                                                       │
+ │  Internet: 18 ms    Loss: 0%      Down: 420 Mbps    Up: 45 Mbps        │
+ │  Router:    2 ms    Wi-Fi: 5GHz   VPN: Off          Location: 🇺🇸 US    │
+ └────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## Quick Install
 
-### 1. Download Netdiag for Mac (Recommended)
-Download the latest **[Netdiag.dmg](https://github.com/godigi/netdiag/releases/latest)**, open it, and drag `Netdiag.app` into your Applications folder.
-- **Live Menu Bar Monitor**: See real-time ping latency (`● 18ms`) and network status at a glance.
-- **Hop Attribution Chain**: Pinpoints whether the culprit is your Wi-Fi link, your local router, or your ISP.
-- **Automatic In-App Updates**: Silently keeps you up to date with zero maintenance.
-
-### 2. Homebrew Cask
+### Option A: 1-Line Instant Installer (Mac App + CLI) ⚡ *(Recommended)*
+Run this in your terminal. It installs `Netdiag.app` to `/Applications`, links the `netdiag` command line tool to your PATH, clears Gatekeeper quarantine, and launches the menu bar app:
 ```sh
-brew install --cask godigi/netdiag/netdiag
+curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash
 ```
 
-### 3. Terminal CLI Only
+### Option B: Download for macOS (DMG)
+Download the latest **[Netdiag.dmg](https://github.com/godigi/netdiag/releases/latest)**, open it, and drag `Netdiag.app` into your Applications folder.
+
+> [!TIP]
+> **First Launch on macOS:** If macOS displays an *"unidentified developer"* or *"cannot verify"* message, simply **Right-Click (Control-Click) Netdiag.app ➔ Open**, or run:
+> ```sh
+> xattr -cr /Applications/Netdiag.app
+> ```
+
+### Option C: Homebrew Cask
+```sh
+brew tap godigi/netdiag https://github.com/godigi/netdiag.git
+brew install --cask netdiag
+```
+
+### Option D: Terminal CLI Only
 ```sh
 curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash
 ```
-Then run `netdiag`. That fetches netdiag into `~/.local/share/netdiag` and places a symlink on your PATH.
+Or with Homebrew bash bootstrap: `curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash -s -- --prefix ~/.local/bin`
 
 ---
 
@@ -120,8 +146,7 @@ rm -rf ~/.local/share/netdiag ~/net-diag
 
 ### Requirements
 
-macOS 14+ on Apple Silicon or Intel, plus bash 5 (the installer handles
-it). A Homebrew tap is still on the roadmap.
+macOS 14 Sonoma or newer on Apple Silicon or Intel. CLI requires bash 5 (the installer bootstraps it automatically via Homebrew).
 
 ## Usage
 

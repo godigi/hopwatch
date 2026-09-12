@@ -21,6 +21,15 @@ struct GitHubRelease: Decodable, Sendable {
     var cleanVersion: String {
         tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
     }
+
+    /// Extract a concise release summary for banners (first non-empty line or bullet).
+    var shortReleaseNotes: String? {
+        guard let body = body, !body.isEmpty else { return nil }
+        let lines = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+        return lines.first
+    }
 }
 
 /// A release asset attached to a GitHub release (e.g. `Netdiag.dmg`, `Netdiag.app.zip`).
