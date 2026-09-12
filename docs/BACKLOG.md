@@ -9,17 +9,18 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 | ID | Title | Track | Status | Est. Size |
 |---|---|---|---|---|
-| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Done** | XS |
-| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Done** | S |
-| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Done** | M |
-| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Done** | S |
-| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Done** | M |
-| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Done** | S |
-| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Done** | XS |
-| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Done** | S |
-| [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Done** | XS |
+| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Ready** | XS |
+| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Ready** | S |
+| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Ready** | M |
+| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Ready** | S |
+| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Ready** | M |
+| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Ready** | S |
+| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Ready** | XS |
+| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Ready** | S |
+| [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Ready** | XS |
 | [TASK-012](#task-012-share-diagnostics-menu-action--redacted-report-export) | "Share Diagnostics..." friendly menu action & redacted report export | GUI / Sharing | **Ready** | S |
 | [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Ready** | S |
+| [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Ready** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | Backlog | **Backlog** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Backlog | **Backlog** | M |
 
@@ -29,7 +30,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-001: Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md
 - **Area**: Documentation / Release Prep
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `CHANGELOG.md`
 - **Context**:
@@ -44,7 +45,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-002: Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift`
 - **Area**: macOS GUI / Live Chart
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Models/MonitorSample.swift`
   - `gui/Sources/NetdiagGUI/Support/MonitorSeries.swift`
@@ -60,7 +61,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-003: Unify event journaling between GUI and CLI (`events.jsonl`) [Track E]
 - **Area**: Core Architecture / Availability
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/MonitorStream.swift`
   - `lib/availability.sh`
@@ -76,7 +77,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-004: Add "Launch at Login" support to GUI via `SMAppService` [Track E]
 - **Area**: macOS GUI / Settings
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
   - `gui/Sources/NetdiagGUI/Views/SettingsView.swift`
@@ -93,7 +94,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-005: Subnet crowding telemetry & device surge detection (`LAN-1`) [Track D]
 - **Area**: CLI & GUI / Diagnosis
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `helpers/emit_json.py`
   - `docs/JSON-SCHEMA.md`
@@ -115,7 +116,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-008: "Copy Diagnostic Summary for Support / Front Desk / Host" [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -137,7 +138,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-009: "Open Router Admin Page" quick action [Track A]
 - **Area**: macOS GUI / Action Layer
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
@@ -152,7 +153,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-010: "Open Login Page" action on captive portal detection (`CP-1`) [Track C]
 - **Area**: macOS GUI / Captive Portal
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
   - `gui/Sources/NetdiagGUI/Views/LiveView.swift`
@@ -167,7 +168,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-011: Live Latency in the Menu Bar (`● 18ms`)
 - **Area**: macOS GUI / Telemetry & Menu Bar
-- **Status**: **Done**
+- **Status**: **Ready**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/AppSettings.swift`
   - `gui/Sources/NetdiagGUI/NetdiagApp.swift`
@@ -211,6 +212,25 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - During the `speedtest` phase, `ScanProgressView` renders a prominent live throughput display with directional indicator (`↓ Download` / `↑ Upload`) and live Mbps.
   - Smooth animation as speed milestones arrive via fd-3 progress stream.
   - Reverts gracefully when speed test finishes.
+
+---
+
+### TASK-014: Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`)
+- **Area**: Wi-Fi / Diagnosis & Roaming
+- **Status**: **Ready**
+- **Files to touch**:
+  - `lib/thresholds.sh`
+  - `lib/wifi.sh`
+  - `lib/diagnosis.sh`
+  - `helpers/rules_catalog.py`
+  - `tests/test_parse.bats`
+- **Context**:
+  In multi-AP environments (mesh networks, offices, hotels), a MacBook often stays associated with a distant AP (-78 dBm) even though a much stronger AP (-50 dBm) on the same SSID is nearby. To avoid noise, an alert must only fire if: (1) multiple BSSIDs exist on this SSID, (2) current signal is poor (≤ -75 dBm) while candidate is ≥ 15 dBm stronger (≥ -60 dBm), and (3) the condition persists for at least 75 seconds.
+- **Acceptance Criteria**:
+  - Thresholds defined in `lib/thresholds.sh` (`THRESH_WIFI_STICKY_DELTA_DBM=15`, `THRESH_WIFI_STICKY_MAX_RSSI=-75`, `THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI=-60`).
+  - Rule `W3` (info) added to `rules_catalog.py` with fix: "Toggle Wi-Fi off and back on to force macOS to associate with the closer access point."
+  - Detection logic validates that the alternative BSSID belongs to the current SSID and enforces the signal delta.
+  - Bats unit tests verify triggering when conditions match and staying silent when delta < 15 dBm or single AP.
 
 ---
 
