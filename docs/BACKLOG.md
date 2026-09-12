@@ -487,7 +487,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-022: Anti-False-Positive Guardrails for MTU, DHCP Leases, and Bufferbloat Severity (`M1`, `DH-1`, `B1`, `B2`)
 - **Area**: CLI / Diagnosis & Precision Accuracy
-- **Status**: Ready
+- **Status**: **Done**
 - **Files to touch**:
   - `lib/diagnosis.sh`
   - `lib/constants.sh`

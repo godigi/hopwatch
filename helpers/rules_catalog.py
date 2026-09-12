@@ -822,8 +822,7 @@ RULES: list[dict[str, object]] = [
             "or uploading heavily, adding noticeable extra delay that "
             "makes calls and games feel laggy or worse. Enabling Smart "
             "Queue Management (SQM) or QoS in the router's admin page "
-            "— or replacing it with one that supports it — fixes "
-            "the underlying queueing problem."
+            "fixes the underlying queueing problem."
         ),
         "doc": "DIAGNOSIS-RULES.md#b1--bufferbloat-at-gateway-hop",
         # Load-conditional, so not `broken`. Bufferbloat only bites while
@@ -838,8 +837,7 @@ RULES: list[dict[str, object]] = [
         "fix": (
             "Turn on Smart Queue Management (SQM) or QoS in the router's "
             "admin page — that fixes the underlying queueing problem "
-            "directly. If the router doesn't support it, replacing it "
-            "with one that does is the durable fix."
+            "directly, keeping latency steady during heavy traffic."
         ),
         "fix_away": (
             "Ask whoever runs this network whether their router supports "
@@ -1461,7 +1459,7 @@ RULES: list[dict[str, object]] = [
             "moment, the network can drop without warning — worth "
             "keeping an eye on."
         ),
-        "doc": "DIAGNOSIS-RULES.md#dh-1--dhcp-lease-expires-within-1-hour",
+        "doc": "DIAGNOSIS-RULES.md#dh-1--dhcp-lease-expires-soon",
         "fix": (
             "Nothing to do — this normally renews on its own. If the "
             "network happens to drop right as it renews, that's the "

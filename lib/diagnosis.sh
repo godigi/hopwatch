@@ -342,20 +342,46 @@ diagnosis_run() {
   fi
 
   # B1/B2 — bufferbloat at gateway or ISP hop.
+  local _is_fast_pipe=0
+  if [ -n "${SPEEDTEST_DOWN_MBPS:-}" ] && is_numeric "${SPEEDTEST_DOWN_MBPS:-}" \
+     && [ "${SPEEDTEST_DOWN_MBPS%.*}" -ge "$THRESH_BUFFERBLOAT_FAST_MBPS" ]; then
+    _is_fast_pipe=1
+  fi
+
   case "${BUFFERBLOAT_GW_GRADE:-}" in
     C)   add_diag warn B1 "Your router gets a bit sluggish under load — when something is downloading or uploading heavily, calls and games will feel laggy (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade C). Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page." ;;
-    D|F) add_diag critical B1 "Your router chokes under load — whenever someone's downloading or uploading, Zoom / FaceTime / WhatsApp calls will glitch and games will lag badly (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page, or replace the router with one that supports it." ;;
+    D|F)
+      if [ "$_is_fast_pipe" -eq 1 ]; then
+        add_diag warn B1 "Your router gets sluggish under heavy saturation (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). On a fast connection, this rarely impacts ordinary usage unless saturated by large simultaneous downloads. Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
+      else
+        add_diag critical B1 "Your router chokes under load — whenever someone's downloading or uploading, Zoom / FaceTime / WhatsApp calls will glitch and games will lag badly (extra +${BUFFERBLOAT_GW_DELTA} ms delay, bufferbloat grade ${BUFFERBLOAT_GW_GRADE}). Fix: enable \"Smart Queue Management\" or \"QoS\" in your router's admin page."
+      fi
+      ;;
   esac
   case "${BUFFERBLOAT_INET_GRADE:-}" in
     C)   add_diag warn B2 "The bottleneck under heavy use is your ISP's equipment, not your router (+${BUFFERBLOAT_INET_DELTA} ms extra delay under load, bufferbloat grade C). Try a modem firmware update if you control it; otherwise this is the ISP's responsibility." ;;
-    D|F) add_diag critical B2 "Your ISP's equipment is the bottleneck — under load your connection adds +${BUFFERBLOAT_INET_DELTA} ms of delay (bufferbloat grade ${BUFFERBLOAT_INET_GRADE}), enough to ruin voice/video calls and multiplayer games. Call your ISP and ask about firmware updates or a plan with better latency." ;;
+    D|F)
+      if [ "$_is_fast_pipe" -eq 1 ]; then
+        add_diag warn B2 "Your ISP's equipment adds latency under heavy upload/download saturation (+${BUFFERBLOAT_INET_DELTA} ms extra delay under load, bufferbloat grade ${BUFFERBLOAT_INET_GRADE}). On a fast connection, this rarely impacts ordinary usage unless fully saturated."
+      else
+        add_diag critical B2 "Your ISP's equipment is the bottleneck — under load your connection adds +${BUFFERBLOAT_INET_DELTA} ms of delay (bufferbloat grade ${BUFFERBLOAT_INET_GRADE}), enough to ruin voice/video calls and multiplayer games. Call your ISP and ask about firmware updates or a plan with better latency."
+      fi
+      ;;
   esac
 
   # M1 — path MTU below 1500.
-  if [ -n "$MTU_EFFECTIVE" ] && [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_CRIT" ]; then
-    add_diag critical M1 "Most websites won't load fully — your network is silently dropping anything bigger than ${MTU_EFFECTIVE} bytes per packet. Cause is usually a VPN or DSL link that hasn't been configured to tell other devices about the smaller size. Disconnect any VPN; if it persists, check your router's WAN settings (technical: path MTU ${MTU_EFFECTIVE} — needs MSS clamping)."
-  elif [ -n "$MTU_EFFECTIVE" ] && [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_STANDARD" ]; then
-    add_diag warn M1 "Some websites load fine and others hang forever loading — your network is silently dropping packets above ${MTU_EFFECTIVE} bytes. Usually caused by a VPN, a tunneled connection, or a DSL link. Try disconnecting any VPN; if it persists, ask your ISP or check your router's WAN-MTU / MSS-clamping setting."
+  if [ "${VPN_ACTIVE:-0}" -eq 1 ] || [ "${PATH_SPLIT_TUNNEL:-0}" -eq 1 ]; then
+    # VPN awareness: tunnel encryption headers legitimately reduce path MTU (1380-1420 bytes).
+    # Suppress warnings for standard tunnel MTUs (1280-1499). Only warn if below IPv6 min (1280).
+    if [ -n "$MTU_EFFECTIVE" ] && [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_CRIT" ]; then
+      add_diag warn M1 "Your VPN connection's packet size (${MTU_EFFECTIVE} bytes) is below the standard minimum of 1280 bytes. Some websites and secure services may fail to load. Check your VPN adapter MTU settings."
+    fi
+  else
+    if [ -n "$MTU_EFFECTIVE" ] && [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_CRIT" ]; then
+      add_diag critical M1 "Most websites won't load fully — your network is silently dropping anything bigger than ${MTU_EFFECTIVE} bytes per packet. Cause is usually a VPN or DSL link that hasn't been configured to tell other devices about the smaller size. Disconnect any VPN; if it persists, check your router's WAN settings (technical: path MTU ${MTU_EFFECTIVE} — needs MSS clamping)."
+    elif [ -n "$MTU_EFFECTIVE" ] && [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_STANDARD" ]; then
+      add_diag warn M1 "Some websites load fine and others hang forever loading — your network is silently dropping packets above ${MTU_EFFECTIVE} bytes. Usually caused by a VPN, a tunneled connection, or a DSL link. Try disconnecting any VPN; if it persists, ask your ISP or check your router's WAN-MTU / MSS-clamping setting."
+    fi
   fi
 
   # MT1 — first lossy hop.
@@ -595,7 +621,7 @@ diagnosis_run() {
 
   # DH-1 — DHCP lease expires soon.
   if [ -n "$DHCP_TIME_REMAINING_S" ] && [ "$DHCP_TIME_REMAINING_S" -gt 0 ] && [ "$DHCP_TIME_REMAINING_S" -lt "$THRESH_DHCP_LEASE_WARN_S" ]; then
-    add_diag warn DH-1 "Your Mac's network-address lease from the router expires in $((DHCP_TIME_REMAINING_S / 60)) minutes. Normally it renews automatically, but if your router is rebooting or out of addresses at that moment, you'll suddenly lose the network with no warning. Keep an eye out."
+    add_diag warn DH-1 "Your Mac's network-address lease has not renewed yet (expires in $((DHCP_TIME_REMAINING_S / 60)) minutes). Normally it renews automatically, but if your router is unresponsive at that moment, you could lose connection. Keep an eye out."
   fi
 
   # DH-2 — DHCP vs system DNS mismatch. The comparison is deliberately

@@ -6,6 +6,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Improved — anti-false-positive guardrails for MTU, DHCP, and bufferbloat [M1, DH-1, B1, B2]
+
+Diagnostic accuracy depends on suppressing false alarms on functioning networks and keeping remediation advice proportional and non-destructive:
+
+- **VPN-Aware Path MTU (`M1`)**: VPN tunnels naturally add 60–80 bytes of encryption and encapsulation overhead (IPsec/WireGuard/OpenVPN), causing `mtu.effective` to fall between 1380 and 1420 bytes. Previously, this fired `M1` ("critical/warn: path MTU below 1500"), causing spurious alerts for corporate and remote VPN users. `M1` now suppresses warnings for standard tunnel MTUs (1280–1499 bytes) when an active VPN or split tunnel is present (`VPN_ACTIVE=1` or `PATH_SPLIT_TUNNEL=1`), only firing `warn` if the MTU drops below the IPv6 architectural minimum of 1280 bytes.
+- **Realistic DHCP Lease Expiration (`DH-1`)**: The previous threshold fired a warning whenever a DHCP lease had less than 1 hour remaining. Because DHCP standard RFC 2131 specifies lease renewal at 50% lifetime (T1), standard 2-hour leases triggered false warnings for an entire hour every renewal cycle. The threshold is updated to 10 minutes (`THRESH_DHCP_LEASE_WARN_S=600`), accurately indicating an actual lease renewal stall while softening guidance.
+- **Proportional Bufferbloat Severity & Actionable Remediation (`B1`, `B2`)**: Connections with verified high download bandwidth ($\ge 150\text{ Mbps}$, `THRESH_BUFFERBLOAT_FAST_MBPS`) now demote Grade D/F bufferbloat from `critical` to `warn`, reflecting that ordinary tasks rarely saturate the pipe enough to induce queue bloat. Removed outdated advice instructing users to replace their router, focusing remediation exclusively on enabling Smart Queue Management (SQM) or QoS settings.
+
 ### Added — suboptimal Wi-Fi band trapping detection [W6]
 
 Modern dual-band routers broadcast a unified SSID across both 2.4 GHz and 5 GHz (or 6 GHz) frequencies. When MacBooks wake from sleep or connect from afar, they often associate with the 2.4 GHz beacon. Even after moving close to the router, macOS does not aggressively roam to 5 GHz if the 2.4 GHz connection is deemed "acceptable", trapping the user on congested 2.4 GHz channels with throughput caps:

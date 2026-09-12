@@ -209,10 +209,9 @@ THRESH_NTP_DRIFT_WARN_S=1
 THRESH_DNS_LATENCY_WARN_MS=250
 
 # ── DHCP ─────────────────────────────────────────────────────────────────
-# DH-1 — warn when the lease has less than an hour left. Renewal is
-# normally invisible; it is only interesting when the router happens to be
-# rebooting or out of addresses at that moment.
-THRESH_DHCP_LEASE_WARN_S=3600
+# DH-1 — warn when the lease has less than 10 minutes left without renewing.
+# Renewal is normally automatic at 50% (T1); under 10 minutes indicates renewal failure.
+THRESH_DHCP_LEASE_WARN_S=600
 
 # ── Comparing one stored run against its network's history ───────────────
 # Read by helpers/history.py in --show mode, the only place a single past
@@ -356,6 +355,11 @@ THRESH_BUFFERBLOAT_A_MS=5
 THRESH_BUFFERBLOAT_B_MS=30
 THRESH_BUFFERBLOAT_C_MS=60
 THRESH_BUFFERBLOAT_D_MS=200
+# Proportional bufferbloat: connections with fast verified throughput (>= 150 Mbps)
+# demote grade D/F bufferbloat to warning since ordinary tasks rarely saturate the pipe.
+# Restrict critical bufferbloat to constrained connections (<= 30 Mbps).
+THRESH_BUFFERBLOAT_FAST_MBPS=150
+THRESH_BUFFERBLOAT_CONSTRAINED_MBPS=30
 
 # MTR — per-hop loss above this is interesting enough to display as loss.
 # A middle hop above this with a clean destination is classified as ICMP

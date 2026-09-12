@@ -414,20 +414,22 @@ paper over this would have been the wrong fix in the wrong file.
 ### B1 — Bufferbloat at gateway hop
 
 - Trigger: `bufferbloat.gw_grade ∈ {C, D, F}`
-- Severity: `warn` (C) / `critical` (D, F)
+- Severity: `warn` (C, or D/F when bandwidth ≥ 150 Mbps) / `critical` (D, F on constrained or unmeasured links)
 - Evidence: idle gw RTT, loaded gw RTT, delta in ms, grade.
-- Recommendation: router lacks SQM/fq_codel. Enable Smart Queue Management
-  in the router UI, or replace with a router that supports cake/fq_codel.
+- Recommendation: router queue management under saturation. Enable Smart Queue Management (SQM)
+  or QoS in router admin settings.
 - Rationale: the latency spike happens before traffic ever leaves the LAN,
-  so the queue depth lives in your router's WAN egress buffer.
+  so the queue depth lives in your router's WAN egress buffer. On fast connections (≥ 150 Mbps),
+  ordinary tasks rarely saturate the link so severity is downgraded to warning.
 
 ### B2 — Bufferbloat at ISP hop only
 
 - Trigger: `bufferbloat.inet_grade ∈ {C, D, F}`
-- Severity: `warn` (C) / `critical` (D, F)
+- Severity: `warn` (C, or D/F when bandwidth ≥ 150 Mbps) / `critical` (D, F on constrained or unmeasured links)
 - Evidence: idle internet RTT, loaded internet RTT, delta, grade.
 - Recommendation: your ISP's CPE/uplink is the bottleneck. Call the ISP;
-  if you control the modem, try a firmware update.
+  if you control the modem, try a firmware update. On fast connections (≥ 150 Mbps),
+  severity is downgraded to warning.
 
 ## Rules added for the 14 enhancements
 
@@ -435,14 +437,16 @@ All of the below are implemented and can fire.
 
 ### M1 — Path MTU below 1500
 
-- Trigger: `mtu.effective < 1500`
-- Severity: `warn` (1400–1499) / `critical` (< 1400)
+- Trigger: on direct links, `mtu.effective < 1500`. On active VPN or split tunnels, suppressed for standard tunnel MTUs (1280–1499 bytes), only fires if `mtu.effective < 1280`.
+- Severity: on direct links: `warn` (1400–1499) / `critical` (< 1400). On active VPN/split tunnel: `warn` (< 1280).
 - Evidence: largest DF-set payload that got through and the inferred MTU.
 - Recommendation: classic symptom of PPPoE / VPN / tunnelled link. Add MSS
-  clamping at the router or shrink the WAN MTU.
+  clamping at the router or shrink the WAN MTU. On VPNs, tunnel overhead naturally reduces MTU.
 - Rationale: TLS ClientHello + cert chain push frames to the path-MTU
   ceiling; if DF is set and the router doesn't return ICMP frag-needed, the
-  handshake hangs while smaller-frame sites still work.
+  handshake hangs while smaller-frame sites still work. Standard tunnel MTUs (1380–1420 bytes)
+  are expected and normal on VPNs, so warnings are suppressed unless MTU drops below the IPv6
+  minimum of 1280 bytes.
 
 ### MT1 — First lossy hop identified
 
@@ -566,13 +570,15 @@ All of the below are implemented and can fire.
   address" don't share a message — they have different causes and
   different fixes.
 
-### DH-1 — DHCP lease expires within 1 hour
+### DH-1 — DHCP lease expires soon
 
-- Trigger: `dhcp.time_remaining_s < 3600`.
+- Trigger: `dhcp.time_remaining_s < 600` and `> 0`.
 - Severity: `warn`.
 - Evidence: lease expiration time + computed minutes remaining.
-- Recommendation: if a renewal fails (router rebooting or DHCP scope
+- Recommendation: if a renewal fails (router rebooting, unreachable, or DHCP scope
   exhausted), the link will drop without warning. Watch for it.
+- Rationale: DHCP clients renew at 50% (T1). A lease with less than 10 minutes remaining
+  indicates that earlier renewal attempts failed or the router is unresponsive.
 
 ### DH-2 — DHCP-handed DNS differs from system resolver
 
