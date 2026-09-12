@@ -1184,4 +1184,21 @@ final class NetdiagCoordinator {
         }
         return raw
     }
+
+    // MARK: - Sharing
+
+    /// Raw JSON for the active report (either the live run or the hydrated stored report).
+    var currentReportRawJSON: String? {
+        latestRun?.rawJSON ?? hydratedReport?.rawJSON
+    }
+
+    /// Shares the current report (or newest stored run) as redacted plain text.
+    func shareCurrentReportText() async throws -> String {
+        try await NetdiagRunner.share(rawJSON: currentReportRawJSON)
+    }
+
+    /// Shares the current report (or newest stored run) as redacted JSON.
+    func shareCurrentReportJSON() async throws -> String {
+        try await NetdiagRunner.shareJSON(rawJSON: currentReportRawJSON)
+    }
 }

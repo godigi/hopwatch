@@ -250,3 +250,16 @@ JSON
   [[ "$output" == *"26.417"* ]] || { echo "a measurement was mangled"; echo "$output"; return 1; }
   [[ "$output" == *"0.12"* ]]   || { echo "the clock drift was mangled"; echo "$output"; return 1; }
 }
+
+@test "--share --json outputs parseable redacted JSON" {
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c 'import json, sys; doc = json.load(sys.stdin); assert doc["public"]["ip"] == "[redacted]"'
+  for secret in "203.0.113.77" "MyHouse" "aa:bb:cc:dd:ee:ff" \
+                "aa:bb:cc:dd:ee:f0" "2001:db8:1234:5678::1" \
+                "fe80::a8bb:ccff:fedd:eeff" "192.168.15.42" "Recife"; do
+    [[ "$output" != *"$secret"* ]] || {
+      echo "leaked in json: $secret"; echo "$output"; return 1
+    }
+  done
+}

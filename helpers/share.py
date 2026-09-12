@@ -410,6 +410,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--file", type=str, default=None,
                      help="Read the run's JSON from PATH instead of stdin.")
+    ap.add_argument("--json", action="store_true",
+                     help="Output redacted JSON instead of formatted plain text.")
     args = ap.parse_args()
 
     if args.file:
@@ -436,7 +438,12 @@ def main() -> None:
     # Two passes, deliberately: the field-sourced scrub first, then a
     # sweep for any globally-routable address it could not have known
     # about. See sweep_public_addresses for why belt and braces.
-    print(sweep_public_addresses(render(redact(record))))
+    redacted = redact(record)
+    if args.json:
+        dumped = json.dumps(redacted, indent=2)
+        print(sweep_public_addresses(dumped))
+    else:
+        print(sweep_public_addresses(render(redacted)))
 
 
 if __name__ == "__main__":

@@ -199,9 +199,20 @@ struct NetdiagRunner {
     /// looked up in the store yet. The redaction and every word of the
     /// wording are the CLI's; this returns its bytes untouched, per
     /// CLAUDE.md on where the app is allowed to have an opinion.
-    static func share(rawJSON: String) async throws -> String {
-        let (out, err, status) = try await execute(arguments: ["--share=-"],
-                                                    stdin: rawJSON)
+    static func share(rawJSON: String? = nil) async throws -> String {
+        let args = rawJSON != nil ? ["--share=-"] : ["--share"]
+        let (out, err, status) = try await execute(arguments: args, stdin: rawJSON)
+        guard status == 0 else {
+            throw NetdiagError.scriptError(
+                String((err.isEmpty ? out : err).prefix(400)))
+        }
+        return out
+    }
+
+    /// Renders one stored run or piped JSON as redacted JSON.
+    static func shareJSON(rawJSON: String? = nil) async throws -> String {
+        let args = rawJSON != nil ? ["--share=-", "--json"] : ["--share", "--json"]
+        let (out, err, status) = try await execute(arguments: args, stdin: rawJSON)
         guard status == 0 else {
             throw NetdiagError.scriptError(
                 String((err.isEmpty ? out : err).prefix(400)))

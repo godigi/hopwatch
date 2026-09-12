@@ -715,11 +715,13 @@ if [ "$SHOW" -eq 1 ]; then
   exit 0
 fi
 if [ "$SHARE" -eq 1 ]; then
+  _share_args=()
+  [ "$JSON_MODE" -eq 1 ] && _share_args+=("--json")
   # stdin: the app's path. It already holds the run's JSON and needs no
   # store lookup, so a run that finished two seconds ago shares exactly
   # like one from last week.
   if [ "$SHARE_ID" = "-" ]; then
-    python3 "$HELPERS_DIR/share.py" || exit 3
+    python3 "$HELPERS_DIR/share.py" "${_share_args[@]}" || exit 3
     exit 0
   fi
   # Sourced before the id lookup, not after: history.py's main() now
@@ -769,7 +771,7 @@ print(runs[-1].get("id", "") if runs else "")' 2>/dev/null)"
       | python3 -c 'import json, sys
 doc = json.load(sys.stdin)
 json.dump(doc["run"], sys.stdout)' 2>/dev/null \
-      | python3 "$HELPERS_DIR/share.py" 2>/dev/null
+      | python3 "$HELPERS_DIR/share.py" "${_share_args[@]}" 2>/dev/null
   ); then
     # share.py's own "not valid JSON" message would otherwise also print
     # here, on empty input cascading down from the failed lookup above —

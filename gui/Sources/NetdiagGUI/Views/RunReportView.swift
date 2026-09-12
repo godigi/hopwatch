@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// The report card: one row per thing that was measured, then the CLI's own
 /// prose about what it means.
@@ -23,20 +24,14 @@ struct RunReportView: View {
     /// it is in the store.
     var comparison: RunDetail.Comparison?
     /// The CLI's own bytes for this run, when the caller has them. `nil`
-    /// for a snapshot decoded without them — the Copy control says so
-    /// rather than silently vanishing.
+    /// for runs that reached us through a store that dropped them.
     var rawJSON: String?
-    /// Whether each diagnosis shows its rule id. Passed in rather than read
-    /// from `Defaults` so the captions appear the instant the enclosing
-    /// expert disclosure is opened, not on the next launch.
+
     var showRuleIDs: Bool = false
-    /// Home leads with the user-facing activity answer and keeps the dense
-    /// measurement table behind one disclosure. A stored run's detail page
-    /// remains the place where the complete report opens by default.
     var presentation: Presentation = .full
 
-    /// Where this report came from, when it is not self-evidently about the
-    /// here and now. Rendered as a caption above the report.
+    /// Explains where this report came from when it is not the current run
+    /// on the network the user is sitting on.
     ///
     /// Exists because Home rendered a stored run from another network
     /// through this same view with nothing distinguishing it from a live
@@ -53,6 +48,8 @@ struct RunReportView: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
 
     @State private var shareError: String?
+    @State private var shareFeedback: String?
+    @State private var isSharing = false
     @State private var didCopy = false
     @State private var didCopySupport = false
     @State private var homeDetailsExpanded = false
@@ -83,6 +80,13 @@ struct RunReportView: View {
             card
             copyRow
             diagnoses
+        }
+        .contextMenu {
+            Button("Copy Redacted Report") { copyShareableReport() }
+            Button("Copy for Support / Front Desk") { copySupportSummary() }
+            Divider()
+            Button("Save as Markdown (.md)…") { saveMarkdownReport() }
+            Button("Save Redacted JSON (.json)…") { saveJSONReport() }
         }
     }
 
@@ -127,11 +131,28 @@ struct RunReportView: View {
     @ViewBuilder
     private var copyRow: some View {
         HStack(spacing: 8) {
-            Button(didCopy ? "Copied" : "Copy report") {
-                copyShareableReport()
+            Menu {
+                Button("Copy Redacted Report") {
+                    copyShareableReport()
+                }
+                Button("Copy for Support / Front Desk") {
+                    copySupportSummary()
+                }
+                Divider()
+                Button("Save as Markdown (.md)…") {
+                    saveMarkdownReport()
+                }
+                Button("Save Redacted JSON (.json)…") {
+                    saveJSONReport()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: didCopy ? "checkmark" : "square.and.arrow.up")
+                    Text(shareFeedback ?? "Share Diagnostics…")
+                }
             }
             .controlSize(.small)
-            .disabled(didCopy || rawJSON == nil)
+            .disabled(isSharing)
 
             Button(didCopySupport ? "Copied!" : "Copy for Support") {
                 copySupportSummary()
@@ -175,16 +196,57 @@ struct RunReportView: View {
             return
         }
         Task { @MainActor in
+            isSharing = true
+            defer { isSharing = false }
             do {
-                let text = try await NetdiagRunner.share(rawJSON: raw)
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+                _ = try await DiagnosticReportSharing.copyRedactedReport(rawJSON: raw)
                 shareError = nil
                 didCopy = true
+                shareFeedback = "Diagnostic report copied"
                 try? await Task.sleep(for: .seconds(2))
                 didCopy = false
+                shareFeedback = nil
             } catch {
                 shareError = "Couldn't build a shareable report."
+            }
+        }
+    }
+
+    private func saveMarkdownReport() {
+        guard let raw = rawJSON else {
+            shareError = "This report came from an older netdiag and can't be shared."
+            return
+        }
+        Task { @MainActor in
+            isSharing = true
+            defer { isSharing = false }
+            do {
+                let text = try await NetdiagRunner.share(rawJSON: raw)
+                let name = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: snapshot.timestamp)
+                let mdType = UTType(filenameExtension: "md") ?? .plainText
+                DiagnosticReportSharing.saveFile(content: text, defaultName: name, contentType: mdType)
+                shareError = nil
+            } catch {
+                shareError = "Couldn't export report."
+            }
+        }
+    }
+
+    private func saveJSONReport() {
+        guard let raw = rawJSON else {
+            shareError = "This report came from an older netdiag and can't be shared."
+            return
+        }
+        Task { @MainActor in
+            isSharing = true
+            defer { isSharing = false }
+            do {
+                let json = try await NetdiagRunner.shareJSON(rawJSON: raw)
+                let name = DiagnosticReportSharing.defaultFileName(extension: "json", timestamp: snapshot.timestamp)
+                DiagnosticReportSharing.saveFile(content: json, defaultName: name, contentType: .json)
+                shareError = nil
+            } catch {
+                shareError = "Couldn't export JSON."
             }
         }
     }

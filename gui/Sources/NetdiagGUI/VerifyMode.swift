@@ -85,6 +85,7 @@ private enum VerifyHarness {
         runMonitorSeriesGapTests()
         runLaunchAtLoginTests()
         runMenuBarLatencyTests()
+        runDiagnosticShareTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1090,6 +1091,20 @@ private enum VerifyHarness {
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4) == "5ms", "formatPing falls back to gateway RTT")
         check(MenuBarLabel.formatPing(internetRtt: 25.1, gatewayRtt: 3.0) == "25ms", "formatPing prioritizes internet RTT")
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil, "formatPing is nil when unmeasured")
+    }
+
+    // MARK: - Diagnostic Share
+
+    private static func runDiagnosticShareTests() {
+        print("Diagnostic share (DiagnosticReportSharing):")
+        let mdName = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: "2026-08-25T12:00:00Z")
+        check(mdName == "netdiag-report-2026-08-25-120000.md", "defaultFileName formats md timestamp correctly")
+
+        let jsonName = DiagnosticReportSharing.defaultFileName(extension: "json", timestamp: "2026-08-25T12:00:00Z")
+        check(jsonName == "netdiag-report-2026-08-25-120000.json", "defaultFileName formats json timestamp correctly")
+
+        let nowName = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: nil)
+        check(nowName.hasPrefix("netdiag-report-") && nowName.hasSuffix(".md"), "defaultFileName handles nil timestamp")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

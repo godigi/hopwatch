@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreWLAN
+import UniformTypeIdentifiers
 
 /// Layer two of four: the dropdown status menu.
 ///
@@ -28,6 +29,8 @@ struct DropdownView: View {
     /// below, at most once per incoming monitor sample.
     @State private var coreWLANRSSI: Int?
     @State private var didCopySupport = false
+    @State private var didShare = false
+    @State private var shareFeedback: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -56,6 +59,13 @@ struct DropdownView: View {
             controlsSection
         }
         .padding(.vertical, Theme.Spacing.sm)
+        .contextMenu {
+            Button("Copy Redacted Report") { copyShareableReport() }
+            Button("Copy for Support") { copySupportSummary() }
+            Divider()
+            Button("Save as Markdown (.md)…") { saveMarkdownReport() }
+            Button("Save Redacted JSON (.json)…") { saveJSONReport() }
+        }
         .task {
             if coordinator.history.document.runs.isEmpty {
                 await coordinator.history.load()
@@ -671,6 +681,33 @@ struct DropdownView: View {
                 coordinator.setMonitoring(enabled: enabled)
             }
 
+            Menu {
+                Button("Copy Redacted Report") {
+                    copyShareableReport()
+                }
+                Button("Copy for Support") {
+                    copySupportSummary()
+                }
+                Divider()
+                Button("Save as Markdown (.md)…") {
+                    saveMarkdownReport()
+                }
+                Button("Save Redacted JSON (.json)…") {
+                    saveJSONReport()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: didShare ? "checkmark" : "square.and.arrow.up")
+                        .frame(width: 16)
+                    Text(shareFeedback ?? "Share Diagnostics…")
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, 5)
+            }
+            .menuStyle(.borderlessButton)
+
             dropdownButton(didCopySupport ? "Copied Summary!" : "Copy for Support",
                            icon: didCopySupport ? "checkmark" : "doc.on.doc") {
                 copySupportSummary()
@@ -774,6 +811,44 @@ struct DropdownView: View {
             didCopySupport = true
             try? await Task.sleep(for: .seconds(2))
             didCopySupport = false
+        }
+    }
+
+    private func copyShareableReport() {
+        Task { @MainActor in
+            do {
+                _ = try await coordinator.shareCurrentReportText()
+                shareFeedback = "Diagnostic report copied"
+                didShare = true
+                try? await Task.sleep(for: .seconds(2))
+                shareFeedback = nil
+                didShare = false
+            } catch {
+                shareFeedback = "Couldn't build report"
+                try? await Task.sleep(for: .seconds(2))
+                shareFeedback = nil
+            }
+        }
+    }
+
+    private func saveMarkdownReport() {
+        Task { @MainActor in
+            do {
+                let text = try await coordinator.shareCurrentReportText()
+                let name = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: coordinator.latestRun?.snapshot.timestamp)
+                let mdType = UTType(filenameExtension: "md") ?? .plainText
+                DiagnosticReportSharing.saveFile(content: text, defaultName: name, contentType: mdType)
+            } catch {}
+        }
+    }
+
+    private func saveJSONReport() {
+        Task { @MainActor in
+            do {
+                let json = try await coordinator.shareCurrentReportJSON()
+                let name = DiagnosticReportSharing.defaultFileName(extension: "json", timestamp: coordinator.latestRun?.snapshot.timestamp)
+                DiagnosticReportSharing.saveFile(content: json, defaultName: name, contentType: .json)
+            } catch {}
         }
     }
 
