@@ -88,6 +88,7 @@ private enum VerifyHarness {
         runDiagnosticShareTests()
         runSpeedometerTests()
         runMetricGlossaryTests()
+        runHopAttributionTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -1156,6 +1157,45 @@ private enum VerifyHarness {
         check(MetricGlossary.entry(for: "Under load")?.key == "bufferbloat", "label Under load resolves to bufferbloat")
         check(MetricGlossary.entry(for: "Wi-Fi signal")?.key == "rssi", "label Wi-Fi signal resolves to rssi")
         check(MetricGlossary.entry(for: "Packet size (MTU)")?.key == "mtu", "label Packet size (MTU) resolves to mtu")
+    }
+
+    // MARK: - Hop Attribution
+
+    private static func runHopAttributionTests() {
+        print("Hop attribution resolver (HopAttributionResolver):")
+        let wifiRes = HopAttributionResolver.resolve(
+            rules: ["G1"], isWifi: true, wifiRSSI: -82, gatewayRTT: 12.0, gatewayLoss: 30.0, inetLoss: 30.0
+        )
+        check(wifiRes.culprit == .wifi, "G1 with weak Wi-Fi attributes to Wi-Fi")
+        check(wifiRes.wifiHealth == .critical, "Wi-Fi health is critical")
+
+        let routerRes = HopAttributionResolver.resolve(
+            rules: ["G2"], isWifi: true, wifiRSSI: -45, gatewayRTT: 1.2, gatewayLoss: 25.0, inetLoss: 25.0
+        )
+        check(routerRes.culprit == .router, "G2 with strong Wi-Fi attributes to router")
+        check(routerRes.routerHealth == .critical, "Router health is critical")
+
+        let ispRes = HopAttributionResolver.resolve(
+            rules: ["P1"], isWifi: true, wifiRSSI: -48, gatewayRTT: 1.1, gatewayLoss: 0.0, inetLoss: 100.0
+        )
+        check(ispRes.culprit == .isp, "P1 with healthy gateway attributes to ISP")
+        check(ispRes.ispHealth == .critical, "ISP health is critical")
+
+        let b1Res = HopAttributionResolver.resolve(
+            rules: ["B1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, bufferbloatGW: 220.0, bufferbloatInet: 230.0
+        )
+        check(b1Res.culprit == .router, "B1 local bufferbloat attributes to router")
+
+        let b2Res = HopAttributionResolver.resolve(
+            rules: ["B2"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, bufferbloatGW: 10.0, bufferbloatInet: 250.0
+        )
+        check(b2Res.culprit == .isp, "B2 upstream bufferbloat attributes to ISP")
+
+        let clearRes = HopAttributionResolver.resolve(
+            rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0
+        )
+        check(clearRes.culprit == .none, "Zero faults attributes to none (All Clear)")
+        check(clearRes.wifiHealth == .healthy && clearRes.routerHealth == .healthy && clearRes.ispHealth == .healthy, "All hops healthy on zero faults")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

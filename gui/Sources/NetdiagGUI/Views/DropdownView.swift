@@ -230,6 +230,10 @@ struct DropdownView: View {
                 .controlSize(.small)
                 .disabled(coordinator.isScanning)
             }
+            if let latest = coordinator.monitor.latest {
+                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest))
+                    .padding(.top, 2)
+            }
             Text(isCritical ? "Confirming before notifying you…"
                             : "Will alert if this keeps up.")
                 .font(.caption2)
@@ -287,13 +291,19 @@ struct DropdownView: View {
             }
         }
 
-        return AlertStageCard(
-            alert: alert,
-            moreCount: max(coordinator.alerts.activeSorted.count - 1, 0),
-            onOpen: openActivity,
-            actionButtonTitle: actionTitle,
-            onAction: action
-        )
+        return VStack(spacing: 6) {
+            AlertStageCard(
+                alert: alert,
+                moreCount: max(coordinator.alerts.activeSorted.count - 1, 0),
+                onOpen: openActivity,
+                actionButtonTitle: actionTitle,
+                onAction: action
+            )
+            if let latest = coordinator.monitor.latest {
+                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest))
+                    .padding(.horizontal, Theme.Spacing.xs)
+            }
+        }
     }
 
     private var testingStage: some View {

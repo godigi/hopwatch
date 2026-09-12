@@ -62,6 +62,7 @@ struct RunReportView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            hopAttribution
             suitability
             if presentation == .home {
                 homeDetails
@@ -69,6 +70,10 @@ struct RunReportView: View {
                 details
             }
         }
+    }
+
+    private var hopAttribution: some View {
+        HopAttributionView(result: HopAttributionResolver.resolve(snapshot: snapshot))
     }
 
     /// The measurement table, sharing controls and diagnosis prose remain

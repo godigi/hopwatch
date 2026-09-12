@@ -6,6 +6,16 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — visual hop attribution chain and culprit badge [GUI]
+
+When users encounter connection issues, the first question they ask is: "Is it my Wi-Fi, my router, or my internet provider?"
+
+- Introduced `HopAttributionResolver` pure resolution engine, partitioning the network path into 3 segments (Wi-Fi / Local Link, Local Router / Gateway, Internet & ISP) and determining the primary Culprit (`none`, `wifi`, `router`, `isp`) along with plain-English reassurance.
+- Added `HopAttributionView` at the top of `RunReportView`: an interactive horizontal node chain (`[Mac] ──(Wi-Fi)──► [Router] ──(Broadband)──► [Internet]`) with visual state icons, a prominent Culprit Badge, and reassuring root-cause guidance.
+- Integrated `HopAttributionCompactView` into `DropdownView` during `watching` and `alerted` stages for at-a-glance hop attribution directly in the menu bar.
+- Tested across Wi-Fi degradation (`G1`), router packet loss (`G2`), upstream ISP loss (`P1`/`P2`), local bufferbloat (`B1`) vs upstream bufferbloat (`B2`), and all-clear states.
+
+
 ### Added — plain-English metric tooltips and MetricGlossary [GUI]
 
 Technical metrics like `Bufferbloat (+184 ms)`, `Packet size (MTU) 1492 bytes`, `UPnP enabled`, `RSSI -76 dBm`, and `SNR 21 dB` can be confusing to non-network engineers.
