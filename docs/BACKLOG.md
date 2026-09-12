@@ -9,20 +9,21 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 | ID | Title | Track | Status | Est. Size |
 |---|---|---|---|---|
-| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Done** | XS |
-| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Done** | S |
-| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Done** | M |
-| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Done** | S |
-| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Done** | M |
-| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Done** | S |
-| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Done** | XS |
-| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Done** | S |
-| [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Done** | XS |
-| [TASK-012](#task-012-share-diagnostics-menu-action--redacted-report-export) | "Share Diagnostics..." friendly menu action & redacted report export | GUI / Sharing | **Done** | S |
-| [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Done** | S |
-| [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Done** | M |
-| [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
-| [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
+| [TASK-001](#task-001-document-unreleased-gui-episode-folding--monitor-started-parity-in-changelogmd) | Document unreleased GUI episode folding & monitor-started parity in CHANGELOG.md | Quality | **Ready** | XS |
+| [TASK-002](#task-002-decode-gap_s-in-monitorsampleswift-and-use-in-monitorseriesswift) | Decode `gap_s` in `MonitorSample.swift` and use in `MonitorSeries.swift` | GUI / Monitor | **Ready** | S |
+| [TASK-003](#task-003-unify-event-journaling-between-gui-and-cli-eventsjsonl) | Unify event journaling between GUI and CLI (`events.jsonl`) | **Track E** (Architecture) | **Ready** | M |
+| [TASK-004](#task-004-add-launch-at-login-support-to-gui-via-smappservice) | Add "Launch at Login" support to GUI via `SMAppService` | **Track E** (Architecture) | **Ready** | S |
+| [TASK-005](#task-005-subnet-crowding-telemetry--device-surge-detection-lan-1) | Subnet crowding telemetry & device surge detection (`LAN-1`) | **Track D** (Subnet) | **Ready** | M |
+| [TASK-008](#task-008-copy-diagnostic-summary-for-support--front-desk--host) | "Copy Diagnostic Summary for Support / Front Desk / Host" | **Track A** (Action Layer) | **Ready** | S |
+| [TASK-009](#task-009-open-router-admin-page-quick-action) | "Open Router Admin Page" quick action for owned networks | **Track A** (Action Layer) | **Ready** | XS |
+| [TASK-010](#task-010-open-login-page-action-on-captive-portal-detection) | "Open Login Page" quick action on captive portal detection (`CP-1`) | **Track C** (Captive Portal)| **Ready** | S |
+| [TASK-011](#task-011-live-latency-in-the-menu-bar) | Live Latency & Ping in the Menu Bar (`● 18ms`) | GUI / Telemetry | **Ready** | XS |
+| [TASK-012](#task-012-share-diagnostics-menu-action--redacted-report-export) | "Share Diagnostics..." friendly menu action & redacted report export | GUI / Sharing | **Ready** | S |
+| [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Ready** | S |
+| [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Ready** | M |
+| [TASK-015](#task-015-what-does-this-mean-plain-english-tooltips-on-technical-metrics) | "What Does This Mean?" Plain-English tooltips on technical metrics | GUI / UX | **Ready** | S |
+| [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | Backlog | **Backlog** | M |
+| [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Backlog | **Backlog** | M |
 
 ---
 
@@ -256,3 +257,20 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
   - `.github/workflows/release.yml`
 - **Context**:
   Allow users to install via `brew install --cask netdiag` or download a signed/stapled `.dmg` artifact from GitHub Releases.
+
+---
+
+### TASK-015: "What Does This Mean?" Plain-English Tooltips on Technical Metrics
+- **Area**: macOS GUI / Accessibility & UX
+- **Status**: **Ready**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Views/RunReportView.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
+  - `gui/Sources/NetdiagGUI/Support/MetricGlossary.swift` (new helper)
+- **Context**:
+  Technical measurements like `Bufferbloat (+184 ms)`, `Packet size (MTU) 1492 bytes`, `UPnP enabled`, `RSSI -76 dBm`, and `SNR 21 dB` leave non-network engineers confused about whether a number is healthy or problematic. Adding native macOS help tooltips (`ⓘ` or hover text) explains the metric in plain, friendly English and outlines its real-world impact.
+- **Acceptance Criteria**:
+  - Create a central `MetricGlossary` providing concise, jargon-free explanations for all diagnostic rows (Bufferbloat, MTU, RSSI, SNR, IPv6, VPN, UPnP, Clock drift, DNS latency, Packet loss).
+  - Add native `.help(...)` or subtle info popover triggers on metric labels in `RunReportView` and `DropdownView`.
+  - Explanations focus on real-world impact (e.g. why bufferbloat causes video call audio glitches, why MTU matters for VPNs).
+  - Verified in Swift tests.
