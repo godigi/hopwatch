@@ -6,6 +6,24 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — plain-English metric tooltips and MetricGlossary [GUI]
+
+Technical metrics like `Bufferbloat (+184 ms)`, `Packet size (MTU) 1492 bytes`, `UPnP enabled`, `RSSI -76 dBm`, and `SNR 21 dB` can be confusing to non-network engineers.
+
+- Introduced `MetricGlossary` providing concise explanations and real-world impact descriptions across all diagnostic rows (Bufferbloat, MTU, RSSI, SNR, IPv6, VPN, UPnP, Clock drift, DNS latency, Packet loss, Router, Internet, Speed, Local network, Availability).
+- Added native macOS `.help(...)` tooltips across metric labels in `RunReportView` and `DropdownView`.
+- Enriched `HelpHint` question-mark popovers to fall back seamlessly to `MetricGlossary` for offline or uncataloged metrics.
+
+### Changed — dropdown status menu redesign with unified telemetry [GUI]
+
+Redesigned `DropdownView` into a cohesive, modern macOS Control Center-style layout where 100% of information remains immediately visible on launch with zero clicks or disclosures:
+
+- **Status Header & Integrated Action**: Integrated the "Run Check" action button directly into the status card, removing the awkward floating button separating live telemetry.
+- **Performance & Live Heartbeat (Unified Card)**: Fuses live internet ping, packet loss, and the heartbeat sparkline into one cohesive card paired beside live throughput speeds (Down/Up Mbps and test age).
+- **Connection Path & Context Strip**: A 4-item pill strip displaying local first hop (Router latency, Wi-Fi signal) and network identity (VPN state, Country/Public IP).
+- **Recent Activity Stream**: Formats 24-hour folded episodes with aligned relative timestamps, status glyphs, and clean summary text.
+- **Streamlined Utility Footer**: Clean bottom bar for Dashboard, Pause/Resume, Diagnostics sharing, Settings, and Quit.
+
 ### Added — sticky access point detection on multi-AP Wi-Fi networks [W3]
 
 In multi-AP environments (mesh networks, campuses, hotels), macOS frequently

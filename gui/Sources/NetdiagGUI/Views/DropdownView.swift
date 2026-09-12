@@ -33,21 +33,15 @@ struct DropdownView: View {
     @State private var shareFeedback: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             stageSection
                 .padding(.horizontal, Theme.Spacing.md)
 
-            checkButton
+            performanceCard
                 .padding(.horizontal, Theme.Spacing.md)
-                .padding(.top, Theme.Spacing.sm)
 
-            heartbeatSection
+            connectionPathStrip
                 .padding(.horizontal, Theme.Spacing.md)
-                .padding(.top, Theme.Spacing.sm)
-
-            instrumentSection
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.top, Theme.Spacing.xs)
 
             Divider().padding(.vertical, Theme.Spacing.xs)
 
@@ -125,29 +119,54 @@ struct DropdownView: View {
     }
 
     private var healthyStage: some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text("All good — watching")
-                    .font(.callout).fontWeight(.semibold)
+        VStack(spacing: 4) {
+            HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .imageScale(.medium)
+                        Text("All good — watching")
+                            .font(.callout).fontWeight(.semibold)
+                    }
+                    Text(quietLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    coordinator.runFullCheck()
+                } label: {
+                    Label(FullCheckPolicy.controlLabel(isSafe: coordinator.fullCheckIsSafe),
+                          systemImage: "stethoscope")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(coordinator.isScanning)
+                .help(FullCheckPolicy.controlHelp(isSafe: coordinator.fullCheckIsSafe))
             }
-            Text(quietLine)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             if let lastCheck = lastCheckLine {
-                Text("Last check \(lastCheck.relative)\(lastCheck.badge.map { " · \($0)" } ?? "")")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            if let detail = statusDetail {
+                HStack {
+                    Text("Last check \(lastCheck.relative)\(lastCheck.badge.map { " · \($0)" } ?? "")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    if let detail = statusDetail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            } else if let detail = statusDetail {
                 Text(detail)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .padding(Theme.Spacing.sm)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.sm)
         .cardStyle()
     }
 
@@ -186,21 +205,31 @@ struct DropdownView: View {
         let title = isCritical ? "Detecting a network problem"
                                : "Watching — something needs attention"
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: isCritical ? "exclamationmark.triangle.fill"
-                                             : "exclamationmark.triangle")
-                    .foregroundStyle(tint)
-                Text(title)
-                    .font(.callout).fontWeight(.semibold)
-                    .lineLimit(2)
+            HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isCritical ? "exclamationmark.triangle.fill"
+                                                     : "exclamationmark.triangle")
+                            .foregroundStyle(tint)
+                        Text(title)
+                            .font(.callout).fontWeight(.semibold)
+                            .lineLimit(1)
+                    }
+                    Text(coordinator.headline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    coordinator.runFullCheck()
+                } label: {
+                    Label("Run Check", systemImage: "stethoscope")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(coordinator.isScanning)
             }
-            // `headline` already returns the worst firing rule's blurb for
-            // severity warn/critical, and the no-connection line when the
-            // link is down — both exactly the prose this card needs.
-            Text(coordinator.headline)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             Text(isCritical ? "Confirming before notifying you…"
                             : "Will alert if this keeps up.")
                 .font(.caption2)
@@ -340,41 +369,87 @@ struct DropdownView: View {
         .cardStyle()
     }
 
-    // MARK: - Instruments (fixed; never move between states)
+    // MARK: - Performance & Live Heartbeat (Unified Card)
 
-    private var instrumentSection: some View {
-        VStack(spacing: Theme.Spacing.xs) {
-            HStack(spacing: 0) {
-                InstrumentCell(label: "Internet", value: internetValue.text,
-                               tint: internetValue.tint)
-                InstrumentCell(label: "Loss", value: lossValue.text,
-                               tint: lossValue.tint)
-                InstrumentCell(label: "Down", value: speedValues.down,
-                               unit: "Mbps")
-                InstrumentCell(label: "Up", value: speedValues.up,
-                               unit: "Mbps")
+    private var performanceCard: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            // Left: Live Internet Latency, Loss & Sparkline
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    InstrumentCell(label: "Internet", value: internetValue.text,
+                                   tint: internetValue.tint)
+                    InstrumentCell(label: "Loss", value: lossValue.text,
+                                   tint: lossValue.tint)
+                }
+                HeartbeatStrip(samples: coordinator.monitor.recent,
+                               flatlined: !coordinator.monitor.isRunning
+                                          || coordinator.monitor.isPaused)
+                    .help("Live ping to internet over the last minute. Proves monitoring is alive.")
+                HStack {
+                    if coordinator.monitor.isRunning && !coordinator.monitor.isPaused {
+                        let cadence = coordinator.monitor.latest?.status.cadenceS
+                            ?? Defaults.fastInterval
+                        Text(coordinator.monitor.isBursting
+                             ? "every \(cadence)s · test"
+                             : "every \(cadence)s")
+                        if let stats = heartbeatStats {
+                            Text("· min \(stats.min) · avg \(stats.avg) · max \(stats.max) ms")
+                        }
+                    } else {
+                        Text("monitoring off")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
             }
-            if let age = speedValues.age {
-                Text("speeds from test \(age)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+            .frame(maxWidth: .infinity)
+
             Divider()
-            HStack(spacing: 0) {
-                InstrumentCell(label: "Router",
-                               value: routerInfo?.ping ?? "—",
-                               tint: routerTint)
-                InstrumentCell(label: "Wi-Fi signal", value: wifiCell.value,
-                               unit: wifiCell.unit, tint: wifiCell.tint)
-                InstrumentCell(label: "VPN",
-                               value: vpnActive ? (vpnName ?? "on") : "off",
-                               tint: vpnActive ? .primary : .secondary)
-                LocationCell(countryISO: countryISO, publicIP: publicIP)
+
+            // Right: Speeds
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    InstrumentCell(label: "Down", value: speedValues.down, unit: "Mbps")
+                    InstrumentCell(label: "Up", value: speedValues.up, unit: "Mbps")
+                }
+                if let age = speedValues.age {
+                    Text("speeds from test \(age)")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else {
+                    Text("not speed tested")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .frame(maxWidth: .infinity)
         }
-        .padding(.vertical, Theme.Spacing.sm)
+        .padding(Theme.Spacing.sm)
         .cardStyle()
+    }
+
+    // MARK: - Connection Path & Context Strip (Router, Wi-Fi, VPN, Location)
+
+    private var connectionPathStrip: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            InstrumentCell(label: "Router",
+                           value: routerInfo?.ping ?? "—",
+                           tint: routerTint)
+            InstrumentCell(label: "Wi-Fi signal",
+                           value: wifiCell.value,
+                           unit: wifiCell.unit,
+                           tint: wifiCell.tint)
+            InstrumentCell(label: "VPN",
+                           value: vpnActive ? (vpnName ?? "on") : "off",
+                           tint: vpnActive ? .primary : .secondary)
+            LocationCell(countryISO: countryISO, publicIP: publicIP)
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .padding(.horizontal, Theme.Spacing.xs)
+        .background(.quaternary.opacity(Theme.cardOpacity),
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
     }
 
     /// Categories of the currently fired rules, resolved through the
@@ -528,43 +603,6 @@ struct DropdownView: View {
         return ("—", "—", nil)
     }
 
-    // MARK: - Heartbeat
-
-    private var heartbeatSection: some View {
-        VStack(spacing: 2) {
-            HeartbeatStrip(samples: coordinator.monitor.recent,
-                           flatlined: !coordinator.monitor.isRunning
-                                      || coordinator.monitor.isPaused)
-            HStack {
-                // The live probe interval, straight from the monitor's own
-                // emitted `cadence_s` — so it reads "every 5s" while
-                // healthy, "every 3s" once degraded engages, and "every 2s"
-                // during a latency-test burst, and changes the moment the
-                // monitor's cadence does rather than from a settings
-                // snapshot. A user watching the card turn red sees the
-                // probe rate ramp up at the same time, which is the
-                // evidence that the app is investigating rather than
-                // sitting on a stale green. Falls back to the configured
-                // fast interval before the first sample lands.
-                if coordinator.monitor.isRunning && !coordinator.monitor.isPaused {
-                    let cadence = coordinator.monitor.latest?.status.cadenceS
-                        ?? Defaults.fastInterval
-                    Text(coordinator.monitor.isBursting
-                         ? "every \(cadence)s · test"
-                         : "every \(cadence)s")
-                    if let stats = heartbeatStats {
-                        Text("· min \(stats.min) · avg \(stats.avg) · max \(stats.max) ms")
-                    }
-                } else {
-                    Text("monitoring off")
-                }
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 9))
-            .foregroundStyle(.tertiary)
-        }
-    }
-
     /// Same 60-sample window `HeartbeatStrip` plots, summarized as
     /// min/avg/max so the strip's shape has numbers beside it. Hidden
     /// below two points: a min/avg/max of one number is not a range.
@@ -577,13 +615,13 @@ struct DropdownView: View {
         return (Int(minV.rounded()), Int(avgV.rounded()), Int(maxV.rounded()))
     }
 
-    // MARK: - Timeline
+    // MARK: - Timeline (Recent Activity)
 
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack {
-                Text("LAST 24 HOURS")
-                    .font(.system(size: 9))
+                Text("RECENT ACTIVITY")
+                    .font(.system(size: 9, weight: .semibold))
                     .kerning(0.5)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -606,9 +644,11 @@ struct DropdownView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
             } else {
-                ForEach(recent) { ActivityRow(entry: $0) }
+                VStack(spacing: 3) {
+                    ForEach(recent) { ActivityRow(entry: $0) }
+                }
             }
         }
     }
@@ -635,23 +675,6 @@ struct DropdownView: View {
         let events = coordinator.eventLog.within(hours: 24)
         guard case .alerted(let alert) = stage else { return events }
         return events.filter { !($0.kind == "alert" && $0.summary == alert.title) }
-    }
-
-    // MARK: - The one CTA
-
-    private var checkButton: some View {
-        Button {
-            coordinator.runFullCheck()
-        } label: {
-            HStack {
-                Image(systemName: "stethoscope")
-                Text(FullCheckPolicy.controlLabel(isSafe: coordinator.fullCheckIsSafe))
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(coordinator.isScanning)
-        .help(FullCheckPolicy.controlHelp(isSafe: coordinator.fullCheckIsSafe))
     }
 
     // MARK: - System Controls & Footer

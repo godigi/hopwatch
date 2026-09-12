@@ -22,7 +22,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-013](#task-013-prominent-speedometer--throughput-gauge-during-speed-test) | Prominent Speedometer & live throughput gauge during speed test | GUI / Polish | **Done** | S |
 | [TASK-014](#task-014-sticky-access-point-detection-on-multi-ap-wi-fi-networks-w3) | Sticky Access Point detection on multi-AP Wi-Fi networks (`W3`) | Wi-Fi / Roaming | **Done** | M |
 | [TASK-015](#task-015-what-does-this-mean-plain-english-tooltips-on-technical-metrics) | "What Does This Mean?" Plain-English tooltips on technical metrics | GUI / UX | **Done** | S |
-| [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Ready** | M |
+| [TASK-016](#task-016-dropdown-view-redesign-unified-telemetry-card-integrated-action--cohesive-visual-hierarchy) | Dropdown View Redesign (Unified Telemetry Card & Integrated Action) | GUI / Redesign | **Done** | M |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -280,7 +280,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ### TASK-016: Dropdown View Redesign (Unified Telemetry Card, Integrated Action & Cohesive Visual Hierarchy)
 - **Area**: macOS GUI / Dropdown & Visual Polish
-- **Status**: **Ready**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
