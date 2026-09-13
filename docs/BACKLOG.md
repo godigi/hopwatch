@@ -34,13 +34,14 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
 | [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
 | [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | **Done** | S |
-| [TASK-028](#task-028-meeting-shield--live-call--video-conferencing-quality-guardian-zoom--meet--teams) | "Meeting Shield" — Live Call & Video Conferencing Quality Guardian | **Track F** (Live Work) | Ready | M |
-| [TASK-029](#task-029-find-the-best-desk--walkaround-wi-fi-signal--roaming-surveyor) | "Find the Best Desk" — Walkaround Wi-Fi Signal & Roaming Surveyor | **Track F** (Live Work) | Ready | M |
-| [TASK-030](#task-030-passive-local-lan-topology--friendly-device-discovery-bonjour--mdns) | Passive Local LAN Topology & Friendly Device Discovery (Bonjour / mDNS) | **Track D** (Subnet & LAN) | Ready | M |
-| [TASK-031](#task-031-upstream-isp-outage-corroborator--1-click-support-ticket-dispatch) | Upstream ISP Outage Corroborator & 1-Click Support Ticket Dispatch | **Track A** (Action Layer) | Ready | S |
-| [TASK-032](#task-032-native-macos-desktop--notification-center-widgets-via-widgetkit) | Native macOS Desktop & Notification Center Widgets via `WidgetKit` | **Track E** (Architecture) | Ready | M |
-| [TASK-033](#task-033-apple-shortcuts-integration--app-intents-automation) | Apple Shortcuts Integration & App Intents Automation | **Track E** (Architecture) | Ready | S |
-| [TASK-034](#task-034-gaming--low-latency-stream-optimizer-interactive-cake--sqm-router-guide) | Gaming & Low-Latency Stream Optimizer (Interactive CAKE / SQM Router Guide) | Diagnosis / Remediation | Ready | S |
+| [TASK-035](#task-035-dashboard-usability--visual-clarity-polish-home-live-activity-trends-networks) | Dashboard Usability & Visual Clarity Polish (Home, Live, Activity, Trends, Networks) | GUI / UX & Design | **High Priority** | L |
+| [TASK-028](#task-028-meeting-shield--live-call--video-conferencing-quality-guardian-zoom--meet--teams) | "Meeting Shield" — Live Call & Video Conferencing Quality Guardian | **Track F** (Live Work) | Low Priority | M |
+| [TASK-029](#task-029-find-the-best-desk--walkaround-wi-fi-signal--roaming-surveyor) | "Find the Best Desk" — Walkaround Wi-Fi Signal & Roaming Surveyor | **Track F** (Live Work) | Low Priority | M |
+| [TASK-030](#task-030-passive-local-lan-topology--friendly-device-discovery-bonjour--mdns) | Passive Local LAN Topology & Friendly Device Discovery (Bonjour / mDNS) | **Track D** (Subnet & LAN) | Low Priority | M |
+| [TASK-031](#task-031-upstream-isp-outage-corroborator--1-click-support-ticket-dispatch) | Upstream ISP Outage Corroborator & 1-Click Support Ticket Dispatch | **Track A** (Action Layer) | Low Priority | S |
+| [TASK-032](#task-032-native-macos-desktop--notification-center-widgets-via-widgetkit) | Native macOS Desktop & Notification Center Widgets via `WidgetKit` | **Track E** (Architecture) | Low Priority | M |
+| [TASK-033](#task-033-apple-shortcuts-integration--app-intents-automation) | Apple Shortcuts Integration & App Intents Automation | **Track E** (Architecture) | Low Priority | S |
+| [TASK-034](#task-034-gaming--low-latency-stream-optimizer-interactive-cake--sqm-router-guide) | Gaming & Low-Latency Stream Optimizer (Interactive CAKE / SQM Router Guide) | Diagnosis / Remediation | Low Priority | S |
 | [TASK-006](#task-006-icloud-private-relay--profile-encrypted-dns-qualifiers-pr-1-edns-1) | iCloud Private Relay & Profile Encrypted DNS qualifiers (`PR-1`, `EDNS-1`) | CLI / Diagnosis | **Done** | M |
 | [TASK-007](#task-007-gui-distribution-dmg-packaging-and-homebrew-formula) | GUI distribution DMG packaging and Homebrew formula | Build & Dist | **Done** | M |
 
@@ -688,10 +689,49 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 
 ---
 
+### TASK-035: Dashboard Usability & Visual Clarity Polish (Home, Live, Activity, Trends, Networks)
+- **Area**: macOS GUI / Dashboard & Usability
+- **Track**: Track F (UX & Polish)
+- **Status**: **High Priority**
+- **Files to touch**:
+  - `gui/Sources/NetdiagGUI/Views/HomeView.swift`
+  - `gui/Sources/NetdiagGUI/Views/LiveView.swift`
+  - `gui/Sources/NetdiagGUI/Views/ActivityView.swift`
+  - `gui/Sources/NetdiagGUI/Views/TrendsView.swift`
+  - `gui/Sources/NetdiagGUI/Views/NetworksView.swift`
+  - `gui/Sources/NetdiagGUI/Views/NetworkDetailCard.swift`
+  - `gui/Sources/NetdiagGUI/Views/DropdownComponents.swift`
+- **Context**:
+  While `netdiag` captures deep, high-precision network telemetry and diagnosis rules, non-expert users find the dashboard tabs dense, text-heavy, or graph-centric without immediate plain-English answers to: *"Is my connection working well right now?"*
+  Each of the 5 tabs in `MainWindow` (Home, Live, Activity, Trends, Networks) needs a focused usability and visual hierarchy overhaul to maximize glanceability, clarity, and ease of understanding.
+- **Architectural Design**:
+  1. **Home Tab ("Status at a Glance")**:
+     - Introduces a friendly, welcoming hero status card at the top with plain-English health verdict, friendly glyph, and 4 glanceable instrument tiles (Internet Latency, Connection Stability & Jitter, Link Loss %, Current Wi-Fi/Ethernet link quality).
+     - Elevates the full-check action and clean separation between live telemetry and past check reports.
+  2. **Live Tab ("Real-Time Live Monitor")**:
+     - Introduces a 4-metric live gauge bar (Router Ping, Internet Ping, Jitter & Stability badge, Packet Loss) above the 3 charts for instant comprehension without axis reading.
+     - Adds clear visual guidance explaining what normal vs problematic graphs look like.
+  3. **Activity Tab ("Actionable History & Reassurance")**:
+     - Introduces an activity summary banner (incident counts vs clean periods).
+     - Polishes `ActivityRow` with clear severity pill tags, duration badges, and friendly iconography.
+     - Reassuring empty-state presentation when no disruptions occurred.
+  4. **Trends Tab ("Historical Baseline Digest")**:
+     - Highlights baseline performance summary cards (typical download/upload, typical latency, reliability score).
+     - Intuitive time-window segmented pills (`24h`, `7d`, `30d`, `All`) and friendly metric names.
+  5. **Networks Tab ("Active Network Spotlight")**:
+     - Prominently spotlights the currently active network at the top of the sidebar under "Active Connection".
+     - Streamlines the detail pane with enhanced metrics grid and clear "Today vs Typical" comparison chips.
+- **Acceptance Criteria**:
+  - All 5 tabs provide immediate glanceability and plain-English clarity.
+  - No regression in existing 49 unit tests or `--verify` checks.
+  - Clean SwiftUI implementation complying with `Theme.swift`.
+
+---
+
 ### TASK-028: "Meeting Shield" — Live Call & Video Conferencing Quality Guardian (Zoom / Meet / Teams)
 - **Area**: macOS GUI / Call Quality & Telemetry
 - **Track**: Track F (Live Work & Quality)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/CallGuardian.swift`
   - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
@@ -723,7 +763,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-029: "Find the Best Desk" — Walkaround Wi-Fi Signal & Roaming Surveyor
 - **Area**: macOS GUI / Travel & Wi-Fi Heatmap
 - **Track**: Track F (Live Work & Quality)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Services/SignalSurveyor.swift`
   - `gui/Sources/NetdiagGUI/Views/SurveyorView.swift`
@@ -750,7 +790,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-030: Passive Local LAN Topology & Friendly Device Discovery (Bonjour / mDNS)
 - **Area**: Core CLI & GUI / Subnet & Local Devices
 - **Track**: Track D (Subnet & LAN)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `lib/lan.sh`
   - `helpers/lan_inventory.py`
@@ -780,7 +820,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-031: Upstream ISP Outage Corroborator & 1-Click Support Ticket Dispatch
 - **Area**: Core CLI & GUI / ISP Attribution & Support
 - **Track**: Track A (Action Layer)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `lib/diagnosis.sh`
   - `gui/Sources/NetdiagGUI/Support/SupportSummary.swift`
@@ -815,7 +855,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-032: Native macOS Desktop & Notification Center Widgets via WidgetKit
 - **Area**: macOS Platform Integration / Widgets
 - **Track**: Track E (Architecture & Platform)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `gui/Package.swift`
   - `gui/Sources/NetdiagWidget/`
@@ -839,7 +879,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-033: Apple Shortcuts Integration & App Intents Automation
 - **Area**: macOS Platform Integration / Automation
 - **Track**: Track E (Architecture & Platform)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Intents/NetdiagIntents.swift`
   - `gui/Sources/NetdiagGUI/Services/NetdiagCoordinator.swift`
@@ -864,7 +904,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-034: Gaming & Low-Latency Stream Optimizer (Interactive CAKE / SQM Router Guide)
 - **Area**: Diagnosis & Remediation / Bufferbloat
 - **Track**: Track A (Action Layer)
-- **Status**: Ready
+- **Status**: Low Priority (Future)
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/BufferbloatGuideView.swift`
   - `gui/Sources/NetdiagGUI/Views/DropdownView.swift`
