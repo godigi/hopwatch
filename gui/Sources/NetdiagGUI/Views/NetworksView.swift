@@ -400,7 +400,7 @@ struct NetworksView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    if let first = net.firstSeenDate, let last = net.lastSeenDate {
+                    if net.firstSeenDate != nil, net.lastSeenDate != nil {
                         if !subtitle.isEmpty {
                             Text("·")
                                 .font(.caption)
