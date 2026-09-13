@@ -18,7 +18,7 @@ while read -r local_ref local_oid remote_ref remote_oid; do
         fi
 
         # Check if there are unreleased commits that contain feat or fix
-        if echo "$UNRELEASED_COMMITS" | grep -qE '^(feat|fix)(\([^\)]+\))?:'; then
+        if echo "$UNRELEASED_COMMITS" | grep -qE '^[0-9a-f]+ (feat|fix)(\([^\)]+\))?:'; then
             echo ""
             echo "🔔 [netdiag] Detected unreleased feature/fix commits since ${LATEST_TAG}:"
             echo "$UNRELEASED_COMMITS" | sed 's/^/   /'
