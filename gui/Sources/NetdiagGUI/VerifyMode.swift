@@ -976,7 +976,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "0.14.0",
+                version: "1.0.0",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -1224,6 +1224,20 @@ private enum VerifyHarness {
         )
         check(w6Res.culprit == .wifi, "W6 2.4GHz band trapping attributes to Wi-Fi")
         check(w6Res.wifiHealth == .warning, "W6 Wi-Fi health is warning")
+
+        let ws1Res = HopAttributionResolver.resolve(
+            rules: ["WS-1"], isWifi: true, wifiRSSI: -56, gatewayRTT: 19.4, gatewayLoss: 0.0, inetRTT: 76.0, inetLoss: 0.0
+        )
+        check(ws1Res.culprit == .wifi, "WS-1 attributes to Wi-Fi")
+        check(ws1Res.headline == "Wi-Fi Channel Crowded", "WS-1 headline is Wi-Fi Channel Crowded")
+        check(ws1Res.badgeTitle == "Advisory: Crowded Channel", "WS-1 badgeTitle is Advisory: Crowded Channel")
+        check(!ws1Res.reassurance.contains("dropping packets"), "WS-1 without drops does not claim dropping packets")
+
+        let ispDegradedRes = HopAttributionResolver.resolve(
+            rules: ["L2"], isWifi: true, wifiRSSI: -49, gatewayRTT: 8.0, gatewayLoss: 0.0, inetRTT: 54.0, inetLoss: 12.0
+        )
+        check(ispDegradedRes.culprit == .isp, "L2 attributes to ISP")
+        check(ispDegradedRes.badgeTitle == "Culprit: Upstream Packet Loss", "Partial internet loss gives Upstream Packet Loss badge")
 
         let clearRes = HopAttributionResolver.resolve(
             rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0

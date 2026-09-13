@@ -6,6 +6,17 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-13
+
+### Fixed — Diagnostic Accuracy, Hop Attribution, & CoreWLAN Telemetry
+
+- **Hop Attribution Channel Contention Disambiguation (`HopAttributionResolver`)**: Rule `WS-1` (crowded Wi-Fi channel) now generates an `Advisory: Crowded Channel` badge and `"Wi-Fi Channel Crowded"` headline with targeted channel guidance, rather than falsely declaring the link degraded or claiming packet drops when packet loss is 0.0%. Fallback reassurance only mentions dropping packets when gateway loss is observed.
+- **Differentiated Upstream ISP Badges**: Differentiated total outages (`>= 95%` loss or unreachable) badged as `Culprit: ISP Outage` from partial packet loss badged as `Culprit: Upstream Packet Loss` (e.g. 12% loss).
+- **CoreWLAN Telemetry Fallback (`RunReportView`)**: When the CLI scan lacks sudo permissions for `wdutil`, the GUI gracefully falls back to CoreWLAN live RSSI (`Good · -56 dBm (live)`) instead of stating "not recorded (needs sudo)" right below the live chip.
+- **Signal Health Decoupling**: Removed `WS-1` from the health check rules of the Wi-Fi signal row so channel contention does not color the RSSI row yellow.
+- **Activity Suitability Refinement (`rules_catalog.py`)**: Removed streaming from `WS-1` degradation; passive channel crowding no longer marks buffered streaming as "Rough".
+- **Dropdown Header Truncation (`DropdownView`)**: Prevented stage title and headline text truncation in the 360pt menu bar popover using flexible wrapping and minimum scale factors.
+
 ### Added — Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) [TASK-027]
 
 - **Closed-Loop Resolution Stage (`StageResolver`)**: Added `.resolved(ResolutionSnapshot)` stage to the dropdown stage resolver, providing immediate, uplifting confirmation when user actions (moving closer to Wi-Fi, switching bands, captive portal login) or network recoveries succeed.
@@ -3783,7 +3794,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/godigi/netdiag/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/godigi/netdiag/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0

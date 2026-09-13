@@ -155,5 +155,47 @@ import Testing
         #expect(w6.culprit == .wifi)
         #expect(w6.wifiHealth == .warning)
         #expect(w6.reassurance.contains("slower 2.4 GHz band"))
+
+        // WS-1: Crowded Wi-Fi channel with zero packet loss
+        let ws1 = HopAttributionResolver.resolve(
+            rules: ["WS-1"],
+            isWifi: true,
+            wifiRSSI: -56,
+            gatewayRTT: 19.4,
+            gatewayLoss: 0.0,
+            inetRTT: 76.0,
+            inetLoss: 0.0
+        )
+        #expect(ws1.culprit == .wifi)
+        #expect(ws1.wifiHealth == .warning)
+        #expect(ws1.headline == "Wi-Fi Channel Crowded")
+        #expect(ws1.badgeTitle == "Advisory: Crowded Channel")
+        #expect(!ws1.reassurance.contains("dropping packets"))
+        #expect(ws1.reassurance.contains("crowded by neighboring networks"))
+
+        // Upstream packet loss (12%) vs Outage (100%)
+        let ispDegraded = HopAttributionResolver.resolve(
+            rules: ["L2"],
+            isWifi: true,
+            wifiRSSI: -49,
+            gatewayRTT: 8.0,
+            gatewayLoss: 0.0,
+            inetRTT: 54.0,
+            inetLoss: 12.0
+        )
+        #expect(ispDegraded.culprit == .isp)
+        #expect(ispDegraded.badgeTitle == "Culprit: Upstream Packet Loss")
+
+        let ispOutage = HopAttributionResolver.resolve(
+            rules: ["P1"],
+            isWifi: true,
+            wifiRSSI: -49,
+            gatewayRTT: 8.0,
+            gatewayLoss: 0.0,
+            inetRTT: 0.0,
+            inetLoss: 100.0
+        )
+        #expect(ispOutage.culprit == .isp)
+        #expect(ispOutage.badgeTitle == "Culprit: ISP Outage")
     }
 }

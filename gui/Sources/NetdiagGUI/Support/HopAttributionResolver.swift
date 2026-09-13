@@ -69,6 +69,7 @@ public enum HopAttributionResolver {
         public let ispHealth: HopHealth
         public let headline: String
         public let reassurance: String
+        public let badgeTitle: String
         public let isWired: Bool
         public let activeRules: [String]
 
@@ -80,6 +81,7 @@ public enum HopAttributionResolver {
             ispHealth: HopHealth,
             headline: String,
             reassurance: String,
+            badgeTitle: String? = nil,
             isWired: Bool = false,
             activeRules: [String] = []
         ) {
@@ -90,6 +92,7 @@ public enum HopAttributionResolver {
             self.ispHealth = ispHealth
             self.headline = headline
             self.reassurance = reassurance
+            self.badgeTitle = badgeTitle ?? culprit.badgeTitle
             self.isWired = isWired
             self.activeRules = activeRules
         }
@@ -149,12 +152,15 @@ public enum HopAttributionResolver {
 
         // 4. Attribute Primary Culprit (Local precedes Upstream in root cause analysis)
         let culprit: Culprit
-        let headline: String
+        var headline: String
         let reassurance: String
+        var badgeTitle: String
 
         if wifiHealth != .healthy {
             culprit = .wifi
             headline = "Local Wi-Fi Signal Degraded"
+            badgeTitle = culprit.badgeTitle
+
             if ruleSet.contains("AWDL-1") {
                 reassurance = "Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping is causing periodic latency spikes. Setting AirDrop to 'Receiving Off' in Control Center restores steady ping."
             } else if ruleSet.contains("W6") {
@@ -163,15 +169,26 @@ public enum HopAttributionResolver {
                 reassurance = "Your Wi-Fi signal appears strong, but your transmit rate has collapsed. Moving closer or switching Wi-Fi bands will restore link speed."
             } else if ruleSet.contains("W5") {
                 reassurance = "Your Mac hears the router well, but the router struggles to hear your Mac (asymmetric link). Moving closer balances transmission power."
+            } else if ruleSet.contains("WS-1") {
+                headline = "Wi-Fi Channel Crowded"
+                let hasDrops = gatewayLoss != nil && gatewayLoss! > 0
+                badgeTitle = hasDrops ? "Culprit: Crowded Channel" : "Advisory: Crowded Channel"
+                reassurance = "Your Wi-Fi channel is crowded by neighboring networks. If performance is inconsistent, changing your router to a less congested channel will improve stability."
             } else if let rssi = wifiRSSI {
                 reassurance = "Your Wi-Fi signal is weak (\(rssi) dBm). Moving closer to the access point or switching to 5GHz will resolve the packet loss."
             } else {
-                reassurance = "The wireless link between your Mac and the router is dropping packets. Moving closer to the router or toggling Wi-Fi usually fixes this."
+                if let loss = gatewayLoss, loss > 0 {
+                    reassurance = "The wireless link between your Mac and the router is dropping packets. Moving closer to the router or toggling Wi-Fi usually fixes this."
+                } else {
+                    reassurance = "The wireless link between your Mac and the router is experiencing instability. Moving closer to the router or switching Wi-Fi bands usually helps."
+                }
             }
         } else if routerHealth != .healthy {
             culprit = .router
             headline = "Local Router or Gateway Issue"
+            badgeTitle = culprit.badgeTitle
             if ruleSet.contains("B1") {
+                badgeTitle = "Culprit: Router Bufferbloat"
                 reassurance = "Your Wi-Fi link is fine, but your router buffers heavily under load. Restarting the router or enabling Smart Queue Management (SQM) helps."
             } else {
                 reassurance = "Your Wi-Fi connection is solid, but your router itself is dropping packets or experiencing elevated queue latency."
@@ -179,6 +196,7 @@ public enum HopAttributionResolver {
         } else if ispHealth != .healthy {
             culprit = .isp
             headline = "Upstream Issue with Internet Service Provider"
+            badgeTitle = culprit.badgeTitle
             var parts: [String] = []
             if isWifi, let rssi = wifiRSSI {
                 parts.append("Wi-Fi is strong (\(rssi) dBm)")
@@ -194,17 +212,27 @@ public enum HopAttributionResolver {
             }
             let localStatus = parts.joined(separator: " and ")
             if ruleSet.contains("CP-1") {
+                badgeTitle = "Culprit: Captive Portal"
                 reassurance = "\(localStatus). A captive portal login is blocking access to the internet."
             } else if ruleSet.contains("D5") {
+                badgeTitle = "Culprit: Unresponsive DNS"
                 reassurance = "\(localStatus). Your primary DNS server is unresponsive and queries are silently falling back to a secondary resolver."
             } else if ruleSet.contains("B2") {
+                badgeTitle = "Culprit: Upstream Latency"
                 reassurance = "\(localStatus). The latency surge is occurring upstream in your ISP's network."
+            } else if (inetLoss != nil && inetLoss! >= 95) || ruleSet.contains("P1") || ruleSet.contains("P2") {
+                badgeTitle = "Culprit: ISP Outage"
+                reassurance = "\(localStatus). Complete packet loss past your router indicates an upstream ISP outage."
+            } else if let loss = inetLoss, loss > 0 {
+                badgeTitle = "Culprit: Upstream Packet Loss"
+                reassurance = "\(localStatus). Packet loss (\(String(format: "%.0f%%", loss))) is occurring upstream on your ISP's broadband network."
             } else {
                 reassurance = "\(localStatus). The packet loss and downtime are upstream on your ISP's broadband network."
             }
         } else {
             culprit = .none
             headline = "All Network Hops Healthy"
+            badgeTitle = culprit.badgeTitle
             reassurance = "Data flows cleanly from your Mac across the local network, through your router, and out to the internet."
         }
 
@@ -216,18 +244,19 @@ public enum HopAttributionResolver {
             ispHealth: ispHealth,
             headline: headline,
             reassurance: reassurance,
+            badgeTitle: badgeTitle,
             isWired: !isWifi,
             activeRules: rules
         )
     }
 
-    static func resolve(snapshot: RunSnapshot) -> Result {
+    static func resolve(snapshot: RunSnapshot, fallbackRSSI: Int? = nil) -> Result {
         let rules = snapshot.diagnosis.compactMap(\.rule)
         let isWifi = snapshot.wifi != nil
         return resolve(
             rules: rules,
             isWifi: isWifi,
-            wifiRSSI: snapshot.wifi?.rssi,
+            wifiRSSI: snapshot.wifi?.rssi ?? fallbackRSSI,
             gatewayRTT: snapshot.gateway.rttAvgMs,
             gatewayLoss: snapshot.gateway.lossPct,
             inetRTT: snapshot.internetLatency.rttAvgMs,
@@ -237,13 +266,13 @@ public enum HopAttributionResolver {
         )
     }
 
-    static func resolve(sample: MonitorSample) -> Result {
+    static func resolve(sample: MonitorSample, fallbackRSSI: Int? = nil) -> Result {
         let rules = sample.status.rules
         let isWifi = sample.link.isWiFi
         return resolve(
             rules: rules,
             isWifi: isWifi,
-            wifiRSSI: sample.wifi?.rssi,
+            wifiRSSI: sample.wifi?.rssi ?? fallbackRSSI,
             gatewayRTT: sample.gateway.rttAvgMs,
             gatewayLoss: sample.gateway.lossPct,
             inetRTT: sample.internet.rttAvgMs,
@@ -277,7 +306,7 @@ public struct HopAttributionView: View {
                         .font(.headline)
                 }
                 Spacer()
-                Text(result.culprit.badgeTitle)
+                Text(result.badgeTitle)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(result.culprit.badgeTint)
                     .padding(.horizontal, 8)
@@ -370,7 +399,7 @@ public struct HopAttributionCompactView: View {
 
             Spacer()
 
-            Text(result.culprit.badgeTitle)
+            Text(result.badgeTitle)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(result.culprit.badgeTint)
                 .padding(.horizontal, 6)

@@ -244,7 +244,7 @@ struct DropdownView: View {
         let isCritical = sev == .critical
         let tint: Color = isCritical ? .red : .orange
         let title = isCritical ? "Detecting a network problem"
-                               : "Watching — something needs attention"
+                               : "Watching — needs attention"
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: Theme.Spacing.sm) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -255,13 +255,15 @@ struct DropdownView: View {
                         Text(title)
                             .font(.callout).fontWeight(.semibold)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                     Text(coordinator.headline)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
                 Button {
                     coordinator.runFullCheck()
                 } label: {
@@ -272,7 +274,7 @@ struct DropdownView: View {
                 .disabled(coordinator.isScanning)
             }
             if let latest = coordinator.monitor.latest {
-                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest))
+                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest, fallbackRSSI: coreWLANRSSI))
                     .padding(.top, 2)
             }
             Text(isCritical ? "Confirming before notifying you…"
@@ -341,7 +343,7 @@ struct DropdownView: View {
                 onAction: action
             )
             if let latest = coordinator.monitor.latest {
-                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest))
+                HopAttributionCompactView(result: HopAttributionResolver.resolve(sample: latest, fallbackRSSI: coreWLANRSSI))
                     .padding(.horizontal, Theme.Spacing.xs)
             }
         }

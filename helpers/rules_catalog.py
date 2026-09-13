@@ -451,8 +451,8 @@ RULES: list[dict[str, object]] = [
         # the same jitter and loss a tunnel suffers from. Omitting it here
         # while the other two carry it was an inconsistency, not a
         # judgement that a congested channel spares a VPN.
-        "impacts": {"calls": "degraded", "streaming": "degraded",
-                    "gaming": "degraded", "vpn": "degraded"},
+        "impacts": {"calls": "degraded", "gaming": "degraded",
+                    "vpn": "degraded"},
         "fix": (
             "Log into the router's admin page and switch to a quieter "
             "WiFi channel, or let it choose one automatically — the "

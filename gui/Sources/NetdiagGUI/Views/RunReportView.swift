@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import CoreWLAN
 
 /// The report card: one row per thing that was measured, then the CLI's own
 /// prose about what it means.
@@ -54,13 +55,22 @@ struct RunReportView: View {
     @State private var didCopySupport = false
     @State private var homeDetailsExpanded = false
 
+    private var liveRSSI: Int? {
+        if coordinator.locationPermissions.isAuthorized,
+           let live = CWWiFiClient.shared().interface()?.rssiValue(),
+           live != 0 {
+            return live
+        }
+        return coordinator.monitor.latest?.wifi?.rssi
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let provenance {
                 Text(provenance)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
             hopAttribution
             suitability
@@ -73,7 +83,10 @@ struct RunReportView: View {
     }
 
     private var hopAttribution: some View {
-        HopAttributionView(result: HopAttributionResolver.resolve(snapshot: snapshot))
+        HopAttributionView(result: HopAttributionResolver.resolve(
+            snapshot: snapshot,
+            fallbackRSSI: liveRSSI
+        ))
     }
 
     /// The measurement table, sharing controls and diagnosis prose remain
@@ -563,30 +576,27 @@ struct RunReportView: View {
         // and correctly shows nothing; a Wi-Fi run without `sudo` says why
         // instead of the row just not being there.
         if let wifi = s.wifi {
-            // "not recorded", not "not measured": on Home this row sits a
-            // few inches under a live Wi-Fi reading taken from macOS
-            // directly, so "not measured" had the card flatly denying a
-            // number the same screen was already showing. The two answer
-            // different questions — what this check wrote down, versus
-            // what the radio says right now — and only the first one needs
-            // sudo. Saying "recorded" scopes the claim to the run.
+            let effectiveRSSI = wifi.rssi ?? liveRSSI
             let signal = SignalScale.cellContent(
-                rssi: wifi.rssi, scale: coordinator.signalScale.scale)
+                rssi: effectiveRSSI, scale: coordinator.signalScale.scale)
             let signalValue: String
-            if wifi.rssi == nil {
-                signalValue = "not recorded (needs sudo)"
-            } else if let unit = signal.unit {
-                signalValue = "\(signal.value) · \(unit)"
+            if effectiveRSSI != nil {
+                let suffix = wifi.rssi == nil ? " (live)" : ""
+                if let unit = signal.unit {
+                    signalValue = "\(signal.value) · \(unit)\(suffix)"
+                } else {
+                    signalValue = "\(signal.value)\(suffix)"
+                }
             } else {
-                signalValue = signal.value
+                signalValue = "not recorded (needs sudo)"
             }
             out.append(Row(label: "Wi-Fi signal",
                            value: signalValue,
-                           health: health(["W1", "W2", "W3", "W4", "W5", "W6", "AWDL-1", "WS-1", "WD-1"], "Wi-Fi signal"),
+                           health: health(["W1", "W2", "W3", "W4", "W5", "W6", "AWDL-1", "WD-1"], "Wi-Fi signal"),
                            metricKey: "wifi_rssi_dbm",
                            glossaryKey: "wifi_signal",
                            medianFormatter: { "\(Int($0.rounded())) dBm" },
-                           valueTint: wifi.rssi == nil ? nil : signal.tint))
+                           valueTint: effectiveRSSI == nil ? nil : signal.tint))
         }
         out.append(Row(label: "Under load",
                        value: bufferbloatValue,
