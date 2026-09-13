@@ -8,7 +8,7 @@
 #   make dmg           package the signed GUI into a distributable .dmg
 #   make clean         clean build artifacts
 
-.PHONY: all test test-cli test-gui gui dmg install-gui clean
+.PHONY: all test test-cli test-gui gui dmg install-gui clean bump bump-patch bump-minor bump-major hooks
 
 all: test
 
@@ -31,3 +31,18 @@ install-gui:
 
 clean:
 	$(MAKE) -C gui clean
+
+hooks:
+	git config core.hooksPath .githooks
+
+bump:
+	python3 scripts/bump.py
+
+bump-patch:
+	python3 scripts/bump.py --type patch
+
+bump-minor:
+	python3 scripts/bump.py --type minor
+
+bump-major:
+	python3 scripts/bump.py --type major

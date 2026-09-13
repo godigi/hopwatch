@@ -1,0 +1,44 @@
+name: auto-version
+
+# Automatically bumps version, rolls CHANGELOG, and pushes a release tag
+# whenever new feature or fix commits land on main without a release.
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ["v*"]
+
+jobs:
+  auto-bump:
+    runs-on: macos-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Auto-Bump Version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          python3 scripts/bump.py --ci
+
+      - name: Push Version Bump and Tag
+        run: |
+          # Only push if bump created a new commit/tag
+          latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          head_tag="$(git tag --points-at HEAD 2>/dev/null || true)"
+          if [ -n "$head_tag" ]; then
+            echo "Pushing release commit and tag: $head_tag"
+            git push origin main --follow-tags
+          else
+            echo "No version bump needed."
+          fi
