@@ -31,6 +31,7 @@ struct TrendsView: View {
                 controls
                 purposeSubtitle
                 verdictCard
+                baselineDigest
             }
             Divider()
             ScrollView {
@@ -57,68 +58,159 @@ struct TrendsView: View {
     // MARK: - Purpose
 
     /// Wayfinding copy about this screen itself — permanent, not tied to
-    /// any state, per the redesign's split (CLAUDE.md: claims about *CLI*
-    /// behavior belong in the rules catalog; what this app's own view is
-    /// for is fine to say in Swift).
+    /// any state, per the redesign's split.
     private var purposeSubtitle: some View {
         Text("What this network is usually like — one point per saved check, over weeks. Live samples are not stored here.")
             .font(.caption)
             .foregroundStyle(.secondary)
-            // Deliberately NOT `.fixedSize(horizontal: false, vertical: true)`,
-            // which every other block of prose in this app carries.
-            //
-            // This one is different because it sits *outside* the ScrollView
-            // below it, so its ideal height is the detail column's ideal
-            // height, and a fixed-size Text asked for its ideal height at an
-            // unconstrained width answers with a many-line one. The window
-            // then sized the whole NavigationSplitView to 1274pt inside a
-            // 707pt window and centred it — pushing the controls, the first
-            // chart, and the sidebar's own rows above the top of the window.
-            // On screen that reads as "opening Trends hides the sidebar",
-            // which is why it was hunted as a split-view bug for a while;
-            // nothing was ever collapsed. Text wraps by itself here, and
-            // nothing is constraining its height, so the modifier bought
-            // nothing even before it cost this.
             .proseWidth()
             .padding(.horizontal, 12)
     }
 
-    /// The current network, canonicalized, for defaulting `networkID` when
-    /// the picker first appears — the same monitor→history join
-    /// `NetdiagCoordinator.wifiDisplayName` and `AlertEngine.networkChanged`
-    /// use (`historyJoinID`), passed through `canonicalID` so a manually
-    /// merged network resolves to the group the user actually merged it
-    /// into. `nil` before any monitor sample has landed, or when that
-    /// network hasn't appeared in the loaded store yet — both cases the
-    /// picker already handles by staying on "All networks".
     private var defaultNetworkID: String? {
         guard let raw = coordinator.monitor.latest?.network.historyJoinID else { return nil }
         let canonical = store.canonicalID(raw)
         return store.mergedNetworks.contains(where: { $0.id == canonical }) ? canonical : nil
     }
 
+    // MARK: - Baseline Digest
+
+    @ViewBuilder
+    private var baselineDigest: some View {
+        if let mem = selectedNetworkMemory {
+            HStack(spacing: 10) {
+                digestTile(
+                    icon: "arrow.up.arrow.down",
+                    iconColor: .blue,
+                    title: "Typical Speeds",
+                    value: speedText(mem),
+                    subcaption: speedSubcaption(mem)
+                )
+
+                digestTile(
+                    icon: "gauge.with.needle",
+                    iconColor: .purple,
+                    title: "Typical Ping",
+                    value: latencyText(mem),
+                    subcaption: jitterText(mem)
+                )
+
+                digestTile(
+                    icon: "shield.checkerboard",
+                    iconColor: reliabilityColor(mem),
+                    title: "Reliability",
+                    value: reliabilityText(mem),
+                    subcaption: "\(mem.checkCount) checks · \(mem.incidentCount) issues"
+                )
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    private var selectedNetworkMemory: NetworkMemory? {
+        guard let id = networkID else { return nil }
+        guard let net = store.mergedNetworks.first(where: { $0.id == id }) else { return nil }
+        let runs = store.runs(networkID: net.id, window: window)
+        return NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id), runs: runs)
+    }
+
+    private func digestTile(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        value: String,
+        subcaption: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .lineLimit(1)
+            Text(subcaption)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.06))
+        )
+    }
+
+    private func speedText(_ mem: NetworkMemory) -> String {
+        if let down = mem.typicalDownMbps {
+            if let up = mem.typicalUpMbps {
+                return String(format: "%.0f / %.0f Mbps", down, up)
+            }
+            return String(format: "%.0f Mbps", down)
+        }
+        return "No speed tests"
+    }
+
+    private func speedSubcaption(_ mem: NetworkMemory) -> String {
+        if let peak = mem.peakDownMbps, let typ = mem.typicalDownMbps, peak > typ {
+            return String(format: "Peak: %.0f Mbps", peak)
+        }
+        return "Download / Upload"
+    }
+
+    private func latencyText(_ mem: NetworkMemory) -> String {
+        if let lat = mem.typicalGatewayLatencyMs {
+            return String(format: "%.1f ms", lat)
+        }
+        if let lat = mem.typicalInternetLatencyMs {
+            return String(format: "%.1f ms", lat)
+        }
+        return "—"
+    }
+
+    private func jitterText(_ mem: NetworkMemory) -> String {
+        if let j = mem.typicalGatewayJitterMs {
+            return String(format: "±%.1f ms jitter", j)
+        }
+        return "Gateway latency baseline"
+    }
+
+    private func reliabilityText(_ mem: NetworkMemory) -> String {
+        if let pct = mem.reliabilityPercent {
+            return String(format: "%.0f%% (%@)", pct, mem.reliabilityGrade)
+        }
+        return "—"
+    }
+
+    private func reliabilityColor(_ mem: NetworkMemory) -> Color {
+        switch mem.reliabilityGrade {
+        case "Excellent", "Good": return .green
+        case "Fair": return .orange
+        default: return .red
+        }
+    }
+
     // MARK: - Verdict
 
-    /// The CLI's own verdict for the selected network — `judged.summary`
-    /// verbatim, tinted from `judged.overall`. Shown only for a single
-    /// selected network that maps onto exactly one raw `--history` group
-    /// (`HistoryStore.judged(networkID:)` already encodes that rule); "All
-    /// networks" gets a plain wayfinding line instead, and a network with
-    /// no verdict (a manual merge, or an old CLI) gets neither — this app
-    /// does not compose a substitute verdict of its own.
     @ViewBuilder
     private var verdictCard: some View {
         if let networkID {
             if let judged = store.judged(networkID: networkID),
                let summary = judged.summary, !summary.isEmpty {
+                let health = verdictHealth(judged.overall)
                 HStack(alignment: .top, spacing: 10) {
-                    Circle()
-                        .fill(verdictHealth(judged.overall)?.tint ?? .secondary)
-                        .frame(width: 8, height: 8)
-                        .padding(.top, 5)
+                    Image(systemName: health == .healthy ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(health?.tint ?? .secondary)
+                        .padding(.top, 2)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(summary)
-                            .font(.callout)
+                            .font(.callout.weight(.medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Text("Judged by netdiag, not the app")
                             .font(.caption2)
@@ -165,39 +257,51 @@ struct TrendsView: View {
     /// an unlucky ISP name was a layout input. Network keeps the most
     /// room of the three because its values are the longest and the least
     /// guessable when truncated; Window needs least, its four values are
-    /// fixed and short.
+    private func friendlyMetricLabel(_ m: HistoryDocument.MetricDescriptor) -> String {
+        let name: String
+        switch m.key {
+        case "gateway_rtt_ms":
+            name = "Router Ping"
+        case "internet_rtt_ms":
+            name = "Internet Ping"
+        case "bufferbloat_gw_delta_ms":
+            name = "Bufferbloat (Router)"
+        case "bufferbloat_inet_delta_ms":
+            name = "Bufferbloat (Internet)"
+        case "speedtest_down_mbps":
+            name = "Download Speed"
+        case "speedtest_up_mbps":
+            name = "Upload Speed"
+        case "wifi_rssi":
+            name = "Wi-Fi Signal Strength"
+        default:
+            name = m.label
+        }
+        return "\(name) (\(m.samples))"
+    }
+
     private var controls: some View {
-        HStack {
-            Picker("Metric", selection: $metricKey) {
-                ForEach(store.document.metrics) { m in
-                    // The sample count is in the picker itself, so choosing
-                    // an empty metric is an informed choice rather than a
-                    // dead end the user has to discover by selecting it.
-                    //
-                    // `verbatim:` matters. `Text("…\(Int)…")` builds a
-                    // `LocalizedStringKey`, which formats integers with the
-                    // locale's grouping separator — so 2371 samples rendered
-                    // as "Gateway RTT (2.371)" here, reading as a decimal,
-                    // while `metricNote` two hundred lines down said "2371
-                    // samples" because it interpolates into a plain `String`.
-                    // Same number, two spellings, one of them wrong.
-                    Text(verbatim: "\(m.label) (\(m.samples))").tag(m.key)
-                }
-            }
-            .frame(maxWidth: 220)
-
-            Picker("Window", selection: $window) {
-                ForEach(HistoryWindow.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .frame(maxWidth: 130)
-
+        HStack(spacing: 12) {
             Picker("Network", selection: $networkID) {
                 Text("All networks").tag(String?.none)
                 ForEach(store.mergedNetworks) { net in
                     Text(store.displayName(for: net.id)).tag(String?.some(net.id))
                 }
             }
-            .frame(maxWidth: 240)
+            .frame(maxWidth: 220)
+
+            Picker("Metric", selection: $metricKey) {
+                ForEach(store.document.metrics) { m in
+                    Text(verbatim: friendlyMetricLabel(m)).tag(m.key)
+                }
+            }
+            .frame(maxWidth: 260)
+
+            Picker("Window", selection: $window) {
+                ForEach(HistoryWindow.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 180)
 
             Spacer()
 
@@ -318,6 +422,15 @@ struct TrendsView: View {
                 }
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+        )
     }
 
     /// Y-axis labels without the locale's thousands separator.
@@ -525,6 +638,15 @@ struct TrendsView: View {
                 .frame(height: 160)
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+        )
     }
 
     private struct DayBucket {

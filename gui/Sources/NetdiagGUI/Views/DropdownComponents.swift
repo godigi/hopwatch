@@ -304,48 +304,76 @@ struct ActivityRow: View {
     @Environment(NetdiagCoordinator.self) private var coordinator
     let entry: ActivityEntry
 
+    private var severity: String? {
+        entry.ruleID.flatMap { coordinator.rulesCatalog.catalog?[$0]?.severity }
+    }
+
     private var tint: Color {
-        EventStyle.tint(for: entry.kind,
-                        severity: entry.ruleID.flatMap {
-                            coordinator.rulesCatalog.catalog?[$0]?.severity
-                        })
+        EventStyle.tint(for: entry.kind, severity: severity)
+    }
+
+    private var tagText: String? {
+        if entry.kind == "rule-cleared" { return "Resolved" }
+        if let sev = severity {
+            switch sev {
+            case "warn", "warning": return "Warning"
+            case "critical": return "Disruption"
+            case "info": return "Notice"
+            default: return nil
+            }
+        }
+        if entry.kind == "vpn-disconnected" { return "Warning" }
+        if entry.kind.hasPrefix("vpn-") || entry.kind.hasPrefix("wifi-") { return "Change" }
+        return nil
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: EventStyle.symbol(for: entry.kind))
-                .font(.system(size: 10))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
                 .background(tint.opacity(0.12), in: Circle())
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.summary)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.summary)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if let tag = tagText {
+                        Text(tag)
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(tint.opacity(0.15), in: Capsule())
+                            .foregroundStyle(tint)
+                    }
+                }
+
                 if let detail = entry.detail {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            // The absorbed alert's one distinct fact: this is the subset of
-            // findings that actually interrupted the user. A glyph rather
-            // than a word, because it is a property of the row, not another
-            // clause in the sentence — see `ActivityEntry.absorbAlerts`.
+
             if entry.notified {
                 Image(systemName: "bell.fill")
-                    .font(.system(size: 8))
+                    .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .help("You were notified about this")
             }
+
             Spacer(minLength: 8)
+
             RelativeTimeText(date: entry.latest)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .layoutPriority(1)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 }
 

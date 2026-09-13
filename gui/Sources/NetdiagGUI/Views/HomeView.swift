@@ -21,10 +21,9 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                header
+                statusHeroCard
 
                 locationWarningBanner
-                wifiRow
 
                 ArrivalCard(state: coordinator.arrivalState,
                             network: arrivalNetworkName,
@@ -112,14 +111,6 @@ struct HomeView: View {
     }
 
     /// The name for the arrival card, falling back past CoreWLAN.
-    ///
-    /// `wifiDisplayName` is nil without Location Services, and the card's
-    /// own fallback is the generic "this network" — which rendered
-    /// directly beneath a header already showing the real name, from the
-    /// history store, two lines up. `arrivalNetworkID` is the canonical id
-    /// the card is *about*, and `history.displayName(for:)` is the same
-    /// resolver the Networks tab and the header use, so this cannot
-    /// disagree with them.
     private var arrivalNetworkName: String? {
         if let live = coordinator.wifiDisplayName, !live.isEmpty { return live }
         guard let id = coordinator.arrivalNetworkID else { return nil }
@@ -127,54 +118,269 @@ struct HomeView: View {
         return resolved.isEmpty ? nil : resolved
     }
 
-    // MARK: - Wi-Fi row
-    //
-    // Restores what the pre-redesign single-panel dropdown's
-    // `wifiGlanceInfo` used to show (network name + signal) on Home, where
-    // it never actually lived before this task — see this task's report
-    // for the full investigation. Reuses Item 1's exact word-plus-dBm
-    // treatment (`SignalScale.cellContent`) and `NetdiagCoordinator
-    // .wifiDisplayName`, the same two things `DropdownView`'s Wi-Fi
-    // instrument and quiet-line caption read, so Home and the dropdown can
-    // never describe the same network two different ways.
+    // MARK: - Status at a Glance Hero Card
 
-    @ViewBuilder
-    private var wifiRow: some View {
-        if isConnectedToWiFi && coordinator.locationPermissions.isAuthorized {
-            let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-            HStack(spacing: 10) {
-                Image(systemName: "wifi")
-                    .foregroundStyle(cell.tint)
-                    .frame(width: 18)
-                if let name = coordinator.wifiDisplayName {
-                    Text(name).fontWeight(.medium)
-                } else {
-                    Text("Wi-Fi").foregroundStyle(.secondary)
+    private var statusHeroCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Top Row: Status Glyph, Headline & Subtitle, Primary Action
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: statusIcon)
+                    .font(.system(size: 26))
+                    .foregroundStyle(coordinator.currentHealth.tint)
+                    .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(coordinator.headline)
+                        .font(.title3.weight(.bold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let caption = lastCheckedCaption {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if coordinator.monitor.isRunning {
+                        Text("Continuous background monitoring active")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
-                // "now", explicitly. The report card below carries its own
-                // Wi-Fi signal row, and that one reports what the *check*
-                // recorded — which stays blank without sudo. Unlabelled,
-                // the two read as the app contradicting itself about a
-                // number one of them is visibly showing; labelled, they
-                // read as what they are, a live radio reading and a
-                // recorded one.
-                Text("now")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(cell.value)
-                    .fontWeight(.medium)
-                    .foregroundStyle(cell.tint)
-                if let unit = cell.unit {
-                    Text(unit)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                Spacer(minLength: 8)
+
+                if coordinator.isScanning {
+                    HStack(spacing: 6) {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(elapsedLabel(at: context.date))
+                                .monospacedDigit()
+                                .font(.caption.weight(.medium))
+                        }
+                        Button("Cancel") { coordinator.cancelScan() }
+                            .controlSize(.small)
+                    }
+                } else {
+                    Button {
+                        coordinator.runFullCheck()
+                    } label: {
+                        Label(fullCheckLabel, systemImage: "stethoscope")
+                    }
+                    .keyboardShortcut("r")
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .help(fullCheckHelp)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .cardStyle()
+
+            Divider()
+
+            // 4 Vital Instrument Tiles
+            vitalTilesGrid
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(coordinator.currentHealth.tint.opacity(0.25), lineWidth: 1)
+                )
+        )
+    }
+
+    private var statusIcon: String {
+        switch coordinator.currentHealth {
+        case .healthy:  return "checkmark.shield.fill"
+        case .warning:  return "exclamationmark.triangle.fill"
+        case .critical: return "xmark.octagon.fill"
+        case .paused:   return "pause.circle.fill"
+        }
+    }
+
+    private var vitalTilesGrid: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // 1. Latency
+            vitalTile(
+                icon: "gauge.with.needle",
+                iconColor: latencyTint,
+                label: "Latency (Ping)",
+                value: latencyValue,
+                subcaption: latencyQuality
+            )
+
+            // 2. Stability & Jitter
+            vitalTile(
+                icon: currentStability.icon,
+                iconColor: currentStability.tint,
+                label: "Stability",
+                value: currentStability.label,
+                subcaption: jitterSubcaption
+            )
+
+            // 3. Packet Loss
+            vitalTile(
+                icon: "shield.checkerboard",
+                iconColor: lossTint,
+                label: "Packet Loss",
+                value: lossValue,
+                subcaption: lossSubcaption
+            )
+
+            // 4. Connection Link
+            vitalTile(
+                icon: linkIcon,
+                iconColor: linkTint,
+                label: linkTypeLabel,
+                value: linkName,
+                subcaption: linkQuality
+            )
+        }
+    }
+
+    private func vitalTile(
+        icon: String,
+        iconColor: Color,
+        label: String,
+        value: String,
+        subcaption: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(subcaption)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.06))
+        )
+    }
+
+    // MARK: - Vital Computations
+
+    private var latencyMs: Double? {
+        if let ping = coordinator.monitor.latest?.internet.rttAvgMs { return ping }
+        if let gw = coordinator.monitor.latest?.gateway.rttAvgMs { return gw }
+        if let ping = coordinator.latestRun?.snapshot.internetLatency.rttAvgMs { return ping }
+        return coordinator.latestRun?.snapshot.gateway.rttAvgMs
+    }
+
+    private var latencyValue: String {
+        guard let ms = latencyMs else { return "—" }
+        return String(format: "%.0f ms", ms)
+    }
+
+    private var latencyTint: Color {
+        guard let ms = latencyMs else { return .secondary }
+        if ms < 40 { return .green }
+        if ms < 100 { return .yellow }
+        return .red
+    }
+
+    private var latencyQuality: String {
+        guard let ms = latencyMs else { return "Waiting for probe" }
+        if ms < 25 { return "Fast & responsive" }
+        if ms < 60 { return "Good" }
+        if ms < 120 { return "Moderate lag" }
+        return "High latency"
+    }
+
+    private var currentJitter: Double? {
+        if let live = coordinator.monitor.latest?.liveJitterMs {
+            return live
+        }
+        return MonitorSeries.movingJitter(samples: coordinator.monitor.recent)
+    }
+
+    private var currentStability: ConnectionStability {
+        let rtt = latencyMs
+        let loss = currentLoss
+        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
+    }
+
+    private var jitterSubcaption: String {
+        if let j = currentJitter {
+            return String(format: "±%.1f ms jitter", j)
+        }
+        return currentStability.description
+    }
+
+    private var currentLoss: Double? {
+        coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct
+    }
+
+    private var lossValue: String {
+        guard let l = currentLoss else { return "—" }
+        return String(format: "%.0f%%", l)
+    }
+
+    private var lossTint: Color {
+        guard let l = currentLoss else { return .secondary }
+        if l == 0 { return .green }
+        if l <= 2.0 { return .yellow }
+        return .red
+    }
+
+    private var lossSubcaption: String {
+        guard let l = currentLoss else { return "Measuring" }
+        if l == 0 { return "Clean link (0 drops)" }
+        if l <= 2.0 { return "Minor packet loss" }
+        return "Frequent drops"
+    }
+
+    private var linkIcon: String {
+        if isConnectedToWiFi { return "wifi" }
+        return "cable.connector"
+    }
+
+    private var linkTypeLabel: String {
+        if isConnectedToWiFi { return "Wi-Fi" }
+        return "Ethernet"
+    }
+
+    private var linkName: String {
+        if isConnectedToWiFi {
+            if let name = coordinator.wifiDisplayName, !name.isEmpty {
+                return name
+            }
+            return coordinator.locationPermissions.isAuthorized ? "Wi-Fi" : "Connected"
+        }
+        return "Wired Link"
+    }
+
+    private var linkTint: Color {
+        if isConnectedToWiFi {
+            let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
+            return cell.tint
+        }
+        return .green
+    }
+
+    private var linkQuality: String {
+        if isConnectedToWiFi {
+            if !coordinator.locationPermissions.isAuthorized {
+                return "Location restricted"
+            }
+            let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
+            if let unit = cell.unit {
+                return "\(cell.value) (\(unit))"
+            }
+            return cell.value
+        }
+        return "Active connection"
     }
 
     /// Same precedence as `DropdownView.resolvedRSSI`: the monitor's own
@@ -269,60 +475,6 @@ struct HomeView: View {
         return false
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(coordinator.headline)
-                    .font(.title3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    // The widest thing on Home, and so the view's ideal
-                    // width — see `View.proseWidth`. The longest headline
-                    // the coordinator can produce still fits on two lines
-                    // here; most fit on one.
-                    .proseWidth()
-                if let caption = lastCheckedCaption {
-                    Text(caption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if coordinator.isScanning {
-                HStack(spacing: 6) {
-                    // The elapsed seconds stay even now that the phase list
-                    // exists: the list says how far along the run is
-                    // through a *declared* set of checks, and says nothing
-                    // about how long the rest will take. The counter is the
-                    // only honest thing to put next to it.
-                    //
-                    // Driven by a TimelineView because nothing else ticks
-                    // once a second — during a scan the monitor is paused,
-                    // so a counter recomputed on observation alone would
-                    // sit frozen at whatever second the last event landed.
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(elapsedLabel(at: context.date))
-                            .monospacedDigit().font(.caption)
-                    }
-                    Button("Cancel") { coordinator.cancelScan() }
-                }
-            } else {
-                // Continuous monitoring owns the fast "is it broken now?"
-                // question and starts a targeted investigation when a fault
-                // appears. The only manual path is the occasional full
-                // baseline check (or its safe lighter fallback).
-                Button {
-                    coordinator.runFullCheck()
-                } label: {
-                    Label(fullCheckLabel, systemImage: "stethoscope")
-                }
-                .keyboardShortcut("r")
-                .buttonStyle(.borderedProminent)
-                .help(fullCheckHelp)
-            }
-        }
-    }
 
     // Both of these are `FullCheckPolicy`'s wording, not this view's — see
     // that file for why the label has to track which depth will actually

@@ -36,11 +36,15 @@ struct ActivityView: View {
     /// `eventLog.events`, and cached state would go stale the moment the
     /// monitor recorded a transition. Recomputing once per render keeps the
     /// observation-driven refresh exactly as it was.
+    @State private var issuesOnly = false
+
     var body: some View {
-        let entries = ActivityEntry.fold(coordinator.eventLog.events)
-        let days = days(of: entries)
+        let allEntries = ActivityEntry.fold(coordinator.eventLog.events)
+        let filteredEntries = issuesOnly ? allEntries.filter(isIssue) : allEntries
+        let days = days(of: filteredEntries)
+
         return VStack(alignment: .leading, spacing: 0) {
-            heading(entries: entries, days: days)
+            summaryCard(allEntries: allEntries, daysCount: days.count)
             Divider()
             List {
                 activeSection
@@ -57,39 +61,68 @@ struct ActivityView: View {
         }
     }
 
-    // MARK: - Heading
+    // MARK: - Summary Card
 
-    /// Counts episodes, not stored rows. "329 events" was technically true
-    /// and told the reader nothing except that the list would be long; the
-    /// number that matters is how many distinct things happened.
-    private func heading(entries: [ActivityEntry], days: [Day]) -> some View {
-        let count = entries.count
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("Activity").font(.headline)
-            Text(count == 0
-                 ? "Nothing recorded yet"
-                 : "\(count) event\(count == 1 ? "" : "s") in the last \(days.count) day\(days.count == 1 ? "" : "s")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func summaryCard(allEntries: [ActivityEntry], daysCount: Int) -> some View {
+        let issuesCount = allEntries.filter(isIssue).count
+        let activeCount = coordinator.alerts.activeSorted.count
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: activeCount > 0 ? "exclamationmark.triangle.fill" : (issuesCount > 0 ? "clock.arrow.circlepath" : "checkmark.shield.fill"))
+                    .font(.system(size: 20))
+                    .foregroundStyle(activeCount > 0 ? .red : (issuesCount > 0 ? .blue : .green))
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(summaryTitle(activeCount: activeCount, issuesCount: issuesCount))
+                        .font(.headline)
+
+                    Text(summarySubtitle(allCount: allEntries.count, issuesCount: issuesCount, daysCount: daysCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Picker("Filter", selection: $issuesOnly) {
+                    Text("All Activity (\(allEntries.count))").tag(false)
+                    Text("Issues Only (\(issuesCount))").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
+            }
         }
         .padding(12)
     }
 
+    private func summaryTitle(activeCount: Int, issuesCount: Int) -> String {
+        if activeCount > 0 {
+            return "\(activeCount) Active Alert\(activeCount == 1 ? "" : "s") Now"
+        }
+        if issuesCount == 0 {
+            return "Connection Stable & Quiet"
+        }
+        return "Network Activity History"
+    }
+
+    private func summarySubtitle(allCount: Int, issuesCount: Int, daysCount: Int) -> String {
+        if issuesCount == 0 {
+            return "No packet loss, latency spikes, or disruptions observed across \(max(daysCount, 1)) day(s)"
+        }
+        return "\(issuesCount) incident\(issuesCount == 1 ? "" : "s") · \(allCount) total event\(allCount == 1 ? "" : "s") over \(max(daysCount, 1)) day(s)"
+    }
+
+    private func isIssue(_ entry: ActivityEntry) -> Bool {
+        if entry.ruleID != nil { return true }
+        if entry.kind == "rule-fired" || entry.kind == "alert" || entry.kind == "vpn-disconnected" {
+            return true
+        }
+        return false
+    }
+
     // MARK: - Active now
 
-    /// What is firing *right now*, above the history.
-    ///
-    /// This view previously rendered `eventLog` and nothing else, while
-    /// `MainWindow` badged its sidebar row with `alerts.activeSorted.count`
-    /// and the dropdown's alert card offered "See full report (+2)" pointing
-    /// here — a badge counting something the screen never showed, and a
-    /// button promising two more findings at a destination that listed
-    /// neither. An `alert` event does appear in the history below once an
-    /// alert fires, but that is a record of a past moment; it says nothing
-    /// about whether the condition still holds now.
-    ///
-    /// Reuses `AlertStageCard`, the dropdown's own card, so an alert reads
-    /// identically wherever it appears — including its severity colour.
     @ViewBuilder
     private var activeSection: some View {
         let active = coordinator.alerts.activeSorted
@@ -110,12 +143,24 @@ struct ActivityView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        Label("No events recorded yet — changes and alerts will appear here as monitoring notices them.",
-              systemImage: "clock.arrow.circlepath")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, 6)
+        VStack(spacing: 10) {
+            Image(systemName: issuesOnly ? "checkmark.shield.fill" : "clock.arrow.circlepath")
+                .font(.system(size: 32))
+                .foregroundStyle(issuesOnly ? .green : .secondary)
+            Text(issuesOnly ? "No Disruptions Recorded" : "No Activity Recorded Yet")
+                .font(.headline)
+            Text(issuesOnly
+                 ? "Your connection has maintained uninterrupted stability with zero packet loss or latency alerts."
+                 : "Events and network transitions will appear here as monitoring detects them.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 32)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     // MARK: - Day grouping

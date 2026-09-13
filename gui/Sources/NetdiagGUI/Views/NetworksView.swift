@@ -67,6 +67,42 @@ struct NetworksView: View {
         }
     }
 
+    private var currentNetworks: [HistoryDocument.Network] {
+        visibleNetworks.filter { isCurrent($0) }
+    }
+
+    private var previousNetworks: [HistoryDocument.Network] {
+        visibleNetworks.filter { !isCurrent($0) }
+    }
+
+    private func isWiFi(_ net: HistoryDocument.Network) -> Bool {
+        net.id.starts(with: "wifi:") || !net.ssids.isEmpty
+    }
+
+    private func isEthernet(_ net: HistoryDocument.Network) -> Bool {
+        net.id.starts(with: "lan:")
+    }
+
+    private func networkTypeIcon(_ net: HistoryDocument.Network) -> String {
+        if isWiFi(net) { return "wifi" }
+        if isEthernet(net) { return "cable.connector" }
+        return "network"
+    }
+
+    private func networkDetailSubtitle(_ net: HistoryDocument.Network) -> String {
+        var parts: [String] = []
+        if !net.ssids.isEmpty {
+            parts.append("SSID: " + net.ssids.joined(separator: ", "))
+        }
+        if !net.gateways.isEmpty {
+            parts.append("Gateway: " + net.gateways.joined(separator: ", "))
+        }
+        if !net.isps.isEmpty {
+            parts.append("ISP: " + net.isps.joined(separator: ", "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     /// Every string a user might search for this network by, joined so one
     /// `contains` covers them all. The display name leads, because a
     /// user-assigned rename is the thing the user themselves will type.
@@ -134,43 +170,92 @@ struct NetworksView: View {
                 } else if visibleNetworks.isEmpty {
                     Text("No networks match \"\(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines))\"")
                         .foregroundStyle(.secondary)
-                }
-                ForEach(visibleNetworks) { net in
-                    let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id))
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(store.displayName(for: net.id))
-                                .lineLimit(1)
-                            if isCurrent(net) {
-                                Image(systemName: "circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.system(size: 8))
+                } else {
+                    if !currentNetworks.isEmpty {
+                        Section {
+                            ForEach(currentNetworks) { net in
+                                networkListRow(net, isActive: true)
                             }
-                            Spacer(minLength: 4)
-                            // Last-seen rather than another badge: the row
-                            // already identifies, this tells you how stale that
-                            // identity is — "the café, 3 weeks ago" — which is
-                            // the thing you actually scan the list for.
-                            if let last = net.lastSeenDate {
-                                Text(RelativeTime.string(from: last))
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .help("Last seen \(last.formatted(date: .abbreviated, time: .shortened))")
+                        } header: {
+                            HStack(spacing: 6) {
+                                Text("ACTIVE CONNECTION")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 6, height: 6)
                             }
                         }
-                        Text(mem.summaryChipText)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
-                    .padding(.vertical, 2)
-                    .tag(net.id)
+
+                    if !previousNetworks.isEmpty {
+                        Section {
+                            ForEach(previousNetworks) { net in
+                                networkListRow(net, isActive: false)
+                            }
+                        } header: {
+                            Text(currentNetworks.isEmpty ? "ALL NETWORKS" : "PREVIOUS NETWORKS")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .searchable(text: $searchQuery, placement: .toolbar,
                         prompt: "Search by name, SSID, gateway or ISP")
         }
         .frame(width: 250)
+    }
+
+    private func networkListRow(_ net: HistoryDocument.Network, isActive: Bool) -> some View {
+        let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id))
+        return HStack(alignment: .center, spacing: 8) {
+            Image(systemName: networkTypeIcon(net))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isActive ? .green : .secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(store.displayName(for: net.id))
+                        .fontWeight(isActive ? .semibold : .regular)
+                        .lineLimit(1)
+
+                    if isActive {
+                        Text("Active")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if let last = net.lastSeenDate {
+                        Text(RelativeTime.string(from: last))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .help("Last seen \(last.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                }
+
+                if !mem.summaryChipText.isEmpty {
+                    Text(mem.summaryChipText)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if !net.gateways.isEmpty {
+                    Text(net.gateways.joined(separator: ", "))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+        .tag(net.id)
     }
 
     // MARK: - Right column: detail pane
@@ -183,9 +268,17 @@ struct NetworksView: View {
                   let net = visibleNetworks.first(where: { $0.id == id }) ?? store.mergedNetworksByRecency.first(where: { $0.id == id }) {
             networkOverview(net)
         } else {
-            VStack {
-                Text("Select a network")
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "network")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.tertiary)
+                Text("Select a Network")
+                    .font(.headline)
                     .foregroundStyle(.secondary)
+                Text("Choose a network from the sidebar to inspect baseline performance and run history.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -204,15 +297,22 @@ struct NetworksView: View {
             return nil
         }()
         return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                nameHeader(net)
-                NetworkDetailCard(memory: mem, comparison: comp)
-                controlsRow(net)
+            VStack(alignment: .leading, spacing: 14) {
+                networkHeader(net)
+                NetworkDetailCard(memory: mem, comparison: comp, showHeader: false, showCardTitle: true)
                 if !net.bridgedFrom.isEmpty {
-                    Text("includes: \(net.bridgedFrom.joined(separator: ", "))")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Includes merged records from: \(net.bridgedFrom.joined(separator: ", "))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 4)
                 }
                 Divider()
+                    .padding(.vertical, 2)
                 checksList(net)
             }
             .padding(16)
@@ -220,147 +320,242 @@ struct NetworksView: View {
         }
     }
 
-    private func nameHeader(_ net: HistoryDocument.Network) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if editingName {
-                TextField("Network name", text: $draftName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                    .onSubmit { commitRename(net) }
-                Button("Save") { commitRename(net) }
-                Button("Cancel") { editingName = false }
-            } else {
-                Text(store.displayName(for: net.id))
-                    .font(.title3).fontWeight(.semibold)
-                if isCurrent(net) {
-                    Text("connected")
-                        .font(.caption2)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.green.opacity(0.2), in: Capsule())
+    private func networkHeader(_ net: HistoryDocument.Network) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: networkTypeIcon(net))
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(isCurrent(net) ? .green : .blue)
+                .frame(width: 32, height: 32)
+                .padding(6)
+                .background(
+                    (isCurrent(net) ? Color.green : Color.blue).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                if editingName {
+                    HStack(spacing: 8) {
+                        TextField("Network name", text: $draftName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 240)
+                            .onSubmit { commitRename(net) }
+                        Button("Save") { commitRename(net) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        Button("Cancel") { editingName = false }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Text(store.displayName(for: net.id))
+                            .font(.title2.weight(.bold))
+
+                        if isCurrent(net) {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.green).frame(width: 6, height: 6)
+                                Text("Active Now")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.green)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                        }
+
+                        if isWiFi(net) {
+                            Label("Wi-Fi", systemImage: "wifi")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.1), in: Capsule())
+                        } else if isEthernet(net) {
+                            Label("Ethernet", systemImage: "cable.connector")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.1), in: Capsule())
+                        }
+
+                        if net.synthesized {
+                            Text("Inferred")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.1), in: Capsule())
+                                .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
+                        }
+                    }
                 }
-                if net.synthesized {
-                    Text("inferred")
-                        .font(.caption2)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.secondary.opacity(0.18), in: Capsule())
-                        .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
+
+                // Subtitle metadata: SSID, Gateway, ISP, and date range seen
+                HStack(spacing: 6) {
+                    let subtitle = networkDetailSubtitle(net)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let first = net.firstSeenDate, let last = net.lastSeenDate {
+                        if !subtitle.isEmpty {
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("Seen \(dateRange(net))")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
-        }
-    }
 
-    private func statsRow(_ net: HistoryDocument.Network) -> some View {
-        // `checkCount` is nil for a CLI old enough to predate the key (see
-        // `HistoryDocument.Network`'s doc comment), and the only number
-        // left to show then is `runCount` — every stored record, including
-        // --speed-only/--mtu-only/--wifi-only partials. Labeling that count
-        // "Checks" was the bug: on this machine one network reports
-        // run_count 32 against check_count 28, so the old label overcounted
-        // by exactly the partial runs it didn't examine the network for.
-        // The label switches to "Runs" whenever it's showing the
-        // all-records total rather than the checks-only one, so it never
-        // claims more than the number actually means.
-        let checksCount = net.checkCount ?? net.runCount
-        let checksLabel = net.checkCount != nil ? "Checks" : "Runs"
-        return HStack(spacing: 24) {
-            stat(checksLabel, "\(checksCount)")
-            stat("Problems", "\(net.incidentCount)", detail: problemsDetail(net))
-            stat("Median router RTT", medianRTT(net))
-            stat("Seen", dateRange(net))
-        }
-        .font(.caption)
-    }
-
-    /// The "% of checks" caption under the Problems stat, or nil when
-    /// `incidentRate` has no honest denominator to report against — see
-    /// that property's doc comment for why it can be nil.
-    private func problemsDetail(_ net: HistoryDocument.Network) -> String? {
-        guard let rate = net.incidentRate else { return nil }
-        return String(format: "%.0f%% of checks", rate * 100)
-    }
-
-    private func controlsRow(_ net: HistoryDocument.Network) -> some View {
-        HStack(spacing: 12) {
-            if !editingName {
-                Button("Rename") {
-                    editingName = true
-                    draftName = store.displayName(for: net.id)
-                }
-                .buttonStyle(.link)
-            }
-            Button("Merge…") { mergeSource = net }
-                .buttonStyle(.link)
-            if store.manualMerges.values.contains(net.id) {
-                Button("Unmerge") { unmergeInto(net) }.buttonStyle(.link)
-            }
             Spacer()
+
+            if !editingName {
+                HStack(spacing: 8) {
+                    Button {
+                        editingName = true
+                        draftName = store.displayName(for: net.id)
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        mergeSource = net
+                    } label: {
+                        Label("Merge…", systemImage: "arrow.triangle.merge")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    if store.manualMerges.values.contains(net.id) {
+                        Button("Unmerge") {
+                            unmergeInto(net)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Checks list (inline, no navigation push)
 
     private func checksList(_ net: HistoryDocument.Network) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let runs = visibleRuns(for: net)
+        let groups = RunGroup.coalesce(runs)
+        let days = DaySection.group(groups)
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text("CHECKS")
-                    .font(.system(size: 9, weight: .semibold))
-                    .kerning(0.5)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("CHECK HISTORY")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("\(runs.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+
                 Spacer()
+
                 Picker("Scope", selection: $checkScope) {
                     ForEach(CheckScope.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.small)
-                .frame(maxWidth: 190)
+                .frame(maxWidth: 180)
 
-                Toggle("Problems only", isOn: $problemsOnly)
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
+                Picker("Filter", selection: $problemsOnly) {
+                    Text("All Checks").tag(false)
+                    Text("Issues Only").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .frame(maxWidth: 170)
             }
             .padding(.bottom, 2)
 
-            let runs = visibleRuns(for: net)
-            let groups = RunGroup.coalesce(runs)
-            let days = DaySection.group(groups)
-
             if days.isEmpty {
-                if problemsOnly {
-                    Text("No problems on this network")
-                        .font(.callout)
+                VStack(spacing: 8) {
+                    Image(systemName: problemsOnly ? "checkmark.shield" : "network.slash")
+                        .font(.system(size: 26))
+                        .foregroundStyle(problemsOnly ? .green : .secondary)
+
+                    Text(problemsOnly ? "No Issues on This Network" : "No Checks Recorded")
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(problemsOnly
+                         ? "All recorded checks for this network passed without any detected warnings or disruptions."
+                         : (checkScope == .fullOnly && !networkRuns(net).isEmpty
+                            ? "No full checks recorded yet. Partial or speed-only runs exist."
+                            : "Run a check from the Home tab to analyze and record performance on this network."))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
-                } else if checkScope == .fullOnly && !networkRuns(net).isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No full checks recorded yet.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    if checkScope == .fullOnly && !networkRuns(net).isEmpty {
                         Button("Show all checks (\(networkRuns(net).count) recorded)") {
                             checkScope = .all
                         }
-                        .buttonStyle(.link)
-                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.top, 4)
                     }
-                    .padding(.vertical, 8)
-                } else {
-                    Text("No checks recorded for this network yet.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+                .padding(.horizontal, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                        )
+                )
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(day.label.uppercased())
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: 10, weight: .bold))
                                 .kerning(0.5)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 4)
 
-                            ForEach(day.groups) { group in
-                                runGroupRow(group, net)
+                            VStack(spacing: 0) {
+                                ForEach(day.groups) { group in
+                                    runGroupRow(group, net)
+                                    if group.id != day.groups.last?.id {
+                                        Divider()
+                                            .padding(.leading, 26)
+                                    }
+                                }
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(nsColor: .controlBackgroundColor))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                                    )
+                            )
                         }
                     }
                 }
@@ -466,7 +661,7 @@ struct NetworksView: View {
     }
 
     private func checkRowContent(_ run: HistoryDocument.Run, isNested: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: run.health.symbol)
                 .foregroundStyle(run.health.tint)
                 .frame(width: 16)
@@ -497,8 +692,13 @@ struct NetworksView: View {
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             }
+            if run.runID != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 
@@ -522,12 +722,13 @@ struct NetworksView: View {
                 Button {
                     selectedRunRoute = nil
                 } label: {
-                    Label("All checks", systemImage: "chevron.left")
+                    Label("Back to Checks", systemImage: "chevron.left")
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 Spacer()
             }
-            .padding(8)
+            .padding(10)
             Divider()
             RunDetailView(route: route)
         }

@@ -41,7 +41,8 @@ struct LiveView: View {
                           $0.gateway.rttAvgMs
                       },
                       absent: "No router round-trip has been measured in the last hour.",
-                      unit: "ms")
+                      unit: "ms",
+                      advice: "Flat lines near the bottom are ideal. Spikes indicate Wi-Fi noise or router load.")
                 chart(title: "Internet round-trip",
                       titleHelpKey: "internet",
                       subtitle: subtitle(catalogKey: "monitor_internet_tcp",
@@ -50,7 +51,8 @@ struct LiveView: View {
                       series: MonitorSeries.build(samples, tier: "medium",
                                                   value: Self.internetMs),
                       absent: "No internet round-trip has been measured in the last hour.",
-                      unit: "ms")
+                      unit: "ms",
+                      advice: "Measures core internet targets. Spikes with a flat router line point to ISP congestion.")
                 chart(title: "Router packet loss",
                       titleHelpKey: "packet_loss",
                       subtitle: subtitle(catalogKey: "monitor_gateway_loss",
@@ -59,7 +61,8 @@ struct LiveView: View {
                           $0.gateway.lossPct
                       },
                       absent: "No packet-loss measurement in the last hour.",
-                      unit: "%")
+                      unit: "%",
+                      advice: "0% loss is expected. Non-zero loss causes robotic audio or dropped calls.")
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -202,47 +205,156 @@ struct LiveView: View {
         .cardStyle()
     }
 
-    // MARK: - Current values
+    // MARK: - Current values (Live Instrument Gauges)
 
     private var currentValues: some View {
-        HStack(alignment: .top, spacing: 28) {
-            value("Router", latestGateway)
-            // Labeled and captioned, not just "Internet": DropdownView's
-            // instrument grid has its own cell also labeled "Internet",
-            // and that one is ICMP round-trip. This number is the fastest
-            // TCP *connect* time to a well-known host (see `internetMs`) —
-            // a different measurement, same unit, same word, shown
-            // elsewhere in the same app. Without the qualifier the two
-            // numbers read as the same fact disagreeing with each other.
-            value("Internet (TCP connect)", latestInternet,
-                  caption: "Not the ping-based reading shown elsewhere")
-            value("Sampling", cadenceLabel)
-            Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 10) {
+            gaugeTile(
+                icon: "network",
+                iconColor: routerTint,
+                label: "Router Ping",
+                value: latestGateway,
+                detail: routerDetail
+            )
+
+            gaugeTile(
+                icon: "globe",
+                iconColor: internetTint,
+                label: "Internet (TCP)",
+                value: latestInternet,
+                detail: "Target connect time"
+            )
+
+            gaugeTile(
+                icon: stability.icon,
+                iconColor: stability.tint,
+                label: "Stability",
+                value: stability.label,
+                detail: jitterDetail
+            )
+
+            gaugeTile(
+                icon: "shield.checkerboard",
+                iconColor: lossTint,
+                label: "Packet Loss",
+                value: latestLoss,
+                detail: lossDetail
+            )
         }
     }
 
-    private func value(_ label: String, _ text: String, caption: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(text).font(.title3).monospacedDigit()
-            if let caption {
-                Text(caption).font(.caption2).foregroundStyle(.tertiary)
+    private func gaugeTile(
+        icon: String,
+        iconColor: Color,
+        label: String,
+        value: String,
+        detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+            Text(detail)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.06))
+        )
     }
 
-    /// "not measured" is a different statement from a number, and it is
-    /// never rendered as 0.
+    private var routerMs: Double? {
+        monitor.latest?.gateway.rttAvgMs
+    }
+
     private var latestGateway: String {
-        guard let ms = monitor.latest?.gateway.rttAvgMs else { return "not measured" }
+        guard let ms = routerMs else { return "—" }
         return String(format: "%.0f ms", ms)
+    }
+
+    private var routerTint: Color {
+        guard let ms = routerMs else { return .secondary }
+        if ms < 5 { return .green }
+        if ms < 15 { return .yellow }
+        return .red
+    }
+
+    private var routerDetail: String {
+        guard let ms = routerMs else { return "No probe yet" }
+        if ms < 4 { return "Normal local link" }
+        if ms < 15 { return "Moderate latency" }
+        return "High router ping"
+    }
+
+    private var internetMsValue: Double? {
+        guard let sample = monitor.latest else { return nil }
+        return Self.internetMs(sample)
     }
 
     private var latestInternet: String {
-        guard let sample = monitor.latest, let ms = Self.internetMs(sample) else {
-            return "not measured"
-        }
+        guard let ms = internetMsValue else { return "—" }
         return String(format: "%.0f ms", ms)
+    }
+
+    private var internetTint: Color {
+        guard let ms = internetMsValue else { return .secondary }
+        if ms < 40 { return .green }
+        if ms < 100 { return .yellow }
+        return .red
+    }
+
+    private var currentJitter: Double? {
+        if let live = monitor.latest?.liveJitterMs { return live }
+        return MonitorSeries.movingJitter(samples: monitor.recent)
+    }
+
+    private var stability: ConnectionStability {
+        let rtt = monitor.latest?.internet.rttAvgMs ?? monitor.latest?.gateway.rttAvgMs
+        let loss = monitor.latest?.internet.lossPct ?? monitor.latest?.gateway.lossPct
+        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
+    }
+
+    private var jitterDetail: String {
+        if let j = currentJitter {
+            return String(format: "±%.1f ms jitter", j)
+        }
+        return stability.description
+    }
+
+    private var currentLossPct: Double? {
+        monitor.latest?.gateway.lossPct
+    }
+
+    private var latestLoss: String {
+        guard let l = currentLossPct else { return "—" }
+        return String(format: "%.0f%%", l)
+    }
+
+    private var lossTint: Color {
+        guard let l = currentLossPct else { return .secondary }
+        if l == 0 { return .green }
+        if l <= 2.0 { return .yellow }
+        return .red
+    }
+
+    private var lossDetail: String {
+        guard let l = currentLossPct else { return "Measuring" }
+        if l == 0 { return "0 drops" }
+        if l <= 2.0 { return "Minor loss" }
+        return "Frequent drops"
     }
 
     /// The cadence the stream reports about itself, plus the tier it is on.
@@ -277,15 +389,6 @@ struct LiveView: View {
         return "Currently: \(named)"
     }
 
-    // These three are what each subtitle read, verbatim, before the rules
-    // catalog carried this prose — kept as named fallback constants so an
-    // old CLI whose catalog doesn't yet have `monitor_gateway_rtt` /
-    // `monitor_internet_tcp` / `monitor_gateway_loss` still gets the exact
-    // sentence this screen has always shown, byte-for-byte. The internet
-    // one is the empty-hosts case of the old computed `internetSubtitle`
-    // (the caption above now owns the live host list; this fallback never
-    // names specific hosts, matching the catalog's own host-agnostic
-    // wording for the same key).
     private static let routerSubtitleFallback = "Gateway ping, every cycle of the fast tier."
     private static let internetSubtitleFallback =
         "Time to open a TCP connection to well-known hosts. Measured on the medium tier, so it is sparser than the router line."
@@ -306,19 +409,27 @@ struct LiveView: View {
     private func chart(title: String, titleHelpKey: String, subtitle: String,
                        caption: String? = nil,
                        series: MonitorSeries.Result, absent: String,
-                       unit: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
+                       unit: String,
+                       advice: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center) {
                 Text(title).font(.headline)
-                // Existing glossary keys only — see this file's header for
-                // why no new catalog entries were needed for these three.
                 HelpHint(key: titleHelpKey)
-                Text(sampleLabel(series.points.count)).font(.caption)
+                Text(sampleLabel(series.points.count))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
                 Spacer()
+                Text("Last 60m")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
+
             Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
             if let caption {
                 Text(caption).font(.caption2).foregroundStyle(.tertiary)
             }
@@ -328,13 +439,29 @@ struct LiveView: View {
             } else {
                 LiveChart(series: series, unit: unit)
 
-                if !series.gaps.isEmpty {
-                    Text(gapNote(series.gaps.count))
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    if let advice {
+                        Label(advice, systemImage: "info.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !series.gaps.isEmpty {
+                        Text(gapNote(series.gaps.count))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+        )
     }
 
     private func empty(_ text: String) -> some View {

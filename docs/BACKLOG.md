@@ -34,7 +34,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 | [TASK-025](#task-025-smart-rate-limited-macos-system-notifications-on-network-degradation) | Smart, Rate-Limited macOS System Notifications on Network Degradation | GUI / System Alerts | **Done** | S |
 | [TASK-026](#task-026-live-jitter-tracking--real-time-connection-stability-badge-in-monitor) | Live Jitter Tracking & Real-Time Connection Stability Badge in Monitor | GUI / Telemetry & Quality | **Done** | S |
 | [TASK-027](#task-027-remediation-feedback--resolution-banner-closed-loop-confirmation) | Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) | GUI / UX & Delight | **Done** | S |
-| [TASK-035](#task-035-dashboard-usability--visual-clarity-polish-home-live-activity-trends-networks) | Dashboard Usability & Visual Clarity Polish (Home, Live, Activity, Trends, Networks) | GUI / UX & Design | **High Priority** | L |
+| [TASK-035](#task-035-dashboard-usability--visual-clarity-polish-home-live-activity-trends-networks) | Dashboard Usability & Visual Clarity Polish (Home, Live, Activity, Trends, Networks) | GUI / UX & Design | **Done** | L |
 | [TASK-028](#task-028-meeting-shield--live-call--video-conferencing-quality-guardian-zoom--meet--teams) | "Meeting Shield" — Live Call & Video Conferencing Quality Guardian | **Track F** (Live Work) | Low Priority | M |
 | [TASK-029](#task-029-find-the-best-desk--walkaround-wi-fi-signal--roaming-surveyor) | "Find the Best Desk" — Walkaround Wi-Fi Signal & Roaming Surveyor | **Track F** (Live Work) | Low Priority | M |
 | [TASK-030](#task-030-passive-local-lan-topology--friendly-device-discovery-bonjour--mdns) | Passive Local LAN Topology & Friendly Device Discovery (Bonjour / mDNS) | **Track D** (Subnet & LAN) | Low Priority | M |
@@ -692,7 +692,7 @@ Tasks are structured so that an autonomous worker session (e.g. running `/goal`)
 ### TASK-035: Dashboard Usability & Visual Clarity Polish (Home, Live, Activity, Trends, Networks)
 - **Area**: macOS GUI / Dashboard & Usability
 - **Track**: Track F (UX & Polish)
-- **Status**: **High Priority**
+- **Status**: **Done**
 - **Files to touch**:
   - `gui/Sources/NetdiagGUI/Views/HomeView.swift`
   - `gui/Sources/NetdiagGUI/Views/LiveView.swift`
