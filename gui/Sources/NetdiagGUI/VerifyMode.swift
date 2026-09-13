@@ -1364,17 +1364,21 @@ private enum VerifyHarness {
 
     private static func runConnectionStabilityTests() {
         print("Connection Stability & Jitter Tracking (TASK-026):")
-        let opt = ConnectionStability.evaluate(rtt: 20.0, jitter: 3.5, loss: 0.0)
-        check(opt.level == .optimal, "low latency and jitter evaluate to .optimal")
+        let opt = ConnectionStability.evaluate(rtt: 55.0, jitter: 9.0, loss: 0.0)
+        check(opt.level == .optimal, "55ms latency and 9ms jitter evaluate to .optimal")
         check(opt.tint == .green, "optimal stability has green tint")
 
-        let variable = ConnectionStability.evaluate(rtt: 55.0, jitter: 12.0, loss: 0.0)
-        check(variable.level == .variable, "mild latency and jitter evaluate to .variable")
-        check(variable.label == "Variable", "variable label is Variable")
+        let variable = ConnectionStability.evaluate(rtt: 40.0, jitter: 18.0, loss: 0.0)
+        check(variable.level == .variable, "moderate jitter evaluates to .variable")
+        check(variable.label == "Variable", "moderate jitter label is Variable")
 
-        let highJitter = ConnectionStability.evaluate(rtt: 30.0, jitter: 25.0, loss: 0.0)
+        let highJitter = ConnectionStability.evaluate(rtt: 30.0, jitter: 30.0, loss: 0.0)
         check(highJitter.level == .variable, "high jitter evaluates to .variable")
-        check(highJitter.label == "High Jitter", "jitter > 20ms sets label to High Jitter")
+        check(highJitter.label == "High Jitter", "jitter > 25ms sets label to High Jitter")
+
+        let elevatedPing = ConnectionStability.evaluate(rtt: 95.0, jitter: 5.0, loss: 0.0)
+        check(elevatedPing.level == .variable, "rtt > 75ms evaluates to .variable")
+        check(elevatedPing.label == "Elevated Ping", "steady high ping is labelled Elevated Ping")
 
         let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 3.5)
         check(unstableLoss.level == .unstable, "loss > 2% evaluates to .unstable")

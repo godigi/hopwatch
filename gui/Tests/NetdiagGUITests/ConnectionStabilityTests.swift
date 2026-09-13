@@ -5,21 +5,31 @@ import Testing
 @Suite struct ConnectionStabilityTests {
 
     @Test func stabilityThresholds() {
-        // Optimal: RTT < 35, Jitter < 8, Loss == 0%
-        let opt = ConnectionStability.evaluate(rtt: 25.0, jitter: 4.0, loss: 0.0)
+        // Optimal: RTT <= 75, Jitter <= 15, Loss == 0%
+        let opt = ConnectionStability.evaluate(rtt: 55.0, jitter: 9.0, loss: 0.0)
         #expect(opt.level == .optimal)
         #expect(opt.label == "Optimal")
         #expect(opt.icon == "checkmark.circle.fill")
 
-        // Variable: RTT between 35 and 150
-        let varRtt = ConnectionStability.evaluate(rtt: 60.0, jitter: 5.0, loss: 0.0)
+        // Elevated Ping: RTT between 75 and 150 with clean jitter/loss
+        let varRtt = ConnectionStability.evaluate(rtt: 90.0, jitter: 5.0, loss: 0.0)
         #expect(varRtt.level == .variable)
-        #expect(varRtt.label == "Variable")
+        #expect(varRtt.label == "Elevated Ping")
 
-        // High Jitter: Jitter between 20 and 50
+        // Moderate Jitter: Jitter between 15 and 25
+        let modJitter = ConnectionStability.evaluate(rtt: 40.0, jitter: 18.0, loss: 0.0)
+        #expect(modJitter.level == .variable)
+        #expect(modJitter.label == "Variable")
+
+        // High Jitter: Jitter between 25 and 50
         let highJitter = ConnectionStability.evaluate(rtt: 25.0, jitter: 35.0, loss: 0.0)
         #expect(highJitter.level == .variable)
         #expect(highJitter.label == "High Jitter")
+
+        // Minor Loss: Loss <= 2%
+        let minorLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 1.0)
+        #expect(minorLoss.level == .variable)
+        #expect(minorLoss.label == "Minor Loss")
 
         // Unstable: Loss > 2%
         let unstLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 3.5)

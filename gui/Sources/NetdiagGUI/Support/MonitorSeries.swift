@@ -163,10 +163,14 @@ struct ConnectionStability: Sendable, Equatable {
         }
     }
 
-    /// Evaluates stability index according to TASK-026:
-    /// - Optimal (green): RTT < 35ms, Jitter < 8ms, Loss == 0%
-    /// - Variable (yellow): RTT 35–90ms or Jitter > 8ms (and <= 50ms) or RTT > 90ms (and <= 150ms)
-    /// - Unstable (red): Packet loss > 2% or Jitter > 50ms or RTT > 150ms
+    /// Evaluates stability index combining realistic internet thresholds (Option A)
+    /// and decoupling link stability from baseline distance latency (Option B):
+    /// - Optimal (green): Loss == 0%, Jitter <= 15ms, RTT <= 75ms (flawless, rock-solid stability)
+    /// - Variable (yellow):
+    ///   * Jitter 15–50ms (labelled "High Jitter" if > 25ms, "Variable" if 15–25ms)
+    ///   * Loss > 0% and <= 2% (minor loss)
+    ///   * RTT > 75ms and <= 150ms (labelled "Elevated Ping" when jitter is steady)
+    /// - Unstable (red): Packet loss > 2%, Jitter > 50ms, or RTT > 150ms
     static func evaluate(rtt: Double?, jitter: Double?, loss: Double?) -> ConnectionStability {
         guard let rtt else {
             return ConnectionStability(
@@ -181,18 +185,34 @@ struct ConnectionStability: Sendable, Equatable {
         let j = jitter ?? 0.0
 
         if l > 2.0 || j > 50.0 || rtt > 150.0 {
+            let label = l > 2.0 ? "Unstable" : (j > 50.0 ? "High Jitter" : "Unstable")
             return ConnectionStability(
                 level: .unstable,
-                label: "Unstable",
+                label: label,
                 description: "Expect dropouts, buffering, and call audio glitching",
                 icon: "exclamationmark.triangle.fill"
             )
-        } else if rtt > 35.0 || j > 8.0 || l > 0.0 {
-            let label = j > 20.0 ? "High Jitter" : "Variable"
+        } else if j > 15.0 || l > 0.0 || rtt > 75.0 {
+            let label: String
+            let desc: String
+            if j > 25.0 {
+                label = "High Jitter"
+                desc = "Noticeable jitter variance (±\(Int(round(j)))ms); potential micro-stutter in competitive gaming or calls"
+            } else if j > 15.0 {
+                label = "Variable"
+                desc = "Moderate jitter variance (±\(Int(round(j)))ms); acceptable for streaming and general browsing"
+            } else if l > 0.0 {
+                label = "Minor Loss"
+                desc = "Slight packet loss (\(String(format: "%.1f%%", l))); may cause occasional retransmissions"
+            } else {
+                label = "Elevated Ping"
+                desc = "Steady connection with elevated ping (\(Int(round(rtt)))ms); clean link with zero loss"
+            }
+
             return ConnectionStability(
                 level: .variable,
                 label: label,
-                description: "Acceptable for browsing/streaming; occasional micro-stutter in live calls/games",
+                description: desc,
                 icon: "waveform.path.ecg"
             )
         } else {
