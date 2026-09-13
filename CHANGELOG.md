@@ -6,6 +6,8 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-13
+
 ## [1.0.0] - 2026-09-13
 
 ### Fixed — Diagnostic Accuracy, Hop Attribution, & CoreWLAN Telemetry
@@ -3794,7 +3796,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/godigi/netdiag/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/godigi/netdiag/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/godigi/netdiag/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
