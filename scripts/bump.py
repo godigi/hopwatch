@@ -112,7 +112,7 @@ def update_file(path: str, pattern: str, replacement: str, dry_run: bool = False
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    new_content, count = re.subn(pattern, replacement, content, flags=re.MULTILINE)
+    new_content, count = re.subn(pattern, lambda _: replacement, content, flags=re.MULTILINE)
     if count == 0:
         print(f"Warning: pattern '{pattern}' not matched in {path}")
         return
@@ -162,10 +162,10 @@ def update_changelog(
             f"{bullets_str}\n"
         )
 
-    text = re.sub(unreleased_pattern, replacement, text, count=1)
+    text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1)
 
     footer_ref = f"[Unreleased]: https://github.com/godigi/netdiag/compare/v{next_version}...HEAD\n[{next_version}]: https://github.com/godigi/netdiag/compare/v{prev_version}...v{next_version}"
-    text = re.sub(r"\[Unreleased\]: https://[^\n]+", footer_ref, text, count=1)
+    text = re.sub(r"\[Unreleased\]: https://[^\n]+", lambda _: footer_ref, text, count=1)
 
     if not dry_run:
         with open(changelog_path, "w", encoding="utf-8") as f:
