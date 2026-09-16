@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(NetdiagCoordinator.self) private var coordinator
+    @Environment(HopwatchCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
     @Environment(\.openWindow) private var openWindow
 
@@ -80,7 +80,7 @@ struct SettingsView: View {
             }
 
             Section("Startup") {
-                Toggle("Launch netdiag at login", isOn: $appSettings.launchAtLogin)
+                Toggle("Launch Hopwatch at login", isOn: $appSettings.launchAtLogin)
             }
 
             Section("Updates") {
@@ -165,13 +165,19 @@ struct SettingsView: View {
                         Text("Notifications")
                         Text(coordinator.alerts.notificationsAuthorized
                              ? "Allowed — alerts appear when connectivity drops."
-                             : "Off — netdiag cannot alert you when something breaks.")
+                             : (coordinator.alerts.notificationsDenied
+                                ? "Restricted — alerts cannot appear until enabled in System Settings."
+                                : "Off — Hopwatch cannot alert you when something breaks."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if !coordinator.alerts.notificationsAuthorized {
-                        Button("Turn on") {
-                            Task { await coordinator.alerts.requestAuthorization() }
+                        Button(coordinator.alerts.notificationsDenied ? "Open Settings" : "Turn on") {
+                            if coordinator.alerts.notificationsDenied {
+                                coordinator.alerts.openSystemSettings()
+                            } else {
+                                Task { await coordinator.alerts.requestOrOpenSettings() }
+                            }
                         }
                     } else {
                         Image(systemName: "checkmark.circle.fill")
@@ -263,7 +269,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("netdiag waits before telling you about something, and won't repeat itself for a while afterwards — so a connection that wobbles for a few seconds stays quiet. Weak-signal warnings wait two minutes and repeat at most once an hour.")
+                Text("Hopwatch waits before telling you about something, and won't repeat itself for a while afterwards — so a connection that wobbles for a few seconds stays quiet. Weak-signal warnings wait two minutes and repeat at most once an hour.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -272,6 +278,12 @@ struct SettingsView: View {
         .task {
             await coordinator.alerts.refreshAuthorization()
             coordinator.locationPermissions.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await coordinator.alerts.refreshAuthorization()
+                coordinator.locationPermissions.refresh()
+            }
         }
     }
 
@@ -308,7 +320,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section("netdiag command") {
+            Section("hopwatch command") {
                 HStack {
                     TextField("Leave blank to find it automatically", text: $appSettings.binaryPath)
                         .textFieldStyle(.roundedBorder)
@@ -335,17 +347,16 @@ struct SettingsView: View {
 
             Section("Where things are kept") {
                 LabeledContent("Reports and history") {
-                    Text("~/net-diag").font(.system(.caption, design: .monospaced))
+                    Text(reportsDirectoryDisplay).font(.system(.caption, design: .monospaced))
                 }
                 Button("Open folder in Finder") {
-                    NSWorkspace.shared.open(
-                        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("net-diag"))
+                    NSWorkspace.shared.open(reportsDirectoryURL)
                 }
                 .buttonStyle(.link)
             }
 
             Section {
-                Text("netdiag.app doesn't diagnose anything itself — every measurement, every threshold and every explanation comes from the netdiag command-line tool. The app shows you what it found.")
+                Text("Hopwatch.app doesn't diagnose anything itself — every measurement, every threshold and every explanation comes from the hopwatch command-line tool. The app shows you what it found.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -378,9 +389,33 @@ struct SettingsView: View {
     // boolean off the capabilities handshake, never a judgement about the
     // network (that stays lib/thresholds.sh's job, per CLAUDE.md).
 
+    private var reportsDirectoryURL: URL {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let hopwatch = home.appendingPathComponent("hopwatch")
+        let netdiag = home.appendingPathComponent("net-diag")
+        if FileManager.default.fileExists(atPath: hopwatch.path) {
+            return hopwatch
+        } else if FileManager.default.fileExists(atPath: netdiag.path) {
+            return netdiag
+        }
+        return hopwatch
+    }
+
+    private var reportsDirectoryDisplay: String {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let hopwatch = home.appendingPathComponent("hopwatch")
+        let netdiag = home.appendingPathComponent("net-diag")
+        if FileManager.default.fileExists(atPath: hopwatch.path) {
+            return "~/hopwatch"
+        } else if FileManager.default.fileExists(atPath: netdiag.path) {
+            return "~/net-diag"
+        }
+        return "~/hopwatch"
+    }
+
     private var about: some View {
         Section("About") {
-            LabeledContent("netdiag.app") { Text(AppVersion.display) }
+            LabeledContent("Hopwatch.app") { Text(AppVersion.display) }
             LabeledContent("CLI in use") {
                 Text(BinaryLocator.resolve() ?? "not found")
                     .font(.system(.caption, design: .monospaced))
@@ -434,18 +469,18 @@ struct SettingsView: View {
         case nil:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("Checking netdiag's version…").font(.caption).foregroundStyle(.secondary)
+                Text("Checking hopwatch's version…").font(.caption).foregroundStyle(.secondary)
             }
         case .unavailable:
-            Text("Couldn't reach the netdiag command to check its version.")
+            Text("Couldn't reach the hopwatch command to check its version.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         case .legacy:
-            Text("This netdiag command predates the version check this app uses, so its version and dependencies aren't available. It still runs — Monitor, History and Show need an update to work from this app.")
+            Text("This hopwatch command predates the version check this app uses, so its version and dependencies aren't available. It still runs — Monitor, History and Show need an update to work from this app.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         case .modern(let caps):
-            LabeledContent("netdiag CLI") {
+            LabeledContent("hopwatch CLI") {
                 Text(caps.version.map { "v\($0)" } ?? "unknown version")
             }
             LabeledContent("Speed test tool") { Text(speedtestLabel(caps.deps.speedtest)) }

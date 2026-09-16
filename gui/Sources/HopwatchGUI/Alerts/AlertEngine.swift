@@ -53,6 +53,10 @@ final class AlertEngine {
         notificationManager.isAuthorized
     }
 
+    var notificationsDenied: Bool {
+        notificationManager.isDenied
+    }
+
     init(notificationManager: NotificationManager? = nil) {
         self.notificationManager = notificationManager ?? NotificationManager()
     }
@@ -91,8 +95,16 @@ final class AlertEngine {
         await notificationManager.requestAuthorization()
     }
 
+    func requestOrOpenSettings() async {
+        await notificationManager.requestOrOpenSettings()
+    }
+
     func refreshAuthorization() async {
         await notificationManager.refreshAuthorization()
+    }
+
+    func openSystemSettings() {
+        notificationManager.openSystemSettings()
     }
 
     // MARK: - Global suppressors

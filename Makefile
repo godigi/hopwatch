@@ -8,7 +8,7 @@
 #   make dmg           package the signed GUI into a distributable .dmg
 #   make clean         clean build artifacts
 
-.PHONY: all test test-cli test-gui gui dmg install-gui clean bump bump-patch bump-minor bump-major hooks
+.PHONY: all test test-cli test-gui gui dmg install-gui clean bump bump-patch bump-minor bump-major hooks ship ship-all
 
 all: test
 
@@ -46,3 +46,15 @@ bump-minor:
 
 bump-major:
 	python3 scripts/bump.py --type major
+
+ship: test-gui
+	python3 scripts/bump.py
+	git push origin main --tags
+	$(MAKE) install-gui
+	open /Applications/Hopwatch.app
+
+ship-all: test
+	python3 scripts/bump.py
+	git push origin main --tags
+	$(MAKE) install-gui
+	open /Applications/Hopwatch.app

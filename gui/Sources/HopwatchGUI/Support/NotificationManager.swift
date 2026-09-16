@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import AppKit
 import os
 
 /// Sensitivity filter for macOS system notifications.
@@ -29,8 +30,13 @@ enum NotificationScope: String, CaseIterable, Identifiable, Sendable {
 final class NotificationManager {
 
     private(set) var isAuthorized = false
+    private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     var notificationsEnabled: Bool = true
     var scope: NotificationScope = .all
+
+    var isDenied: Bool {
+        authorizationStatus == .denied
+    }
 
     /// Internal tracking for rate limiting (cooldown per alert key)
     private var lastNotifiedAt: [String: Date] = [:]
@@ -40,6 +46,9 @@ final class NotificationManager {
     /// Notification posting handler, overridable for testing
     var onPostNotification: ((_ id: String, _ title: String, _ body: String, _ isSilent: Bool) -> Void)?
     var onRemoveNotification: ((_ id: String) -> Void)?
+    var onOpenSystemSettings: (() -> Void)?
+    var onFetchSettings: (() async -> UNAuthorizationStatus)?
+    var onRequestAuthorization: ((UNAuthorizationOptions) async throws -> Bool)?
 
     private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "notifications")
 
@@ -51,24 +60,107 @@ final class NotificationManager {
     // MARK: - Permission
 
     func requestAuthorization() async {
+        if let onRequestAuthorization {
+            do {
+                let granted = try await onRequestAuthorization([.alert, .sound])
+                await refreshAuthorization()
+                if !granted && authorizationStatus == .denied {
+                    openSystemSettings()
+                }
+            } catch {
+                log.error("Notification authorization request failed: \(error.localizedDescription, privacy: .public)")
+                await refreshAuthorization()
+                if authorizationStatus == .denied {
+                    openSystemSettings()
+                }
+            }
+            return
+        }
+        guard Bundle.main.bundleIdentifier != nil else {
+            return
+        }
         let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        authorizationStatus = settings.authorizationStatus
+        if settings.authorizationStatus == .denied {
+            log.debug("notification authorization is denied; opening System Settings")
+            openSystemSettings()
+            return
+        }
         do {
-            isAuthorized = try await center.requestAuthorization(options: [.alert, .sound])
+            let granted = try await center.requestAuthorization(options: [.alert, .sound])
+            await refreshAuthorization()
+            if !granted && authorizationStatus == .denied {
+                log.debug("notification authorization was declined; opening System Settings")
+                openSystemSettings()
+            }
         } catch {
             log.error("Notification authorization request failed: \(error.localizedDescription, privacy: .public)")
-            isAuthorized = false
+            await refreshAuthorization()
+            if authorizationStatus == .denied {
+                openSystemSettings()
+            }
+        }
+    }
+
+    /// Requests authorization, or falls back to opening System Settings if
+    /// authorization is denied or produces no visible prompt / grant.
+    func requestOrOpenSettings() async {
+        await refreshAuthorization()
+        if isDenied {
+            openSystemSettings()
+            return
+        }
+        let statusBefore = authorizationStatus
+        await requestAuthorization()
+        if !isAuthorized && authorizationStatus == statusBefore {
+            log.debug("notification authorization unchanged; opening System Settings")
+            openSystemSettings()
         }
     }
 
     func refreshAuthorization() async {
+        if let onFetchSettings {
+            authorizationStatus = await onFetchSettings()
+            isAuthorized = (authorizationStatus == .authorized || authorizationStatus == .provisional)
+            return
+        }
+        guard Bundle.main.bundleIdentifier != nil else {
+            return
+        }
         let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authorizationStatus = settings.authorizationStatus
         isAuthorized = settings.authorizationStatus == .authorized
             || settings.authorizationStatus == .provisional
     }
 
+    /// Opens macOS System Settings directly to Notifications.
+    func openSystemSettings() {
+        if let onOpenSystemSettings {
+            onOpenSystemSettings()
+            return
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+            if NSWorkspace.shared.open(url) {
+                log.debug("opened System Settings -> Notifications via modern URL")
+                return
+            }
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+            NSWorkspace.shared.open(url)
+            log.debug("opened System Settings -> Notifications via fallback URL")
+        }
+    }
+
+    /// For testing: set authorization status directly
+    func setAuthorizationStatusForTesting(_ status: UNAuthorizationStatus) {
+        authorizationStatus = status
+        isAuthorized = (status == .authorized || status == .provisional)
+    }
+
     /// For testing: set authorized state directly
     func setAuthorizedForTesting(_ authorized: Bool) {
-        isAuthorized = authorized
+        setAuthorizationStatusForTesting(authorized ? .authorized : .denied)
     }
 
     // MARK: - Evaluation & Delivery
@@ -166,6 +258,31 @@ final class NotificationManager {
         }
 
         log.info("Delivered restored notification for \(networkName, privacy: .public)")
+        return true
+    }
+
+    /// Delivers a notification when a new version of Netdiag is available.
+    @discardableResult
+    func deliverUpdateNotification(version: String, shortNotes: String?) -> Bool {
+        guard notificationsEnabled else { return false }
+        let id = "netdiag.update.\(version)"
+        let title = "netdiag Update Available"
+        let notesSnippet = (shortNotes != nil && !shortNotes!.isEmpty) ? " — \(shortNotes!)" : ""
+        let body = "Version \(version) is available to install\(notesSnippet). Click to review."
+
+        if let handler = onPostNotification {
+            handler(id, title, body, false)
+        } else {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+
+            let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+
+        log.info("Delivered update notification for v\(version, privacy: .public)")
         return true
     }
 
