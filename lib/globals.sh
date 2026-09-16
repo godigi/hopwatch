@@ -248,6 +248,13 @@ WATCHER_HEARTBEAT_AGE_S="" # ...as an age, "" when never recorded
 WATCHER_INSTALLED_AGE_S="" # how long the plist has existed
 WATCHER_PATH_BLOCKED=0     # 1 = it runs from a TCC-protected folder
 
+# Browser health / background update desync (lib/browser.sh) [BR-1]
+BROWSER_DESYNC_COUNT=0
+BROWSER_DESYNC_APP=""
+BROWSER_DESYNC_RUNNING_VER=""
+BROWSER_DESYNC_DISK_VER=""
+BROWSER_DESYNC_PID=""
+
 # Output / baseline (lib/output.sh)
 DIAGNOSIS_LINES=""       # one "SEV|MSG" per line (SEV ∈ critical/warn/info)
 BASELINE_JSON=""         # raw JSON from helpers/baseline.py

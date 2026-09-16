@@ -705,6 +705,14 @@ def main() -> None:
                 if line.strip()
             ],
         },
+        "browser_health": {
+            "desync": _bool("BROWSER_DESYNC_COUNT"),
+            "desync_count": _maybe_int("BROWSER_DESYNC_COUNT") or 0,
+            "app": _env("BROWSER_DESYNC_APP"),
+            "running_version": _env("BROWSER_DESYNC_RUNNING_VER"),
+            "disk_version": _env("BROWSER_DESYNC_DISK_VER"),
+            "pid": _maybe_int("BROWSER_DESYNC_PID"),
+        },
         "timings": build_timings(),
         "baseline": build_baseline(),
         "diagnosis": build_diagnosis(),

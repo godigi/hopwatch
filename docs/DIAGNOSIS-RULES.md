@@ -710,6 +710,15 @@ Only the `network_extension` group counts. This machine has a camera
 extension and a driver extension installed; neither is in the datapath,
 and reporting them would be a false alarm on a very common setup.
 
+### BR-1 — Browser may not work correctly after background update
+
+- Trigger: A running Chromium-based browser (Google Chrome, Brave, Arc, Edge, Chromium) has an active framework version whose directory on disk has been deleted (usually after a background silent auto-update).
+- Severity: `warn`.
+- Evidence: Browser application name, running memory version, and current version on disk.
+- Recommendation: Quit and relaunch the browser to finish the update and restore normal browsing.
+
+When a browser updates in the background on macOS, the updater installs the new version into the app bundle and removes the previous version directory from `Versions/` to conserve disk space. While existing tabs and helper processes continue to execute in memory, any new tab or cross-site navigation requires spawning a new helper process from disk. Because the running browser attempts to execute the helper from its original version directory which is now missing, process spawning fails and the tab crashes with an unhappy face ("Aw, Snap!"). Netdiag detects this condition and warns the user that their browser may not be working correctly, advising a quick relaunch.
+
 ### DQ-1 — The run measured two networks
 
 - Trigger: `netid_fingerprint_live` taken once after `dhcp_run` and again

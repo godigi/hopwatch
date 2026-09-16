@@ -238,7 +238,7 @@ progress_plan_phases() {
   case "$1" in
     full|quick)
       printf '%s\n' iface vpn wifi gateway arp netid dhcp public \
-        dns ipv6 tcp_reach ntp hosts wifi_scan wifi_disconnect \
+        dns ipv6 tcp_reach ntp hosts browser wifi_scan wifi_disconnect \
         wan_lb wan_upnp path traffic parallel_batch internet_ping bufferbloat mtu \
         traceroute nat mtr watchdog availability speedtest ;;
     mtu-only)   printf '%s\n' iface netid public mtu ;;

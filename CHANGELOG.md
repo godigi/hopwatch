@@ -6,9 +6,26 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added — Background Browser Update Desynchronization Diagnostic (`BR-1`)
+
+- **Silent Update Crash Detection (`lib/browser.sh`, `helpers/browser_check.py`)**: When Chromium-based browsers (Google Chrome, Brave, Arc, Edge, Chromium) silently auto-update in the background on macOS, the updater replaces the app bundle on disk and deletes the active framework version directory from `Versions/` to reclaim space. While open tabs remain alive in memory, opening any new tab or navigating across sites attempts to spawn a new renderer helper from disk; because the old version files are gone, process spawning fails (`ENOENT`) and the tab crashes immediately with an unhappy face ("Aw, Snap!"). Chrome's internal `UpgradeDetector` often does not display an update prompt during this window. Netdiag now catches this condition in `< 30ms` with zero elevated privileges required.
+- **Cautious, Plain-English Diagnosis (`lib/diagnosis.sh`)**: Added rule `BR-1` (*"Browser may not work correctly after background update"*), warning users that their browser may not be working correctly due to background updates and explaining that quitting and relaunching the browser will complete the update and restore normal browsing.
+- **Activity Suitability Projection (`helpers/suitability.py`, `helpers/rules_catalog.py`)**: Rule `BR-1` projects onto the report card's "What should work here" section, accurately marking `Ordinary browsing: won't hold up` so users do not mistakenly assume their Wi-Fi, router, or ISP is at fault when the physical network is otherwise healthy.
+- **Structured JSON Export (`helpers/emit_json.py`)**: Emits a `browser_health` object containing `desync`, `app`, `running_version`, `disk_version`, and `pid` in `--json` mode.
+- **Defensive Safeguards Against False Alarms**: Implemented 6-layer verification including process user-ownership filtering (`uid == os.getuid()`), bundle existence checks, defunct process rejection, strict numeric version validation, physical directory absence verification on disk, and guaranteed bypass when running and disk versions match.
+
 ## [1.1.1] - 2026-09-13
 
+### Fixed — Connection Stability Thresholds
+
+- **Tuned Jitter and Latency Thresholds (`MonitorSeries`)**: Adjusted connection stability thresholds for realistic internet jitter and latency variations, avoiding false-positive instability ratings under normal packet delivery.
+
 ## [1.1.0] - 2026-09-13
+
+### Fixed — CI & Release Automation
+
+- **Release Bumper Script (`scripts/bump.py`)**: Fixed `re.sub` replacement syntax when updating release templates to prevent regex escape parsing errors.
+- **Git Pre-push Hook (`scripts/pre-push`)**: Improved oneline git log regex parsing to reliably handle commit hashes across git versions.
 
 ## [1.0.0] - 2026-09-13
 

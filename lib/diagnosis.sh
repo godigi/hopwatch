@@ -538,6 +538,11 @@ diagnosis_run() {
     add_diag info EDNS-1 "An encrypted DNS profile is installed and active on this Mac (${_edns_name}). DNS queries from your browser and apps are sent over an encrypted channel (DoH/DoT) rather than using standard unencrypted lookups. The DNS measurements above were taken against local and public unencrypted resolvers for diagnostic baseline comparison, and may not reflect the resolver your traffic actually uses."
   fi
 
+  # BR-1 — Browser may not work correctly after background update
+  if [ "${BROWSER_DESYNC_COUNT:-0}" -gt 0 ]; then
+    add_diag warn BR-1 "We detected that ${BROWSER_DESYNC_APP} may not be working correctly right now. It updated in the background while open, and files its active session needs were removed from disk. This can cause new tabs to crash or show an unhappy face ('Aw, Snap!') instead of loading websites. Quit and reopen ${BROWSER_DESYNC_APP} to finish the update and restore normal browsing."
+  fi
+
   # DQ-1 — this run measured more than one network.
   #
   # Fires first among the informational rules because it changes how
@@ -750,6 +755,18 @@ diagnosis_run() {
   # traffic_at_least call above, which set -e exempts) that kills the
   # whole test instead of just skipping a section this context never asked
   # to render.
+  # Assemble DIAGNOSIS_LINES before suitability_run so build_suitability_json
+  # can project the fired rules.
+  DIAGNOSIS_LINES=""
+  local s i
+  for s in critical warn info; do
+    for i in "${!DIAG[@]}"; do
+      if [ "${DIAG_SEV[$i]}" = "$s" ]; then
+        DIAGNOSIS_LINES+="${s}|${DIAG_RULE[$i]}|${DIAG[$i]}"$'\n'
+      fi
+    done
+  done
+
   if declare -f suitability_run >/dev/null 2>&1; then
     suitability_run
   fi
@@ -765,7 +782,7 @@ diagnosis_run() {
   # Each diagnosis is rendered as a wrapped paragraph: first line gets the
   # status icon + 1 space, continuation lines align under the text (4-col
   # indent). Blank line between diagnoses for readability.
-  local s i first=1
+  local first=1
   for s in critical warn info; do
     for i in "${!DIAG[@]}"; do
       if [ "${DIAG_SEV[$i]}" = "$s" ]; then
@@ -773,7 +790,6 @@ diagnosis_run() {
         [ "$first" -eq 0 ] && say ""
         first=0
         _print_diagnosis_paragraph "$s" "${DIAG_RULE[$i]}" "${DIAG[$i]}"
-        DIAGNOSIS_LINES+="${s}|${DIAG_RULE[$i]}|${DIAG[$i]}"$'\n'
       fi
     done
   done

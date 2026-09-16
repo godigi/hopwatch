@@ -876,7 +876,7 @@ fi
 for mod in iface vpn wifi wifi_scan wifi_disconnect dhcp arp gateway public \
            bufferbloat mtu dns ipv6 tcp_reach speedtest ntp traceroute mtr \
            wan internet_ping hosts netid path traffic watchdog availability \
-           headline diagnosis output gping; do
+           browser headline diagnosis output gping; do
   # shellcheck disable=SC1090
   . "$LIB_DIR/$mod.sh"
 done
@@ -1006,6 +1006,7 @@ launch_parallel ipv6            ipv6_run
 launch_parallel tcp_reach       tcp_reach_run
 launch_parallel ntp             ntp_run
 launch_parallel hosts           hosts_run
+launch_parallel browser         browser_run
 launch_parallel wifi_scan       wifi_scan_run
 launch_parallel wifi_disconnect wifi_disconnect_run
 launch_parallel wan_lb          wan_load_balancing_run

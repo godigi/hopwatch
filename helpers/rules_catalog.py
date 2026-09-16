@@ -1219,6 +1219,26 @@ RULES: list[dict[str, object]] = [
         "fix_target": "network_operator",
     },
     {
+        "id": "BR-1",
+        "title": "Browser may not work correctly after background update",
+        "category": "internet",
+        "severity": "warn",
+        "scope": "scan",
+        "blurb": (
+            "A web browser updated in the background while open, and files its "
+            "active session needs were removed from disk. This can cause new tabs "
+            "to crash or show an unhappy face instead of loading websites. "
+            "Quitting and reopening the browser finishes the update and restores "
+            "normal browsing."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#br-1--browser-may-not-work-correctly-after-background-update",
+        "impacts": {"browsing": "broken"},
+        "fix": (
+            "Quit and reopen the browser to finish the update."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "PR-1",
         "title": "iCloud Private Relay active",
         "category": "topology",
