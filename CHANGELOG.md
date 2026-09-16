@@ -6,6 +6,8 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-16
+
 ### Added — Background Browser Update Desynchronization Diagnostic (`BR-1`)
 
 - **Silent Update Crash Detection (`lib/browser.sh`, `helpers/browser_check.py`)**: When Chromium-based browsers (Google Chrome, Brave, Arc, Edge, Chromium) silently auto-update in the background on macOS, the updater replaces the app bundle on disk and deletes the active framework version directory from `Versions/` to reclaim space. While open tabs remain alive in memory, opening any new tab or navigating across sites attempts to spawn a new renderer helper from disk; because the old version files are gone, process spawning fails (`ENOENT`) and the tab crashes immediately with an unhappy face ("Aw, Snap!"). Chrome's internal `UpgradeDetector` often does not display an update prompt during this window. Netdiag now catches this condition in `< 30ms` with zero elevated privileges required.
@@ -3815,7 +3817,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/godigi/netdiag/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/godigi/netdiag/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/godigi/netdiag/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/godigi/netdiag/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/godigi/netdiag/compare/v0.14.0...v1.0.0

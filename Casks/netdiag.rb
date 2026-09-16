@@ -1,5 +1,5 @@
 cask "netdiag" do
-  version "1.1.1"
+  version "1.2.0"
   sha256 :no_check
 
   url "https://github.com/godigi/netdiag/releases/download/v#{version}/Netdiag-#{version}.dmg"
