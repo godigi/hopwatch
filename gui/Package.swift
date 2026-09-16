@@ -1,6 +1,6 @@
 // swift-tools-version: 5.9
 //
-// netdiag.app — the menu-bar client for the netdiag CLI.
+// Hopwatch.app — the menu-bar client for the hopwatch CLI.
 //
 // SwiftPM rather than an Xcode project, because this machine has only the
 // Command Line Tools. SwiftUI.framework and Charts.framework are both
@@ -18,17 +18,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "NetdiagGUI",
+    name: "HopwatchGUI",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "NetdiagGUI",
-            path: "Sources/NetdiagGUI"
+            name: "HopwatchGUI",
+            path: "Sources/HopwatchGUI"
         ),
         .testTarget(
-            name: "NetdiagGUITests",
-            dependencies: ["NetdiagGUI"],
-            path: "Tests/NetdiagGUITests",
+            name: "HopwatchGUITests",
+            dependencies: ["HopwatchGUI"],
+            path: "Tests/HopwatchGUITests",
             // The CLT-only toolchain (no Xcode.app — see this file's
             // header) ships Swift Testing's Testing.framework under
             // Library/Developer/Frameworks, a path SwiftPM does not search

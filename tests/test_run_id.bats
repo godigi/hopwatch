@@ -179,8 +179,9 @@ assert 'run_id' not in rec, rec
   [ "$run_id" != "None" ]
   [ "$run_id" != "bogus" ]
   run python3 -c "
-import json
-rec = json.loads(open('$home/net-diag/baseline.jsonl').readlines()[-1])
+import json, glob
+path = glob.glob('$home/*/baseline.jsonl')[0]
+rec = json.loads(open(path).readlines()[-1])
 assert 'run_id' not in rec, rec
 "
   [ "$status" -eq 0 ]

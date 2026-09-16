@@ -326,14 +326,15 @@ assert 'recorder' in f, f
   cp -R "$REPO/lib" "$REPO/helpers" "$fake_home/Documents/netdiag/"
   run env HOME="$fake_home" "$fake_home/Documents/netdiag/bin/netdiag" --install-recorder
   [ "$status" -eq 3 ]
+  [ ! -f "$fake_home/Library/LaunchAgents/com.hopwatch.recorder.plist" ]
   [ ! -f "$fake_home/Library/LaunchAgents/com.netdiag.recorder.plist" ]
 }
 
 @test "the recorder and the watcher are separate agents" {
   # They answer different questions — a snapshot every fifteen minutes
   # versus every transition — and neither replaces the other.
-  run bash -c "grep -c 'com.netdiag.recorder' '$REPO/lib/watchdog.sh'"
-  [ "$output" != "0" ]
-  run bash -c "grep -q 'RECORDER_LABEL=\"com.netdiag.recorder\"' '$REPO/lib/watchdog.sh'"
+  run bash -c "grep -E 'RECORDER_LABEL=\"com\.(hopwatch|netdiag)\.recorder\"' '$REPO/lib/watchdog.sh'"
+  [ "$status" -eq 0 ]
+  run bash -c "grep -E 'WATCHER_LABEL=\"com\.(hopwatch|netdiag)\.watcher\"' '$REPO/lib/watchdog.sh'"
   [ "$status" -eq 0 ]
 }

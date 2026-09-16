@@ -1,6 +1,6 @@
-# netdiag — project instructions
+# Hopwatch (formerly netdiag) — project instructions
 
-This project builds `netdiag`, a comprehensive macOS network-diagnostic CLI. This file is the working contract; the reference docs are [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md), [`docs/DIAGNOSIS-RULES.md`](./docs/DIAGNOSIS-RULES.md), and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+This project builds `Hopwatch` (`hopwatch`), a comprehensive macOS network-diagnostic monitor, menu bar app, and CLI. This file is the working contract; the reference docs are [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md), [`docs/DIAGNOSIS-RULES.md`](./docs/DIAGNOSIS-RULES.md), and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ## Scope
 

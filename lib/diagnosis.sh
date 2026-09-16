@@ -130,7 +130,7 @@ diagnosis_run() {
      && [ "$WIFI_CANDIDATE_RSSI" -ge "$THRESH_WIFI_STICKY_CANDIDATE_MIN_RSSI" ] \
      && [ -n "$WIFI_SSID" ] && [ "$WIFI_SSID" != "<redacted>" ] \
      && [ "${WIFI_CANDIDATE_SSID:-$WIFI_SSID}" = "$WIFI_SSID" ] \
-     && [ -z "${WIFI_CANDIDATE_BSSID:-}" -o "${WIFI_CANDIDATE_BSSID:-}" != "$WIFI_BSSID" ]; then
+     && { [ -z "${WIFI_CANDIDATE_BSSID:-}" ] || [ "${WIFI_CANDIDATE_BSSID:-}" != "${WIFI_BSSID:-}" ]; }; then
     local _sticky_delta=$(( WIFI_CANDIDATE_RSSI - WIFI_RSSI ))
     if [ "$_sticky_delta" -ge "$THRESH_WIFI_STICKY_DELTA_DBM" ]; then
       add_diag info W3 "Your Mac is connected to a distant access point (${WIFI_RSSI} dBm) while a closer access point on \"${WIFI_SSID}\" is available (${WIFI_CANDIDATE_RSSI} dBm, ${_sticky_delta} dBm stronger). Toggle Wi-Fi off and back on to associate with the closer access point."
@@ -142,7 +142,7 @@ diagnosis_run() {
      && [ -n "$WIFI_CANDIDATE_5GHZ_RSSI" ] && is_numeric "$WIFI_CANDIDATE_5GHZ_RSSI" \
      && [ "$WIFI_CANDIDATE_5GHZ_RSSI" -ge "$THRESH_WIFI_BAND_5GHZ_MIN_RSSI" ] \
      && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
-     && [ -z "${WIFI_CANDIDATE_5GHZ_BSSID:-}" -o "${WIFI_CANDIDATE_5GHZ_BSSID:-}" != "$WIFI_BSSID" ]; then
+     && { [ -z "${WIFI_CANDIDATE_5GHZ_BSSID:-}" ] || [ "${WIFI_CANDIDATE_5GHZ_BSSID:-}" != "${WIFI_BSSID:-}" ]; }; then
     local _cur_ch="${WIFI_CHAN:-${WIFI_SCAN_CURRENT_CHANNEL:-}}"
     local _cur_band="${WIFI_SCAN_CURRENT_BAND:-}"
     local _cur_ch_num="${_cur_ch%% *}"

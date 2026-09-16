@@ -1,11 +1,10 @@
-# Contributing to netdiag
+# Contributing to Hopwatch
 
-Thanks for looking. netdiag is a bash 5 CLI for macOS; there's no build
-step, so getting set up is a clone and two Homebrew packages.
+Thanks for looking. Hopwatch is a bash 5 CLI and Swift menu-bar app for macOS; getting set up for CLI development is a clone and a couple Homebrew packages.
 
 ```sh
-git clone https://github.com/godigi/netdiag.git
-cd netdiag
+git clone https://github.com/godigi/hopwatch.git
+cd hopwatch
 brew install shellcheck bats-core jq bash
 ./install.sh          # symlinks this clone onto your PATH
 ```
@@ -15,8 +14,9 @@ brew install shellcheck bats-core jq bash
 Both of these run in CI, so it's cheaper to run them locally first:
 
 ```sh
-shellcheck bin/netdiag install.sh lib/*.sh   # must be clean at default severity
+shellcheck bin/hopwatch install.sh lib/*.sh   # must be clean at default severity
 bats tests/                                  # must be green
+make test-gui                                # GUI tests must pass
 ```
 
 `# shellcheck disable=...` is allowed only with a comment saying why the
@@ -34,7 +34,7 @@ warning is a false positive.
 - **A CHANGELOG entry** under `## [Unreleased]`.
 - **Samples come from real runs.** If you change output,
   regenerate `examples/sample-output.{txt,json}` with
-  `./bin/netdiag --redact` and `./bin/netdiag --redact --json`. Don't
+  `./bin/hopwatch --redact` and `./bin/hopwatch --redact --json`. Don't
   hand-edit them: a sample that doesn't match reality is worse than none,
   and the README has been wrong that way before.
 
@@ -88,10 +88,10 @@ what `install.sh` actually installed. Four versions (0.1.0, 0.4.1, 0.5.0,
    `[Unreleased]` at the new tag:
 
    ```
-   [Unreleased]: https://github.com/godigi/netdiag/compare/vX.Y.Z...HEAD
-   [X.Y.Z]: https://github.com/godigi/netdiag/compare/vPREV...vX.Y.Z
+   [Unreleased]: https://github.com/godigi/hopwatch/compare/vX.Y.Z...HEAD
+   [X.Y.Z]: https://github.com/godigi/hopwatch/compare/vPREV...vX.Y.Z
    ```
-4. **Bump `NETDIAG_VERSION`** in `bin/netdiag`. It is what `--version` and
+4. **Bump `HOPWATCH_VERSION`** in `bin/hopwatch` (or run `scripts/bump.py X.Y.Z`). It is what `--version` and
    the GUI's capabilities handshake report; the release workflow refuses a
    tag that disagrees with it.
 5. **Run the suite.** `bats tests/` — `tests/test_changelog.bats` checks
@@ -118,9 +118,10 @@ one-line summary, and `git describe` depends on it.
 
 | Path | What's in it |
 |------|--------------|
-| `bin/netdiag` | argument parsing and the run orchestrator |
+| `bin/hopwatch` | argument parsing and the run orchestrator (`bin/netdiag` symlink) |
 | `lib/*.sh` | one module per check; `common.sh` has shared helpers |
 | `helpers/*.py` | JSON emission, baseline math, summaries (stock `python3`) |
+| `gui/` | native SwiftUI menu-bar app and dashboard (`Hopwatch.app`) |
 | `tests/` | bats-core suites and fixtures |
 | `docs/` | architecture, diagnosis rules, JSON schema |
 
@@ -131,7 +132,7 @@ belongs in the parallel batch.
 
 macOS 14+ only for now. Checks should prefer macOS built-ins; Homebrew
 tools (`mtr`, `gping`, `speedtest`, `jq`) may be used but must degrade to
-a skip with a hint when missing, never a hard failure. netdiag is
+a skip with a hint when missing, never a hard failure. Hopwatch is
 read-only: it must never change routing, DNS, WiFi, or ARP state.
 
 By contributing you agree your work is licensed under the [MIT

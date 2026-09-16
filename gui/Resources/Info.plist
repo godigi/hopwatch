@@ -2,19 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Netdiag</string>
-  <key>CFBundleDisplayName</key><string>netdiag</string>
-  <key>CFBundleExecutable</key><string>NetdiagGUI</string>
+  <key>CFBundleName</key><string>Hopwatch</string>
+  <key>CFBundleDisplayName</key><string>Hopwatch</string>
+  <key>CFBundleExecutable</key><string>HopwatchGUI</string>
   <!-- TCC keys permission grants on bundle id + code signature. Changing
        either re-prompts for Notifications and Location, so neither this
        string nor the signing identity in gui/Makefile should be edited
        casually. -->
-  <key>CFBundleIdentifier</key><string>me.brianfreeman.netdiag</string>
+  <key>CFBundleIdentifier</key><string>me.brianfreeman.hopwatch</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <!-- Template value, not the shipped version: gui/Makefile's `bundle`
        target always overwrites both version keys — via PlistBuddy, on the
-       *copied* plist at build/Netdiag.app/Contents/Info.plist — with
-       whatever NETDIAG_VERSION the bundled ../bin/netdiag reports, so
+       *copied* plist at build/Hopwatch.app/Contents/Info.plist — with
+       whatever HOPWATCH_VERSION the bundled ../bin/hopwatch reports, so
        app and CLI can never disagree about which release they are. This
        file (the committed template) is never read by a running app; the
        obviously-not-real value below is deliberate so a stale number here
@@ -32,8 +32,8 @@
        granted; gateway-MAC identity plus user-assigned names already
        deliver network grouping, so this only buys back real names. -->
   <key>NSLocationUsageDescription</key>
-  <string>netdiag uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
+  <string>Hopwatch uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
-  <string>netdiag uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
+  <string>Hopwatch uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
 </dict>
 </plist>

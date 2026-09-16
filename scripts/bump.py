@@ -36,11 +36,14 @@ def get_repo_root() -> str:
 
 
 def get_current_version(repo_root: str) -> str:
-    netdiag_path = os.path.join(repo_root, "bin", "netdiag")
-    with open(netdiag_path, "r", encoding="utf-8") as f:
-        match = re.search(r'^NETDIAG_VERSION="([^"]+)"', f.read(), re.MULTILINE)
+    bin_path = os.path.join(repo_root, "bin", "hopwatch")
+    if not os.path.exists(bin_path):
+        bin_path = os.path.join(repo_root, "bin", "netdiag")
+    with open(bin_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        match = re.search(r'^(?:HOPWATCH|NETDIAG)_VERSION="([^"]+)"', content, re.MULTILINE)
         if not match:
-            raise ValueError(f"Could not find NETDIAG_VERSION in {netdiag_path}")
+            raise ValueError(f"Could not find HOPWATCH_VERSION or NETDIAG_VERSION in {bin_path}")
         return match.group(1)
 
 
@@ -164,7 +167,7 @@ def update_changelog(
 
     text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1)
 
-    footer_ref = f"[Unreleased]: https://github.com/godigi/netdiag/compare/v{next_version}...HEAD\n[{next_version}]: https://github.com/godigi/netdiag/compare/v{prev_version}...v{next_version}"
+    footer_ref = f"[Unreleased]: https://github.com/godigi/hopwatch/compare/v{next_version}...HEAD\n[{next_version}]: https://github.com/godigi/hopwatch/compare/v{prev_version}...v{next_version}"
     text = re.sub(r"\[Unreleased\]: https://[^\n]+", lambda _: footer_ref, text, count=1)
 
     if not dry_run:
@@ -215,18 +218,35 @@ def main() -> int:
         print("[DRY RUN] No files modified.")
         return 0
 
-    # 1. bin/netdiag
-    update_file(
-        os.path.join(repo_root, "bin", "netdiag"),
-        r'^NETDIAG_VERSION="[^"]+"',
-        f'NETDIAG_VERSION="{next_version}"',
-    )
-
-    # 2. Casks/netdiag.rb
-    cask_path = os.path.join(repo_root, "Casks", "netdiag.rb")
-    if os.path.exists(cask_path):
+    # 1. bin/hopwatch (and bin/netdiag if it exists as regular file)
+    hopwatch_bin = os.path.join(repo_root, "bin", "hopwatch")
+    if os.path.exists(hopwatch_bin) and not os.path.islink(hopwatch_bin):
         update_file(
-            cask_path,
+            hopwatch_bin,
+            r'^(?:HOPWATCH|NETDIAG)_VERSION="[^"]+"',
+            f'HOPWATCH_VERSION="{next_version}"',
+        )
+
+    netdiag_bin = os.path.join(repo_root, "bin", "netdiag")
+    if os.path.exists(netdiag_bin) and not os.path.islink(netdiag_bin):
+        update_file(
+            netdiag_bin,
+            r'^NETDIAG_VERSION="[^"]+"',
+            f'NETDIAG_VERSION="{next_version}"',
+        )
+
+    # 2. Casks/hopwatch.rb and Casks/netdiag.rb
+    cask_hopwatch = os.path.join(repo_root, "Casks", "hopwatch.rb")
+    if os.path.exists(cask_hopwatch):
+        update_file(
+            cask_hopwatch,
+            r'version\s+"[^"]+"',
+            f'version "{next_version}"',
+        )
+    cask_netdiag = os.path.join(repo_root, "Casks", "netdiag.rb")
+    if os.path.exists(cask_netdiag):
+        update_file(
+            cask_netdiag,
             r'version\s+"[^"]+"',
             f'version "{next_version}"',
         )
@@ -240,8 +260,10 @@ def main() -> int:
             f'"version": "{next_version}"',
         )
 
-    # 4. gui/Sources/NetdiagGUI/VerifyMode.swift
-    verify_mode = os.path.join(repo_root, "gui", "Sources", "NetdiagGUI", "VerifyMode.swift")
+    # 4. gui/Sources/HopwatchGUI/VerifyMode.swift (or legacy NetdiagGUI)
+    verify_mode = os.path.join(repo_root, "gui", "Sources", "HopwatchGUI", "VerifyMode.swift")
+    if not os.path.exists(verify_mode):
+        verify_mode = os.path.join(repo_root, "gui", "Sources", "NetdiagGUI", "VerifyMode.swift")
     if os.path.exists(verify_mode):
         update_file(
             verify_mode,
@@ -254,15 +276,20 @@ def main() -> int:
 
     if not args.no_commit:
         files_to_add = [
-            "bin/netdiag",
             "CHANGELOG.md",
         ]
-        if os.path.exists(cask_path):
+        if os.path.exists(hopwatch_bin):
+            files_to_add.append("bin/hopwatch")
+        if os.path.exists(netdiag_bin):
+            files_to_add.append("bin/netdiag")
+        if os.path.exists(cask_hopwatch):
+            files_to_add.append("Casks/hopwatch.rb")
+        if os.path.exists(cask_netdiag):
             files_to_add.append("Casks/netdiag.rb")
         if os.path.exists(sample_json):
             files_to_add.append("examples/sample-output.json")
         if os.path.exists(verify_mode):
-            files_to_add.append("gui/Sources/NetdiagGUI/VerifyMode.swift")
+            files_to_add.append(os.path.relpath(verify_mode, repo_root))
 
         run_cmd(["git", "add"] + files_to_add)
         commit_msg = f"chore(release): bump version to {next_version}"

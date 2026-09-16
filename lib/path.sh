@@ -141,6 +141,7 @@ path_parse_network_extensions() {
 # (a location trail of joined network names). netdiag reads ONLY the scalar
 # PrivacyProxyServiceStatus.
 path_parse_private_relay() {
+  # shellcheck disable=SC2016 # python string "$top" is not a shell variable
   python3 -c '
 import sys, plistlib
 try:

@@ -19,7 +19,10 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  SNAPSHOT="$REPO/gui/Sources/NetdiagGUI/Models/RunSnapshot.swift"
+  SNAPSHOT="$REPO/gui/Sources/HopwatchGUI/Models/RunSnapshot.swift"
+  if [ ! -f "$SNAPSHOT" ]; then
+    SNAPSHOT="$REPO/gui/Sources/NetdiagGUI/Models/RunSnapshot.swift"
+  fi
 }
 
 # The CodingKeys case names of RunSnapshot's own (outermost) enum — the one

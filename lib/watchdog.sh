@@ -30,28 +30,40 @@
 # Read across modules that shellcheck can't follow from here.
 # shellcheck disable=SC2034
 
-WATCHER_LABEL="com.netdiag.watcher"
+WATCHER_LABEL="com.hopwatch.watcher"
 # The recorder is a second, different agent: the watcher runs a whole
 # --quick scan every fifteen minutes and stores a run; the recorder runs
 # one long-lived --monitor and appends transitions. They answer different
 # questions and neither replaces the other, so they get separate labels
 # rather than one plist with two moods.
-RECORDER_LABEL="com.netdiag.recorder"
+RECORDER_LABEL="com.hopwatch.recorder"
 
 # The one place either half of the feature names the plist. lib/launchd.sh
-# writes it, watchdog_run reads it, and a mismatch would mean netdiag
+# writes it, watchdog_run reads it, and a mismatch would mean hopwatch
 # cheerfully reporting "no watcher installed" about a watcher it installed
 # itself.
 watchdog_plist_path() {
-  printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$WATCHER_LABEL"
+  if [ -f "$HOME/Library/LaunchAgents/$WATCHER_LABEL.plist" ]; then
+    printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$WATCHER_LABEL"
+  elif [ -f "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist" ]; then
+    printf '%s/Library/LaunchAgents/com.netdiag.watcher.plist' "$HOME"
+  else
+    printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$WATCHER_LABEL"
+  fi
 }
 
 watchdog_recorder_plist_path() {
-  printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$RECORDER_LABEL"
+  if [ -f "$HOME/Library/LaunchAgents/$RECORDER_LABEL.plist" ]; then
+    printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$RECORDER_LABEL"
+  elif [ -f "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist" ]; then
+    printf '%s/Library/LaunchAgents/com.netdiag.recorder.plist' "$HOME"
+  else
+    printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$RECORDER_LABEL"
+  fi
 }
 
 watchdog_heartbeat_path() {
-  printf '%s/watcher.heartbeat' "${LOG_DIR:-$HOME/net-diag}"
+  printf '%s/watcher.heartbeat' "$LOG_DIR"
 }
 
 # True when $1 sits under a folder macOS guards with TCC.
@@ -169,8 +181,11 @@ watchdog_run() {
   # PID, or "-" when the job is not currently running. An interval job is
   # not running almost all of the time, so the PID says nothing and the
   # status says everything.
+  local cur_label
+  cur_label="$(/usr/libexec/PlistBuddy -c 'Print :Label' "$plist" 2>/dev/null || true)"
+  [ -z "$cur_label" ] && cur_label="$WATCHER_LABEL"
   WATCHER_LAST_EXIT="$(launchctl list 2>/dev/null \
-    | awk -v l="$WATCHER_LABEL" '$3 == l { print $2; exit }' || true)"
+    | awk -v l="$cur_label" '$3 == l { print $2; exit }' || true)"
   case "$WATCHER_LAST_EXIT" in
     ''|*[!0-9-]*) WATCHER_LAST_EXIT="" ;;
   esac

@@ -1,7 +1,7 @@
-# netdiag
+# Hopwatch
 
-[![shellcheck](https://github.com/godigi/netdiag/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/godigi/netdiag/actions/workflows/shellcheck.yml)
-[![bats](https://github.com/godigi/netdiag/actions/workflows/bats.yml/badge.svg)](https://github.com/godigi/netdiag/actions/workflows/bats.yml)
+[![shellcheck](https://github.com/godigi/hopwatch/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/godigi/hopwatch/actions/workflows/shellcheck.yml)
+[![bats](https://github.com/godigi/hopwatch/actions/workflows/bats.yml/badge.svg)](https://github.com/godigi/hopwatch/actions/workflows/bats.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-lightgrey.svg)](#requirements)
 
@@ -9,7 +9,7 @@
 > Know instantly whether an issue is your Wi-Fi, your router, or your internet provider. Available as a **native macOS menu bar app** and a comprehensive CLI.
 
 <p align="center">
-  <a href="https://github.com/godigi/netdiag/releases/latest">
+  <a href="https://github.com/godigi/hopwatch/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_macOS-DMG-007AFF?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
   </a>
 </p>
@@ -35,37 +35,37 @@
 ## Quick Install
 
 ### Option A: 1-Line Instant Installer (Mac App + CLI) ⚡ *(Recommended)*
-Run this in your terminal. It installs `Netdiag.app` to `/Applications`, links the `netdiag` command line tool to your PATH, clears Gatekeeper quarantine, and launches the menu bar app:
+Run this in your terminal. It installs `Hopwatch.app` to `/Applications`, links the `hopwatch` (and `netdiag`) command line tool to your PATH, clears Gatekeeper quarantine, and launches the menu bar app:
 ```sh
-curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash
+curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh | bash
 ```
 
 ### Option B: Download for macOS (DMG)
-Download the latest **[Netdiag.dmg](https://github.com/godigi/netdiag/releases/latest)**, open it, and drag `Netdiag.app` into your Applications folder.
+Download the latest **[Hopwatch.dmg](https://github.com/godigi/hopwatch/releases/latest)**, open it, and drag `Hopwatch.app` into your Applications folder.
 
 > [!TIP]
-> **First Launch on macOS:** If macOS displays an *"unidentified developer"* or *"cannot verify"* message, simply **Right-Click (Control-Click) Netdiag.app ➔ Open**, or run:
+> **First Launch on macOS:** If macOS displays an *"unidentified developer"* or *"cannot verify"* message, simply **Right-Click (Control-Click) Hopwatch.app ➔ Open**, or run:
 > ```sh
-> xattr -cr /Applications/Netdiag.app
+> xattr -cr /Applications/Hopwatch.app
 > ```
 
 ### Option C: Homebrew Cask
 ```sh
-brew tap godigi/netdiag https://github.com/godigi/netdiag.git
-brew install --cask netdiag
+brew tap godigi/hopwatch https://github.com/godigi/hopwatch.git
+brew install --cask hopwatch
 ```
 
 ### Option D: Terminal CLI Only
 ```sh
-curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install.sh | bash
 ```
-Or with Homebrew bash bootstrap: `curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh | bash -s -- --prefix ~/.local/bin`
+Or with Homebrew bash bootstrap: `curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install.sh | bash -s -- --prefix ~/.local/bin`
 
 ---
 
 ## Overview
 
-`netdiag` runs a battery of macOS-native checks (interface, WiFi, gateway,
+Hopwatch runs a battery of macOS-native checks (interface, WiFi, gateway,
 DNS, traceroute, bufferbloat, PMTU, mtr, IPv6, VPN, TCP reach, WiFi scan +
 disconnect history, NTP drift, ARP, DHCP, local traffic attribution, plus
 NAT/WAN topology — dual-WAN, double-NAT, UPnP/NAT-PMP), writes a
@@ -97,9 +97,9 @@ the report blame your router for your own transfer.
 
 When the internet is flaky you don't have time to run `ping`, `traceroute`,
 `dig`, `ipconfig`, `wdutil`, `mtr`, `system_profiler`, and `speedtest`
-separately and correlate the outputs by hand. `netdiag` does that and tells
+separately and correlate the outputs by hand. Hopwatch does that and tells
 you where to look first. For *intermittent* problems — where the failure
-window is gone by the time you can investigate — `netdiag --watch` or the
+window is gone by the time you can investigate — `hopwatch --watch` or the
 `--install-watcher` LaunchAgent runs it on a cron so the baseline catches
 the regression on the next pass.
 
@@ -107,8 +107,8 @@ If you'd rather read the script before piping it to a shell — a reasonable
 habit — clone instead:
 
 ```sh
-git clone https://github.com/godigi/netdiag.git
-cd netdiag
+git clone https://github.com/godigi/hopwatch.git
+cd hopwatch
 ./install.sh
 ```
 
@@ -122,25 +122,27 @@ never touches the network.
 install.sh --prefix DIR    # where to put the symlink
                            # default: /usr/local/bin if writable, else ~/bin
 install.sh --no-brew       # skip the bash 5 bootstrap
-install.sh --uninstall     # remove the symlink; keeps the checkout and ~/net-diag
+install.sh --uninstall     # remove the symlink; keeps the checkout and ~/hopwatch
 ```
 
 When piping, flags go after `-s --`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install.sh \
   | bash -s -- --prefix ~/.local/bin
 ```
 
-`NETDIAG_SRC` overrides the checkout location, `NETDIAG_REPO` the clone URL.
+`HOPWATCH_SRC` overrides the checkout location, `HOPWATCH_REPO` the clone URL.
 
-To remove netdiag entirely:
+To remove Hopwatch entirely:
 
 ```sh
-netdiag --uninstall-watcher            # if you installed the LaunchAgent
-~/.local/share/netdiag/install.sh --uninstall
-rm -rf ~/.local/share/netdiag ~/net-diag
+hopwatch --uninstall-watcher            # if you installed the LaunchAgent
+~/.local/share/hopwatch/install.sh --uninstall
+rm -rf ~/.local/share/hopwatch ~/hopwatch
 ```
+
+*(Legacy `netdiag` alias and `~/net-diag` directories are cleaned up automatically).*
 
 </details>
 
@@ -148,31 +150,34 @@ rm -rf ~/.local/share/netdiag ~/net-diag
 
 macOS 14 Sonoma or newer on Apple Silicon or Intel. CLI requires bash 5 (the installer bootstraps it automatically via Homebrew).
 
-## Usage
+### Usage
 
 ```
-netdiag [TARGET] [--quick] [--gping] [--no-bufferbloat] [--speed]
-                 [--json] [--quiet] [--expert] [--log PATH] [--progress]
-                 [--baseline | --no-baseline]
-netdiag --mtu-only               # just the path-MTU probe
-netdiag --wifi-only              # just the WiFi checks
-netdiag --speed-only             # just the speed test, recorded to history
-netdiag --dns-only               # just DNS and resolver checks
-netdiag --bufferbloat-only       # just the loaded-vs-idle latency test
-netdiag --ping-only              # just gateway and internet latency/loss
-netdiag --redact --json          # safe to paste into a ticket
-netdiag --watch[=SEC]            # foreground loop, every SEC (default 300)
-netdiag --monitor                # streaming JSONL, one sample per line
-netdiag --summary[=HOURS]        # aggregate ~/net-diag/baseline.jsonl
-netdiag --history[=N]            # whole run store as network-grouped JSON
-netdiag --show=ID                # one stored run, judged against its network
-netdiag --share[=ID|-]           # one run as a pasteable, redacted report
-netdiag --install-watcher        # launchd plist, every 15 min, background
-netdiag --uninstall-watcher
-netdiag --version                # print the version and exit
-netdiag --capabilities           # JSON handshake: schemas, features, deps
-netdiag --rules-catalog          # JSON catalog: every rule ID, title, blurb
+hopwatch [TARGET] [--quick] [--gping] [--no-bufferbloat] [--speed]
+                  [--json] [--quiet] [--expert] [--log PATH] [--progress]
+                  [--baseline | --no-baseline]
+hopwatch --mtu-only               # just the path-MTU probe
+hopwatch --wifi-only              # just the WiFi checks
+hopwatch --speed-only             # just the speed test, recorded to history
+hopwatch --dns-only               # just DNS and resolver checks
+hopwatch --bufferbloat-only       # just the loaded-vs-idle latency test
+hopwatch --ping-only              # just gateway and internet latency/loss
+hopwatch --redact --json          # safe to paste into a ticket
+hopwatch --watch[=SEC]            # foreground loop, every SEC (default 300)
+hopwatch --monitor                # streaming JSONL, one sample per line
+hopwatch --summary[=HOURS]        # aggregate ~/hopwatch/baseline.jsonl
+hopwatch --history[=N]            # whole run store as network-grouped JSON
+hopwatch --show=ID                # one stored run, judged against its network
+hopwatch --share[=ID|-]           # one run as a pasteable, redacted report
+hopwatch --install-watcher        # launchd plist, every 15 min, background
+hopwatch --uninstall-watcher
+hopwatch --version                # print the version and exit
+hopwatch --capabilities           # JSON handshake: schemas, features, deps
+hopwatch --rules-catalog          # JSON catalog: every rule ID, title, blurb
 ```
+
+> [!NOTE]
+> **Compatibility Alias:** `netdiag` is maintained as a direct symlink/alias to `hopwatch` with full arguments and flags compatibility.
 
 | Flag                 | Effect                                                 |
 |----------------------|--------------------------------------------------------|
@@ -190,7 +195,7 @@ netdiag --rules-catalog          # JSON catalog: every rule ID, title, blurb
 | `--no-speed`         | skip the speedtest, to bring a full run under ~35 s    |
 | `--json`             | emit schema-conformant JSON on stdout                  |
 | `--quiet`            | only the Diagnosis section is printed                  |
-| `--log PATH`         | override the default `~/net-diag/<timestamp>.log`      |
+| `--log PATH`         | override the default `~/hopwatch/<timestamp>.log`      |
 | `--no-baseline`      | don't compare to history / don't append to history     |
 | `--redact`           | mask identifying values on stdout / JSON (see below)   |
 | `--mtu-only`         | run only the path-MTU probe and its prerequisites      |
@@ -209,7 +214,7 @@ netdiag --rules-catalog          # JSON catalog: every rule ID, title, blurb
 | `--share[=ID\|-]`     | one run as plain text, no colours, identifying values  |
 |                      | masked — the paste-ready form of a report. Bare: the   |
 |                      | newest stored run. `=-`: read a run's JSON on stdin.   |
-| `--version`          | print `netdiag VERSION` and exit                       |
+| `--version`          | print `hopwatch VERSION` and exit                      |
 | `--capabilities`     | one JSON object describing this install: per-mode      |
 |                      | schema numbers, a feature list, and which optional     |
 |                      | dependencies are on `PATH`                             |
@@ -221,19 +226,19 @@ netdiag --rules-catalog          # JSON catalog: every rule ID, title, blurb
 Examples:
 
 ```sh
-netdiag                      # full run, human-readable
-netdiag --quick              # <8 s subset for "is it up?"
-netdiag github.com           # "why is github specifically slow?"
-netdiag --json | jq .diagnosis
-netdiag --watch=180          # check every 3 min
-netdiag --summary=168        # what's been happening this past week?
-netdiag --wifi-only          # "is it the WiFi?" without the full battery
-netdiag --redact             # before pasting output into a forum thread
-netdiag --monitor | jq -c .status    # watch the rules a program would see
-netdiag --history | jq .networks     # which networks have I been on?
-netdiag --speed-only         # "how fast is it *right now*?"
-netdiag --share              # paste the most recent run into a support chat
-sudo netdiag                 # unlocks RSSI/noise/channel + mtr per-hop
+hopwatch                      # full run, human-readable
+hopwatch --quick              # <8 s subset for "is it up?"
+hopwatch github.com           # "why is github specifically slow?"
+hopwatch --json | jq .diagnosis
+hopwatch --watch=180          # check every 3 min
+hopwatch --summary=168        # what's been happening this past week?
+hopwatch --wifi-only          # "is it the WiFi?" without the full battery
+hopwatch --redact             # before pasting output into a forum thread
+hopwatch --monitor | jq -c .status    # watch the rules a program would see
+hopwatch --history | jq .networks     # which networks have I been on?
+hopwatch --speed-only         # "how fast is it *right now*?"
+hopwatch --share              # paste the most recent run into a support chat
+sudo hopwatch                 # unlocks RSSI/noise/channel + mtr per-hop
 ```
 
 ### Watching a run happen
@@ -242,7 +247,7 @@ A default run takes about a minute. `--progress` reports what it is doing
 while it does it, as one JSON object per line on **file descriptor 3**:
 
 ```sh
-netdiag --progress 3>&1 >/dev/null | jq -c 'select(.t=="phase")'
+hopwatch --progress 3>&1 >/dev/null | jq -c 'select(.t=="phase")'
 {"t":"phase","name":"gateway","state":"start"}
 {"t":"phase","name":"gateway","state":"done","rc":0,"ms":2043}
 {"t":"phase","name":"wifi_scan","state":"skip","why":"not on wifi"}
@@ -259,14 +264,14 @@ Without the flag, fd 3 is not written to at all.
 
 ### Reading past runs
 
-`~/net-diag/baseline.jsonl` keeps the complete JSON of every run.
+`~/hopwatch/baseline.jsonl` (or legacy `~/net-diag/baseline.jsonl`) keeps the complete JSON of every run.
 `--history` lists them and `--show` opens one, scored against every other
 run on the same network:
 
 ```sh
-netdiag --history | jq -r '.runs[0].id'
+hopwatch --history | jq -r '.runs[0].id'
 2026-08-12T00:15:37Z.a4f81c02
-netdiag --show=2026-08-12T00:15:37Z.a4f81c02 | jq -r '.comparison.metrics.gateway_rtt_ms.summary'
+hopwatch --show=2026-08-12T00:15:37Z.a4f81c02 | jq -r '.comparison.metrics.gateway_rtt_ms.summary'
 7.6 ms — typical for this network (median 4.6 ms across 1,913 checks).
 ```
 
@@ -276,13 +281,13 @@ in a real store they do.
 
 ### Sharing a report
 
-A netdiag report carries your public IP, SSID, BSSID, IPv6 address,
+A Hopwatch report carries your public IP, SSID, BSSID, IPv6 address,
 gateway MAC and city — all of which end up in a forum thread if you paste
 it unedited. `--redact` masks them:
 
 ```sh
-netdiag --redact             # stdout is safe to paste
-netdiag --redact --json      # same, machine-readable
+hopwatch --redact             # stdout is safe to paste
+hopwatch --redact --json      # same, machine-readable
 ```
 
 ASN and ISP name are deliberately **kept** — they identify a provider, not
@@ -290,7 +295,7 @@ a person, and they're needed to reason about the fault. Private (RFC1918)
 addresses are kept too: `192.168.1.1` says nothing about you, and blanking
 it would gut the NAT and ARP sections.
 
-The log file written to `~/net-diag/` always keeps full detail. It lives on
+The log file written to `~/hopwatch/` always keeps full detail. It lives on
 your machine; only what you share gets masked. `--redact` implies compact
 output, because section bodies stream out before every value that needs
 masking has been discovered.
@@ -300,8 +305,8 @@ in the store — including the app's own last check — use `--share`, which
 redacts at read time instead:
 
 ```sh
-netdiag --share               # newest stored run, as pasteable plain text
-netdiag --share=2026-08-12T00:15:37Z.a4f81c02   # a specific run (see --history)
+hopwatch --share               # newest stored run, as pasteable plain text
+hopwatch --share=2026-08-12T00:15:37Z.a4f81c02   # a specific run (see --history)
 ```
 
 Same masked fields as `--redact` (ISP and country kept, for the same
@@ -311,9 +316,9 @@ kept/masked table. A real capture is at
 
 ### Retention
 
-`~/net-diag/` is capped: the newest 200 `.log` files and the newest 2000
+`~/hopwatch/` is capped: the newest 200 `.log` files and the newest 2000
 `baseline.jsonl` records are kept, pruned at the end of each run. Override
-with `NETDIAG_KEEP_LOGS` / `NETDIAG_KEEP_HISTORY` (`0` disables pruning).
+with `HOPWATCH_KEEP_LOGS` / `HOPWATCH_KEEP_HISTORY` (`0` disables pruning).
 This matters most with `--install-watcher`, which otherwise adds 96 logs
 and 96 history records a day, forever.
 
@@ -325,19 +330,19 @@ between home, office and a café reported "gateway RTT x4 spike" and "ISP
 changed" on every move. Runs recorded before v0.5.0 have no network
 identity and are skipped rather than pooled in.
 
-### Telling netdiag the Wi-Fi name
+### Telling Hopwatch the Wi-Fi name
 
 macOS withholds the SSID from callers without a Location Services grant,
 and the grant is attributed to the *binary* — so `ipconfig getsummary`
 and `wdutil` are checked as themselves, not as the app that ran them. An
-app can therefore see the network's name over CoreWLAN while the netdiag
+app can therefore see the network's name over CoreWLAN while the CLI
 it just launched reads back the literal string `<redacted>` and reports
 [WI-1](./docs/DIAGNOSIS-RULES.md#wi-1--macos-is-withholding-the-networks-name).
 
-Set `NETDIAG_SSID_HINT` in netdiag's environment to hand it the name.
-It is used only when netdiag's own two scrapes come back empty or
+Set `HOPWATCH_SSID_HINT` (or `NETDIAG_SSID_HINT`) in the environment to hand it the name.
+It is used only when Hopwatch's own two scrapes come back empty or
 redacted — a value it measured always wins — and `wifi.ssid_source` in
-the JSON records which it was (`"system"` or `"caller"`). netdiag.app
+the JSON records which it was (`"system"` or `"caller"`). Hopwatch.app
 sets it automatically. `--monitor` deliberately ignores it: a name
 captured once at spawn time is fresh for a scan and stale for a process
 that outlives the network it was told about.
@@ -447,7 +452,7 @@ Missing optional deps degrade gracefully with a one-line install hint.
 
 ## Permissions
 
-Sudo-free by default. `sudo netdiag` unlocks:
+Sudo-free by default. `sudo hopwatch` unlocks:
 
 - Rich WiFi metrics via `wdutil info` (RSSI, noise, channel, PHY, tx rate)
 - `mtr` per-hop loss (raw sockets need root)
@@ -461,18 +466,18 @@ with a hint, never prompts mid-run.
 For intermittent problems, run on a schedule:
 
 ```sh
-netdiag --install-watcher    # launchd, every 15 min
+hopwatch --install-watcher    # launchd, every 15 min
 # ... later ...
-netdiag --summary=168        # what happened this past week?
+hopwatch --summary=168        # what happened this past week?
 ```
 
 For outages rather than snapshots, install the **recorder** — a launchd
 agent running one long-lived `--monitor` that appends every transition to
-`~/net-diag/events.jsonl`:
+`~/hopwatch/events.jsonl`:
 
 ```sh
-netdiag --install-recorder   # keeps running, and restarts across reboots
-netdiag --events=24          # what changed, and how long each fault lasted
+hopwatch --install-recorder   # keeps running, and restarts across reboots
+hopwatch --events=24          # what changed, and how long each fault lasted
 ```
 
 With a recorder running, a scan also stops being only a snapshot: `AV-1`
@@ -492,12 +497,12 @@ episodes with durations, and reports how much of the window was actually
 observed, so a four-hour outage is never confused with a four-hour closed
 lid.
 
-`baseline.jsonl` is append-only at `~/net-diag/baseline.jsonl`; pipe it
+`baseline.jsonl` is append-only at `~/hopwatch/baseline.jsonl`; pipe it
 through `jq` for ad-hoc analysis. Once it passes its retention cap the
 oldest records roll into `baseline-archive.jsonl` rather than being
 deleted — `--history` reads both.
 
-**netdiag can't install the watcher from `~/Documents`, `~/Desktop` or
+**Hopwatch can't install the watcher from `~/Documents`, `~/Desktop` or
 `~/Downloads`, and will tell you so.** A launchd agent gets no access to
 those folders and cannot ask for any, so a watcher installed from a clone
 in one of them fails with `Operation not permitted` on every run —
@@ -511,9 +516,9 @@ run will report it as `ND-1`:
 ⚠  Background watcher   can't run from this folder
 ```
 
-Fix it by installing netdiag outside those folders — the one-line
-installer puts it in `~/.local/share/netdiag` — then
-`netdiag --uninstall-watcher && netdiag --install-watcher`.
+Fix it by installing Hopwatch outside those folders — the one-line
+installer puts it in `~/.local/share/hopwatch` — then
+`hopwatch --uninstall-watcher && hopwatch --install-watcher`.
 
 ### `--watch` vs `--monitor`
 
@@ -529,11 +534,11 @@ you want:
 | Cadence | one fixed interval | three tiers, adaptive |
 
 `--watch` is for sitting and watching a flaky link. `--monitor` is for
-feeding something — it is what [`netdiag.app`](#netdiagapp-menu-bar-monitor)
+feeding something — it is what [`Hopwatch.app`](#hopwatchapp-menu-bar-monitor)
 consumes. Sample shape and signals (`SIGUSR1` pauses, `SIGUSR2` resumes)
 are documented in [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md).
 
-## netdiag.app (menu-bar monitor)
+## Hopwatch.app (menu-bar monitor)
 
 A native SwiftUI menu-bar app lives in [`gui/`](./gui). It watches the
 connection continuously, notifies in plain English when something breaks,
@@ -590,7 +595,7 @@ Requires macOS 14+ and the Command Line Tools (no Xcode needed).
 ## JSON mode
 
 ```sh
-netdiag --json | jq '.bufferbloat'
+hopwatch --json | jq '.bufferbloat'
 {
   "idle_gw_rtt_ms": 5.4,
   "loaded_gw_rtt_ms": 4.5,
@@ -613,15 +618,15 @@ menu-bar app (v0.7.0), `--show` and run browsing (v0.8.0), `--progress`,
 `--speed-only` and the Live tab (v0.9.0), in-app update checks and the
 `D3`/`D4`/`V6-2` DNS and IPv6 rules (v0.9.1), a full check reachable from
 the app — a "Full check" action on Home and in the dropdown, plus an
-automatic one on first joining a network — (unreleased), and a pasteable
+automatic one on first joining a network — (v1.0.0), and a pasteable
 redacted report via `--share` and the app's "Copy report" button
-(unreleased).
+(v1.0.0).
 
 Next:
 
 - Developer ID signing + notarization, so the app can be handed to
   someone who did not build it
-- Homebrew tap (`brew install godigi/netdiag/netdiag`)
+- Homebrew tap (`brew install godigi/hopwatch/hopwatch`)
 - Apple Private Relay detection
 - Captive-DNS detection (resolver returning A records for `.invalid`)
 - Upload-side bufferbloat probe
@@ -630,7 +635,7 @@ Next:
 Later:
 
 - Linux port
-- Web UI for `~/net-diag/`
+- Web UI for `~/hopwatch/`
 - Slack/Discord webhook on critical diagnosis
 - iperf3 to a user-provided server for LAN throughput
 
@@ -644,7 +649,7 @@ Run both locally:
 
 ```sh
 brew install shellcheck bats-core jq
-shellcheck bin/netdiag install.sh lib/*.sh
+shellcheck bin/hopwatch install.sh lib/*.sh
 bats tests/
 ```
 

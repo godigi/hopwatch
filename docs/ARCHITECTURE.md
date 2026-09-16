@@ -1,8 +1,8 @@
 # Architecture
 
-## Current shape (v0.10.0)
+## Current shape
 
-`bin/netdiag` is a ~230-line orchestrator. Every section lives in its
+`bin/hopwatch` is a ~230-line orchestrator (with `bin/netdiag` symlinked for backwards compatibility). Every section lives in its
 own `lib/*.sh` module with a `Reads / Writes / Entry` header comment.
 Cross-module variables are declared in `lib/globals.sh` so the data
 flow is greppable: search for `WIFI_RSSI` and you'll find the one place
@@ -12,7 +12,7 @@ that initialises it (`globals.sh`), the one module that sets it
 `NETDIAG_WIFI_RSSI` env var).
 
 ```
-bin/netdiag                  # argparse, mode dispatch, source lib/*.sh, call *_run in order
+bin/hopwatch                 # argparse, mode dispatch, source lib/*.sh, call *_run in order
 lib/common.sh                # printing helpers, add_diag, with_timeout, launch_parallel, setvar
 lib/globals.sh               # every cross-module variable, initialised
 lib/iface.sh                 # interface + default gateway
@@ -52,20 +52,20 @@ helpers/capabilities.py      # --capabilities: the version/feature handshake
 helpers/rules_catalog.py     # --rules-catalog: rule titles/blurbs for the GUI
 helpers/speedtest_result.py  # speed test's final result JSON → tab-separated
                              #   fields, replacing ~10 jq calls (see below)
-gui/                         # SwiftUI menu-bar client (SwiftPM, macOS 14+)
+gui/                         # SwiftUI menu-bar client Hopwatch.app (SwiftPM, macOS 14+)
 ```
 
-## The CLI/GUI split (v0.10.0)
+## The CLI/GUI split
 
 `gui/` is a **client**. It renders; it does not decide.
 
 ```
 CLI (bash + Python) — owns every measurement and every threshold
-├── netdiag --json         full scan, ~60 fields
-├── netdiag --history      normalized, network-grouped history
-├── netdiag --monitor      streaming JSONL, one compact sample per line
-├── netdiag --show=ID      one stored run + how it compares to its network
-├── netdiag --progress     phase events on fd 3 while a run happens
+├── hopwatch --json        full scan, ~60 fields
+├── hopwatch --history     normalized, network-grouped history
+├── hopwatch --monitor     streaming JSONL, one compact sample per line
+├── hopwatch --show=ID     one stored run + how it compares to its network
+├── hopwatch --progress    phase events on fd 3 while a run happens
 └── lib/thresholds.sh      cutoffs shared by diagnosis.sh, monitor.sh
                            and helpers/history.py
 

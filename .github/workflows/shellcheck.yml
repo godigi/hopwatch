@@ -22,6 +22,6 @@ jobs:
           SHELLCHECK_OPTS: -x
         run: |
           mapfile -t files < <(git ls-files -- '*.sh' ':!tests/fixtures/*')
-          files+=(bin/netdiag)
+          files+=(bin/hopwatch bin/netdiag)
           printf 'checking %s\n' "${files[@]}"
           shellcheck "${files[@]}"

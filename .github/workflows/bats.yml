@@ -37,10 +37,10 @@ jobs:
           # about the runner's link, so guard the call rather than let -e
           # abort on a healthy result.
           status=0
-          ./bin/netdiag --quick --no-gping --no-baseline --json > /tmp/smoke.json || status=$?
-          echo "netdiag exit status: $status"
+          ./bin/hopwatch --quick --no-gping --no-baseline --json > /tmp/smoke.json || status=$?
+          echo "hopwatch exit status: $status"
           if [ "$status" -eq 3 ]; then
-            echo "::error::netdiag exited 3 (script error)"
+            echo "::error::hopwatch exited 3 (script error)"
             exit 1
           fi
           jq -e 'type == "object" and has("version") and has("diagnosis")' /tmp/smoke.json > /dev/null
@@ -53,8 +53,8 @@ jobs:
       # here has to fail CI rather than surface as a blank menu-bar app.
       - name: Smoke test --history
         run: |
-          ./bin/netdiag --quick --no-gping --quiet > /dev/null || true
-          ./bin/netdiag --history > /tmp/history.json
+          ./bin/hopwatch --quick --no-gping --quiet > /dev/null || true
+          ./bin/hopwatch --history > /tmp/history.json
           jq -e '
             has("networks") and has("runs") and has("metrics")
             and (.counts.records_read >= 1)
@@ -66,7 +66,7 @@ jobs:
         run: |
           # One object per line, each with the rule list the GUI renders.
           # --monitor-count bounds the run; without it this would hang CI.
-          ./bin/netdiag --monitor --monitor-fast-interval 2 --monitor-count 3 > /tmp/monitor.jsonl
+          ./bin/hopwatch --monitor --monitor-fast-interval 2 --monitor-count 3 > /tmp/monitor.jsonl
           [ "$(wc -l < /tmp/monitor.jsonl)" -eq 3 ]
           while IFS= read -r line; do
             printf '%s' "$line" | jq -e '
@@ -78,8 +78,9 @@ jobs:
 
       - name: Smoke test --capabilities
         run: |
+          ./bin/hopwatch --version
           ./bin/netdiag --version
-          ./bin/netdiag --capabilities > /tmp/caps.json
+          ./bin/hopwatch --capabilities > /tmp/caps.json
           # jq is installed above, so deps.jq must be true here. The type
           # checks in bats can't catch a broken env-var wire between bash
           # and the helper — the document stays well-formed, just wrong —
@@ -100,17 +101,6 @@ jobs:
       # --quick skips the speed test regardless, so this is about the
       # rest of the run not tripping over a missing `command -v jq`
       # somewhere unexpected.
-      #
-      # A stub shadows `jq` earlier in PATH rather than trying to strip
-      # brew's bin from PATH: real jq could be at /usr/local/bin (Intel)
-      # or /opt/homebrew/bin (Apple Silicon) depending on the runner, and
-      # bash/bats/other brew tools this job needs live in that same
-      # directory, so removing it outright would risk breaking the step
-      # for an unrelated reason. Shadowing only touches jq — which means
-      # `command -v jq` still succeeds here: this step proves the run
-      # survives jq *failing*, not jq being absent. A gate reintroduced
-      # in either speed-test function is caught instead by the structural
-      # tests in tests/test_speedtest_parse.bats.
       - name: Smoke test a run with a broken jq
         run: |
           mkdir -p /tmp/no-jq
@@ -123,10 +113,10 @@ jobs:
 
           status=0
           PATH="/tmp/no-jq:$PATH" command -v jq
-          PATH="/tmp/no-jq:$PATH" ./bin/netdiag --json --quick --no-gping --no-baseline > /tmp/nojq.json || status=$?
-          echo "netdiag exit status (broken jq): $status"
+          PATH="/tmp/no-jq:$PATH" ./bin/hopwatch --json --quick --no-gping --no-baseline > /tmp/nojq.json || status=$?
+          echo "hopwatch exit status (broken jq): $status"
           if [ "$status" -eq 3 ]; then
-            echo "::error::netdiag exited 3 with broken jq"
+            echo "::error::hopwatch exited 3 with broken jq"
             exit 1
           fi
           python3 -c 'import json,sys; json.load(open("/tmp/nojq.json"))'
@@ -135,7 +125,10 @@ jobs:
       - name: Smoke test the installer
         run: |
           ./install.sh --prefix /tmp/ndbin --no-brew
+          test -L /tmp/ndbin/hopwatch
           test -L /tmp/ndbin/netdiag
+          /tmp/ndbin/hopwatch --help > /dev/null
           /tmp/ndbin/netdiag --help > /dev/null
           ./install.sh --prefix /tmp/ndbin --uninstall
+          test ! -e /tmp/ndbin/hopwatch
           test ! -e /tmp/ndbin/netdiag

@@ -227,11 +227,14 @@ watchdog_state_for() {
 # ── The two halves agree about where the plist lives ─────────────────────
 
 @test "install and check name the same plist" {
-  # They used to hardcode the path separately. netdiag reporting "no
+  # They used to hardcode the path separately. hopwatch reporting "no
   # watcher installed" about a watcher it installed itself is the failure
   # this collapses into one function.
-  [ "$(watchdog_plist_path)" = "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist" ]
-  run grep -c 'com.netdiag.watcher.plist' "$REPO/lib/launchd.sh"
+  case "$(watchdog_plist_path)" in
+    "$HOME/Library/LaunchAgents/com.hopwatch.watcher.plist"|"$HOME/Library/LaunchAgents/com.netdiag.watcher.plist") ;;
+    *) false ;;
+  esac
+  run grep -c 'com.hopwatch.watcher.plist' "$REPO/lib/launchd.sh"
   [ "$output" = "0" ]
 }
 

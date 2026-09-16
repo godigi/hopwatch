@@ -82,6 +82,7 @@ jobs:
           # lightweight tag, which CONTRIBUTING.md tells maintainers not to
           # create but which would otherwise leave the title empty.
           subject="$(git tag -l --format='%(contents:subject)' "$tag")"
+          subject="${subject#hopwatch }"
           subject="${subject#netdiag }"
           echo "title=${subject:-$tag}" >> "$GITHUB_OUTPUT"
 
@@ -93,17 +94,20 @@ jobs:
           fail=0
 
           # 1. The version the CLI reports must be the version being tagged.
-          #    `netdiag --version` is what a user and the GUI's capabilities
+          #    `hopwatch --version` is what a user and the GUI's capabilities
           #    handshake both read, so a mismatch here means the artefact
           #    lies about itself. Read from the tag, not the checked-out
-          #    default branch, whose NETDIAG_VERSION has usually moved on.
-          cli="$(git show "$TAG:bin/netdiag" | sed -n 's/^NETDIAG_VERSION="\(.*\)"$/\1/p' | head -1)"
+          #    default branch, whose HOPWATCH_VERSION has usually moved on.
+          cli="$(git show "$TAG:bin/hopwatch" 2>/dev/null | sed -n 's/^HOPWATCH_VERSION="\(.*\)"$/\1/p' | head -1)"
+          if [ -z "$cli" ]; then
+            cli="$(git show "$TAG:bin/netdiag" 2>/dev/null | sed -n 's/^\(HOPWATCH\|NETDIAG\)_VERSION="\(.*\)"$/\2/p' | head -1)"
+          fi
           if [ "$cli" != "$VERSION" ]; then
-            echo "::error::bin/netdiag says NETDIAG_VERSION=\"$cli\" but the tag is $TAG"
-            echo "  bump NETDIAG_VERSION to $VERSION, or tag v$cli instead"
+            echo "::error::bin/hopwatch says version \"$cli\" but the tag is $TAG"
+            echo "  bump HOPWATCH_VERSION to $VERSION, or tag v$cli instead"
             fail=1
           else
-            echo "bin/netdiag reports $cli"
+            echo "CLI reports $cli"
           fi
 
           # 2. The CHANGELOG must document it. This doubles as the notes
@@ -146,8 +150,10 @@ jobs:
           TITLE: ${{ steps.v.outputs.title }}
           VERSION: ${{ steps.v.outputs.version }}
         run: |
-          dmg="gui/build/Netdiag-${VERSION}.dmg"
-          zip="gui/build/Netdiag-${VERSION}.zip"
+          dmg="gui/build/Hopwatch-${VERSION}.dmg"
+          [ -f "$dmg" ] || dmg="gui/build/Netdiag-${VERSION}.dmg"
+          zip="gui/build/Hopwatch-${VERSION}.zip"
+          [ -f "$zip" ] || zip="gui/build/Netdiag-${VERSION}.zip"
           # A pre-1.0 tag is still marked as a normal release; the
           # distinction this repo cares about is documented-vs-not, which
           # the verify step above already enforces.

@@ -33,6 +33,7 @@ dns_run() {
   SYS_RES_ALL="$(scutil --dns 2>/dev/null \
     | awk '/nameserver\[[0-9]+\]/ && !seen[$3]++ { printf "%s%s", (n++ ? " " : ""), $3 }')"
   SYS_RES="${SYS_RES_ALL%% *}"
+  # shellcheck disable=SC2206 # intentional word splitting of space-separated resolver IP addresses
   local -a _res_list=( $SYS_RES_ALL )
   [ -n "$SYS_RES_ALL" ] && info "System resolvers: $SYS_RES_ALL"
   if dns_is_manual_override "$DHCP_DNS_SERVERS" "$SYS_RES_ALL"; then

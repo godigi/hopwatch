@@ -20,18 +20,18 @@ install_watcher_run() {
   # looked exactly like health.
   if watchdog_path_blocked "$SCRIPT_PATH"; then
     printf 'watcher not installed.\n\n' >&2
-    printf '  netdiag runs from a folder macOS keeps background agents out of:\n' >&2
+    printf '  hopwatch runs from a folder macOS keeps background agents out of:\n' >&2
     printf '    %s\n\n' "$SCRIPT_PATH" >&2
     printf '  A launchd agent gets no access to ~/Documents, ~/Desktop or\n' >&2
     printf '  ~/Downloads, and cannot ask for any — so every scheduled run\n' >&2
     printf '  would fail with "Operation not permitted" and record nothing,\n' >&2
     printf '  while the log it writes stayed empty and looked healthy.\n\n' >&2
-    printf '  Install netdiag outside those folders first, then re-run this:\n\n' >&2
+    printf '  Install hopwatch outside those folders first, then re-run this:\n\n' >&2
     printf '    curl -fsSL %s | bash\n' \
-      'https://raw.githubusercontent.com/godigi/netdiag/main/install.sh' >&2
-    printf '    netdiag --install-watcher\n\n' >&2
-    printf '  That puts the checkout in ~/.local/share/netdiag and repoints\n' >&2
-    printf '  the netdiag on your PATH at it. Your reports in %s are\n' "$LOG_DIR" >&2
+      'https://raw.githubusercontent.com/godigi/hopwatch/main/install.sh' >&2
+    printf '    hopwatch --install-watcher\n\n' >&2
+    printf '  That puts the checkout in ~/.local/share/hopwatch and repoints\n' >&2
+    printf '  the hopwatch on your PATH at it. Your reports in %s are\n' "$LOG_DIR" >&2
     printf '  untouched, and this checkout is left exactly as it is.\n' >&2
     exit 3
   fi
@@ -66,12 +66,17 @@ install_watcher_run() {
 </dict>
 </plist>
 PLIST_EOF
+  # Clean up legacy netdiag watcher plist if present
+  if [ -f "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist" ] && [ "$plist" != "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist" ]; then
+    launchctl unload "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist"
+  fi
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load "$plist"
   printf 'installed: %s (runs every %s min)\n' \
     "$plist" "$(( THRESH_WATCHER_INTERVAL_S / 60 ))"
   printf 'tail log:   tail -f %s/watcher.stdout.log\n' "$LOG_DIR"
-  printf 'check on it: netdiag reports ND-1 if it stops running.\n'
+  printf 'check on it: hopwatch reports ND-1 if it stops running.\n'
   exit 0
 }
 
@@ -114,11 +119,11 @@ install_recorder_run() {
 
   if watchdog_path_blocked "$SCRIPT_PATH"; then
     printf 'recorder not installed.\n\n' >&2
-    printf '  netdiag runs from a folder macOS keeps background agents out of:\n' >&2
+    printf '  hopwatch runs from a folder macOS keeps background agents out of:\n' >&2
     printf '    %s\n\n' "$SCRIPT_PATH" >&2
     printf '  Same reason as the watcher: a launchd agent gets no access to\n' >&2
     printf '  ~/Documents, ~/Desktop or ~/Downloads and cannot ask for any.\n' >&2
-    printf '  Install netdiag outside those folders first, then re-run this.\n' >&2
+    printf '  Install hopwatch outside those folders first, then re-run this.\n' >&2
     exit 3
   fi
 
@@ -144,11 +149,16 @@ install_recorder_run() {
 </dict>
 </plist>
 PLIST_EOF
+  # Clean up legacy netdiag recorder plist if present
+  if [ -f "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist" ] && [ "$plist" != "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist" ]; then
+    launchctl unload "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist"
+  fi
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load "$plist"
   printf 'installed: %s\n' "$plist"
   printf 'journal:    %s/events.jsonl\n' "$LOG_DIR"
-  printf 'read it:    netdiag --events=24\n'
+  printf 'read it:    hopwatch --events=24\n'
   exit 0
 }
 

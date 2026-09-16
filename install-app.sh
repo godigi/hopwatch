@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# install-app.sh — 1-line installer for Netdiag macOS Menu Bar App & CLI
+# install-app.sh — 1-line installer for Hopwatch macOS Menu Bar App & CLI
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh | bash
 #
 # What it does:
-#   1. Fetches the latest signed Netdiag.dmg / Netdiag.zip from GitHub Releases
-#   2. Installs Netdiag.app to /Applications (or ~/Applications if unprivileged)
+#   1. Fetches the latest signed Hopwatch.dmg / Hopwatch.zip from GitHub Releases
+#   2. Installs Hopwatch.app to /Applications (or ~/Applications if unprivileged)
 #   3. Clears macOS Gatekeeper quarantine tags (no "unidentified developer" blockage)
-#   4. Links the terminal CLI tool 'netdiag' to your PATH
-#   5. Launches Netdiag in your menu bar
+#   4. Links the terminal CLI tool 'hopwatch' (and 'netdiag') to your PATH
+#   5. Launches Hopwatch in your menu bar
 
 set -euo pipefail
 
-REPO="godigi/netdiag"
+REPO="godigi/hopwatch"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -21,15 +21,15 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 cyan() { printf '\033[36m%s\033[0m\n' "$*"; }
 die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = "Darwin" ] || die "Netdiag is macOS-only (detected $(uname -s))."
+[ "$(uname -s)" = "Darwin" ] || die "Hopwatch is macOS-only (detected $(uname -s))."
 
 # Check macOS version (minimum Sonoma 14.0)
 OS_VER="$(sw_vers -productVersion | cut -d. -f1)"
 if [ "$OS_VER" -lt 14 ]; then
-  die "Netdiag requires macOS 14 Sonoma or newer (current: $(sw_vers -productVersion))."
+  die "Hopwatch requires macOS 14 Sonoma or newer (current: $(sw_vers -productVersion))."
 fi
 
-bold "⚡ Installing Netdiag for macOS..."
+bold "⚡ Installing Hopwatch for macOS..."
 
 # Determine install destination
 if [ -w "/Applications" ]; then
@@ -38,9 +38,9 @@ else
   APP_DIR="$HOME/Applications"
   mkdir -p "$APP_DIR"
 fi
-TARGET_APP="$APP_DIR/Netdiag.app"
+TARGET_APP="$APP_DIR/Hopwatch.app"
 
-TMP_DIR="$(mktemp -d -t netdiag-install-XXXXXX)"
+TMP_DIR="$(mktemp -d -t hopwatch-install-XXXXXX)"
 cleanup() {
   if [ -n "${MOUNT_DIR:-}" ] && [ -d "$MOUNT_DIR" ]; then
     hdiutil detach "$MOUNT_DIR" -force -quiet 2>/dev/null || true
@@ -61,21 +61,21 @@ ASSET_NAME=""
 
 if [ -n "$RELEASE_JSON" ]; then
   # Parse installable asset URL from GitHub API
-  DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -E 'browser_download_url.*Netdiag.*(\.dmg|\.zip)' | head -1 | cut -d '"' -f 4 || true)"
+  DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*(\.dmg|\.zip)' | head -1 | cut -d '"' -f 4 || true)"
   ASSET_NAME="$(basename "$DOWNLOAD_URL" 2>/dev/null || true)"
 fi
 
 # Fallback URL if GitHub API rate-limited
 if [ -z "$DOWNLOAD_URL" ]; then
-  DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/Netdiag.dmg"
-  ASSET_NAME="Netdiag.dmg"
+  DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/Hopwatch.dmg"
+  ASSET_NAME="Hopwatch.dmg"
 fi
 
 # ── Download asset ───────────────────────────────────────────────────────
 ARCHIVE_PATH="$TMP_DIR/$ASSET_NAME"
 cyan "• Downloading $ASSET_NAME..."
 curl -fL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE_PATH" \
-  || die "Failed to download Netdiag from $DOWNLOAD_URL"
+  || die "Failed to download Hopwatch from $DOWNLOAD_URL"
 
 # ── Extract and install ──────────────────────────────────────────────────
 cyan "• Installing to $TARGET_APP..."
@@ -86,7 +86,9 @@ case "$ASSET_NAME" in
     MOUNT_DIR="$TMP_DIR/mount"
     mkdir -p "$MOUNT_DIR"
     hdiutil attach "$ARCHIVE_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet -noautoopen
-    if [ -d "$MOUNT_DIR/Netdiag.app" ]; then
+    if [ -d "$MOUNT_DIR/Hopwatch.app" ]; then
+      EXTRACTED_APP="$MOUNT_DIR/Hopwatch.app"
+    elif [ -d "$MOUNT_DIR/Netdiag.app" ]; then
       EXTRACTED_APP="$MOUNT_DIR/Netdiag.app"
     fi
     ;;
@@ -94,20 +96,24 @@ case "$ASSET_NAME" in
     EXTRACT_DIR="$TMP_DIR/extracted"
     mkdir -p "$EXTRACT_DIR"
     ditto -xk "$ARCHIVE_PATH" "$EXTRACT_DIR"
-    if [ -d "$EXTRACT_DIR/Netdiag.app" ]; then
+    if [ -d "$EXTRACT_DIR/Hopwatch.app" ]; then
+      EXTRACTED_APP="$EXTRACT_DIR/Hopwatch.app"
+    elif [ -d "$EXTRACT_DIR/Netdiag.app" ]; then
       EXTRACTED_APP="$EXTRACT_DIR/Netdiag.app"
     fi
     ;;
 esac
 
-[ -n "$EXTRACTED_APP" ] || die "Could not locate Netdiag.app in downloaded archive."
+[ -n "$EXTRACTED_APP" ] || die "Could not locate Hopwatch.app in downloaded archive."
 
-# Stop running instance if currently active
+# Stop running instances if currently active
+killall Hopwatch 2>/dev/null || true
 killall Netdiag 2>/dev/null || true
 sleep 0.5
 
-# Install app bundle
+# Install app bundle (and remove old Netdiag.app)
 rm -rf "$TARGET_APP"
+rm -rf "$APP_DIR/Netdiag.app"
 cp -R "$EXTRACTED_APP" "$TARGET_APP"
 
 # Detach DMG if mounted
@@ -117,33 +123,39 @@ if [ -n "${MOUNT_DIR:-}" ]; then
 fi
 
 # ── Strip Gatekeeper quarantine ──────────────────────────────────────────
-# Prevents "Netdiag cannot be opened because Apple cannot check it for malicious software"
+# Prevents "Hopwatch cannot be opened because Apple cannot check it for malicious software"
 xattr -cr "$TARGET_APP" 2>/dev/null || true
 
-# ── CLI Symlink ──────────────────────────────────────────────────────────
-CLI_BIN="$TARGET_APP/Contents/Resources/cli/bin/netdiag"
-if [ -x "$CLI_BIN" ]; then
-  CLI_DEST=""
-  if [ -w "/usr/local/bin" ]; then
-    CLI_DEST="/usr/local/bin/netdiag"
-  elif [ -d "$HOME/bin" ] && [ -w "$HOME/bin" ]; then
-    CLI_DEST="$HOME/bin/netdiag"
-  elif [ -d "$HOME/.local/bin" ] && [ -w "$HOME/.local/bin" ]; then
-    CLI_DEST="$HOME/.local/bin/netdiag"
-  else
-    mkdir -p "$HOME/bin"
-    CLI_DEST="$HOME/bin/netdiag"
-  fi
+# ── CLI Symlinks ─────────────────────────────────────────────────────────
+CLI_DIR="$TARGET_APP/Contents/Resources/cli/bin"
+BIN_DIR=""
+if [ -w "/usr/local/bin" ]; then
+  BIN_DIR="/usr/local/bin"
+elif [ -d "$HOME/bin" ] && [ -w "$HOME/bin" ]; then
+  BIN_DIR="$HOME/bin"
+elif [ -d "$HOME/.local/bin" ] && [ -w "$HOME/.local/bin" ]; then
+  BIN_DIR="$HOME/.local/bin"
+else
+  mkdir -p "$HOME/bin"
+  BIN_DIR="$HOME/bin"
+fi
 
-  ln -sfn "$CLI_BIN" "$CLI_DEST"
-  cyan "• Linked CLI: $CLI_DEST -> $CLI_BIN"
+if [ -n "$BIN_DIR" ]; then
+  if [ -x "$CLI_DIR/hopwatch" ]; then
+    ln -sfn "$CLI_DIR/hopwatch" "$BIN_DIR/hopwatch"
+    cyan "• Linked CLI: $BIN_DIR/hopwatch -> $CLI_DIR/hopwatch"
+  fi
+  if [ -x "$CLI_DIR/netdiag" ]; then
+    ln -sfn "$CLI_DIR/netdiag" "$BIN_DIR/netdiag"
+    cyan "• Linked CLI alias: $BIN_DIR/netdiag -> $CLI_DIR/netdiag"
+  fi
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────
 open "$TARGET_APP"
 
-green "✔ Netdiag successfully installed to $TARGET_APP"
+green "✔ Hopwatch successfully installed to $TARGET_APP"
 printf '\n'
 bold "  Menu Bar:  Look for the ● indicator in your top macOS menu bar"
-bold "  Terminal:  Run 'netdiag' or 'netdiag --quick' from any terminal"
+bold "  Terminal:  Run 'hopwatch' or 'hopwatch --quick' from any terminal"
 printf '\n'
