@@ -133,7 +133,11 @@ jobs:
 
       - name: Build and package GUI DMG
         run: |
-          make -C gui dmg
+          if [ "$(uname -s)" = "Darwin" ] && command -v swift >/dev/null 2>&1; then
+            make -C gui dmg
+          else
+            echo "Swift/macOS not available on this runner; skipping GUI DMG packaging"
+          fi
 
       - name: Create or update the Release
         env:
