@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/bump.py — Automated SemVer bumper for netdiag.
+"""scripts/bump.py — Automated SemVer bumper for hopwatch.
 
 Determines the next version from Conventional Commits since the last git tag,
 updates all version definitions across the project, rolls CHANGELOG.md,
@@ -240,18 +240,11 @@ def main() -> int:
             f'NETDIAG_VERSION="{next_version}"',
         )
 
-    # 2. Casks/hopwatch.rb and Casks/netdiag.rb
+    # 2. Casks/hopwatch.rb
     cask_hopwatch = os.path.join(repo_root, "Casks", "hopwatch.rb")
     if os.path.exists(cask_hopwatch):
         update_file(
             cask_hopwatch,
-            r'version\s+"[^"]+"',
-            f'version "{next_version}"',
-        )
-    cask_netdiag = os.path.join(repo_root, "Casks", "netdiag.rb")
-    if os.path.exists(cask_netdiag):
-        update_file(
-            cask_netdiag,
             r'version\s+"[^"]+"',
             f'version "{next_version}"',
         )
@@ -265,10 +258,8 @@ def main() -> int:
             f'"version": "{next_version}"',
         )
 
-    # 4. gui/Sources/HopwatchGUI/VerifyMode.swift (or legacy NetdiagGUI)
+    # 4. gui/Sources/HopwatchGUI/VerifyMode.swift
     verify_mode = os.path.join(repo_root, "gui", "Sources", "HopwatchGUI", "VerifyMode.swift")
-    if not os.path.exists(verify_mode):
-        verify_mode = os.path.join(repo_root, "gui", "Sources", "NetdiagGUI", "VerifyMode.swift")
     if os.path.exists(verify_mode):
         update_file(
             verify_mode,
@@ -289,8 +280,6 @@ def main() -> int:
             files_to_add.append("bin/netdiag")
         if os.path.exists(cask_hopwatch):
             files_to_add.append("Casks/hopwatch.rb")
-        if os.path.exists(cask_netdiag):
-            files_to_add.append("Casks/netdiag.rb")
         if os.path.exists(sample_json):
             files_to_add.append("examples/sample-output.json")
         if os.path.exists(verify_mode):

@@ -70,6 +70,7 @@ bundle: build
 	@mkdir -p "$(APP_DIR)/Contents/MacOS" "$(APP_DIR)/Contents/Resources"
 	@cp "$(BIN)" "$(APP_DIR)/Contents/MacOS/HopwatchGUI"
 	@cp Resources/Info.plist "$(APP_DIR)/Contents/Info.plist"
+	@if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$(APP_DIR)/Contents/Resources/AppIcon.icns"; fi
 	@printf 'APPL????' > "$(APP_DIR)/Contents/PkgInfo"
 	@mkdir -p "$(CLI_DIR)"
 	@cp -R ../bin "$(CLI_DIR)/bin"

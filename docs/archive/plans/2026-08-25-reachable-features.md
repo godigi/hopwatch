@@ -4,7 +4,7 @@
 
 **Goal:** Make four already-built capabilities reachable — a complete network check from the app, a pasteable redacted report, a per-network `--summary` that stops inventing numbers, and a `--help` you can navigate.
 
-**Architecture:** Four independent workstreams against the spec at `docs/superpowers/specs/2026-08-25-reachable-features-design.md`. Item 1 is Swift-only plus one line of bash. Item 2 adds one Python helper and one CLI mode, then a button. Items 3 and 4 are CLI-only. The project's standing rules hold throughout: thresholds live only in `lib/thresholds.sh`, and the GUI renders CLI decisions rather than making its own (`CLAUDE.md`).
+**Architecture:** Four independent workstreams against the spec at `docs/design/2026-08-25-reachable-features-design.md`. Item 1 is Swift-only plus one line of bash. Item 2 adds one Python helper and one CLI mode, then a button. Items 3 and 4 are CLI-only. The project's standing rules hold throughout: thresholds live only in `lib/thresholds.sh`, and the GUI renders CLI decisions rather than making its own (`CLAUDE.md`).
 
 **Tech Stack:** bash 5 / zsh, Python 3 (stdlib only), SwiftUI + SwiftPM (no Xcode), bats-core, shellcheck.
 

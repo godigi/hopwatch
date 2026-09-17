@@ -17,7 +17,7 @@ not footer trivia. Design stance, from the approved mockup: **one swappable
 ## Layout (top to bottom)
 
 Revised after a user-testing round on the first build (see
-`docs/superpowers/plans/2026-08-17-dropdown-redesign.md`'s follow-up items):
+`docs/archive/plans/2026-08-17-dropdown-redesign.md`'s follow-up items):
 the CTA moved up under the stage, the timeline band was cut in favor of plain
 event rows, the instrument grid's first row now reads the internet-side probe
 instead of duplicating the router cell, and the footer regained the two

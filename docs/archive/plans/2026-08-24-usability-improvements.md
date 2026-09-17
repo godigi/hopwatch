@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the seven independently-shippable fixes from
-`docs/superpowers/specs/2026-08-24-usability-improvements-design.md`, in the
+`docs/design/2026-08-24-usability-improvements-design.md`, in the
 doc's smallest-diff-first order.
 
 **Architecture:** Seven self-contained tasks, one per spec item, no shared

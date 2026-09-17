@@ -8,7 +8,7 @@
 
 **Tech Stack:** bash 5 + Python 3 helpers (CLI), SwiftUI / SwiftPM (GUI), bats-core (CLI tests), the in-app `--verify` harness (Swift tests — `swift test` is a no-op on this toolchain).
 
-**Spec:** `docs/superpowers/specs/2026-08-29-arriving-somewhere-new-design.md`
+**Spec:** `docs/design/2026-08-29-arriving-somewhere-new-design.md`
 **Mockups:** `nimbalyst-local/mockups/netdiag-{arrival-card,activity-episodes,suitability-and-fixes}.mockup.html` (gitignored)
 
 ---

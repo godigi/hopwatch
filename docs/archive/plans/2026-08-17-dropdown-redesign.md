@@ -8,7 +8,7 @@
 
 **Tech Stack:** bash 5 + python3 (CLI), bats-core (CLI tests), SwiftUI/SwiftPM macOS 14 (GUI), swift-testing via XCTest (new GUI test target).
 
-**Spec:** `docs/superpowers/specs/2026-08-17-dropdown-redesign-design.md`
+**Spec:** `docs/design/2026-08-17-dropdown-redesign-design.md`
 
 ---
 
@@ -31,7 +31,7 @@
 | `helpers/capabilities.py` | modify | `SCHEMA_MONITOR = 2` |
 | `tests/test_monitor.bats` | modify | Change-detection tests (helper-direct `emit()` style) + snapshot-function tests |
 | `docs/JSON-SCHEMA.md` | modify | Monitor sample v2 (`changes`), conventions, capabilities literal |
-| `docs/superpowers/specs/2026-08-17-dropdown-redesign-design.md` | modify | Amend gating mechanism (schemas.monitor ≥ 2, not a feature string) |
+| `docs/design/2026-08-17-dropdown-redesign-design.md` | modify | Amend gating mechanism (schemas.monitor ≥ 2, not a feature string) |
 | `gui/Sources/NetdiagGUI/Models/MonitorSample.swift` | modify | Decode `changes` leniently |
 | `gui/Sources/NetdiagGUI/Models/NetworkEvent.swift` | create | Event value type + pure prune/derive helpers |
 | `gui/Sources/NetdiagGUI/Services/EventStore.swift` | create | Persisted, pruned event log (Application Support) |
@@ -455,7 +455,7 @@ forwarded to monitor_sample.py as NETDIAG_MON_PREV_*."
 - Modify: `lib/monitor.sh:455` (`NETDIAG_MON_SCHEMA=1`)
 - Modify: `helpers/capabilities.py:48` (`SCHEMA_MONITOR = 1`)
 - Modify: `docs/JSON-SCHEMA.md` (~353-376 sample, ~378-401 conventions, ~745-747 capabilities literal)
-- Modify: `docs/superpowers/specs/2026-08-17-dropdown-redesign-design.md`
+- Modify: `docs/design/2026-08-17-dropdown-redesign-design.md`
 - Test: `tests/test_capabilities.bats` (~234-247 cross-check — needs no edit, verifies the pair)
 
 - [ ] **Step 1: Bump both schema constants**
@@ -506,7 +506,7 @@ In the capabilities literal (~745): `"monitor": 1` → `"monitor": 2`.
 
 - [ ] **Step 4: Amend the spec's gating sentence**
 
-In `docs/superpowers/specs/2026-08-17-dropdown-redesign-design.md`, replace the sentence fragment
+In `docs/design/2026-08-17-dropdown-redesign-design.md`, replace the sentence fragment
 
 `Schema: `monitor` bumps 1 → 2; a `monitor_changes` entry joins `--capabilities` features so an older CLI degrades the GUI to a tickless timeline rather than breaking it.`
 
@@ -523,7 +523,7 @@ Expected: PASS. (If the in-flight L1/L2 work left `MONITOR_VOCABULARY` failing, 
 
 ```bash
 git add lib/monitor.sh helpers/capabilities.py docs/JSON-SCHEMA.md \
-        docs/superpowers/specs/2026-08-17-dropdown-redesign-design.md
+        docs/design/2026-08-17-dropdown-redesign-design.md
 git commit -m "feat: monitor schema 2 — the stream now describes its own changes
 
 Docs the changes array and its null-suppression rule; consumers gate on

@@ -11,6 +11,7 @@
        casually. -->
   <key>CFBundleIdentifier</key><string>me.brianfreeman.hopwatch</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <!-- Template value, not the shipped version: gui/Makefile's `bundle`
        target always overwrites both version keys — via PlistBuddy, on the
        *copied* plist at build/Hopwatch.app/Contents/Info.plist — with

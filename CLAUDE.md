@@ -58,7 +58,7 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
      decline itself and never retry. A depth may be downgraded (an
      unhealthy link, a metered hotspot), but then the app says so on
      screen and offers the full check as a button. See
-     `docs/superpowers/specs/2026-08-31-arrival-and-the-three-modes-design.md`.
+     `docs/design/2026-08-31-arrival-and-the-three-modes-design.md`.
   2. **Any Home surface reading history scopes to the current network, or
      states its provenance.** An unlabelled report from the network you
      were on an hour ago is indistinguishable from one about the network
@@ -155,18 +155,22 @@ Each must: produce a labeled section, contribute to JSON output, feed the Diagno
 ## Repo layout
 
 ```
-netdiag/
-├── bin/netdiag              # bash entry point
-├── lib/*.sh                 # modular checks if splitting bash
-├── helpers/*.py             # Python helpers if porting parse logic
-├── tests/{fixtures,*.bats}  # bats-core
+hopwatch/
+├── bin/hopwatch             # bash entry point (symlinked to bin/netdiag)
+├── lib/*.sh                 # modular checks
+├── helpers/*.py             # Python helpers for parsing and analytics
+├── tests/{fixtures,*.bats}  # bats-core test suites
 ├── examples/sample-output.{txt,json}
 ├── gui/                     # SwiftUI menu-bar app (SwiftPM, no Xcode)
 │   ├── Package.swift  Makefile  Resources/Info.plist
-│   └── Sources/NetdiagGUI/{Models,Services,Alerts,Views,Support}
-├── docs/{ARCHITECTURE,DIAGNOSIS-RULES,JSON-SCHEMA}.md
-├── .github/workflows/{shellcheck,bats}.yml
-├── README.md  CHANGELOG.md  LICENSE  install.sh  .gitignore
+│   └── Sources/HopwatchGUI/{Models,Services,Alerts,Views,Support}
+├── docs/                    # Architecture, design specs, rules, and assets
+│   ├── {ARCHITECTURE,DIAGNOSIS-RULES,JSON-SCHEMA,SCREENSHOTS}.md
+│   ├── design/              # Architecture and feature design specifications
+│   ├── archive/plans/       # Historical implementation plans
+│   └── assets/              # Light and dark UI screenshots
+├── .github/workflows/       # GitHub Actions CI & release automation
+├── README.md  CHANGELOG.md  LICENSE  install.sh  install-app.sh  .gitignore
 ```
 
 Before refactoring past ~700 lines of bash, decide bash-modules vs bash+Python helper and record the rationale in `docs/ARCHITECTURE.md`.

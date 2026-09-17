@@ -10,7 +10,7 @@
 
 **Working directory:** `/Users/bfreeman/Documents/AI-Workspace/netdiag_worktrees/arrival-state` (branch `feat/arrival-state`, already created from `main` at `b25df72`). All paths below are relative to it.
 
-**Spec:** `docs/superpowers/specs/2026-08-31-arrival-and-the-three-modes-design.md`
+**Spec:** `docs/design/2026-08-31-arrival-and-the-three-modes-design.md`
 
 ---
 
@@ -301,7 +301,7 @@ Create `tests/fixtures/network-ids.txt`. Format is `<raw record>|<expected canon
 # Shared by tests/test_network_identity.bats and VerifyMode's
 # runNetworkIdentityFixtureTests(). Both must agree on every line — that
 # agreement is the whole point of the file. See
-# docs/superpowers/specs/2026-08-31-arrival-and-the-three-modes-design.md.
+# docs/design/2026-08-31-arrival-and-the-three-modes-design.md.
 #
 # raw record | expected canonical form ("-" = no identity)
 wifi:mac=AA:BB:CC:DD:EE:FF|mac:aa:bb:cc:dd:ee:ff
