@@ -8,7 +8,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [1.2.2] - 2026-09-16
 
+### Changed — Rebranded Project to Hopwatch
+- **App & CLI Identity**: Rebranded project from `netdiag` to `Hopwatch` (`hopwatch` CLI and `Hopwatch.app` menu bar companion), preserving backwards-compatible `netdiag` symlinks and legacy data paths.
+- **Permissions**: Handled denied notification states cleanly without redundant prompts.
+
 ## [1.2.1] - 2026-09-16
+
+### Fixed — Packaging & CI Automation
+- **Release Packaging**: Guarded GUI DMG creation to execute strictly on Darwin runners with Swift installed.
 
 ## [1.2.0] - 2026-09-16
 

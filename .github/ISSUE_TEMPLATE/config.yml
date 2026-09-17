@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Hopwatch Discussions & Questions
+    url: https://github.com/godigi/hopwatch/discussions
+    about: Ask questions, share diagnostic captures, or brainstorm with the community.

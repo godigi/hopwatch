@@ -116,7 +116,7 @@ unset NETDIAG_RUN_ID
 unset HOPWATCH_RUN_ID
 
 HOPWATCH_VERSION="1.2.2"
-HOPWATCH_VERSION="1.2.2"
+NETDIAG_VERSION="1.2.2"
 
 _require_python3() {
   if ! command -v python3 >/dev/null 2>&1; then

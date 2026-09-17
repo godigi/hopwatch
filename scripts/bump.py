@@ -223,8 +223,13 @@ def main() -> int:
     if os.path.exists(hopwatch_bin) and not os.path.islink(hopwatch_bin):
         update_file(
             hopwatch_bin,
-            r'^(?:HOPWATCH|NETDIAG)_VERSION="[^"]+"',
+            r'^HOPWATCH_VERSION="[^"]+"',
             f'HOPWATCH_VERSION="{next_version}"',
+        )
+        update_file(
+            hopwatch_bin,
+            r'^NETDIAG_VERSION="[^"]+"',
+            f'NETDIAG_VERSION="{next_version}"',
         )
 
     netdiag_bin = os.path.join(repo_root, "bin", "netdiag")

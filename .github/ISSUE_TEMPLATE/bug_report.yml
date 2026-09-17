@@ -1,0 +1,57 @@
+name: "Bug Report"
+description: "File an issue about something not working in Hopwatch"
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please provide as much detail as possible.
+        **Tip:** You can run `hopwatch --redact` or `hopwatch --share` to get a diagnostic report with sensitive information safely masked.
+  - type: textarea
+    id: description
+    attributes:
+      label: "Problem Description"
+      description: "A clear and concise description of what went wrong."
+      placeholder: "e.g. When disconnecting from VPN, Hopwatch continues to report VPN as active..."
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: "Component"
+      description: "Where did the issue occur?"
+      options:
+        - "Menu Bar App (Hopwatch.app)"
+        - "Command Line Tool (hopwatch CLI)"
+        - "Installer / Homebrew"
+        - "Continuous Monitoring (Watcher / Recorder)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "Hopwatch Version"
+      description: "Run `hopwatch --version` or check About Hopwatch."
+      placeholder: "e.g. 1.2.0"
+    validations:
+      required: true
+  - type: input
+    id: macos_version
+    attributes:
+      label: "macOS Version & Architecture"
+      placeholder: "e.g. macOS 15.0 Sequoia (Apple Silicon M3 Max)"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostic_output
+    attributes:
+      label: "Diagnostic Output (Redacted)"
+      description: "Run `hopwatch --redact` and paste the output here."
+      render: shell
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to Reproduce"
+      description: "How can we reproduce the problem?"
+      placeholder: "1. Open Hopwatch\n2. Run a full check\n3. See error..."

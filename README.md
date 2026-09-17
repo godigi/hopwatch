@@ -1,12 +1,17 @@
+<div align="center">
+
 # Hopwatch
 
-[![shellcheck](https://github.com/godigi/hopwatch/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/godigi/hopwatch/actions/workflows/shellcheck.yml)
-[![bats](https://github.com/godigi/hopwatch/actions/workflows/bats.yml/badge.svg)](https://github.com/godigi/hopwatch/actions/workflows/bats.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-14%2B-lightgrey.svg)](#requirements)
+**The zero-jargon network monitor and diagnostic companion for macOS.**  
+*Know instantly whether an issue is your Wi-Fi, your router, or your internet provider.*
 
-> **The zero-jargon network monitor and diagnostic companion for macOS.**  
-> Know instantly whether an issue is your Wi-Fi, your router, or your internet provider. Available as a **native macOS menu bar app** and a comprehensive CLI.
+[![Latest Release](https://img.shields.io/github/v/release/godigi/hopwatch?style=flat-square&color=007AFF)](https://github.com/godigi/hopwatch/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/godigi/hopwatch/bats.yml?style=flat-square&label=tests)](https://github.com/godigi/hopwatch/actions/workflows/bats.yml)
+[![ShellCheck](https://img.shields.io/github/actions/workflow/status/godigi/hopwatch/shellcheck.yml?style=flat-square&label=shellcheck)](https://github.com/godigi/hopwatch/actions/workflows/shellcheck.yml)
+[![macOS](https://img.shields.io/badge/macOS-14%2B%20Sonoma%20%7C%20Sequoia-lightgrey?style=flat-square&logo=apple)](https://github.com/godigi/hopwatch#requirements)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
+
+<br />
 
 <p align="center">
   <a href="https://github.com/godigi/hopwatch/releases/latest">
@@ -14,21 +19,22 @@
   </a>
 </p>
 
-```
- ┌────────────────────────────────────────────────────────────────────────┐
- │  ● 18ms   (Menu Bar)                                                   │
- ├────────────────────────────────────────────────────────────────────────┤
- │  🟢 All good — watching on HomeNet 5G                                  │
- │                                                                        │
- │  HOP ATTRIBUTION CHAIN:                                                │
- │  [Mac] ────(Wi-Fi: -46 dBm)────> [Router] ────(18ms RTT)────> [ISP]    │
- │   🟢            🟢                  🟢                🟢               │
- │                                                                        │
- │  LIVE TELEMETRY:                                                       │
- │  Internet: 18 ms    Loss: 0%      Down: 420 Mbps    Up: 45 Mbps        │
- │  Router:    2 ms    Wi-Fi: 5GHz   VPN: Off          Location: 🇺🇸 US    │
- └────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/dropdown-dark.png" width="380" alt="Hopwatch Menu Bar Dropdown" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
+</p>
+
+</div>
+
+### Highlights
+
+| Feature | Description |
+|:---|:---|
+| 🎯 **Hop Attribution Chain** | Pinpoints root cause at a glance across `[Mac] ──► [Router] ──► [ISP]`. |
+| ⚡ **Live Menu Bar Telemetry** | Monospace live RTT (`● 18ms`), packet loss, and link health directly in your menu bar. |
+| 🔍 **40+ Diagnostic Checks** | Bufferbloat, path MTU, captive portals, Wi-Fi sticky APs, DNS hijacking, and DHCP lease expiry. |
+| 🛡️ **Zero Jargon & Redacted Sharing** | Human-readable diagnoses with actionable fixes; 1-click sanitized reports safe for support tickets. |
+| 📈 **Per-Network Baselines** | Profiles each Wi-Fi and wired network to flag latency spikes and regressions. |
+| 🔄 **Continuous Background Monitoring** | LaunchAgent watcher & recorder detect flapping outages and track downtime across reboots. |
 
 ---
 
@@ -102,6 +108,18 @@ you where to look first. For *intermittent* problems — where the failure
 window is gone by the time you can investigate — `hopwatch --watch` or the
 `--install-watcher` LaunchAgent runs it on a cron so the baseline catches
 the regression on the next pass.
+
+### Hopwatch vs. Traditional Tools
+
+| Capability | `ping` / `traceroute` | `speedtest-cli` | `mtr` | **Hopwatch** |
+|:---|:---:|:---:|:---:|:---:|
+| **Root-Cause Attribution** (Wi-Fi vs Router vs ISP) | ❌ | ❌ | ❌ | ✅ **Automatic Culprit Detection** |
+| **Loaded Bufferbloat Grading** (A–F) | ❌ | ❌ | ❌ | ✅ **Loaded vs Idle Jitter** |
+| **Wi-Fi Radio Health & Sticky APs** | ❌ | ❌ | ❌ | ✅ **RSSI, SNR, PHY & Overlaps** |
+| **Per-Network Historical Baseline** | ❌ | ❌ | ❌ | ✅ **Scored vs Median History** |
+| **Safe Sanitized Sharing** | ❌ | ❌ | ❌ | ✅ **Masks IPs, SSIDs, MACs** |
+| **Continuous Menu Bar Monitor** | ❌ | ❌ | ❌ | ✅ **Native SwiftUI App** |
+| **Zero Jargon Plain-English Fixes** | ❌ | ❌ | ❌ | ✅ **Clear Next Steps** |
 
 If you'd rather read the script before piping it to a shell — a reasonable
 habit — clone instead:
