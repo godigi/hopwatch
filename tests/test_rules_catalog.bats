@@ -450,7 +450,11 @@ for r in d['rules']:
     if r.get('also'):
         used.add(r['also'])
 
-src = open('$REPO/gui/Sources/NetdiagGUI/Views/RunReportView.swift').read()
+import os
+gui_path = '$REPO/gui/Sources/HopwatchGUI/Views/RunReportView.swift'
+if not os.path.exists(gui_path):
+    gui_path = '$REPO/gui/Sources/NetdiagGUI/Views/RunReportView.swift'
+src = open(gui_path).read()
 block = re.search(
     r'static let rowCategories: \[String: Set<String>\] = \[(.*?)\n    \]',
     src, re.S)
@@ -471,8 +475,11 @@ assert not orphans, f'categories no report-card row claims: {sorted(orphans)}'
   # The guard above is only worth having if it fails when it should, so
   # prove it against a category deliberately absent from the table.
   run python3 -c "
-import re
-src = open('$REPO/gui/Sources/NetdiagGUI/Views/RunReportView.swift').read()
+import os, re
+gui_path = '$REPO/gui/Sources/HopwatchGUI/Views/RunReportView.swift'
+if not os.path.exists(gui_path):
+    gui_path = '$REPO/gui/Sources/NetdiagGUI/Views/RunReportView.swift'
+src = open(gui_path).read()
 block = re.search(
     r'static let rowCategories: \[String: Set<String>\] = \[(.*?)\n    \]',
     src, re.S)

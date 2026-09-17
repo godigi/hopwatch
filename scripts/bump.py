@@ -138,8 +138,8 @@ def update_changelog(
         text = f.read()
 
     today = datetime.date.today().isoformat()
-    unreleased_pattern = r"(## \[Unreleased\]\s*\n)([\s\S]*?)(?=\n## \[|\Z)"
-    match = re.search(unreleased_pattern, text)
+    unreleased_pattern = r"(## \[Unreleased\][^\n]*\n)([\s\S]*?)(?=^## \[|\Z)"
+    match = re.search(unreleased_pattern, text, re.MULTILINE)
 
     unreleased_body = match.group(2).strip() if match else ""
 
@@ -165,7 +165,7 @@ def update_changelog(
             f"{bullets_str}\n"
         )
 
-    text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1)
+    text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1, flags=re.MULTILINE)
 
     footer_ref = f"[Unreleased]: https://github.com/godigi/hopwatch/compare/v{next_version}...HEAD\n[{next_version}]: https://github.com/godigi/hopwatch/compare/v{prev_version}...v{next_version}"
     text = re.sub(r"\[Unreleased\]: https://[^\n]+", lambda _: footer_ref, text, count=1)

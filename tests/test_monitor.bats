@@ -1083,7 +1083,8 @@ except Exception:
 @test "the GUI pauses with SIGUSR1, never SIGSTOP" {
   # Structural guard on the fix. SIGSTOP against this process is a latent
   # kill that only manifests under a GUI parent.
-  local gui="$REPO/gui/Sources/NetdiagGUI/Services/MonitorStream.swift"
+  local gui="$REPO/gui/Sources/HopwatchGUI/Services/MonitorStream.swift"
+  [ -f "$gui" ] || gui="$REPO/gui/Sources/NetdiagGUI/Services/MonitorStream.swift"
   [ -f "$gui" ] || skip "GUI sources not present"
   run grep -nE '^[^/]*kill\(process\.processIdentifier, SIG(STOP|CONT)\)' "$gui"
   [ "$status" -ne 0 ] || { echo "GUI still uses SIGSTOP/SIGCONT:"; echo "$output"; return 1; }

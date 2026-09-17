@@ -12,21 +12,33 @@ final class EventStore {
 
     private(set) var events: [NetworkEvent] = []
 
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag",
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch",
                              category: "events")
     private let url: URL?
 
     init(directory: URL? = nil) {
-        let dir = directory ?? FileManager.default
+        let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first?
+            .first
+        let dir = directory ?? appSupport?
             .appendingPathComponent(Bundle.main.bundleIdentifier
-                                    ?? "me.brianfreeman.netdiag",
+                                    ?? "me.brianfreeman.hopwatch",
                                     isDirectory: true)
         if let dir {
             try? FileManager.default.createDirectory(
                 at: dir, withIntermediateDirectories: true)
-            url = dir.appendingPathComponent("events.json")
+            let fileURL = dir.appendingPathComponent("events.json")
+
+            // If no events file exists yet, migrate legacy netdiag events.json if present
+            if !FileManager.default.fileExists(atPath: fileURL.path),
+               let legacyDir = appSupport?.appendingPathComponent("me.brianfreeman.netdiag", isDirectory: true) {
+                let legacyFile = legacyDir.appendingPathComponent("events.json")
+                if FileManager.default.fileExists(atPath: legacyFile.path) {
+                    try? FileManager.default.copyItem(at: legacyFile, to: fileURL)
+                }
+            }
+
+            url = fileURL
         } else {
             url = nil
         }

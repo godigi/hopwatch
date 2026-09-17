@@ -21,7 +21,8 @@ final class WatcherControl {
     private(set) var isBusy = false
     private(set) var lastError: String?
 
-    private static let label = "com.netdiag.watcher"
+    private static let label = "com.hopwatch.watcher"
+    private static let legacyLabel = "com.netdiag.watcher"
 
     func refresh() async {
         isInstalled = await Self.isLoaded()
@@ -67,6 +68,11 @@ final class WatcherControl {
     /// failed to load is exactly the state a "watcher installed" toggle
     /// must not claim.
     private static func isLoaded() async -> Bool {
+        if await checkLoaded(label: label) { return true }
+        return await checkLoaded(label: legacyLabel)
+    }
+
+    private static func checkLoaded(label: String) async -> Bool {
         await withCheckedContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
