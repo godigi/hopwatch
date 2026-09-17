@@ -6,6 +6,8 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-16
+
 ## [1.2.1] - 2026-09-16
 
 ## [1.2.0] - 2026-09-16
@@ -3819,7 +3821,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/netdiag/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/godigi/hopwatch/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/godigi/netdiag/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/godigi/netdiag/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/godigi/netdiag/compare/v1.1.0...v1.1.1
