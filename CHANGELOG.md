@@ -6,6 +6,13 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
+### Changes
+
+- feat: add official Hopwatch macOS app icon and branding assets
+- docs: organize legacy superpowers design and plan archives
+- feat: add llms.txt, citation metadata, and AI-optimized query documentation
 ## [1.2.4] - 2026-09-17
 
 ### Changes
@@ -3841,7 +3848,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/godigi/hopwatch/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/godigi/hopwatch/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/godigi/hopwatch/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/godigi/hopwatch/compare/v1.2.1...v1.2.2
