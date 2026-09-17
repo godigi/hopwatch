@@ -78,6 +78,7 @@ final class HistoryStore {
             // "computed once" cache are worse than the repeated scan it
             // replaces.
             medianCache.removeAll()
+            invalidateNetworkCaches()
         } catch {
             lastError = error.localizedDescription
         }
@@ -115,6 +116,7 @@ final class HistoryStore {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { customNames.removeValue(forKey: key) } else { customNames[key] = trimmed }
         Defaults.networkNames = customNames
+        invalidateNetworkCaches()
     }
 
     func isOwned(networkID: String?) -> Bool {
@@ -161,12 +163,14 @@ final class HistoryStore {
         // which is exactly what `median(metric:networkID:)` keys its cache
         // on — see its doc comment.
         medianCache.removeAll()
+        invalidateNetworkCaches()
     }
 
     func unmerge(_ networkID: String) {
         manualMerges.removeValue(forKey: networkID)
         Defaults.networkMerges = manualMerges
         medianCache.removeAll()
+        invalidateNetworkCaches()
     }
 
     // MARK: - Derived views
@@ -214,9 +218,22 @@ final class HistoryStore {
         return Array(byID.values)
     }
 
+    @ObservationIgnored
+    private var _cachedMergedNetworks: [HistoryDocument.Network]?
+    @ObservationIgnored
+    private var _cachedMergedNetworksByRecency: [HistoryDocument.Network]?
+
+    private func invalidateNetworkCaches() {
+        _cachedMergedNetworks = nil
+        _cachedMergedNetworksByRecency = nil
+    }
+
     /// Networks after manual merges are applied, largest first.
     var mergedNetworks: [HistoryDocument.Network] {
-        mergedNetworksUnsorted.sorted { $0.runCount > $1.runCount }
+        if let cached = _cachedMergedNetworks { return cached }
+        let result = mergedNetworksUnsorted.sorted { $0.runCount > $1.runCount }
+        _cachedMergedNetworks = result
+        return result
     }
 
     /// Networks after manual merges, most-recently-seen first — the order
@@ -230,13 +247,16 @@ final class HistoryStore {
     /// the recency path does not pay for the run-count sort it would throw
     /// away.
     var mergedNetworksByRecency: [HistoryDocument.Network] {
-        mergedNetworksUnsorted.sorted { a, b in
+        if let cached = _cachedMergedNetworksByRecency { return cached }
+        let result = mergedNetworksUnsorted.sorted { a, b in
             let la = a.lastSeenDate ?? .distantPast
             let lb = b.lastSeenDate ?? .distantPast
             if la != lb { return la > lb }
             if a.runCount != b.runCount { return a.runCount > b.runCount }
             return displayName(for: a.id) < displayName(for: b.id)
         }
+        _cachedMergedNetworksByRecency = result
+        return result
     }
 
     func runs(networkID: String?, window: HistoryWindow) -> [HistoryDocument.Run] {

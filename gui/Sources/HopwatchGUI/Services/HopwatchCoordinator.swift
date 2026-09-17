@@ -175,7 +175,7 @@ final class HopwatchCoordinator {
         log.info("resolution recorded: \(title, privacy: .public) — \(message, privacy: .public)")
     }
 
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "coordinator")
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "coordinator")
 
     // MARK: - Lifecycle
 

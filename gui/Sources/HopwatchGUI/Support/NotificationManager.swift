@@ -50,7 +50,7 @@ final class NotificationManager {
     var onFetchSettings: (() async -> UNAuthorizationStatus)?
     var onRequestAuthorization: ((UNAuthorizationOptions) async throws -> Bool)?
 
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "notifications")
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "notifications")
 
     init(notificationsEnabled: Bool = true, scope: NotificationScope = .all) {
         self.notificationsEnabled = notificationsEnabled

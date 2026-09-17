@@ -190,14 +190,15 @@ struct RunListView: View {
         }
     }
 
-    private func dayLabel(_ day: Date) -> String {
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .full
         f.timeStyle = .none
-        // "Today" and "Yesterday" where they apply: most of the time the
-        // interesting checks are the recent ones, and a full date makes the
-        // reader work out which of them that is.
         f.doesRelativeDateFormatting = true
-        return f.string(from: day)
+        return f
+    }()
+
+    private func dayLabel(_ day: Date) -> String {
+        Self.dayFormatter.string(from: day)
     }
 }

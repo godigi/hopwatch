@@ -549,7 +549,7 @@ struct RunSnapshot: Decodable, Sendable {
         return .healthy
     }
 
-    var date: Date { ISO8601DateFormatter().date(from: timestamp ?? "") ?? Date() }
+    var date: Date { FastISO8601.parse(timestamp) ?? Date() }
 
     /// The dropdown's "Last check" row wants the same badge a stored run's
     /// list row shows — reused via `HistoryDocument.Run.modeBadge(for:)`

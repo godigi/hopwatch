@@ -275,7 +275,7 @@ struct MonitorSample: Decodable, Sendable {
         }
     }
 
-    var timestamp: Date { ISO8601DateFormatter().date(from: ts ?? "") ?? Date() }
+    var timestamp: Date { FastISO8601.parse(ts) ?? Date() }
 
     var health: Health {
         guard link.up else { return .critical }

@@ -649,26 +649,23 @@ struct TrendsView: View {
         )
     }
 
-    private struct DayBucket {
-        let key: String
+    private struct DayBucket: Identifiable {
+        var id: Date { day }
+        var key: String { "\(day.timeIntervalSince1970)" }
         let day: Date
         var counts: [String: Int]
     }
 
     private func bucketByDay(_ runs: [HistoryDocument.Run]) -> [DayBucket] {
-        var out: [String: DayBucket] = [:]
+        var out: [Date: [String: Int]] = [:]
         let calendar = Calendar.current
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
         for run in runs {
             let day = calendar.startOfDay(for: run.date)
-            let key = formatter.string(from: day)
-            var bucket = out[key] ?? DayBucket(key: key, day: day, counts: [:])
             let severity = run.severity == "info" ? "ok" : run.severity
-            bucket.counts[severity, default: 0] += 1
-            out[key] = bucket
+            out[day, default: [:]][severity, default: 0] += 1
         }
-        return out.values.sorted { $0.day < $1.day }
+        return out.map { DayBucket(day: $0.key, counts: $0.value) }
+            .sorted { $0.day < $1.day }
     }
 
     // MARK: - Coverage

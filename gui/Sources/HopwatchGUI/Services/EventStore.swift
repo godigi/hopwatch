@@ -114,8 +114,11 @@ final class EventStore {
     }
 
     private func save() {
-        guard let url, let data = try? JSONEncoder().encode(events)
-        else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let url else { return }
+        let currentEvents = events
+        Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(currentEvents) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }

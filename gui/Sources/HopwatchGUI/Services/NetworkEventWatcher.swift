@@ -50,7 +50,7 @@ final class NetworkEventWatcher: NSObject {
 
     private let wifiClient = CWWiFiClient.shared()
     private var pathMonitor: NWPathMonitor?
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "netwatch")
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "netwatch")
 
     func start() {
         wifiClient.delegate = self
@@ -71,7 +71,7 @@ final class NetworkEventWatcher: NSObject {
                                  expensive: expensive, constrained: constrained)
             }
         }
-        monitor.start(queue: DispatchQueue(label: "me.brianfreeman.netdiag.path"))
+        monitor.start(queue: DispatchQueue(label: "me.brianfreeman.hopwatch.path"))
         pathMonitor = monitor
     }
 

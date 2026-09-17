@@ -79,7 +79,7 @@ final class MonitorStream {
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
 
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "monitor")
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "monitor")
     private static let recentCapacity = 360
 
     /// Called for every decoded sample. The alert engine subscribes here.

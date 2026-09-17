@@ -164,8 +164,8 @@ struct HistoryDocument: Decodable, Sendable {
             metricStats?[metric] ?? nil
         }
 
-        var firstSeenDate: Date? { HistoryDocument.iso.date(from: firstSeen ?? "") }
-        var lastSeenDate: Date? { HistoryDocument.iso.date(from: lastSeen ?? "") }
+        var firstSeenDate: Date? { FastISO8601.parse(firstSeen) }
+        var lastSeenDate: Date? { FastISO8601.parse(lastSeen) }
 
         var incidentCount: Int {
             (severityCounts["warn"] ?? 0) + (severityCounts["critical"] ?? 0)
@@ -205,7 +205,11 @@ struct HistoryDocument: Decodable, Sendable {
     }
 
     struct Run: Decodable, Sendable, Identifiable {
-        var ts: String?
+        var ts: String? {
+            didSet {
+                date = FastISO8601.parse(ts) ?? .distantPast
+            }
+        }
         /// The CLI's handle for this run — `<timestamp>.<8 hex>` — and the
         /// only thing `--show` accepts. `ts` alone will not do:
         /// helpers/history.py dedups on (timestamp, canonical JSON)
@@ -218,20 +222,63 @@ struct HistoryDocument: Decodable, Sendable {
         /// listed but not opened — see RunListView, which says so rather
         /// than offering a row that would fail.
         var runID: String?
-        var networkID: String = ""
+        var networkID: String
         var version: String?
         /// How much of the battery this run attempted — the closed set
         /// docs/JSON-SCHEMA.md documents under `run_mode`. `nil` on every
         /// record written before v0.9.0. See `isCheck`, the one predicate
         /// this app derives from it.
         var runMode: String?
-        var severity: String = "ok"
-        var diagnosisCount: Int = 0
-        var rules: [String] = []
+        var severity: String
+        var diagnosisCount: Int
+        var rules: [String]
         var rootCause: String?
         /// Absent keys mean "not measured in that run", never zero. A chart
         /// must skip them rather than draw a cliff that never happened.
-        var metrics: [String: Double] = [:]
+        var metrics: [String: Double]
+        private(set) var date: Date
+
+        init(
+            ts: String? = nil,
+            runID: String? = nil,
+            networkID: String = "",
+            version: String? = nil,
+            runMode: String? = nil,
+            severity: String = "ok",
+            diagnosisCount: Int = 0,
+            rules: [String] = [],
+            rootCause: String? = nil,
+            metrics: [String: Double] = [:],
+            date: Date? = nil
+        ) {
+            self.ts = ts
+            self.runID = runID
+            self.networkID = networkID
+            self.version = version
+            self.runMode = runMode
+            self.severity = severity
+            self.diagnosisCount = diagnosisCount
+            self.rules = rules
+            self.rootCause = rootCause
+            self.metrics = metrics
+            self.date = date ?? (FastISO8601.parse(ts) ?? .distantPast)
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let tsStr: String? = c.lenient(.ts)
+            self.ts = tsStr
+            self.runID = c.lenient(.runID)
+            self.networkID = c.lenient(.networkID, "")
+            self.version = c.lenient(.version)
+            self.runMode = c.lenient(.runMode)
+            self.severity = c.lenient(.severity, "ok")
+            self.diagnosisCount = c.lenient(.diagnosisCount, 0)
+            self.rules = c.lenient(.rules, [])
+            self.rootCause = c.lenient(.rootCause)
+            self.metrics = c.lenient(.metrics, [:])
+            self.date = FastISO8601.parse(tsStr) ?? .distantPast
+        }
 
         enum CodingKeys: String, CodingKey {
             case ts, version, severity, rules, metrics
@@ -248,7 +295,6 @@ struct HistoryDocument: Decodable, Sendable {
         /// netdiag still has stable row identity instead of a run of
         /// duplicate empty strings.
         var id: String { runID ?? "\(ts ?? "")-\(networkID)" }
-        var date: Date { HistoryDocument.iso.date(from: ts ?? "") ?? .distantPast }
 
         var health: Health {
             switch severity {

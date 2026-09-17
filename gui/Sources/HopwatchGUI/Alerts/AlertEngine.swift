@@ -87,7 +87,7 @@ final class AlertEngine {
     private var lastNotifiedAt: [String: Date] = [:]
     private var firedForNetwork: [String: Set<String>] = [:]
     private var previousSample: MonitorSample?
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag", category: "alerts")
+    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "alerts")
 
     // MARK: - Permission
 
