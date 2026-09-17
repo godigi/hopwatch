@@ -6,6 +6,12 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-17
+
+### Changes
+
+- fix: resolve watcher service detection, test harness paths, and bump regex
+- chore: elevate GitHub repository presentation, community templates, and README visuals
 ## [1.2.2] - 2026-09-16
 
 ### Changed — Rebranded Project to Hopwatch
@@ -3828,7 +3834,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/godigi/hopwatch/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/godigi/hopwatch/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/godigi/netdiag/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/godigi/netdiag/compare/v1.1.1...v1.2.0
