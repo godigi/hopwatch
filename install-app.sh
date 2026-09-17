@@ -60,22 +60,44 @@ DOWNLOAD_URL=""
 ASSET_NAME=""
 
 if [ -n "$RELEASE_JSON" ]; then
-  # Parse installable asset URL from GitHub API
-  DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*(\.dmg|\.zip)' | head -1 | cut -d '"' -f 4 || true)"
+  # Parse installable asset URL from GitHub API (preferring .zip for instant extraction, fallback to .dmg)
+  DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*\.zip' | head -1 | cut -d '"' -f 4 || true)"
+  if [ -z "$DOWNLOAD_URL" ]; then
+    DOWNLOAD_URL="$(printf '%s' "$RELEASE_JSON" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*\.dmg' | head -1 | cut -d '"' -f 4 || true)"
+  fi
   ASSET_NAME="$(basename "$DOWNLOAD_URL" 2>/dev/null || true)"
 fi
 
-# Fallback URL if GitHub API rate-limited
+# If latest release had no attached assets, search recent releases
 if [ -z "$DOWNLOAD_URL" ]; then
-  DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/Hopwatch.dmg"
-  ASSET_NAME="Hopwatch.dmg"
+  ALL_RELEASES="$(curl -sSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${REPO}/releases" 2>/dev/null || true)"
+  DOWNLOAD_URL="$(printf '%s' "$ALL_RELEASES" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*\.zip' | head -1 | cut -d '"' -f 4 || true)"
+  if [ -z "$DOWNLOAD_URL" ]; then
+    DOWNLOAD_URL="$(printf '%s' "$ALL_RELEASES" | grep -E 'browser_download_url.*(Hopwatch|Netdiag).*\.dmg' | head -1 | cut -d '"' -f 4 || true)"
+  fi
+  ASSET_NAME="$(basename "$DOWNLOAD_URL" 2>/dev/null || true)"
+fi
+
+# Fallback URL if GitHub API rate-limited or unreachable
+if [ -z "$DOWNLOAD_URL" ]; then
+  DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/Hopwatch.zip"
+  ASSET_NAME="Hopwatch.zip"
 fi
 
 # ── Download asset ───────────────────────────────────────────────────────
 ARCHIVE_PATH="$TMP_DIR/$ASSET_NAME"
 cyan "• Downloading $ASSET_NAME..."
-curl -fL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE_PATH" \
-  || die "Failed to download Hopwatch from $DOWNLOAD_URL"
+if ! curl -fL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"; then
+  if [ "$ASSET_NAME" != "Hopwatch.dmg" ]; then
+    cyan "• Retrying with DMG fallback..."
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/Hopwatch.dmg"
+    ASSET_NAME="Hopwatch.dmg"
+    ARCHIVE_PATH="$TMP_DIR/$ASSET_NAME"
+    curl -fL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE_PATH" || die "Failed to download Hopwatch from $DOWNLOAD_URL"
+  else
+    die "Failed to download Hopwatch from $DOWNLOAD_URL"
+  fi
+fi
 
 # ── Extract and install ──────────────────────────────────────────────────
 cyan "• Installing to $TARGET_APP..."

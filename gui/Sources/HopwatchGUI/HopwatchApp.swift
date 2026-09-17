@@ -63,7 +63,7 @@ struct HopwatchApp: App {
                 .environment(coordinator)
                 .environment(coordinator.appSettings)
         }
-        .defaultSize(width: 560, height: 520)
+        .defaultSize(width: 560, height: 580)
         .windowResizability(.contentSize)
     }
 }

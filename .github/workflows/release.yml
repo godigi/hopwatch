@@ -46,7 +46,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: self-hosted
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
         with:
@@ -135,12 +135,16 @@ jobs:
       - name: Show the notes that will be published
         run: cat /tmp/notes.md
 
-      - name: Build and package GUI DMG
+      - name: Build and package GUI DMG & ZIP
         run: |
-          if [ "$(uname -s)" = "Darwin" ] && command -v swift >/dev/null 2>&1; then
-            make -C gui dmg
-          else
-            echo "Swift/macOS not available on this runner; skipping GUI DMG packaging"
+          make -C gui dmg
+          dmg="gui/build/Hopwatch-${VERSION}.dmg"
+          [ -f "$dmg" ] || dmg="gui/build/Netdiag-${VERSION}.dmg"
+          zip="gui/build/Hopwatch-${VERSION}.zip"
+          [ -f "$zip" ] || zip="gui/build/Netdiag-${VERSION}.zip"
+          if [ ! -f "$dmg" ] || [ ! -f "$zip" ]; then
+            echo "::error::Packaging failed: $dmg or $zip was not generated!"
+            exit 1
           fi
 
       - name: Create or update the Release
@@ -154,26 +158,19 @@ jobs:
           [ -f "$dmg" ] || dmg="gui/build/Netdiag-${VERSION}.dmg"
           zip="gui/build/Hopwatch-${VERSION}.zip"
           [ -f "$zip" ] || zip="gui/build/Netdiag-${VERSION}.zip"
-          # A pre-1.0 tag is still marked as a normal release; the
-          # distinction this repo cares about is documented-vs-not, which
-          # the verify step above already enforces.
+          cp "$dmg" "gui/build/Hopwatch.dmg"
+          cp "$zip" "gui/build/Hopwatch.zip"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG exists — updating its notes in place"
+            echo "Release $TAG exists — updating its notes and assets"
             gh release edit "$TAG" \
               --title "$TITLE" \
               --notes-file /tmp/notes.md
+            gh release upload "$TAG" "$dmg" "$zip" "gui/build/Hopwatch.dmg" "gui/build/Hopwatch.zip" --clobber
           else
             gh release create "$TAG" \
+              "$dmg" "$zip" "gui/build/Hopwatch.dmg" "gui/build/Hopwatch.zip" \
               --title "$TITLE" \
               --notes-file /tmp/notes.md \
               --verify-tag
-          fi
-          if [ -f "$dmg" ]; then
-            echo "Uploading $dmg to Release $TAG"
-            gh release upload "$TAG" "$dmg" --clobber
-          fi
-          if [ -f "$zip" ]; then
-            echo "Uploading $zip to Release $TAG"
-            gh release upload "$TAG" "$zip" --clobber
           fi
           gh release view "$TAG" --json tagName,name,isDraft,isPrerelease,assets

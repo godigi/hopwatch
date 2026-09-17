@@ -58,6 +58,14 @@ struct OnboardingView: View {
                 Task { await coordinator.watcher.install() }
             }
 
+            step(number: 4,
+                 title: "Start Hopwatch when your Mac boots",
+                 detail: "Recommended. Keeps Hopwatch running in your menu bar so you are always warned when your connection drops or degrades.",
+                 done: appSettings.launchAtLogin,
+                 action: "Turn on") {
+                appSettings.launchAtLogin = true
+            }
+
             Spacer()
 
             HStack(alignment: .firstTextBaseline) {

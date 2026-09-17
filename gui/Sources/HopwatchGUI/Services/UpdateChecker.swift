@@ -73,13 +73,26 @@ final class UpdateChecker {
                 let localVersion = SemanticVersion(Defaults.appVersion)
 
                 if remoteVersion > localVersion {
-                    self.availableRelease = release
-                    self.hasUpdate = true
-                    self.statusMessage = "New version available: v\(release.cleanVersion)"
-                    self.log.notice("Update available: v\(release.cleanVersion, privacy: .public)")
-                    if Defaults.lastNotifiedUpdateVersion != release.cleanVersion {
-                        Defaults.lastNotifiedUpdateVersion = release.cleanVersion
-                        self.onUpdateFound?(release)
+                    let hasArchive = release.assets.contains(where: { $0.isInstallableArchive })
+                    if hasArchive {
+                        self.availableRelease = release
+                        self.hasUpdate = true
+                        self.statusMessage = "New version available: v\(release.cleanVersion)"
+                        self.log.notice("Update available: v\(release.cleanVersion, privacy: .public)")
+                        if Defaults.lastNotifiedUpdateVersion != release.cleanVersion {
+                            Defaults.lastNotifiedUpdateVersion = release.cleanVersion
+                            self.onUpdateFound?(release)
+                        }
+                    } else {
+                        // Release tag exists but packaging is still in progress in CI
+                        self.availableRelease = nil
+                        self.hasUpdate = false
+                        if manual {
+                            self.statusMessage = "v\(release.cleanVersion) published (packaging in progress…)"
+                        } else {
+                            self.statusMessage = "Up to date (v\(Defaults.appVersion))"
+                        }
+                        self.log.info("Release v\(release.cleanVersion) has no installable assets yet; waiting for packaging.")
                     }
                 } else {
                     self.availableRelease = nil
@@ -141,7 +154,7 @@ final class UpdateChecker {
             guard let self else { return }
             defer { self.isDownloading = false }
             do {
-                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("NetdiagUpdate-\(UUID().uuidString)")
+                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchUpdate-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
                 self.statusMessage = "Downloading v\(release.cleanVersion)…"
@@ -245,18 +258,18 @@ final class UpdateChecker {
         return sysApps
     }
 
-    /// Helper to locate Netdiag.app (or legacy Hopwatch.app) in a directory or its immediate children
+    /// Helper to locate Hopwatch.app (or legacy Netdiag.app) in a directory or its immediate children
     private func findApp(in directory: URL) -> String? {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(atPath: directory.path) else { return nil }
-        for appName in ["Netdiag.app", "Hopwatch.app"] {
+        for appName in ["Hopwatch.app", "Netdiag.app"] {
             if contents.contains(appName) {
                 return directory.appendingPathComponent(appName).path
             }
         }
         for item in contents {
             let sub = directory.appendingPathComponent(item)
-            if sub.lastPathComponent == "Netdiag.app" || sub.lastPathComponent == "Hopwatch.app" {
+            if sub.lastPathComponent == "Hopwatch.app" || sub.lastPathComponent == "Netdiag.app" {
                 return sub.path
             }
         }
