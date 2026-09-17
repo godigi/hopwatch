@@ -11,12 +11,14 @@ All notable changes to `netdiag` are recorded here. Format follows
 ### Changes
 
 - perf: accelerate telemetry parsing, memoize history networks, and optimize view render loops
+
 ## [1.2.3] - 2026-09-17
 
 ### Changes
 
 - fix: resolve watcher service detection, test harness paths, and bump regex
 - chore: elevate GitHub repository presentation, community templates, and README visuals
+
 ## [1.2.2] - 2026-09-16
 
 ### Changed — Rebranded Project to Hopwatch

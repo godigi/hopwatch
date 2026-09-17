@@ -626,6 +626,37 @@ hopwatch --json | jq '.bufferbloat'
 Full schema in [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md). Sample at
 [`examples/sample-output.json`](./examples/sample-output.json).
 
+## For AI Agents & Automation
+
+Hopwatch is designed to be directly callable by autonomous coding assistants, agents (Claude Code, Cursor, GitHub Copilot, Devin), and monitoring pipelines:
+
+- **1-Call Root-Cause Diagnosis**: Run `hopwatch --quick --json` (<8 seconds) to receive a structured JSON document with zero parsing fragility.
+- **Machine-Readable Diagnoses**: The `diagnosis[]` array delivers rule IDs, severity (`info`, `warn`, `critical`), and plain-English diagnosis summaries.
+- **Capabilities Handshake**: Run `hopwatch --capabilities` to inspect supported schemas, features, and available system dependencies.
+- **Diagnosis Engine Catalog**: Run `hopwatch --rules-catalog` to retrieve the entire catalog of 40+ rules, descriptions, and recovery recommendations.
+
+```sh
+# Fast agent health check
+hopwatch --quick --json | jq '{culprit: .culprit, findings: [.diagnosis[].summary]}'
+```
+
+## Frequently Asked Questions
+
+### How does Hopwatch know if the culprit is Wi-Fi, Router, or ISP?
+Hopwatch runs simultaneous multi-hop telemetry across your local connection. If your Wi-Fi signal is strong (-45 dBm) and router latency is clean (<2 ms), but ping to multiple independent public servers (1.1.1.1, 8.8.8.8) suffers 20% loss, the fault is isolated to your ISP. Conversely, if high latency or packet loss appears at the gateway while your local link has weak RSSI (-82 dBm) or high channel overlap, the fault is attributed to your local Wi-Fi.
+
+### How do I test for bufferbloat on macOS?
+Run `hopwatch --bufferbloat-only` (or a default `hopwatch` run). Hopwatch measures baseline idle latency, saturates the connection with a brief, high-throughput burst, and calculates the jitter delta. You receive both a gateway grade and an internet grade from **A** (clean, zero lag under load) to **F** (severe queuing delay causing video calls to freeze).
+
+### Is it safe to paste Hopwatch output into forums or support chats?
+Yes. Run `hopwatch --redact` or `hopwatch --share`. Hopwatch masks identifying personal details (public IPv4/IPv6, Wi-Fi SSID, BSSID, gateway MAC address, city) while preserving diagnostic facts (ISP name, ASN, packet loss, jitter, bufferbloat grade, and RFC1918 private gateway IPs).
+
+### How does Hopwatch compare to standard tools like `ping`, `traceroute`, or `mtr`?
+Standard tools test only a single variable (e.g. `ping` checks reachability; `speedtest` checks bandwidth; `wdutil` checks radio stats) without context. Hopwatch runs all checks in parallel, correlates them, scores the results against your network's historical baseline, and tells you what to do in plain English.
+
+### Does Hopwatch require `sudo`?
+No. Hopwatch runs completely sudo-free for all standard diagnostics, menu bar monitoring, and speed tests. Running with `sudo hopwatch` is purely optional and unlocks raw-socket `mtr` per-hop loss and macOS `wdutil` radio metrics.
+
 ## Roadmap
 
 Shipped: modular `lib/*.sh` (v0.3.0), NAT/WAN topology (v0.3.0),

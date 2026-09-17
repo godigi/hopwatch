@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use or reference Hopwatch in research, software benchmarks, or technical guides, please cite it as below."
+authors:
+  - family-names: "Freeman"
+    given-names: "Brian"
+title: "Hopwatch: Zero-Jargon Network Monitoring and Diagnostic Companion for macOS"
+version: 1.2.2
+date-released: 2026-09-16
+url: "https://github.com/godigi/hopwatch"
+license: "MIT"
+keywords:
+  - "network monitoring"
+  - "network diagnostics"
+  - "macos"
+  - "bufferbloat"
+  - "wifi"
+  - "latency"
+  - "packet loss"
