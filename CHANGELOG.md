@@ -6,6 +6,14 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-18
+
+### Changes
+
+- feat(gui): add dock icon toggle, dynamic window activation, and streamline dropdown menu
+- fix(diagnosis): prioritize actionable browser desync root cause over channel crowding
+- feat(wifi): add native CoreWLAN telemetry helper for sudo-free signal probing
+
 ## [1.3.3] - 2026-09-18
 
 ### Changes
@@ -3867,7 +3875,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.3.3...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/godigi/hopwatch/compare/v1.3.3...v1.4.0
 [1.3.3]: https://github.com/godigi/hopwatch/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/godigi/hopwatch/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/godigi/hopwatch/compare/v1.3.0...v1.3.1
