@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-18
+
+### Changes
+
+- fix: sync dashboard and menu status, dismiss invalid resolutions, and update status dot on degradation
+
 ## [1.4.0] - 2026-09-18
 
 ### Changes
@@ -3875,7 +3881,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/godigi/hopwatch/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/godigi/hopwatch/compare/v1.3.3...v1.4.0
 [1.3.3]: https://github.com/godigi/hopwatch/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/godigi/hopwatch/compare/v1.3.1...v1.3.2
