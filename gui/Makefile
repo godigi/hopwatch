@@ -11,7 +11,7 @@
 #   make clean
 
 APP           := Hopwatch
-BUNDLE_ID     := me.brianfreeman.hopwatch
+BUNDLE_ID     := com.godigi.hopwatch
 BUILD_DIR     := build
 APP_DIR       := $(BUILD_DIR)/$(APP).app
 CONFIG        := release

@@ -43,6 +43,41 @@ enum Defaults {
             Key.notificationsEnabled: true,
             Key.notificationScope: "all",
         ])
+
+        // On first launch of com.godigi.hopwatch, import legacy user preferences
+        // (network names, merges, arrival states, phase durations) if present.
+        if defaults.object(forKey: Key.networkNames) == nil {
+            let prefPath = ("~/Library/Preferences" as NSString).expandingTildeInPath
+            if let files = try? FileManager.default.contentsOfDirectory(atPath: prefPath) {
+                for file in files where (file.hasSuffix(".hopwatch.plist") || file.hasSuffix(".netdiag.plist")) && !file.contains("com.godigi.hopwatch") {
+                    let legacyDomain = file.replacingOccurrences(of: ".plist", with: "")
+                    if let legacy = UserDefaults(suiteName: legacyDomain) {
+                        let keysToMigrate = [
+                            Key.networkNames,
+                            Key.networkMerges,
+                            Key.networkOwned,
+                            Key.arrivalStates,
+                            Key.phaseDurationSamples,
+                            Key.menuBarStyle,
+                            Key.expertExpanded,
+                            Key.fastInterval,
+                            Key.degradedInterval,
+                            Key.mediumInterval,
+                            Key.slowInterval,
+                        ]
+                        var didMigrate = false
+                        for key in keysToMigrate {
+                            if let val = legacy.object(forKey: key), defaults.object(forKey: key) == nil {
+                                defaults.set(val, forKey: key)
+                                didMigrate = true
+                            }
+                        }
+                        if didMigrate { break }
+                    }
+                }
+            }
+        }
+
         return defaults
     }()
 

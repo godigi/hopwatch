@@ -150,4 +150,12 @@ import Testing
         await mgr.requestOrOpenSettings()
         #expect(openedSettings)
     }
+
+    @Test @MainActor func systemSettingsURLsTargetBundleID() {
+        let modernURL = NotificationManager.systemSettingsURL(bundleID: "com.godigi.hopwatch")
+        #expect(modernURL?.absoluteString == "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.godigi.hopwatch")
+
+        let fallbackURL = NotificationManager.systemSettingsFallbackURL(bundleID: "com.godigi.hopwatch")
+        #expect(fallbackURL?.absoluteString == "x-apple.systempreferences:com.apple.preference.notifications?id=com.godigi.hopwatch")
+    }
 }

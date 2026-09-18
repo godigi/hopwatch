@@ -663,7 +663,7 @@ Expected: builds with no errors.
 Run: `make -C gui run`. Open Settings → General. Enable "Watch my
 connection continuously" if off. Drag "Check the router every" to a new
 value and release the mouse (don't close the window). Watch
-`log stream --predicate 'subsystem == "me.brianfreeman.netdiag"'` (the
+`log stream --predicate 'subsystem == "com.godigi.netdiag"'` (the
 command `make run` prints on launch) for a monitor-restart log line
 appearing immediately on release, not only when the Settings window is
 later closed. Then switch focus to another app (Cmd-Tab) without closing

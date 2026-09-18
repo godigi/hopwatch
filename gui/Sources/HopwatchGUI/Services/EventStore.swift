@@ -12,7 +12,7 @@ final class EventStore {
 
     private(set) var events: [NetworkEvent] = []
 
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch",
+    private let log = Logger(subsystem: "com.godigi.hopwatch",
                              category: "events")
     private let url: URL?
 
@@ -22,19 +22,26 @@ final class EventStore {
             .first
         let dir = directory ?? appSupport?
             .appendingPathComponent(Bundle.main.bundleIdentifier
-                                    ?? "me.brianfreeman.hopwatch",
+                                    ?? "com.godigi.hopwatch",
                                     isDirectory: true)
         if let dir {
             try? FileManager.default.createDirectory(
                 at: dir, withIntermediateDirectories: true)
             let fileURL = dir.appendingPathComponent("events.json")
 
-            // If no events file exists yet, migrate legacy netdiag events.json if present
-            if !FileManager.default.fileExists(atPath: fileURL.path),
-               let legacyDir = appSupport?.appendingPathComponent("me.brianfreeman.netdiag", isDirectory: true) {
-                let legacyFile = legacyDir.appendingPathComponent("events.json")
-                if FileManager.default.fileExists(atPath: legacyFile.path) {
-                    try? FileManager.default.copyItem(at: legacyFile, to: fileURL)
+            // If no events file exists yet, migrate legacy events.json if present
+            if !FileManager.default.fileExists(atPath: fileURL.path), let appSupport {
+                if let entries = try? FileManager.default.contentsOfDirectory(at: appSupport, includingPropertiesForKeys: nil) {
+                    for legacyDir in entries where legacyDir.hasDirectoryPath {
+                        let name = legacyDir.lastPathComponent
+                        if (name.hasSuffix(".hopwatch") || name.hasSuffix(".netdiag")) && name != "com.godigi.hopwatch" {
+                            let legacyFile = legacyDir.appendingPathComponent("events.json")
+                            if FileManager.default.fileExists(atPath: legacyFile.path) {
+                                try? FileManager.default.copyItem(at: legacyFile, to: fileURL)
+                                break
+                            }
+                        }
+                    }
                 }
             }
 

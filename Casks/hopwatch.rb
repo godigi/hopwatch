@@ -14,8 +14,8 @@ cask "hopwatch" do
   binary "#{appdir}/Hopwatch.app/Contents/Resources/cli/bin/netdiag"
 
   zap trash: [
-    "~/Library/Preferences/me.brianfreeman.hopwatch.plist",
-    "~/Library/Preferences/me.brianfreeman.netdiag.plist",
+    "~/Library/Application Support/com.godigi.hopwatch",
+    "~/Library/Preferences/com.godigi.hopwatch.plist",
     "~/hopwatch",
     "~/net-diag",
   ]

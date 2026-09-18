@@ -9,10 +9,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a potential security vulnerability within Hopwatch, please **do not** file a public GitHub issue. Instead, please report it privately:
-
-1. **GitHub Security Advisory (Recommended):** Use GitHub's [Private Vulnerability Reporting](https://github.com/godigi/hopwatch/security/advisories/new) feature on the repository.
-2. **Email:** Alternatively, email the maintainer directly at `security@brianfreeman.me`.
+Please use GitHub's [Private Vulnerability Reporting](https://github.com/godigi/hopwatch/security/advisories/new) feature on the repository.
 
 ### What to Include
 

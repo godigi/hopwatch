@@ -699,11 +699,6 @@ struct TrendsView: View {
                 Text(verbatim: "\(counts.duplicatesDropped) duplicate record\(counts.duplicatesDropped == 1 ? " was" : "s were") merged.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if !coordinator.watcher.isInstalled {
-                Text("Turn on background checks in Settings to record a run every 15 minutes — history gets much more useful with them.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         // The widest prose on this screen, and — before this cap — the
         // single view setting the whole tab's ideal width. See

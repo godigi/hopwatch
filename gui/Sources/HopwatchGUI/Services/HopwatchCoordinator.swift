@@ -175,7 +175,7 @@ final class HopwatchCoordinator {
         log.info("resolution recorded: \(title, privacy: .public) — \(message, privacy: .public)")
     }
 
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "coordinator")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "coordinator")
 
     // MARK: - Lifecycle
 
@@ -215,6 +215,10 @@ final class HopwatchCoordinator {
         Task {
             await alerts.refreshAuthorization()
             await watcher.refresh()
+            if watcher.isInstalled {
+                log.info("Uninstalling legacy 15-minute background watcher")
+                await watcher.uninstall()
+            }
             await history.load()
             await hydrateFromHistoryIfNeeded()
         }

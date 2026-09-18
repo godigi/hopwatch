@@ -20,7 +20,7 @@ final class LocationPermissionStore: NSObject, CLLocationManagerDelegate {
 
     private(set) var status: CLAuthorizationStatus = .notDetermined
     private let locationManager = CLLocationManager()
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "location")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "location")
 
     override init() {
         super.init()

@@ -2231,10 +2231,10 @@ Joining five networks to test five states is impractical. Drive it through defau
 
 ```bash
 # Back up the real state first.
-defaults read me.brianfreeman.netdiag arrivalStates > /tmp/arrivalStates.backup 2>/dev/null || true
+defaults read com.godigi.netdiag arrivalStates > /tmp/arrivalStates.backup 2>/dev/null || true
 
 # Force the current network back to unchecked and relaunch.
-defaults delete me.brianfreeman.netdiag arrivalStates
+defaults delete com.godigi.netdiag arrivalStates
 cd /Users/bfreeman/Documents/AI-Workspace/netdiag_worktrees/arrival-state/gui
 make sign && open build/Netdiag.app
 ```
@@ -2242,7 +2242,7 @@ make sign && open build/Netdiag.app
 Expected, in the app: Home shows the arrival card naming the current network, a check starts within one monitor cycle, the card shows progress rows, and when it finishes the card disappears and the report is about *this* network. Confirm the state landed:
 
 ```bash
-defaults read me.brianfreeman.netdiag arrivalStates
+defaults read com.godigi.netdiag arrivalStates
 ```
 
 Expected: JSON containing one canonical `mac:`/`ssid:`/`gw:` key with `"kind":"checked"`.
@@ -2252,7 +2252,7 @@ Expected: JSON containing one canonical `mac:`/`ssid:`/`gw:` key with `"kind":"c
 The original bug is a decline while a scan is in flight. Reproduce it:
 
 ```bash
-defaults delete me.brianfreeman.netdiag arrivalStates
+defaults delete com.godigi.netdiag arrivalStates
 ```
 
 Relaunch, and immediately press **Full check** in the app so a manual scan is running when the first sample lands. The arrival attempt will be declined.
@@ -2260,7 +2260,7 @@ Relaunch, and immediately press **Full check** in the app so a manual scan is ru
 Expected: the arrival card stays visible with its spinner, and within ~30 s of the manual scan finishing the arrival check starts on its own. Before this change, that retry never happened. Confirm in the log:
 
 ```bash
-log show --last 10m --predicate 'subsystem == "me.brianfreeman.netdiag"' --info --style compact \
+log show --last 10m --predicate 'subsystem == "com.godigi.netdiag"' --info --style compact \
   | grep -i arrival
 ```
 

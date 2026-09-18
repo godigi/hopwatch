@@ -22,7 +22,7 @@ final class SignalScaleStore {
     private var loadedForVersion: String?
     private var refreshTask: Task<Void, Never>?
 
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "signalscale")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "signalscale")
 
     /// Cheap to call from every consumer's `.task` / `.onAppear` — see
     /// `RulesCatalogStore.ensureLoaded()`'s identical header.
@@ -86,7 +86,7 @@ final class SignalScaleStore {
         guard let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         let dir = base.appendingPathComponent(
-            Bundle.main.bundleIdentifier ?? "me.brianfreeman.hopwatch", isDirectory: true)
+            Bundle.main.bundleIdentifier ?? "com.godigi.hopwatch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

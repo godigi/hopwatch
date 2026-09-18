@@ -292,34 +292,6 @@ struct SettingsView: View {
     private var advanced: some View {
         @Bindable var appSettings = appSettings
         return Form {
-            Section("Background checks") {
-                HStack {
-                    Text(coordinator.watcher.isInstalled
-                         ? "Running a check every 15 minutes."
-                         : "Off — history only grows when a check runs.")
-                    Spacer()
-                    if coordinator.watcher.isBusy {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Button(coordinator.watcher.isInstalled ? "Turn off" : "Turn on") {
-                            Task {
-                                if coordinator.watcher.isInstalled {
-                                    await coordinator.watcher.uninstall()
-                                } else {
-                                    await coordinator.watcher.install()
-                                }
-                            }
-                        }
-                    }
-                }
-                Text("Installs a small background job (launchd) that records a quick check every 15 minutes. This is what makes the History charts worth looking at.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let error = coordinator.watcher.lastError {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                }
-            }
-
             Section("hopwatch command") {
                 HStack {
                     TextField("Leave blank to find it automatically", text: $appSettings.binaryPath)
@@ -340,7 +312,7 @@ struct SettingsView: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 .buttonStyle(.link)
-                Text("Reopens the three-step setup — notifications, Wi-Fi names, background checks — shown on first launch.")
+                Text("Reopens the three-step setup — notifications, Wi-Fi names, launch at login — shown on first launch.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -363,7 +335,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .task {
-            await coordinator.watcher.refresh()
             capabilities = await CapabilityStore.shared.current()
         }
     }

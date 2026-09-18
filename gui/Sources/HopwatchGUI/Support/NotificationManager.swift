@@ -50,7 +50,7 @@ final class NotificationManager {
     var onFetchSettings: (() async -> UNAuthorizationStatus)?
     var onRequestAuthorization: ((UNAuthorizationOptions) async throws -> Bool)?
 
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "notifications")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "notifications")
 
     init(notificationsEnabled: Bool = true, scope: NotificationScope = .all) {
         self.notificationsEnabled = notificationsEnabled
@@ -134,17 +134,37 @@ final class NotificationManager {
             || settings.authorizationStatus == .provisional
     }
 
-    /// Opens macOS System Settings directly to Notifications.
+    /// Builds the modern System Settings URL directly for the app's notification pane.
+    static func systemSettingsURL(bundleID: String? = Bundle.main.bundleIdentifier) -> URL? {
+        let id = bundleID ?? "com.godigi.hopwatch"
+        return URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")
+    }
+
+    /// Builds the fallback System Settings URL with bundle ID for older/alternate macOS handlers.
+    static func systemSettingsFallbackURL(bundleID: String? = Bundle.main.bundleIdentifier) -> URL? {
+        let id = bundleID ?? "com.godigi.hopwatch"
+        return URL(string: "x-apple.systempreferences:com.apple.preference.notifications?id=\(id)")
+    }
+
+    /// Opens macOS System Settings directly to Notifications for Hopwatch.
     func openSystemSettings() {
         if let onOpenSystemSettings {
             onOpenSystemSettings()
             return
         }
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
-            if NSWorkspace.shared.open(url) {
-                log.debug("opened System Settings -> Notifications via modern URL")
-                return
-            }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.godigi.hopwatch"
+        if let url = Self.systemSettingsURL(bundleID: bundleID), NSWorkspace.shared.open(url) {
+            log.debug("opened System Settings -> Notifications for \(bundleID, privacy: .public) via modern URL")
+            return
+        }
+        if let url = Self.systemSettingsFallbackURL(bundleID: bundleID), NSWorkspace.shared.open(url) {
+            log.debug("opened System Settings -> Notifications for \(bundleID, privacy: .public) via fallback URL with ID")
+            return
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"),
+           NSWorkspace.shared.open(url) {
+            log.debug("opened System Settings -> Notifications via modern URL")
+            return
         }
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
             NSWorkspace.shared.open(url)

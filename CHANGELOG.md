@@ -11,6 +11,7 @@ All notable changes to `netdiag` are recorded here. Format follows
 ### Changes
 
 - fix(updater): guarantee atomic release assets, updater safety gates, and resilient installer
+
 ## [1.3.0] - 2026-09-17
 
 ### Changes
@@ -18,6 +19,7 @@ All notable changes to `netdiag` are recorded here. Format follows
 - feat: add official Hopwatch macOS app icon and branding assets
 - docs: organize legacy superpowers design and plan archives
 - feat: add llms.txt, citation metadata, and AI-optimized query documentation
+
 ## [1.2.4] - 2026-09-17
 
 ### Changes

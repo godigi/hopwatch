@@ -51,7 +51,7 @@ final class RulesCatalogStore {
     private var loadedForVersion: String?
     private var refreshTask: Task<Void, Never>?
 
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "rulescatalog")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "rulescatalog")
 
     /// Cheap to call from every consumer's `.task` / `.onAppear` — a no-op
     /// once a fetch for the current version is in flight or already done.
@@ -127,7 +127,7 @@ final class RulesCatalogStore {
         guard let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         let dir = base.appendingPathComponent(
-            Bundle.main.bundleIdentifier ?? "me.brianfreeman.hopwatch", isDirectory: true)
+            Bundle.main.bundleIdentifier ?? "com.godigi.hopwatch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

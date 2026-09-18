@@ -6,10 +6,10 @@ import CoreLocation
 /// Three asks, and only the first is required. Each one says what it is
 /// for in terms of what the user gets, not in terms of what the app wants —
 /// "unlocks real Wi-Fi names" rather than "requires Location Services
-/// authorization". The app has to work fully when the two optional ones are
-/// declined, and it does: gateway-MAC identity plus renaming already
-/// deliver network grouping without Location, and history simply grows more
-/// slowly without the background job.
+/// authorization". The app works fully even when the two optional ones are
+/// declined: gateway-MAC identity plus renaming already deliver network
+/// grouping without Location, and Hopwatch can always be launched manually
+/// without start-at-login.
 struct OnboardingView: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
@@ -51,14 +51,6 @@ struct OnboardingView: View {
             }
 
             step(number: 3,
-                 title: "Record a check every 15 minutes",
-                 detail: "Optional. Installs a small background job so your history builds up over time. Without it, history only grows when a check actually runs.",
-                 done: coordinator.watcher.isInstalled,
-                 action: "Turn on") {
-                Task { await coordinator.watcher.install() }
-            }
-
-            step(number: 4,
                  title: "Start Hopwatch when your Mac boots",
                  detail: "Recommended. Keeps Hopwatch running in your menu bar so you are always warned when your connection drops or degrades.",
                  done: appSettings.launchAtLogin,
@@ -93,13 +85,11 @@ struct OnboardingView: View {
         .frame(width: 560)
         .task {
             await coordinator.alerts.refreshAuthorization()
-            await coordinator.watcher.refresh()
             coordinator.locationPermissions.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {
                 await coordinator.alerts.refreshAuthorization()
-                await coordinator.watcher.refresh()
                 coordinator.locationPermissions.refresh()
             }
         }

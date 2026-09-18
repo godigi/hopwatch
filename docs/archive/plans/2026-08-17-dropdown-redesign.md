@@ -678,16 +678,17 @@ final class EventStore {
 
     private(set) var events: [NetworkEvent] = []
 
-    private let log = Logger(subsystem: "me.brianfreeman.netdiag",
+    private let log = Logger(subsystem: "com.godigi.netdiag",
                              category: "events")
     private let url: URL?
 
     init(directory: URL? = nil) {
-        let dir = directory ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent(Bundle.main.bundleIdentifier
-                                    ?? "me.brianfreeman.netdiag",
+        let dir = directory
+            ?? FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first?
+                .appendingPathComponent(Bundle.main.bundleIdentifier
+                                        ?? "com.godigi.netdiag",
                                     isDirectory: true)
         if let dir {
             try? FileManager.default.createDirectory(

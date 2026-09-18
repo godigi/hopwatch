@@ -10,7 +10,7 @@ import os.log
 @MainActor
 @Observable
 final class UpdateChecker {
-    private let log = Logger(subsystem: "me.brianfreeman.hopwatch", category: "UpdateChecker")
+    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "UpdateChecker")
     private let releaseAPI = URL(string: "https://api.github.com/repos/godigi/hopwatch/releases/latest")!
     private let releaseWebFallback = URL(string: "https://github.com/godigi/hopwatch/releases/latest")!
 

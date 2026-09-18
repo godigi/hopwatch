@@ -123,7 +123,7 @@ struct RunListView: View {
             } else {
                 Label("No checks recorded for this network", systemImage: "tray")
                     .font(.callout)
-                Text("Checks appear here as soon as Hopwatch records one against this network. Turn on background checks in Settings to record one every 15 minutes.")
+                Text("Checks appear here as soon as Hopwatch records one against this network (upon arrival or when running a full check).")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

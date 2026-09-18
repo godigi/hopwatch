@@ -9,7 +9,7 @@
        either re-prompts for Notifications and Location, so neither this
        string nor the signing identity in gui/Makefile should be edited
        casually. -->
-  <key>CFBundleIdentifier</key><string>me.brianfreeman.hopwatch</string>
+  <key>CFBundleIdentifier</key><string>com.godigi.hopwatch</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <!-- Template value, not the shipped version: gui/Makefile's `bundle`
