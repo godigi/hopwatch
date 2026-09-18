@@ -6,6 +6,11 @@ All notable changes to `netdiag` are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-09-18
+
+### Changes
+
+- refactor(app): migrate bundle identifier to com.godigi.hopwatch and deep-link notification settings
 ## [1.3.1] - 2026-09-17
 
 ### Changes
@@ -3855,7 +3860,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/godigi/hopwatch/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/godigi/hopwatch/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/godigi/hopwatch/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/godigi/hopwatch/compare/v1.2.3...v1.2.4
