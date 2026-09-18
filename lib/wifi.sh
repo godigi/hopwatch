@@ -44,31 +44,30 @@ wifi_run() {
     awdl_out="$(ifconfig awdl0 2>/dev/null || true)"
     WIFI_AWDL_ACTIVE="$(wifi_parse_awdl_active "$awdl_out")"
 
-    # Try wdutil for rich info (needs sudo). Non-interactive: only attempt if
-    # cached creds.
-    local wdutil_out=""
-    if sudo -n true 2>/dev/null; then
-      wdutil_out="$(with_timeout 5 sudo -n wdutil info 2>/dev/null || true)"
+    # Query Wi-Fi telemetry via CoreWLAN helper (sudo-free, native Apple framework, <50ms).
+    local telemetry_out=""
+    local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/wifi_telemetry.py"
+    if [ -f "$helper" ]; then
+      telemetry_out="$(with_timeout 3 python3 "$helper" 2>/dev/null || true)"
+    fi
+    # Opportunistic fallback to wdutil if helper produced nothing and root credentials exist
+    if [ -z "$telemetry_out" ] && { [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+      local wdutil_raw
+      wdutil_raw="$(with_timeout 5 sudo -n wdutil info 2>/dev/null || true)"
+      [ -n "$wdutil_raw" ] && telemetry_out="$(wifi_parse_wdutil "$wdutil_raw")"
     fi
 
-    # Whether the privileged scrape happened at all. Without it RSSI,
-    # noise, SNR, channel, PHY and tx rate are *unavailable*, which is a
-    # different fact from "measured and found quiet" — and until this
-    # flag existed the record could not tell the two apart. That is
-    # exactly why the three WiFi-flapping episodes in the project's own
-    # history (112, 241 and 173 disassociations in an hour) are
-    # undiagnosable after the fact: every radio field in those stored
-    # spikes is null, and nothing says whether that meant silence or an
-    # unprivileged run.
+    # Whether the radio telemetry scrape happened. Without it RSSI,
+    # noise, SNR, channel, PHY and tx rate are unavailable.
     WIFI_PRIVILEGED=0
-    [ -n "$wdutil_out" ] && WIFI_PRIVILEGED=1
+    [ -n "$telemetry_out" ] && WIFI_PRIVILEGED=1
 
-    if [ -n "$wdutil_out" ]; then
+    if [ -n "$telemetry_out" ]; then
       local rssi noise chan tx phy w_ssid w_bssid
-      # One parse for the whole scrape — see wifi_common.sh.
+      # One parse for the whole scrape.
       {
         IFS=$'\t' read -r rssi noise chan tx phy w_ssid w_bssid
-      } <<<"$(wifi_parse_wdutil "$wdutil_out")"
+      } <<<"$telemetry_out"
       # wdutil's SSID/BSSID is unredacted *if* the calling process has
       # Wi-Fi-access entitlement (Terminal with Location Services granted).
       # Override the ipconfig values when wdutil gave us something real.

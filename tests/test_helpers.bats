@@ -649,3 +649,23 @@ import json, sys
 assert json.load(sys.stdin)['wifi_disconnects']['events'] == []
 "
 }
+
+# ── wifi_telemetry.py ──────────────────────────────────────────────────
+
+@test "wifi_telemetry: helper exits 0 and produces valid tab-separated format" {
+  run python3 "$HELPERS/wifi_telemetry.py"
+  [ "$status" -eq 0 ]
+  # If empty (on non-wifi or unassociated machine), output is empty
+  [ -z "$output" ] && return 0
+  # When telemetry is available, it must have 7 tab-separated fields
+  printf '%s\n' "$output" | python3 -c "
+import sys
+line = sys.stdin.read().rstrip('\n')
+fields = line.split('\t')
+assert len(fields) == 7, f'expected 7 fields, got {len(fields)}: {fields}'
+rssi, noise, chan, tx, phy, ssid, bssid = fields
+# RSSI is a non-zero integer (typically -100 to -20 dBm)
+val = int(rssi)
+assert val < 0, f'expected negative RSSI, got {val}'
+"
+}

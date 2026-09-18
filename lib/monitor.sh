@@ -527,21 +527,27 @@ _mon_web_verdict() {
 _mon_probe_wifi_signal() {
   MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""
   [ "$MON_IFACE_TYPE" = "wifi" ] || return 0
-  # wdutil needs root. The GUI runs unprivileged, so in practice these stay
-  # null and W1/W2 never fire from the monitor — which is correct: a null
-  # RSSI is "not measured", and inventing one would be worse than the
-  # missing alert. `sudo -n` never prompts.
-  sudo -n true 2>/dev/null || return 0
-  local out rssi noise
-  out="$(with_timeout 4 sudo -n wdutil info 2>/dev/null || true)"
+  local out=""
+  local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/wifi_telemetry.py"
+  if [ -f "$helper" ]; then
+    out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
+  fi
+  if [ -z "$out" ] && { [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+    local raw
+    raw="$(with_timeout 4 sudo -n wdutil info 2>/dev/null || true)"
+    [ -n "$raw" ] && out="$(wifi_parse_wdutil "$raw")"
+  fi
   [ -n "$out" ] || return 0
+  local rssi noise chan _
   {
     # Fields 1-3 only; the parser's SSID/BSSID tail is scanner policy.
-    IFS=$'\t' read -r rssi noise MON_WIFI_CHAN _
-  } <<<"$(wifi_parse_wdutil "$out")"
+    IFS=$'\t' read -r rssi noise chan _
+  } <<<"$out"
   is_numeric "$rssi"  || rssi=""
   is_numeric "$noise" || noise=""
   MON_WIFI_RSSI="$rssi"
+  MON_WIFI_NOISE="$noise"
+  MON_WIFI_CHAN="$chan"
   MON_WIFI_NOISE="$noise"
   if [ -n "$rssi" ] && [ -n "$noise" ]; then
     MON_WIFI_SNR=$((rssi - noise))
