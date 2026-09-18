@@ -8,7 +8,7 @@
 #   1. Fetches the latest signed Hopwatch.dmg / Hopwatch.zip from GitHub Releases
 #   2. Installs Hopwatch.app to /Applications (or ~/Applications if unprivileged)
 #   3. Clears macOS Gatekeeper quarantine tags (no "unidentified developer" blockage)
-#   4. Links the terminal CLI tool 'hopwatch' (and 'netdiag') to your PATH
+#   4. Links the terminal CLI tool 'hopwatch' to your PATH
 #   5. Launches Hopwatch in your menu bar
 
 set -euo pipefail
@@ -166,10 +166,6 @@ if [ -n "$BIN_DIR" ]; then
   if [ -x "$CLI_DIR/hopwatch" ]; then
     ln -sfn "$CLI_DIR/hopwatch" "$BIN_DIR/hopwatch"
     cyan "• Linked CLI: $BIN_DIR/hopwatch -> $CLI_DIR/hopwatch"
-  fi
-  if [ -x "$CLI_DIR/netdiag" ]; then
-    ln -sfn "$CLI_DIR/netdiag" "$BIN_DIR/netdiag"
-    cyan "• Linked CLI alias: $BIN_DIR/netdiag -> $CLI_DIR/netdiag"
   fi
 fi
 

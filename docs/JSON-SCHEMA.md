@@ -1284,7 +1284,7 @@ today's fields keeps working against tomorrow's catalog.
       "key": "wifi_rssi_dbm",
       "label": "WiFi signal",
       "help": "How strong the wireless signal is where your Mac sits, measured by the radio itself. A weak reading here explains stalls and dropouts even when everything past the router looks healthy.",
-      "why_absent": "Signal strength is only recorded by a privileged run — `sudo netdiag` in a terminal."
+      "why_absent": "Signal strength was not recorded during this check."
     }
   ]
 }
@@ -1419,8 +1419,7 @@ today's fields keeps working against tomorrow's catalog.
     `--history` metric entry whose absence from a stored run has a
     knowable cause: a check mode that skips the measurement (`--quick`,
     the background watcher, a `--speed-only`/`--dns-only`/…-focused run)
-    or a privilege it needs (`sudo netdiag` for the two WiFi radio
-    metrics). One or two plain sentences, rendered verbatim by consumers
+    or an unmeasured radio metric. One or two plain sentences, rendered verbatim by consumers
     — it names *why* the chart is empty, not what to do about it; the
     GUI supplies its own "Full check" affordance rather than the CLI
     dictating UI. Metrics with no single knowable cause (a report-card

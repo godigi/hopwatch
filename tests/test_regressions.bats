@@ -19,7 +19,7 @@ setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
   JSON_MODE=0 QUIET=0 QUICK=0 LOG=/dev/null
   SPUN=()
-  # thresholds.sh declares the cutoffs diagnosis.sh fires on; bin/netdiag
+  # thresholds.sh declares the cutoffs diagnosis.sh fires on; bin/hopwatch
   # sources it before common.sh and so must every test that exercises a rule.
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
@@ -89,12 +89,12 @@ spin() {
   run kill -0 "$beta";  [ "$status" -ne 0 ]
 }
 
-@test "bin/netdiag clears the spinner from its EXIT trap" {
-  run grep -n "progress_spin_stop" "$REPO/bin/netdiag"
+@test "bin/hopwatch clears the spinner from its EXIT trap" {
+  run grep -n "progress_spin_stop" "$REPO/bin/hopwatch"
   [ "$status" -eq 0 ]
   [[ "$output" == *"_netdiag_on_exit"* || "$output" == *"spin_stop"* ]] || return 1
   # The trap body itself must reference it, so Ctrl-C can't strand a spinner.
-  run awk '/^_netdiag_on_exit\(\)/,/^}/' "$REPO/bin/netdiag"
+  run awk '/^_netdiag_on_exit\(\)/,/^}/' "$REPO/bin/hopwatch"
   [[ "$output" == *"progress_spin_stop"* ]] || return 1
 }
 

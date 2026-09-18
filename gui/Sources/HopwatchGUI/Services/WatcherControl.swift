@@ -1,18 +1,11 @@
 import Foundation
 
-/// Toggles the launchd watcher — `netdiag --install-watcher` /
-/// `--uninstall-watcher` — and reports whether it is loaded.
+/// Manages legacy launchd watcher state — `hopwatch --uninstall-watcher` —
+/// and reports whether a legacy agent is loaded so it can be uninstalled.
 ///
-/// The watcher is what makes the history worth charting. Without it, the
-/// store only grows when someone remembers to run netdiag; with it, a
-/// `--quick` run lands every 15 minutes and the two-month view has actual
-/// density. It stays optional because it is a background job that touches
-/// the network on a timer, and that should be a choice.
-///
-/// The install and uninstall paths deliberately shell out to the CLI rather
-/// than writing the plist here. The plist embeds the resolved script path
-/// and the exact flag set, and having two places that decide those is how
-/// they drift.
+/// Historical baselines are recorded automatically on network arrival and
+/// on-demand full checks. This control ensures any legacy 15-minute launchd
+/// daemon from prior versions can be detected and cleanly unloaded.
 @MainActor
 @Observable
 final class WatcherControl {

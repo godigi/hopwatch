@@ -19,13 +19,13 @@ setup() {
   # metric_stats (per-network median/p10/p90) reuses --show's comparison
   # arithmetic, so the plain listing now needs THRESH_COMPARE_* too.
   # Sourced rather than hardcoded, so a test can never pass against a
-  # cutoff production does not use. bin/netdiag exports exactly these.
+  # cutoff production does not use. bin/hopwatch exports exactly these.
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
   export THRESH_COMPARE_MIN_SAMPLES THRESH_COMPARE_TAIL_PCTL
   # The judged block reads the same six cutoffs helpers/judgement.py's
   # JUDGED_METRICS names, and main() now requires them in every mode —
-  # bin/netdiag's _export_judging_thresholds exports exactly this list.
+  # bin/hopwatch's _export_judging_thresholds exports exactly this list.
   export LOSS_WARN_PCT LOSS_CRIT_PCT THRESH_BUFFERBLOAT_B_MS \
          THRESH_BUFFERBLOAT_C_MS THRESH_WIFI_RSSI_WEAK_DBM \
          THRESH_WIFI_RSSI_G1_DBM THRESH_MTU_STANDARD THRESH_MTU_CRIT \
@@ -809,19 +809,19 @@ for n in d['networks']:
 # ── CLI surface ──────────────────────────────────────────────────────────
 
 @test "--history emits one parseable object and exits 0" {
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --history"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --history"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; json.load(sys.stdin)'
 }
 
 @test "--history with a non-numeric limit exits 3, not 2" {
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --history=soon"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --history=soon"
   [ "$status" -eq 3 ]
   [[ "$output" == *"expects a run count"* ]] || return 1
 }
 
 @test "--history is documented in --help" {
-  run "$REPO/bin/netdiag" --help
+  run "$REPO/bin/hopwatch" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--history"* ]] || return 1
 }

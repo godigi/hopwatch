@@ -19,7 +19,7 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   JSON_MODE=0 QUIET=0 QUICK=0 EXPERT=0 REDACT=0 LOG=/dev/null
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
@@ -27,7 +27,7 @@ setup() {
   . "$REPO/lib/common.sh"
 }
 
-# Every phase name bin/netdiag hands to a wrapper, deduped and sorted.
+# Every phase name bin/hopwatch hands to a wrapper, deduped and sorted.
 wrapper_names() {
   # [a-z0-9_] and not [a-z_]: `ipv6` has a digit in it, and a pattern
   # that quietly skips one phase is a guard that passes while the thing it
@@ -47,7 +47,7 @@ declared_names() {
 
 # ── The plan and the run sequence agree ──────────────────────────────────
 
-@test "every phase bin/netdiag runs is declared in some mode's plan" {
+@test "every phase bin/hopwatch runs is declared in some mode's plan" {
   local missing
   missing="$(comm -23 <(wrapper_names) <(declared_names))"
   [ -z "$missing" ] || {
@@ -58,11 +58,11 @@ declared_names() {
   }
 }
 
-@test "every phase a plan declares is one bin/netdiag actually runs" {
+@test "every phase a plan declares is one bin/hopwatch actually runs" {
   local extra
   extra="$(comm -13 <(wrapper_names) <(declared_names))"
   [ -z "$extra" ] || {
-    echo "planned phases that nothing in bin/netdiag runs:"
+    echo "planned phases that nothing in bin/hopwatch runs:"
     echo "$extra"
     return 1
   }

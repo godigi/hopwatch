@@ -37,13 +37,11 @@ def get_repo_root() -> str:
 
 def get_current_version(repo_root: str) -> str:
     bin_path = os.path.join(repo_root, "bin", "hopwatch")
-    if not os.path.exists(bin_path):
-        bin_path = os.path.join(repo_root, "bin", "netdiag")
     with open(bin_path, "r", encoding="utf-8") as f:
         content = f.read()
         match = re.search(r'^(?:HOPWATCH|NETDIAG)_VERSION="([^"]+)"', content, re.MULTILINE)
         if not match:
-            raise ValueError(f"Could not find HOPWATCH_VERSION or NETDIAG_VERSION in {bin_path}")
+            raise ValueError(f"Could not find HOPWATCH_VERSION in {bin_path}")
         return match.group(1)
 
 
@@ -147,7 +145,7 @@ def update_changelog(
         replacement = (
             f"## [Unreleased]\n\n"
             f"## [{next_version}] - {today}\n\n"
-            f"{unreleased_body}\n"
+            f"{unreleased_body}\n\n"
         )
     else:
         commit_bullets = []
@@ -162,7 +160,7 @@ def update_changelog(
             f"## [Unreleased]\n\n"
             f"## [{next_version}] - {today}\n\n"
             f"### Changes\n\n"
-            f"{bullets_str}\n"
+            f"{bullets_str}\n\n"
         )
 
     text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1, flags=re.MULTILINE)
@@ -177,7 +175,7 @@ def update_changelog(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Automated version bumper for netdiag")
+    parser = argparse.ArgumentParser(description="Automated version bumper for hopwatch")
     parser.add_argument(
         "--type",
         choices=["major", "minor", "patch", "auto"],
@@ -206,7 +204,7 @@ def main() -> int:
         bump_type = detect_bump_type(commits)
 
     next_version = calculate_next_version(current_version, bump_type)
-    print(f"Bumping netdiag: {current_version} -> {next_version} ({bump_type})")
+    print(f"Bumping hopwatch: {current_version} -> {next_version} ({bump_type})")
     if commits:
         print(f"Found {len(commits)} commit(s) since {latest_tag}:")
         for c in commits[:5]:
@@ -218,7 +216,7 @@ def main() -> int:
         print("[DRY RUN] No files modified.")
         return 0
 
-    # 1. bin/hopwatch (and bin/netdiag if it exists as regular file)
+    # 1. bin/hopwatch
     hopwatch_bin = os.path.join(repo_root, "bin", "hopwatch")
     if os.path.exists(hopwatch_bin) and not os.path.islink(hopwatch_bin):
         update_file(
@@ -228,14 +226,6 @@ def main() -> int:
         )
         update_file(
             hopwatch_bin,
-            r'^NETDIAG_VERSION="[^"]+"',
-            f'NETDIAG_VERSION="{next_version}"',
-        )
-
-    netdiag_bin = os.path.join(repo_root, "bin", "netdiag")
-    if os.path.exists(netdiag_bin) and not os.path.islink(netdiag_bin):
-        update_file(
-            netdiag_bin,
             r'^NETDIAG_VERSION="[^"]+"',
             f'NETDIAG_VERSION="{next_version}"',
         )
@@ -276,8 +266,6 @@ def main() -> int:
         ]
         if os.path.exists(hopwatch_bin):
             files_to_add.append("bin/hopwatch")
-        if os.path.exists(netdiag_bin):
-            files_to_add.append("bin/netdiag")
         if os.path.exists(cask_hopwatch):
             files_to_add.append("Casks/hopwatch.rb")
         if os.path.exists(sample_json):

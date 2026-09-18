@@ -4,7 +4,7 @@ name: shellcheck
 # deploy/gha-runners/README.md. ludeeus/action-shellcheck is a Docker-based
 # action; running it would need the runner user in the `docker` group, which
 # is root-equivalent. shellcheck is pre-installed on the runner host, so call
-# it directly instead. bin/netdiag is extensionless (bash shebang, no .sh
+# it directly instead. bin/hopwatch is extensionless (bash shebang, no .sh
 # suffix) and would not be caught by a bare `*.sh` glob — same detection gap
 # the previous action's shebang-scanning covered; listed explicitly here.
 on:
@@ -22,6 +22,6 @@ jobs:
           SHELLCHECK_OPTS: -x
         run: |
           mapfile -t files < <(git ls-files -- '*.sh' ':!tests/fixtures/*')
-          files+=(bin/hopwatch bin/netdiag)
+          files+=(bin/hopwatch)
           printf 'checking %s\n' "${files[@]}"
           shellcheck "${files[@]}"

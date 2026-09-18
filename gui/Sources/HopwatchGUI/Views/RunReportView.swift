@@ -588,7 +588,7 @@ struct RunReportView: View {
                     signalValue = "\(signal.value)\(suffix)"
                 }
             } else {
-                signalValue = "not recorded (needs sudo)"
+                signalValue = "not recorded"
             }
             out.append(Row(label: "Wi-Fi signal",
                            value: signalValue,

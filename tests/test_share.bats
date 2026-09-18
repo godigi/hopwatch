@@ -130,7 +130,7 @@ share() { python3 "$REPO/helpers/share.py" < "$RUN"; }
 }
 
 @test "the expert sections are deliberately absent" {
-  # bin/netdiag:483-488 already forces EXPERT=0 under --redact, because
+  # bin/hopwatch:483-488 already forces EXPERT=0 under --redact, because
   # the expert panel is where the identifying values live and a
   # partially redacted transcript is worse than none — it looks safe.
   run share
@@ -139,7 +139,7 @@ share() { python3 "$REPO/helpers/share.py" < "$RUN"; }
 }
 
 @test "--share reads a run on stdin with '-'" {
-  run bash -c "'$REPO/bin/netdiag' --share=- < '$RUN'"
+  run bash -c "'$REPO/bin/hopwatch' --share=- < '$RUN'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Report"* ]] || { echo "$output"; return 1; }
   [[ "$output" != *"203.0.113.77"* ]] || { echo "leaked the public IP"; return 1; }
@@ -148,26 +148,26 @@ share() { python3 "$REPO/helpers/share.py" < "$RUN"; }
 @test "--share on an empty store fails as a usage error, not a diagnosis" {
   # Exit 2 is reserved for a real diagnosis so wrappers can tell the two
   # apart. 'you have no runs' is a 3.
-  run env HOME="$BATS_TEST_TMPDIR" "$REPO/bin/netdiag" --share
+  run env HOME="$BATS_TEST_TMPDIR" "$REPO/bin/hopwatch" --share
   [ "$status" -eq 3 ]
   [[ "$output" == *"no stored run"* ]] || { echo "$output"; return 1; }
 }
 
 @test "--share is documented in --help" {
-  run "$REPO/bin/netdiag" --help
+  run "$REPO/bin/hopwatch" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--share"* ]] || return 1
 }
 
 @test "--share=- rejects malformed input as a usage error" {
-  run bash -c "printf 'not json' | '$REPO/bin/netdiag' --share=-"
+  run bash -c "printf 'not json' | '$REPO/bin/hopwatch' --share=-"
   [ "$status" -ne 0 ]
   [ "$status" -ne 2 ]
   [[ "$output" != *"Traceback"* ]] || { echo "$output"; return 1; }
 }
 
 @test "--share with a bogus id exits 3 with a message, not 0 with empty output" {
-  run env HOME="$BATS_TEST_TMPDIR" "$REPO/bin/netdiag" --share=definitely-not-a-real-id
+  run env HOME="$BATS_TEST_TMPDIR" "$REPO/bin/hopwatch" --share=definitely-not-a-real-id
   [ "$status" -eq 3 ]
   [ -n "$output" ] || { echo "empty output on a bogus id"; return 1; }
 }

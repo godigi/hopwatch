@@ -79,7 +79,6 @@ jobs:
       - name: Smoke test --capabilities
         run: |
           ./bin/hopwatch --version
-          ./bin/netdiag --version
           ./bin/hopwatch --capabilities > /tmp/caps.json
           # jq is installed above, so deps.jq must be true here. The type
           # checks in bats can't catch a broken env-var wire between bash
@@ -126,9 +125,6 @@ jobs:
         run: |
           ./install.sh --prefix /tmp/ndbin --no-brew
           test -L /tmp/ndbin/hopwatch
-          test -L /tmp/ndbin/netdiag
           /tmp/ndbin/hopwatch --help > /dev/null
-          /tmp/ndbin/netdiag --help > /dev/null
           ./install.sh --prefix /tmp/ndbin --uninstall
           test ! -e /tmp/ndbin/hopwatch
-          test ! -e /tmp/ndbin/netdiag

@@ -9,7 +9,7 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
 }
 
 @test "output: the text report has a suitability section" {

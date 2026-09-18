@@ -261,7 +261,7 @@ summarise_judged() {
 @test "netdiag --summary passes the cutoffs through" {
   # The CLI is what sources lib/thresholds.sh and exports. If it stops,
   # every metric silently loses its verdict.
-  run "$REPO/bin/netdiag" --summary=1
+  run "$REPO/bin/hopwatch" --summary=1
   [ "$status" -eq 0 ]
 }
 

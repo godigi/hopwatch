@@ -2027,8 +2027,7 @@ METRICS: list[dict[str, str]] = [
             "looks healthy."
         ),
         "why_absent": (
-            "Signal strength is only recorded by a privileged run — "
-            "`sudo netdiag` in a terminal."
+            "Signal strength was not recorded during this check."
         ),
     },
     {
@@ -2041,8 +2040,7 @@ METRICS: list[dict[str, str]] = [
             "alone still looks fine."
         ),
         "why_absent": (
-            "Signal strength is only recorded by a privileged run — "
-            "`sudo netdiag` in a terminal."
+            "Signal-to-noise ratio was not recorded during this check."
         ),
     },
     {

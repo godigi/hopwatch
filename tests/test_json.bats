@@ -11,7 +11,7 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   HELPERS="$REPO/helpers"
   export HELPERS
 }
@@ -57,7 +57,7 @@ else:
 
 @test "json: a missing UPnP state is not a measured path family" {
   # measured_families() is called directly, against this file's own rule,
-  # because the case cannot be reached through bin/netdiag: bash always
+  # because the case cannot be reached through bin/hopwatch: bash always
   # exports WAN_UPNP_STATE, defaulted to "unknown" by lib/globals.sh. A
   # null or empty state only happens when the binary is *not* the caller,
   # which emit_json.py's docstring explicitly supports ("a direct helper

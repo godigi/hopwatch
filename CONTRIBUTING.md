@@ -118,7 +118,7 @@ one-line summary, and `git describe` depends on it.
 
 | Path | What's in it |
 |------|--------------|
-| `bin/hopwatch` | argument parsing and the run orchestrator (`bin/netdiag` symlink) |
+| `bin/hopwatch` | argument parsing and the run orchestrator |
 | `lib/*.sh` | one module per check; `common.sh` has shared helpers |
 | `helpers/*.py` | JSON emission, baseline math, summaries (stock `python3`) |
 | `gui/` | native SwiftUI menu-bar app and dashboard (`Hopwatch.app`) |

@@ -131,11 +131,10 @@ fi
 [ "$UNINSTALL" -eq 1 ] || [ -w "$PREFIX" ] \
   || die "$PREFIX is not writable — pass --prefix with somewhere you own, e.g. --prefix ~/.local/bin"
 DEST="$PREFIX/hopwatch"
-DEST_LEGACY="$PREFIX/netdiag"
 
 if [ "$UNINSTALL" -eq 1 ]; then
   removed=0
-  for d in "$DEST" "$DEST_LEGACY"; do
+  for d in "$DEST" "$PREFIX/netdiag"; do
     if [ -L "$d" ] || [ -f "$d" ]; then
       rm -f "$d"
       note "removed: $d"
@@ -143,9 +142,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
     fi
   done
   if [ "$removed" -eq 1 ]; then
-    note "the checkout and your reports in ~/hopwatch (or ~/net-diag) were left in place."
+    note "the checkout and your reports in ~/hopwatch were left in place."
   else
-    note "nothing to remove at $DEST or $DEST_LEGACY"
+    note "nothing to remove at $DEST"
   fi
   exit 0
 fi
@@ -171,15 +170,10 @@ fi
 
 # ── Link it ──────────────────────────────────────────────────────────────
 SRC="$SRC_DIR/bin/hopwatch"
-SRC_LEGACY="$SRC_DIR/bin/netdiag"
 [ -x "$SRC" ] || die "$SRC is missing or not executable"
 
 ln -sfn "$SRC" "$DEST"
 note "installed: $DEST -> $SRC"
-if [ -x "$SRC_LEGACY" ]; then
-  ln -sfn "$SRC_LEGACY" "$DEST_LEGACY"
-  note "installed alias: $DEST_LEGACY -> $SRC_LEGACY"
-fi
 
 case ":$PATH:" in
   *":$PREFIX:"*) ;;

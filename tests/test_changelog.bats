@@ -148,16 +148,17 @@ require_tags() {
 
 # ── The file and the CLI agree ───────────────────────────────────────────
 
-@test "NETDIAG_VERSION is documented in the CHANGELOG" {
+@test "HOPWATCH_VERSION is documented in the CHANGELOG" {
   # The release workflow enforces this against the tag; here it is
   # enforced on every push, so a version bump without a CHANGELOG entry
   # fails at the point it is made rather than at release time.
   local cli
-  cli="$(sed -n 's/^NETDIAG_VERSION="\(.*\)"$/\1/p' "$REPO/bin/netdiag" | head -1)"
-  [ -n "$cli" ] || { echo "could not read NETDIAG_VERSION from bin/netdiag"; return 1; }
+  cli="$(sed -n 's/^HOPWATCH_VERSION="\(.*\)"$/\1/p' "$REPO/bin/hopwatch" | head -1)"
+  [ -n "$cli" ] || cli="$(sed -n 's/^NETDIAG_VERSION="\(.*\)"$/\1/p' "$REPO/bin/hopwatch" | head -1)"
+  [ -n "$cli" ] || { echo "could not read HOPWATCH_VERSION from bin/hopwatch"; return 1; }
   run python3 "$SECTION" --file "$CHANGELOG" --version "$cli"
   [ "$status" -eq 0 ] || {
-    echo "bin/netdiag reports $cli, which has no '## [$cli]' section"
+    echo "bin/hopwatch reports $cli, which has no '## [$cli]' section"
     return 1
   }
 }

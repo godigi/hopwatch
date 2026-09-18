@@ -2,7 +2,7 @@
 
 ## Current shape
 
-`bin/hopwatch` is a ~230-line orchestrator (with `bin/netdiag` symlinked for backwards compatibility). Every section lives in its
+`bin/hopwatch` is a ~230-line orchestrator. Every section lives in its
 own `lib/*.sh` module with a `Reads / Writes / Entry` header comment.
 Cross-module variables are declared in `lib/globals.sh` so the data
 flow is greppable: search for `WIFI_RSSI` and you'll find the one place

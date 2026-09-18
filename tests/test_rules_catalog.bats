@@ -12,9 +12,9 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   HELPERS="$REPO/helpers"
-  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/netdiag" \
+  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/hopwatch" \
     | sed -E 's/^NETDIAG_VERSION="([^"]*)"/\1/')"
   [ -n "$VERSION" ]
 }
@@ -252,9 +252,9 @@ for rid in ('B1', 'B2', 'M1', 'NT-1'):
   local q="['\"]"
   local scan_set mon_set
   scan_set="$(grep -ohE "add_diag[[:space:]]+${q}?(critical|warn|info)${q}?[[:space:]]+${q}?[A-Za-z0-9_-]+${q}?" \
-    "$REPO/bin/netdiag" "$REPO"/lib/*.sh | awk '{print $NF}' | tr -d '"' | tr -d "'" | sort -u)"
+    "$REPO/bin/hopwatch" "$REPO"/lib/*.sh | awk '{print $NF}' | tr -d '"' | tr -d "'" | sort -u)"
   mon_set="$(grep -ohE "_mon_add_rule[[:space:]]+${q}?(critical|warn|info)${q}?[[:space:]]+${q}?[A-Za-z0-9_-]+${q}?" \
-    "$REPO/bin/netdiag" "$REPO"/lib/*.sh | awk '{print $NF}' | tr -d '"' | tr -d "'" | sort -u)"
+    "$REPO/bin/hopwatch" "$REPO"/lib/*.sh | awk '{print $NF}' | tr -d '"' | tr -d "'" | sort -u)"
   [ -n "$scan_set" ]
   [ -n "$mon_set" ]
   run "$NETDIAG" --rules-catalog
@@ -362,13 +362,13 @@ assert len(ids) == len(set(ids)), sorted(set(x for x in ids if ids.count(x) > 1)
   local add_diag_re="add_diag[[:space:]]+${q}?(critical|warn|info)${q}?[[:space:]]+${q}?[A-Za-z0-9_-]+${q}?"
   local mon_add_rule_re="_mon_add_rule[[:space:]]+${q}?(critical|warn|info)${q}?[[:space:]]+${q}?[A-Za-z0-9_-]+${q}?"
 
-  # bin/netdiag is included even though no call site lives there today:
+  # bin/hopwatch is included even though no call site lives there today:
   # an add_diag added to the entry point would otherwise vanish from both
   # sides of the comparison at once.
   local extracted
   extracted="$(
-    { grep -ohE "$add_diag_re" "$REPO/bin/netdiag" "$REPO"/lib/*.sh
-      grep -ohE "$mon_add_rule_re" "$REPO/bin/netdiag" "$REPO"/lib/*.sh
+    { grep -ohE "$add_diag_re" "$REPO/bin/hopwatch" "$REPO"/lib/*.sh
+      grep -ohE "$mon_add_rule_re" "$REPO/bin/hopwatch" "$REPO"/lib/*.sh
     } | awk '{print $NF}' | tr -d '"' | tr -d "'" | sort -u
   )"
   [ -n "$extracted" ]

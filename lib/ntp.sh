@@ -53,15 +53,6 @@ ntp_run() {
   else
     warn "sntp returned no result (firewall blocking UDP/123?)."
   fi
-  # Network time settings — getters need root on Tahoe; try -n, skip on failure.
-  if sudo -n true 2>/dev/null; then
-    NTP_USING_NETWORK_TIME="$(sudo -n systemsetup -getusingnetworktime 2>/dev/null \
-      | sed 's/^Network Time: //')"
-    NTP_SERVER="$(sudo -n systemsetup -getnetworktimeserver 2>/dev/null \
-      | sed 's/^Network Time Server: //')"
-    [ -n "$NTP_USING_NETWORK_TIME" ] && info "Network time: $NTP_USING_NETWORK_TIME"
-    [ -n "$NTP_SERVER" ]             && info "Network time server: $NTP_SERVER"
-  fi
 
   if [ -n "${NETDIAG_PAR_VARS:-}" ]; then
     setvar NTP_DRIFT_S "$NTP_DRIFT_S"

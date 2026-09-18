@@ -8,9 +8,9 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   HELPERS="$REPO/helpers"
-  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/netdiag" \
+  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/hopwatch" \
     | sed -E 's/^NETDIAG_VERSION="([^"]*)"/\1/')"
   [ -n "$VERSION" ]
 }
@@ -130,7 +130,7 @@ for b in d['bands']:
 }
 
 # ── Boundaries come from lib/thresholds.sh, not a second copy ───────────
-# bin/netdiag re-sources lib/thresholds.sh on every invocation, so an
+# bin/hopwatch re-sources lib/thresholds.sh on every invocation, so an
 # env override made *before* calling the CLI would just be clobbered —
 # these two call the helper directly, the same way test_show.bats drives
 # helpers/history.py's THRESH_COMPARE_* to prove the wiring is live.

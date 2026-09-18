@@ -885,36 +885,36 @@ assert ch[0]['summary'] == 'Network interface changed: en0 → en5'
 # These exit during argument validation, before any probe runs.
 
 @test "--monitor with a non-numeric interval exits 3, not 2" {
-  run "$REPO/bin/netdiag" --monitor --monitor-fast-interval abc
+  run "$REPO/bin/hopwatch" --monitor --monitor-fast-interval abc
   [ "$status" -eq 3 ]
   [[ "$output" == *"whole number of seconds"* ]] || return 1
 }
 
 @test "--monitor with a zero interval exits 3" {
-  run "$REPO/bin/netdiag" --monitor --monitor-medium-interval 0
+  run "$REPO/bin/hopwatch" --monitor --monitor-medium-interval 0
   [ "$status" -eq 3 ]
   [[ "$output" == *"at least 1 second"* ]] || return 1
 }
 
 @test "a monitor interval flag with no value exits 3" {
-  run "$REPO/bin/netdiag" --monitor --monitor-slow-interval
+  run "$REPO/bin/hopwatch" --monitor --monitor-slow-interval
   [ "$status" -eq 3 ]
   [[ "$output" == *"expects a value"* ]] || return 1
 }
 
 @test "the --monitor-*=VALUE form is accepted" {
-  run "$REPO/bin/netdiag" --monitor --monitor-fast-interval=nope
+  run "$REPO/bin/hopwatch" --monitor --monitor-fast-interval=nope
   [ "$status" -eq 3 ]
   [[ "$output" == *"whole number of seconds"* ]] || return 1
 }
 
 @test "--monitor-count is validated too" {
-  run "$REPO/bin/netdiag" --monitor --monitor-count -1
+  run "$REPO/bin/hopwatch" --monitor --monitor-count -1
   [ "$status" -eq 3 ]
 }
 
 @test "--monitor and its interval flags are documented in --help" {
-  run "$REPO/bin/netdiag" --help
+  run "$REPO/bin/hopwatch" --help
   [ "$status" -eq 0 ]
   for flag in --monitor --monitor-fast-interval --monitor-medium-interval \
               --monitor-slow-interval --monitor-count; do
@@ -924,7 +924,7 @@ assert ch[0]['summary'] == 'Network interface changed: en0 → en5'
 
 @test "--monitor writes nothing under the log directory" {
   # It runs for days. Anything it accumulates, it accumulates forever.
-  run grep -n 'LOG=/dev/null' "$REPO/bin/netdiag"
+  run grep -n 'LOG=/dev/null' "$REPO/bin/hopwatch"
   [ "$status" -eq 0 ]
   # Code lines only — the header comment names baseline.jsonl precisely to
   # say it is never written.
@@ -955,7 +955,7 @@ assert ch[0]['summary'] == 'Network interface changed: en0 → en5'
 # command line contains the pattern, so pgrep matches the wrong process and
 # the signal lands on the test runner.
 start_monitor() {
-  "$REPO/bin/netdiag" --monitor --monitor-fast-interval 2 \
+  "$REPO/bin/hopwatch" --monitor --monitor-fast-interval 2 \
     --monitor-medium-interval 3600 --monitor-slow-interval 3600 \
     > "$BATS_TEST_TMPDIR/stream.jsonl" 2>"$BATS_TEST_TMPDIR/stream.err" &
   printf '%s' "$!"
@@ -1108,7 +1108,7 @@ except Exception:
   # An intermediate shell stands in for the app: it spawns the monitor,
   # then is killed outright, exactly as a force-quit or a crash would be.
   local out="$BATS_TEST_TMPDIR/pid"
-  bash -c "'$REPO/bin/netdiag' --monitor --monitor-fast-interval 2 \
+  bash -c "'$REPO/bin/hopwatch' --monitor --monitor-fast-interval 2 \
              >/dev/null 2>&1 & echo \$! > '$out'; sleep 60" &
   local shell_pid=$!
   sleep 4
@@ -1179,7 +1179,7 @@ except Exception:
 }
 
 @test "monitor state block initializes every MON_PREV_ variable" {
-  # bin/netdiag runs set -u: an uninitialized MON_PREV_* would abort the
+  # bin/hopwatch runs set -u: an uninitialized MON_PREV_* would abort the
   # first emit. Every var _mon_emit forwards must be declared.
   for v in MON_HAVE_PREV MON_PREV_PUB_IP MON_PREV_PUB_CC MON_PREV_PUB_ISP \
            MON_PREV_VPN_ACTIVE MON_PREV_VPN_NAME MON_PREV_SSID \

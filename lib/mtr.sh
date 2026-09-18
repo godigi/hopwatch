@@ -127,10 +127,19 @@ parse_mtr_tsv() {
 mtr_run() {
   [ "$QUICK" -eq 0 ] || { progress_skip "--quick"; return 0; }
 
-  if command -v mtr >/dev/null 2>&1 && sudo -n true 2>/dev/null && command -v jq >/dev/null 2>&1; then
+  local -a mtr_cmd=()
+  if command -v mtr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    if mtr -c 1 127.0.0.1 >/dev/null 2>&1; then
+      mtr_cmd=(mtr)
+    elif sudo -n true 2>/dev/null; then
+      mtr_cmd=(sudo -n mtr)
+    fi
+  fi
+
+  if [ "${#mtr_cmd[@]}" -gt 0 ]; then
     hdr "Continuous loss to 1.1.1.1 (mtr -j -c 60 -i 0.2)"
     local mtr_json mtr_tsv
-    mtr_json="$(with_timeout 20 sudo -n mtr -j -c 60 -n -i 0.2 1.1.1.1 2>/dev/null || true)"
+    mtr_json="$(with_timeout 20 "${mtr_cmd[@]}" -j -c 60 -n -i 0.2 1.1.1.1 2>/dev/null || true)"
     printf '%s\n' "$mtr_json" >> "$LOG"
     if [ -z "$mtr_json" ] || ! printf '%s' "$mtr_json" | jq -e .report >/dev/null 2>&1; then
       warn "mtr returned no parseable report — falling back to per-hop loop."
@@ -145,12 +154,5 @@ mtr_run() {
   fi
 
   hdr "Per-hop loss (5 packets each)"
-  if ! command -v mtr >/dev/null 2>&1; then
-    info "Tip: \`brew install mtr\` enables a 60-cycle continuous-loss view."
-  elif ! command -v jq >/dev/null 2>&1; then
-    info "Tip: \`brew install jq\` and re-run to enable the mtr-based view."
-  elif ! sudo -n true 2>/dev/null; then
-    info "Tip: cache sudo creds (\`sudo -v\`) and re-run for the mtr-based view."
-  fi
   _run_per_hop_fallback
 }

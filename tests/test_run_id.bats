@@ -22,7 +22,7 @@ setup() {
   TMP="$BATS_TEST_TMPDIR"
   LOG_DIR="$TMP/net-diag"
   LOG="/dev/null"
-  NETDIAG_VERSION="$(sed -n 's/^NETDIAG_VERSION="\([^"]*\)".*/\1/p' "$REPO/bin/netdiag" | head -1)"
+  NETDIAG_VERSION="$(sed -n 's/^NETDIAG_VERSION="\([^"]*\)".*/\1/p' "$REPO/bin/hopwatch" | head -1)"
   TARGET=""
   RUN_MODE="quick"
   TIMESTAMP_ISO="2026-01-01T00:00:00Z"
@@ -110,7 +110,7 @@ assert 'run_id' not in rec, rec
 
 @test "run_id is null when HISTORY_APPEND is off, and nothing is appended" {
   # The shape --no-baseline, --mtu-only and --wifi-only all leave records
-  # in — see bin/netdiag's FOCUS block and the --no-baseline flag.
+  # in — see bin/hopwatch's FOCUS block and the --no-baseline flag.
   NO_BASELINE=1 HISTORY_APPEND=0
   run output_run
   [ "$status" -eq 0 ]
@@ -148,7 +148,7 @@ assert 'run_id' not in rec, rec
 @test "netdiag --json's run_id matches the id netdiag --history derives for the same run" {
   local home="$TMP/home_roundtrip"
   mkdir -p "$home"
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --quick --no-gping --json"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --quick --no-gping --json"
   # Not -eq 0: that means "this network is healthy", a fact about wherever
   # the test runs, not about the code under test. 3 is the one that would
   # mean netdiag itself broke.
@@ -156,7 +156,7 @@ assert 'run_id' not in rec, rec
   local run_id
   run_id="$(stdout_run_id)"
   [ "$run_id" != "None" ]
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --history"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --history"
   [ "$status" -eq 0 ]
   local hist_id
   hist_id="$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["runs"][-1]["id"])')"
@@ -166,13 +166,13 @@ assert 'run_id' not in rec, rec
 @test "a stray NETDIAG_RUN_ID exported by the caller's shell never reaches the stored record" {
   # build_json sets every other NETDIAG_* var explicitly; run_id is the one
   # exception by construction (the build that becomes the stored record
-  # never sets it). Without bin/netdiag's `unset NETDIAG_RUN_ID`, a var
+  # never sets it). Without bin/hopwatch's `unset NETDIAG_RUN_ID`, a var
   # already exported by the caller survives into that build's environment
   # and plants a bogus run_id key inside the very bytes history.py hashes
   # to derive the real one.
   local home="$TMP/home_stray_env"
   mkdir -p "$home"
-  run bash -c "HOME='$home' NETDIAG_RUN_ID=bogus '$REPO/bin/netdiag' --quick --no-gping --json"
+  run bash -c "HOME='$home' NETDIAG_RUN_ID=bogus '$REPO/bin/hopwatch' --quick --no-gping --json"
   [ "$status" -ne 3 ]
   local run_id
   run_id="$(stdout_run_id)"
@@ -190,7 +190,7 @@ assert 'run_id' not in rec, rec
 @test "netdiag --redact --json's run_id is null" {
   local home="$TMP/home_redact"
   mkdir -p "$home"
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --redact --quick --no-gping --json"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --redact --quick --no-gping --json"
   [ "$status" -ne 3 ]
   [ "$(stdout_run_id)" = "None" ]
 }
@@ -198,7 +198,7 @@ assert 'run_id' not in rec, rec
 @test "netdiag --no-baseline --json's run_id is null" {
   local home="$TMP/home_nobaseline"
   mkdir -p "$home"
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --no-baseline --quick --no-gping --json"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --no-baseline --quick --no-gping --json"
   [ "$status" -ne 3 ]
   [ "$(stdout_run_id)" = "None" ]
 }
@@ -206,7 +206,7 @@ assert 'run_id' not in rec, rec
 @test "netdiag --mtu-only --json's run_id is null, and nothing is appended" {
   local home="$TMP/home_mtu"
   mkdir -p "$home"
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --mtu-only --json"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --mtu-only --json"
   [ "$status" -ne 3 ]
   [ "$(stdout_run_id)" = "None" ]
   [ ! -e "$home/net-diag/baseline.jsonl" ]
@@ -215,7 +215,7 @@ assert 'run_id' not in rec, rec
 @test "netdiag --wifi-only --json's run_id is null, and nothing is appended" {
   local home="$TMP/home_wifi"
   mkdir -p "$home"
-  run bash -c "HOME='$home' '$REPO/bin/netdiag' --wifi-only --json"
+  run bash -c "HOME='$home' '$REPO/bin/hopwatch' --wifi-only --json"
   [ "$status" -ne 3 ]
   [ "$(stdout_run_id)" = "None" ]
   [ ! -e "$home/net-diag/baseline.jsonl" ]

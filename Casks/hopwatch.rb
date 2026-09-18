@@ -11,7 +11,6 @@ cask "hopwatch" do
 
   app "Hopwatch.app"
   binary "#{appdir}/Hopwatch.app/Contents/Resources/cli/bin/hopwatch"
-  binary "#{appdir}/Hopwatch.app/Contents/Resources/cli/bin/netdiag"
 
   zap trash: [
     "~/Library/Application Support/com.godigi.hopwatch",

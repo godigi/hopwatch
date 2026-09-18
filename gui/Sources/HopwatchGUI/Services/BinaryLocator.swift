@@ -1,30 +1,25 @@
 import CoreWLAN
 import Foundation
 
-/// Finds the `netdiag` executable, and defines the environment every child
+/// Finds the `hopwatch` executable, and defines the environment every child
 /// process gets.
 ///
-/// This is more delicate than it looks. `netdiag` is normally a *symlink*
-/// (`~/bin/netdiag` → the repo's `bin/netdiag`) whose first act is to
-/// re-exec itself under Homebrew bash 5, because macOS still ships bash
-/// 3.2. It then shells out to `python3`, `dig`, `nc`, `sntp` and friends.
+/// This is more delicate than it looks. `hopwatch` is an executable
+/// whose first act is to re-exec itself under Homebrew bash 5, because macOS
+/// still ships bash 3.2. It then shells out to `python3`, `dig`, `nc`, `sntp` and friends.
 ///
 /// A GUI app launched from Finder inherits almost nothing: `launchd` gives
 /// it a minimal `PATH` that does not include `/opt/homebrew/bin`. Left
-/// alone, the re-exec fails and netdiag exits 3 with "requires bash 5" —
+/// alone, the re-exec fails and hopwatch exits 3 with "requires bash 5" —
 /// which surfaces in the app as an empty dashboard and no explanation. So
 /// every child gets an explicit PATH.
 ///
-/// Resolution order (T7): user override → the CLI bundled inside this
-/// app (`Contents/Resources/cli/bin/netdiag`, put there by `gui/Makefile`'s
+/// Resolution order: user override → the CLI bundled inside this
+/// app (`Contents/Resources/cli/bin/hopwatch`, put there by `gui/Makefile`'s
 /// `bundle` target) → `~/bin` → Homebrew prefixes → a PATH walk. The
 /// bundled copy is checked right after the override, ahead of every
 /// on-disk guess, because it is schema-matched to this exact build of the
-/// app — a `~/bin/netdiag` from a different checkout could be an older or
-/// newer CLI emitting JSON this app doesn't expect. The override still
-/// wins over the bundle: it exists precisely so a developer working on a
-/// dev checkout of the CLI can point the app at it instead of the copy
-/// frozen inside the bundle at build time.
+/// app.
 enum BinaryLocator {
     /// Injected into every child process. Homebrew first (Apple Silicon,
     /// then Intel), then the system directories the CLI's own helpers need.
@@ -39,12 +34,7 @@ enum BinaryLocator {
     /// it and the candidates below take over. Fail-safe by absence, not
     /// by nil.
     private static var bundledBinary: String? {
-        if let hopwatchPath = Bundle.main.resourceURL?.appendingPathComponent("cli/bin/hopwatch").path,
-           FileManager.default.isExecutableFile(atPath: hopwatchPath) {
-            return hopwatchPath
-        }
-        return Bundle.main.resourceURL?
-            .appendingPathComponent("cli/bin/netdiag").path
+        Bundle.main.resourceURL?.appendingPathComponent("cli/bin/hopwatch").path
     }
 
     /// Where to look when the user has not set an override and no bundled
@@ -54,9 +44,6 @@ enum BinaryLocator {
         "\(NSHomeDirectory())/bin/hopwatch",
         "/opt/homebrew/bin/hopwatch",
         "/usr/local/bin/hopwatch",
-        "\(NSHomeDirectory())/bin/netdiag",
-        "/opt/homebrew/bin/netdiag",
-        "/usr/local/bin/netdiag",
     ]
 
     /// Resolved path, or nil. Checked fresh each time rather than cached:
@@ -82,8 +69,6 @@ enum BinaryLocator {
         for dir in processPATH.split(separator: ":") {
             let hopCandidate = "\(dir)/hopwatch"
             if FileManager.default.isExecutableFile(atPath: hopCandidate) { return hopCandidate }
-            let netCandidate = "\(dir)/netdiag"
-            if FileManager.default.isExecutableFile(atPath: netCandidate) { return netCandidate }
         }
         return nil
     }

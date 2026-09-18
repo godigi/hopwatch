@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # The rules -> activities projection. Pure Python, exercised directly:
 # every case here is about the mapping, not about a probe, so nothing in
-# this file runs bin/netdiag.
+# this file runs bin/hopwatch.
 
 setup() {
   HELPERS="${BATS_TEST_DIRNAME}/../helpers"

@@ -22,14 +22,14 @@ setup() {
   ARCHIVE="$TMP/baseline-archive.jsonl"
   : > "$LIVE"
   # Sourced rather than hardcoded, so a test can never pass against a
-  # cutoff production does not use. bin/netdiag exports exactly these.
+  # cutoff production does not use. bin/hopwatch exports exactly these.
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
   export THRESH_COMPARE_MIN_SAMPLES THRESH_COMPARE_TAIL_PCTL
   # helpers/history.py's main() now requires the judged thresholds
   # unconditionally, in every mode including --show, so the hist()/show()
   # helpers below — which call history.py directly rather than through
-  # bin/netdiag — need them exported too. Same list bin/netdiag's
+  # bin/hopwatch — need them exported too. Same list bin/hopwatch's
   # _export_judging_thresholds exports.
   export LOSS_WARN_PCT LOSS_CRIT_PCT THRESH_BUFFERBLOAT_B_MS \
          THRESH_BUFFERBLOAT_C_MS THRESH_WIFI_RSSI_WEAK_DBM \
@@ -94,7 +94,7 @@ for r in json.load(sys.stdin)["runs"]:
     print(r["id"])'
 }
 
-# Put the fixture where bin/netdiag looks for it.
+# Put the fixture where bin/hopwatch looks for it.
 as_home() {
   mkdir -p "$TMP/net-diag"
   cp "$LIVE" "$TMP/net-diag/baseline.jsonl"
@@ -523,7 +523,7 @@ assert set(m) == {'value','median','p10','p90','percentile','n',
   as_home
   local id
   id="$(ids | head -1)"
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show='$id'"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show='$id'"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; json.load(sys.stdin)'
 }
@@ -531,7 +531,7 @@ assert set(m) == {'value','median','p10','p90','percentile','n',
 @test "netdiag --show ID accepts the space-separated form too" {
   ramp '"gateway":{"rtt_avg_ms":@.0}'
   as_home
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show 2026-01-05T00:00:00Z"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show 2026-01-05T00:00:00Z"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"position":5'* ]] || return 1
 }
@@ -539,24 +539,24 @@ assert set(m) == {'value','median','p10','p90','percentile','n',
 @test "netdiag --show with no id exits 3, not 2" {
   # 2 is reserved for a real diagnosis, so a wrapper can tell a typo from a
   # broken network.
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show"
   [ "$status" -eq 3 ]
   [[ "$output" == *"expects a run id"* ]] || return 1
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show="
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show="
   [ "$status" -eq 3 ]
 }
 
 @test "netdiag --show with an unknown id exits 3, not 2" {
   ramp '"gateway":{"rtt_avg_ms":@.0}'
   as_home
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show=2026-01-05T00:00:00Z.deadbeef"
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show=2026-01-05T00:00:00Z.deadbeef"
   [ "$status" -eq 3 ]
 }
 
 @test "netdiag --show stamps the running version, not the record's" {
   ramp '"gateway":{"rtt_avg_ms":@.0}'
   as_home
-  run bash -c "HOME='$TMP' '$REPO/bin/netdiag' --show=2026-01-05T00:00:00Z \
+  run bash -c "HOME='$TMP' '$REPO/bin/hopwatch' --show=2026-01-05T00:00:00Z \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"version\"], d[\"run\"][\"version\"])'"
   [ "$status" -eq 0 ]
   [ "${output% *}" != "0.6.0" ]
@@ -564,7 +564,7 @@ assert set(m) == {'value','median','p10','p90','percentile','n',
 }
 
 @test "--show is documented in --help" {
-  run "$REPO/bin/netdiag" --help
+  run "$REPO/bin/hopwatch" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--show"* ]] || return 1
 }

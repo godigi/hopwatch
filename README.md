@@ -40,14 +40,14 @@
 | 🔍 **40+ Diagnostic Checks** | Bufferbloat, path MTU, captive portals, Wi-Fi sticky APs, DNS hijacking, and DHCP lease expiry. |
 | 🛡️ **Zero Jargon & Redacted Sharing** | Human-readable diagnoses with actionable fixes; 1-click sanitized reports safe for support tickets. |
 | 📈 **Per-Network Baselines** | Profiles each Wi-Fi and wired network to flag latency spikes and regressions. |
-| 🔄 **Continuous Background Monitoring** | LaunchAgent watcher & recorder detect flapping outages and track downtime across reboots. |
+| 🔄 **Continuous Monitoring & Outage Journaling** | Live menu bar monitor and background event recorder track flapping outages and downtime across reboots. |
 
 ---
 
 ## Quick Install
 
 ### Option A: 1-Line Instant Installer (Mac App + CLI) ⚡ *(Recommended)*
-Run this in your terminal. It installs `Hopwatch.app` to `/Applications`, links the `hopwatch` (and `netdiag`) command line tool to your PATH, clears Gatekeeper quarantine, and launches the menu bar app:
+Run this in your terminal. It installs `Hopwatch.app` to `/Applications`, links the `hopwatch` command line tool to your PATH, clears Gatekeeper quarantine, and launches the menu bar app:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh | bash
 ```
@@ -111,9 +111,9 @@ When the internet is flaky you don't have time to run `ping`, `traceroute`,
 `dig`, `ipconfig`, `wdutil`, `mtr`, `system_profiler`, and `speedtest`
 separately and correlate the outputs by hand. Hopwatch does that and tells
 you where to look first. For *intermittent* problems — where the failure
-window is gone by the time you can investigate — `hopwatch --watch` or the
-`--install-watcher` LaunchAgent runs it on a cron so the baseline catches
-the regression on the next pass.
+window is gone by the time you can investigate — Hopwatch proactively monitors
+your connection live in your menu bar (or via `hopwatch --monitor` / `--watch`),
+flagging regressions and drops the moment they occur.
 
 ### Hopwatch vs. Traditional Tools
 
@@ -161,12 +161,10 @@ curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install.sh \
 To remove Hopwatch entirely:
 
 ```sh
-hopwatch --uninstall-watcher            # if you installed the LaunchAgent
+hopwatch --uninstall-recorder           # if you installed the background recorder LaunchAgent
 ~/.local/share/hopwatch/install.sh --uninstall
 rm -rf ~/.local/share/hopwatch ~/hopwatch
 ```
-
-*(Legacy `netdiag` alias and `~/net-diag` directories are cleaned up automatically).*
 
 </details>
 
@@ -193,15 +191,12 @@ hopwatch --summary[=HOURS]        # aggregate ~/hopwatch/baseline.jsonl
 hopwatch --history[=N]            # whole run store as network-grouped JSON
 hopwatch --show=ID                # one stored run, judged against its network
 hopwatch --share[=ID|-]           # one run as a pasteable, redacted report
-hopwatch --install-watcher        # launchd plist, every 15 min, background
-hopwatch --uninstall-watcher
+hopwatch --install-recorder       # launchd plist, background outage journal
+hopwatch --uninstall-recorder
 hopwatch --version                # print the version and exit
 hopwatch --capabilities           # JSON handshake: schemas, features, deps
 hopwatch --rules-catalog          # JSON catalog: every rule ID, title, blurb
 ```
-
-> [!NOTE]
-> **Compatibility Alias:** `netdiag` is maintained as a direct symlink/alias to `hopwatch` with full arguments and flags compatibility.
 
 | Flag                 | Effect                                                 |
 |----------------------|--------------------------------------------------------|
@@ -262,7 +257,6 @@ hopwatch --monitor | jq -c .status    # watch the rules a program would see
 hopwatch --history | jq .networks     # which networks have I been on?
 hopwatch --speed-only         # "how fast is it *right now*?"
 hopwatch --share              # paste the most recent run into a support chat
-sudo hopwatch                 # unlocks RSSI/noise/channel + mtr per-hop
 ```
 
 ### Watching a run happen
@@ -343,8 +337,6 @@ kept/masked table. A real capture is at
 `~/hopwatch/` is capped: the newest 200 `.log` files and the newest 2000
 `baseline.jsonl` records are kept, pruned at the end of each run. Override
 with `HOPWATCH_KEEP_LOGS` / `HOPWATCH_KEEP_HISTORY` (`0` disables pruning).
-This matters most with `--install-watcher`, which otherwise adds 96 logs
-and 96 history records a day, forever.
 
 ### Baselines are per-network
 
@@ -388,7 +380,7 @@ paged for a broken network, not for a typo in its own arguments.
 The default run is a compact Report card plus plain-English findings —
 no jargon, and each finding says what it means for you and what to do.
 Abridged from [`examples/sample-output.txt`](./examples/sample-output.txt),
-a real `netdiag --redact` run:
+a real `hopwatch --redact` run:
 
 ```
 ── Report ──
@@ -464,10 +456,9 @@ would say the same thing twice.
 - **Required:** bash 5 (`brew install bash`), and macOS built-ins
   (`ipconfig`, `networksetup`, `route`, `scutil`, `dig`, `traceroute`,
   `ping`, `nc`, `arp`, `system_profiler`, `sntp`, `curl`, `log`).
-- **Optional (Homebrew):** `jq` (only enables `mtr`'s sudo-only per-hop
-  view and Tailscale's VPN name — `--json`, `--history`, `--monitor` and
+- **Optional (Homebrew):** `jq` (for Tailscale VPN detection and raw JSON formatting — `--json`, `--history`, `--monitor` and
   the speed test are all python3-based and run without it), `mtr`
-  (richer per-hop loss), `gping` (live monitoring on exit), `speedtest`
+  (continuous per-hop loss), `gping` (live monitoring on exit), `speedtest`
   (Ookla) or `speedtest-cli`.
 - **Bundled Python helpers** use stock `/usr/bin/python3` only — no extra
   packages.
@@ -476,73 +467,25 @@ Missing optional deps degrade gracefully with a one-line install hint.
 
 ## Permissions
 
-Sudo-free by default. `sudo hopwatch` unlocks:
+Hopwatch is completely sudo-free. It never prompts for elevated privileges and performs all diagnostics, latency tests, speed tests, and background monitoring in standard user space.
 
-- Rich WiFi metrics via `wdutil info` (RSSI, noise, channel, PHY, tx rate)
-- `mtr` per-hop loss (raw sockets need root)
-- `systemsetup -getusingnetworktime` / `-getnetworktimeserver`
+## Continuous Monitoring & Outage Logging
 
-The script uses `sudo -n` for these — if creds aren't cached it skips
-with a hint, never prompts mid-run.
+Hopwatch continuously tracks connectivity in your menu bar, alerting you the moment a link drops or degrades. 
 
-## Continuous monitoring
-
-For intermittent problems, run on a schedule:
+To track outages and downtime episodes across reboots in headless environments, install the **event recorder** — a lightweight launchd agent running `--monitor` that logs network transitions to `~/hopwatch/events.jsonl`:
 
 ```sh
-hopwatch --install-watcher    # launchd, every 15 min
-# ... later ...
-hopwatch --summary=168        # what happened this past week?
+hopwatch --install-recorder   # keeps running in background, restarts across reboots
+hopwatch --events=24          # summarize downtime episodes and faults over last 24h
 ```
 
-For outages rather than snapshots, install the **recorder** — a launchd
-agent running one long-lived `--monitor` that appends every transition to
-`~/hopwatch/events.jsonl`:
+With event recording active, diagnostics go beyond a single snapshot:
+- `AV-1` alerts when the network dropped repeatedly or experienced significant downtime over the last day.
+- `AV-2` catches brief transient micro-outages that occurred between manual checks.
+- Outages are paired into episodes with exact durations, distinguishing genuine network drops from when your Mac was asleep with its lid closed.
 
-```sh
-hopwatch --install-recorder   # keeps running, and restarts across reboots
-hopwatch --events=24          # what changed, and how long each fault lasted
-```
-
-With a recorder running, a scan also stops being only a snapshot: `AV-1`
-warns when this network dropped repeatedly or for long enough to matter
-in the last day, and `AV-2` names the drops short enough that a check run
-either side of one would have found nothing wrong both times. Both are
-scoped to the network you are actually on, and both say what fraction of
-the window nobody was watching — a Mac that spent the night asleep has a
-24-hour window that is mostly guesswork, and the report says so rather
-than reporting a clean night.
-
-
-The 15-minute watcher above cannot answer "was the internet down at 03:14
-and for how long" — anything shorter than its cadence happens entirely
-between two clean runs. The recorder can. `--events` pairs faults into
-episodes with durations, and reports how much of the window was actually
-observed, so a four-hour outage is never confused with a four-hour closed
-lid.
-
-`baseline.jsonl` is append-only at `~/hopwatch/baseline.jsonl`; pipe it
-through `jq` for ad-hoc analysis. Once it passes its retention cap the
-oldest records roll into `baseline-archive.jsonl` rather than being
-deleted — `--history` reads both.
-
-**Hopwatch can't install the watcher from `~/Documents`, `~/Desktop` or
-`~/Downloads`, and will tell you so.** A launchd agent gets no access to
-those folders and cannot ask for any, so a watcher installed from a clone
-in one of them fails with `Operation not permitted` on every run —
-forever, and silently, since the log it writes stays empty either way.
-That happened to this project for seventeen days and 1,386 failed runs
-before anything noticed. `--install-watcher` now refuses those paths and
-says what to do instead; if you installed one before that landed, any
-run will report it as `ND-1`:
-
-```
-⚠  Background watcher   can't run from this folder
-```
-
-Fix it by installing Hopwatch outside those folders — the one-line
-installer puts it in `~/.local/share/hopwatch` — then
-`hopwatch --uninstall-watcher && hopwatch --install-watcher`.
+`baseline.jsonl` stores completed diagnostic runs at `~/hopwatch/baseline.jsonl` (captured automatically on network arrivals and on-demand full checks). Pipe it through `jq` or view the Trends tab in the Mac app for longitudinal analysis. Oldest records roll into `baseline-archive.jsonl` upon reaching the retention cap.
 
 ### `--watch` vs `--monitor`
 
@@ -661,7 +604,7 @@ Yes. Run `hopwatch --redact` or `hopwatch --share`. Hopwatch masks identifying p
 Standard tools test only a single variable (e.g. `ping` checks reachability; `speedtest` checks bandwidth; `wdutil` checks radio stats) without context. Hopwatch runs all checks in parallel, correlates them, scores the results against your network's historical baseline, and tells you what to do in plain English.
 
 ### Does Hopwatch require `sudo`?
-No. Hopwatch runs completely sudo-free for all standard diagnostics, menu bar monitoring, and speed tests. Running with `sudo hopwatch` is purely optional and unlocks raw-socket `mtr` per-hop loss and macOS `wdutil` radio metrics.
+No. Hopwatch runs 100% sudo-free for all standard diagnostics, menu bar monitoring, speed tests, and per-hop path analysis. It never prompts for elevated privileges.
 
 ## Roadmap
 

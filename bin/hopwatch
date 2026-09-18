@@ -492,7 +492,10 @@ Modes (exit after running, don't run the normal check battery):
                              --monitor-medium-interval SEC    (default 60)
                              --monitor-slow-interval SEC      (default 300)
                              --monitor-count N   emit N samples then exit
-  --install-watcher        install a launchd plist that runs hopwatch
+  --install-recorder       install a launchd plist that runs hopwatch --monitor
+                           and logs outages to ~/hopwatch/events.jsonl.
+  --uninstall-recorder     remove the recorder launchd plist.
+  --install-watcher        (legacy) install a launchd plist that runs hopwatch
                            every 15 min in the background.
   --uninstall-watcher      remove the launchd plist.
   --version                print "hopwatch VERSION" and exit.

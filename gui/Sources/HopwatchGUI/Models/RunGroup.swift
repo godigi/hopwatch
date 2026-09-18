@@ -4,7 +4,7 @@ import Foundation
 /// the exact same health, severity, and fired rules within the same calendar day.
 ///
 /// ── The problem this fixes ──────────────────────────────────────────────────
-/// Background watchers run every 15 minutes, arrival checks run on reconnect,
+/// Arrival checks run on reconnect, checks trigger on alerts,
 /// and availability rules (like AV-1) span 24 hours. Without coalescing, a user
 /// browsing past checks sees dozens of identical rows saying the exact same
 /// thing within minutes of each other.

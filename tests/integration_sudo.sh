@@ -51,17 +51,17 @@ fi
 
 printf 'integration_sudo: OK — mtr reported %s hops via cached sudo.\n' "$HOP_COUNT"
 
-# Smoke-run netdiag itself with cached sudo so the orchestrator hits the
+# Smoke-run hopwatch itself with cached sudo so the orchestrator hits the
 # mtr branch and writes per_hop entries to JSON.
-JSON_OUT="$(./bin/netdiag --json --no-gping --no-bufferbloat --no-baseline 2>/dev/null)"
+JSON_OUT="$(./bin/hopwatch --json --no-gping --no-bufferbloat --no-baseline 2>/dev/null)"
 if [ -z "$JSON_OUT" ]; then
-  printf 'integration_sudo: FAIL — netdiag --json produced no output.\n' >&2
+  printf 'integration_sudo: FAIL — hopwatch --json produced no output.\n' >&2
   exit 1
 fi
 
 PER_HOP_COUNT="$(printf '%s' "$JSON_OUT" | jq -r '.per_hop | length')"
 if [ "$PER_HOP_COUNT" -lt 1 ]; then
-  printf 'integration_sudo: FAIL — netdiag per_hop is empty.\n' >&2
+  printf 'integration_sudo: FAIL — hopwatch per_hop is empty.\n' >&2
   exit 1
 fi
 

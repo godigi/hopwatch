@@ -9,19 +9,19 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   HELPERS="$REPO/helpers"
-  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/netdiag" \
+  VERSION="$(grep -m1 '^NETDIAG_VERSION=' "$REPO/bin/hopwatch" \
     | sed -E 's/^NETDIAG_VERSION="([^"]*)"/\1/')"
   [ -n "$VERSION" ]
 }
 
 # ── --version ──────────────────────────────────────────────────────────
 
-@test "--version prints netdiag VERSION and exits 0" {
+@test "--version prints hopwatch VERSION and exits 0" {
   run "$NETDIAG" --version
   [ "$status" -eq 0 ]
-  [ "$output" = "netdiag $VERSION" ]
+  [ "$output" = "hopwatch $VERSION" ]
 }
 
 @test "--version is documented in --help" {
@@ -303,5 +303,5 @@ assert run_schema >= 2, f'suitability shipped but schemas.run is still {run_sche
   # loop, so nothing after --version is parsed.
   run "$NETDIAG" --version --this-flag-does-not-exist
   [ "$status" -eq 0 ]
-  [ "$output" = "netdiag $VERSION" ]
+  [ "$output" = "hopwatch $VERSION" ]
 }

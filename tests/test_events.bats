@@ -14,7 +14,7 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   EVENTS="$REPO/helpers/events.py"
   J="$BATS_TEST_TMPDIR/events.jsonl"
 }
@@ -322,9 +322,9 @@ assert 'recorder' in f, f
 @test "--install-recorder refuses a TCC-protected path, like the watcher" {
   fake_home="$BATS_TEST_TMPDIR/rhome"
   mkdir -p "$fake_home/Documents/netdiag/bin" "$fake_home/Library/LaunchAgents"
-  cp "$NETDIAG" "$fake_home/Documents/netdiag/bin/netdiag"
+  cp "$NETDIAG" "$fake_home/Documents/netdiag/bin/hopwatch"
   cp -R "$REPO/lib" "$REPO/helpers" "$fake_home/Documents/netdiag/"
-  run env HOME="$fake_home" "$fake_home/Documents/netdiag/bin/netdiag" --install-recorder
+  run env HOME="$fake_home" "$fake_home/Documents/netdiag/bin/hopwatch" --install-recorder
   [ "$status" -eq 3 ]
   [ ! -f "$fake_home/Library/LaunchAgents/com.hopwatch.recorder.plist" ]
   [ ! -f "$fake_home/Library/LaunchAgents/com.netdiag.recorder.plist" ]

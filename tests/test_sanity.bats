@@ -5,14 +5,14 @@
 # tests/fixtures/.
 
 setup() {
-  NETDIAG="${BATS_TEST_DIRNAME}/../bin/netdiag"
+  NETDIAG="${BATS_TEST_DIRNAME}/../bin/hopwatch"
 }
 
-@test "bin/netdiag is executable" {
+@test "bin/hopwatch is executable" {
   [ -x "$NETDIAG" ]
 }
 
-@test "bin/netdiag --help exits 0" {
+@test "bin/hopwatch --help exits 0" {
   run "$NETDIAG" --help
   [ "$status" -eq 0 ]
 }

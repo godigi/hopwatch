@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `netdiag` are recorded here. Format follows
+All notable changes to Hopwatch are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
@@ -11,6 +11,7 @@ All notable changes to `netdiag` are recorded here. Format follows
 ### Changes
 
 - refactor(app): migrate bundle identifier to com.godigi.hopwatch and deep-link notification settings
+
 ## [1.3.1] - 2026-09-17
 
 ### Changes

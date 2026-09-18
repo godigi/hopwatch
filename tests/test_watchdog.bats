@@ -15,7 +15,7 @@
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
-  NETDIAG="$REPO/bin/netdiag"
+  NETDIAG="$REPO/bin/hopwatch"
   JSON_MODE=0 QUIET=0 QUICK=0 EXPERT=0 REDACT=0 LOG=/dev/null
   LOG_DIR="$BATS_TEST_TMPDIR/net-diag"
   mkdir -p "$LOG_DIR"
@@ -32,33 +32,33 @@ setup() {
 # ── The folders a launchd agent can never run from ───────────────────────
 
 @test "a path under ~/Documents is refused" {
-  run watchdog_path_blocked "$HOME/Documents/AI-Workspace/netdiag/bin/netdiag"
+  run watchdog_path_blocked "$HOME/Documents/AI-Workspace/netdiag/bin/hopwatch"
   [ "$status" -eq 0 ]
 }
 
 @test "~/Desktop and ~/Downloads are refused too" {
-  run watchdog_path_blocked "$HOME/Desktop/netdiag/bin/netdiag"
+  run watchdog_path_blocked "$HOME/Desktop/netdiag/bin/hopwatch"
   [ "$status" -eq 0 ]
-  run watchdog_path_blocked "$HOME/Downloads/netdiag/bin/netdiag"
+  run watchdog_path_blocked "$HOME/Downloads/netdiag/bin/hopwatch"
   [ "$status" -eq 0 ]
 }
 
 @test "iCloud Drive is refused — the space in the path is not an escape" {
-  run watchdog_path_blocked "$HOME/Library/Mobile Documents/com~apple~CloudDocs/netdiag/bin/netdiag"
+  run watchdog_path_blocked "$HOME/Library/Mobile Documents/com~apple~CloudDocs/netdiag/bin/hopwatch"
   [ "$status" -eq 0 ]
 }
 
 @test "the install location install.sh actually uses is allowed" {
-  run watchdog_path_blocked "$HOME/.local/share/netdiag/bin/netdiag"
+  run watchdog_path_blocked "$HOME/.local/share/netdiag/bin/hopwatch"
   [ "$status" -ne 0 ]
-  run watchdog_path_blocked "/usr/local/bin/netdiag"
+  run watchdog_path_blocked "/usr/local/bin/hopwatch"
   [ "$status" -ne 0 ]
 }
 
 @test "a path merely containing the word Documents is allowed" {
   # The guard is about three specific folders, not a substring. Refusing
   # a working location is as wrong as accepting a broken one.
-  run watchdog_path_blocked "$HOME/src/Documents-app/bin/netdiag"
+  run watchdog_path_blocked "$HOME/src/Documents-app/bin/hopwatch"
   [ "$status" -ne 0 ]
   run watchdog_path_blocked "/opt/Documents/netdiag"
   [ "$status" -ne 0 ]
@@ -70,10 +70,10 @@ setup() {
   # to run every fifteen minutes forever.
   fake_home="$BATS_TEST_TMPDIR/home"
   mkdir -p "$fake_home/Documents/netdiag/bin" "$fake_home/Library/LaunchAgents"
-  cp "$NETDIAG" "$fake_home/Documents/netdiag/bin/netdiag"
+  cp "$NETDIAG" "$fake_home/Documents/netdiag/bin/hopwatch"
   cp -R "$REPO/lib" "$REPO/helpers" "$fake_home/Documents/netdiag/"
 
-  run env HOME="$fake_home" "$fake_home/Documents/netdiag/bin/netdiag" --install-watcher
+  run env HOME="$fake_home" "$fake_home/Documents/netdiag/bin/hopwatch" --install-watcher
   [ "$status" -eq 3 ]
   [[ "$output" == *"watcher not installed"* ]] || { echo "$output"; return 1; }
   [[ "$output" == *"Operation not permitted"* ]] || { echo "$output"; return 1; }
@@ -118,7 +118,7 @@ watchdog_state_for() {
 }
 
 @test "an off-contract launchd exit is failing, whatever the heartbeat says" {
-  # 126/127 and signals never reached bin/netdiag's EXIT trap at all.
+  # 126/127 and signals never reached bin/hopwatch's EXIT trap at all.
   [ "$(watchdog_state_for 0 126 60 99999)" = failing ]
   # 3 is the trap's own remap for an unplanned abort — the one exit code
   # that actually means the run broke.
@@ -258,7 +258,7 @@ watchdog_state_for() {
   # or falling through, which leaves WATCHER_STATE at `absent` and reads
   # as "no watcher installed" on a machine that has one.
   #
-  # `set -eu` because the suite runs that way and bin/netdiag does not, so
+  # `set -eu` because the suite runs that way and bin/hopwatch does not, so
   # this is the stricter of the two environments. It is *not* a guard
   # against an AND-list aborting the function: bash does not abort on a
   # failing member of an AND-list, which was checked against the chain
@@ -271,12 +271,12 @@ watchdog_state_for() {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.netdiag.watcher</string>
-  <key>ProgramArguments</key><array><string>/usr/local/bin/netdiag</string></array>
+  <key>ProgramArguments</key><array><string>/usr/local/bin/hopwatch</string></array>
   <key>StartInterval</key><integer>900</integer>
 </dict>
 </plist>
 PLIST
-  # bash 5, the way bin/netdiag finds it: `bash` on PATH is macOS's 3.2,
+  # bash 5, the way bin/hopwatch finds it: `bash` on PATH is macOS's 3.2,
   # which has no EPOCHREALTIME and so cannot source lib/common.sh under
   # `set -u` at all. Running this under 3.2 would fail for a reason that
   # has nothing to do with what it is testing.

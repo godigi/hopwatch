@@ -15,7 +15,7 @@ name: release
 # turn the two silent drifts this repo has already suffered into a loud
 # red X on the tag:
 #
-#   1. a tag whose version disagrees with bin/netdiag's NETDIAG_VERSION
+#   1. a tag whose version disagrees with bin/hopwatch's HOPWATCH_VERSION
 #      — v0.9.1 shipped with the constant bumped and no tag at all;
 #   2. a tag with no matching CHANGELOG section — undocumented release;
 #   3. a tag that still says [Unreleased] — CHANGELOG never rolled over.
@@ -62,7 +62,7 @@ jobs:
           # read it with at all, which makes the workflow_dispatch backfill
           # path impossible.
           #
-          # The one thing that must come from the tag is NETDIAG_VERSION,
+          # The one thing that must come from the tag is HOPWATCH_VERSION,
           # since the whole point of check 1 is what that specific commit
           # claims about itself. It is read with `git show <tag>:` below.
           ref: ${{ github.event.repository.default_branch }}

@@ -11,7 +11,7 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
 - **Platform:** macOS 14+ (Sonoma/Sequoia/Tahoe), Apple Silicon and Intel. No Linux portability for v1.
 - **Shell:** must work under both zsh (default) and Homebrew bash 5+. Declare bash in the shebang if needed.
 - **Dependencies:** prefer macOS built-ins (`ipconfig`, `networksetup`, `route`, `scutil`, `wdutil`, `dig`, `traceroute`, `ping`, `nc`, `arp`, `log`, `sntp`, `system_profiler`, `curl`). Acceptable Homebrew extras: `mtr`, `gping`, `speedtest` (or `speedtest-cli`), `jq`. Detect missing deps → skip with hint, never hard-fail.
-- **Permissions:** default run is sudo-free. sudo-only checks must try `sudo -n` first, degrade gracefully, never prompt mid-run.
+- **Permissions:** 100% sudo-free. Hopwatch never prompts for root and never nudges users to cache sudo credentials. All standard diagnostics, latency tests, and monitoring run in user space.
 - **Parallelism:** run independent checks concurrently via background jobs + `wait`. Target ≤ 35s for `--no-speed`, ≤ 8s `--quick`. A default run now includes the speed test and is bound by whichever speedtest CLI is installed — measured at ~115s with `speedtest-cli` and ~65s with Ookla's `speedtest`, which is why the installer prefers Ookla. `--no-speed` is the flag to reach for when the run needs to be fast.
   - Two checks must **not** be parallelised, because both measure a property of a quiet link: `internet_ping_run` (packet loss / latency) and `bufferbloat_run` (which saturates the link deliberately). Running the loss probe inside the parallel batch made it report 30% loss on a healthy network.
 - **Read-only:** never modify routing, DNS, WiFi, or ARP state.
@@ -156,7 +156,7 @@ Each must: produce a labeled section, contribute to JSON output, feed the Diagno
 
 ```
 hopwatch/
-├── bin/hopwatch             # bash entry point (symlinked to bin/netdiag)
+├── bin/hopwatch             # bash entry point
 ├── lib/*.sh                 # modular checks
 ├── helpers/*.py             # Python helpers for parsing and analytics
 ├── tests/{fixtures,*.bats}  # bats-core test suites
@@ -190,7 +190,7 @@ All 11 must hold before declaring the project shippable:
 1. `netdiag` runs end-to-end on macOS with all 14 sections, no shellcheck warnings, no uncaught errors.
 2. `netdiag --json` produces valid JSON matching `docs/JSON-SCHEMA.md`; `netdiag --json | jq .` succeeds.
 3. `netdiag --quick` skips bufferbloat, mtr, speed test, baseline diff, and WiFi scan; finishes in ≤ 8 s on a healthy network.
-4. `sudo netdiag` adds RSSI/noise/channel/PHY/tx_rate to the WiFi section and to the neighborhood scan.
+4. WiFi diagnostics capture SSID, BSSID, security, channel, and neighborhood scan completely sudo-free.
 5. `netdiag github.com` adds the target to ping, traceroute, TCP-reach, and DNS.
 6. Exit codes work as specified (0/1/2/3).
 7. A successful run writes a parseable human-readable log to `~/net-diag/<timestamp>.log`.
