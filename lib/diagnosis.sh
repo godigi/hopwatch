@@ -777,8 +777,36 @@ diagnosis_run() {
     ok "Nothing obviously wrong — your network looks healthy."
     return 0
   fi
+  # Determine most_likely_root_cause: critical rules take precedence, followed
+  # by active application/browser failures (BR-1) which completely break browsing,
+  # ahead of passive or advisory environmental warnings (such as WS-1 channel crowding).
+  for i in "${!DIAG[@]}"; do
+    if [ "${DIAG_SEV[$i]}" = "critical" ]; then
+      MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+      break
+    fi
+  done
+  if [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+    for i in "${!DIAG[@]}"; do
+      if [ "${DIAG_SEV[$i]}" = "warn" ] && [ "${DIAG_RULE[$i]}" = "BR-1" ]; then
+        MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+        break
+      fi
+    done
+  fi
+  if [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+    for s in warn info; do
+      for i in "${!DIAG[@]}"; do
+        if [ "${DIAG_SEV[$i]}" = "$s" ]; then
+          MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+          break 2
+        fi
+      done
+    done
+  fi
+
   # Sort by severity descending (critical → warn → info), preserving insertion
-  # order within each severity. First line emitted becomes most_likely_root_cause.
+  # order within each severity.
   # Each diagnosis is rendered as a wrapped paragraph: first line gets the
   # status icon + 1 space, continuation lines align under the text (4-col
   # indent). Blank line between diagnoses for readability.
@@ -786,7 +814,6 @@ diagnosis_run() {
   for s in critical warn info; do
     for i in "${!DIAG[@]}"; do
       if [ "${DIAG_SEV[$i]}" = "$s" ]; then
-        [ -z "$MOST_LIKELY_ROOT_CAUSE" ] && MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
         [ "$first" -eq 0 ] && say ""
         first=0
         _print_diagnosis_paragraph "$s" "${DIAG_RULE[$i]}" "${DIAG[$i]}"

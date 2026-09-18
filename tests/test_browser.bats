@@ -132,3 +132,20 @@ diag_text_for() {
   diagnosis_run >/dev/null
   ! diag_has BR-1 || { echo "BR-1 fired unexpectedly"; return 1; }
 }
+
+@test "diagnosis: BR-1 outranks advisory WS-1 in most_likely_root_cause" {
+  accuracy_baseline
+  IS_WIFI=1
+  WIFI_SCAN_CURRENT_CHANNEL_NEIGHBORS=8
+  THRESH_WIFI_CHANNEL_NEIGHBOURS=5
+  BROWSER_DESYNC_COUNT=1
+  BROWSER_DESYNC_APP="Google Chrome"
+  BROWSER_DESYNC_RUNNING_VER="153.0.8010.37"
+  BROWSER_DESYNC_DISK_VER="153.0.8010.48"
+  BROWSER_DESYNC_PID="75770"
+
+  diagnosis_run >/dev/null
+  diag_has WS-1 || { echo "WS-1 did not fire"; return 1; }
+  diag_has BR-1 || { echo "BR-1 did not fire"; return 1; }
+  [[ "$MOST_LIKELY_ROOT_CAUSE" == *"We detected that Google Chrome may not be working correctly right now"* ]]
+}
