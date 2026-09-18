@@ -28,3 +28,7 @@ Every change that lands on `main` represents a released version that users can d
 ### 4. Local Build & Testing Rule
 Whenever making changes and committing/pushing code:
 - Always rebuild and install the macOS app locally using `make install-gui` (which bundles, signs with stable identity, and installs to `/Applications/Hopwatch.app`), and relaunch it (`open /Applications/Hopwatch.app`) so that the user is continuously testing the latest built version.
+
+### 5. Local Work vs. Remote Release Gate
+- Development and testing are performed locally first. Changes are kept local until verified.
+- Whenever significant work or a feature milestone is completed locally, **always explicitly ask the user** if they would like to commit, push to remote `main`, and make a new version release available to the public. Never push to `main` without asking/confirmation.

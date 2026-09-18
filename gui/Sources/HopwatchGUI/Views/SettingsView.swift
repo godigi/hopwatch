@@ -77,9 +77,18 @@ struct SettingsView: View {
                 Picker("Show", selection: $appSettings.menuBarStyle) {
                     ForEach(MenuBarStyle.allCases) { Text($0.label).tag($0) }
                 }
+                if hasNotchScreen {
+                    Text("On MacBooks with a camera notch, macOS automatically hides menu bar items when too many icons are present. Selecting \"Status dot only\" uses the least space, or enable \"Show Hopwatch in Dock\" below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
-            Section("Startup") {
+            Section("Dock & Startup") {
+                Toggle("Show Hopwatch in Dock", isOn: $appSettings.showInDock)
+                Text("Keeps Hopwatch visible in your Dock and the ⌘⇥ App Switcher at all times.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Toggle("Launch Hopwatch at login", isOn: $appSettings.launchAtLogin)
             }
 
@@ -482,5 +491,9 @@ struct SettingsView: View {
         case false?: return "not installed"
         case nil:    return "unknown"
         }
+    }
+
+    private var hasNotchScreen: Bool {
+        NSScreen.screens.contains { $0.auxiliaryTopRightArea != nil }
     }
 }

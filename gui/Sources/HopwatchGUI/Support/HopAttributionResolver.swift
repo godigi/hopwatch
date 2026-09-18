@@ -38,6 +38,7 @@ public enum HopAttributionResolver {
 
     public enum Culprit: String, Equatable, Sendable {
         case none = "All Clear"
+        case mac = "This Mac"
         case wifi = "Wi-Fi Signal"
         case router = "Local Router"
         case isp = "Internet Service Provider"
@@ -45,6 +46,7 @@ public enum HopAttributionResolver {
         public var badgeTitle: String {
             switch self {
             case .none:   return "All Hops Healthy"
+            case .mac:    return "Culprit: Browser App"
             case .wifi:   return "Culprit: Weak Wi-Fi"
             case .router: return "Culprit: Router Issue"
             case .isp:    return "Culprit: ISP Outage"
@@ -54,6 +56,7 @@ public enum HopAttributionResolver {
         public var badgeTint: Color {
             switch self {
             case .none:   return .green
+            case .mac:    return .orange
             case .wifi:   return .orange
             case .router: return .red
             case .isp:    return .red
@@ -100,6 +103,9 @@ public enum HopAttributionResolver {
 
     // MARK: - Rule Classifications
 
+    private static let macCriticalRules: Set<String> = []
+    private static let macWarningRules: Set<String> = ["BR-1", "CK-1", "EDNS-1"]
+
     private static let wifiCriticalRules: Set<String> = ["G1", "W1", "WD-1"]
     private static let wifiWarningRules: Set<String> = ["W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
 
@@ -123,6 +129,14 @@ public enum HopAttributionResolver {
         bufferbloatInet: Double? = nil
     ) -> Result {
         let ruleSet = Set(rules)
+
+        // 0. Evaluate Mac / Host Health
+        var macHealth: HopHealth = .healthy
+        if !ruleSet.isDisjoint(with: macCriticalRules) {
+            macHealth = .critical
+        } else if !ruleSet.isDisjoint(with: macWarningRules) {
+            macHealth = .warning
+        }
 
         // 1. Evaluate Wi-Fi / Local Link Health
         var wifiHealth: HopHealth = .healthy
@@ -156,7 +170,14 @@ public enum HopAttributionResolver {
         let reassurance: String
         var badgeTitle: String
 
-        if wifiHealth != .healthy {
+        // A broken browser process (BR-1) takes precedence over minor/advisory local degradation
+        // when the physical network link is operational.
+        if ruleSet.contains("BR-1") && wifiHealth != .critical && routerHealth != .critical && ispHealth != .critical {
+            culprit = .mac
+            headline = "Browser Needs Relaunch"
+            badgeTitle = "Culprit: Browser App"
+            reassurance = "A web browser updated in the background while open and its active session files were removed from disk. Quitting and reopening the browser finishes the update and restores normal browsing."
+        } else if wifiHealth != .healthy {
             culprit = .wifi
             headline = "Local Wi-Fi Signal Degraded"
             badgeTitle = culprit.badgeTitle
@@ -229,6 +250,17 @@ public enum HopAttributionResolver {
             } else {
                 reassurance = "\(localStatus). The packet loss and downtime are upstream on your ISP's broadband network."
             }
+        } else if macHealth != .healthy {
+            culprit = .mac
+            headline = "Mac System / Application Issue"
+            badgeTitle = culprit.badgeTitle
+            if ruleSet.contains("CK-1") {
+                reassurance = "Your Mac's system clock has drifted significantly from network time, which can disrupt TLS handshakes and secure connections."
+            } else if ruleSet.contains("EDNS-1") {
+                reassurance = "An encrypted DNS profile is active on your Mac. If lookups fail, check your installed profile in System Settings."
+            } else {
+                reassurance = "A local application or system configuration on your Mac is affecting network connectivity."
+            }
         } else {
             culprit = .none
             headline = "All Network Hops Healthy"
@@ -238,7 +270,7 @@ public enum HopAttributionResolver {
 
         return Result(
             culprit: culprit,
-            macHealth: .healthy,
+            macHealth: macHealth,
             wifiHealth: wifiHealth,
             routerHealth: routerHealth,
             ispHealth: ispHealth,
@@ -253,7 +285,7 @@ public enum HopAttributionResolver {
     static func resolve(snapshot: RunSnapshot, fallbackRSSI: Int? = nil) -> Result {
         let rules = snapshot.diagnosis.compactMap(\.rule)
         let isWifi = snapshot.wifi != nil
-        return resolve(
+        var res = resolve(
             rules: rules,
             isWifi: isWifi,
             wifiRSSI: snapshot.wifi?.rssi ?? fallbackRSSI,
@@ -264,6 +296,23 @@ public enum HopAttributionResolver {
             bufferbloatGW: snapshot.bufferbloat.gwDeltaMs,
             bufferbloatInet: snapshot.bufferbloat.inetDeltaMs
         )
+        if rules.contains("BR-1"),
+           let brDiag = snapshot.diagnosis.first(where: { $0.rule == "BR-1" }),
+           res.culprit == .mac {
+            res = Result(
+                culprit: res.culprit,
+                macHealth: res.macHealth,
+                wifiHealth: res.wifiHealth,
+                routerHealth: res.routerHealth,
+                ispHealth: res.ispHealth,
+                headline: res.headline,
+                reassurance: brDiag.summary,
+                badgeTitle: res.badgeTitle,
+                isWired: res.isWired,
+                activeRules: res.activeRules
+            )
+        }
+        return res
     }
 
     static func resolve(sample: MonitorSample, fallbackRSSI: Int? = nil) -> Result {

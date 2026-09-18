@@ -129,6 +129,8 @@ private struct RuleChipPopover: View {
 /// `helpers/rules_catalog.py`'s `impacts` table and its blurbs, not here.
 struct SuitabilityPanel: View {
     let rows: [RunSnapshot.SuitabilityRow]
+    var catalog: RulesCatalog? = nil
+    @Environment(HopwatchCoordinator.self) private var coordinator
 
     var body: some View {
         // Nothing at all, rather than an empty card: a report from a CLI
@@ -157,6 +159,7 @@ struct SuitabilityPanel: View {
     /// where the point is a glance.
     private func tileView(_ row: RunSnapshot.SuitabilityRow) -> some View {
         let tint = Self.tint(row.verdict)
+        let activeCatalog = catalog ?? coordinator.rulesCatalog.catalog
         return VStack(spacing: Theme.Spacing.xs) {
             Image(systemName: Self.activitySymbol(row.activity))
                 .font(.title3)
@@ -180,7 +183,7 @@ struct SuitabilityPanel: View {
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .top)
         .background(tint.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-        .help(Self.detail(row) ?? Self.word(row.verdict))
+        .help(Self.detail(row, catalog: activeCatalog) ?? Self.word(row.verdict))
         .accessibilityElement(children: .combine)
     }
 
@@ -195,9 +198,29 @@ struct SuitabilityPanel: View {
     /// measured, or the rules that decided the verdict. Never a sentence
     /// composed here.
     static func detail(_ row: RunSnapshot.SuitabilityRow) -> String? {
+        detail(row, catalog: nil)
+    }
+
+    /// Enhanced detail using the rules catalog when available: resolves rule
+    /// titles and actionable remediation advice rather than bare rule codes.
+    static func detail(_ row: RunSnapshot.SuitabilityRow, catalog: RulesCatalog?) -> String? {
         if let reason = row.unmeasuredReason, !reason.isEmpty { return reason }
         guard !row.because.isEmpty else { return nil }
-        return "because " + row.because.joined(separator: ", ")
+        guard let catalog else {
+            return "because " + row.because.joined(separator: ", ")
+        }
+        let explanations: [String] = row.because.compactMap { ruleID in
+            guard let rule = catalog[ruleID] else { return ruleID }
+            let title = rule.title ?? ruleID
+            if let fix = rule.fix, !fix.isEmpty {
+                return "\(title) (\(ruleID)) — \(fix)"
+            }
+            return "\(title) (\(ruleID))"
+        }
+        if explanations.isEmpty {
+            return "because " + row.because.joined(separator: ", ")
+        }
+        return explanations.joined(separator: "\n")
     }
 
     /// Deliberately four distinct *shapes*, not four tints of one shape.

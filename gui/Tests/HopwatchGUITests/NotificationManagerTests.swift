@@ -158,4 +158,14 @@ import Testing
         let fallbackURL = NotificationManager.systemSettingsFallbackURL(bundleID: "com.godigi.hopwatch")
         #expect(fallbackURL?.absoluteString == "x-apple.systempreferences:com.apple.preference.notifications?id=com.godigi.hopwatch")
     }
+
+    @Test @MainActor func notificationResponseInvokesHandler() {
+        let mgr = NotificationManager()
+        var openedDashboard = false
+        mgr.onNotificationResponse = {
+            openedDashboard = true
+        }
+        mgr.onNotificationResponse?()
+        #expect(openedDashboard)
+    }
 }

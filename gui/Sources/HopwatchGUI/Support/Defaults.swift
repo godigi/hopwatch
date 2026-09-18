@@ -42,6 +42,7 @@ enum Defaults {
             Key.hasOnboarded: false,
             Key.notificationsEnabled: true,
             Key.notificationScope: "all",
+            Key.showInDock: false,
         ])
 
         // On first launch of com.godigi.hopwatch, import legacy user preferences
@@ -103,6 +104,7 @@ enum Defaults {
         static let disabledAlerts     = "disabledAlerts"
         static let notificationsEnabled = "notificationsEnabled"
         static let notificationScope  = "notificationScope"
+        static let showInDock         = "showInDock"
         static let autoCheckUpdates   = "autoCheckUpdates"
         static let lastUpdateCheck    = "lastUpdateCheck"
         static let lastNotifiedUpdateVersion = "lastNotifiedUpdateVersion"
@@ -212,6 +214,11 @@ enum Defaults {
     static var hasOnboarded: Bool {
         get { d.bool(forKey: Key.hasOnboarded) }
         set { d.set(newValue, forKey: Key.hasOnboarded) }
+    }
+
+    static var showInDock: Bool {
+        get { d.bool(forKey: Key.showInDock) }
+        set { d.set(newValue, forKey: Key.showInDock) }
     }
 
     /// Declining Location Services is a settled choice, not a per-visit

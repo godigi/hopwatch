@@ -27,7 +27,7 @@ enum NotificationScope: String, CaseIterable, Identifiable, Sendable {
 ///    clearing stale degradation banners from Notification Center.
 @MainActor
 @Observable
-final class NotificationManager {
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private(set) var isAuthorized = false
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
@@ -49,12 +49,38 @@ final class NotificationManager {
     var onOpenSystemSettings: (() -> Void)?
     var onFetchSettings: (() async -> UNAuthorizationStatus)?
     var onRequestAuthorization: ((UNAuthorizationOptions) async throws -> Bool)?
+    var onNotificationResponse: (() -> Void)?
 
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "notifications")
 
     init(notificationsEnabled: Bool = true, scope: NotificationScope = .all) {
         self.notificationsEnabled = notificationsEnabled
         self.scope = scope
+        super.init()
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+        }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        Task { @MainActor in
+            self.onNotificationResponse?()
+            completionHandler()
+        }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     // MARK: - Permission

@@ -75,6 +75,9 @@ struct RunReportView: View {
             hopAttribution
             suitability
             if presentation == .home {
+                if !snapshot.diagnosis.isEmpty {
+                    diagnosesCard
+                }
                 homeDetails
             } else {
                 details
@@ -87,6 +90,12 @@ struct RunReportView: View {
             snapshot: snapshot,
             fallbackRSSI: liveRSSI
         ))
+    }
+
+    private var diagnosesCard: some View {
+        diagnoses
+            .padding(Theme.Spacing.md)
+            .cardStyle()
     }
 
     /// The measurement table, sharing controls and diagnosis prose remain
@@ -110,7 +119,14 @@ struct RunReportView: View {
 
     private var homeDetails: some View {
         DisclosureGroup(isExpanded: $homeDetailsExpanded) {
-            details.padding(.top, Theme.Spacing.md)
+            VStack(alignment: .leading, spacing: 16) {
+                card
+                copyRow
+                if snapshot.diagnosis.isEmpty {
+                    diagnoses
+                }
+            }
+            .padding(.top, Theme.Spacing.md)
         } label: {
             HStack(spacing: Theme.Spacing.sm) {
                 Label("Check details", systemImage: "list.bullet.rectangle")

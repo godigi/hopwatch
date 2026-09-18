@@ -1,5 +1,6 @@
 import Foundation
 import ServiceManagement
+import AppKit
 
 /// The observable face of `Defaults`.
 ///
@@ -78,6 +79,12 @@ final class AppSettings {
     var notificationScope: NotificationScope {
         didSet { Defaults.notificationScope = notificationScope.rawValue }
     }
+    var showInDock: Bool {
+        didSet {
+            Defaults.showInDock = showInDock
+            NSApp?.setActivationPolicy(showInDock ? .regular : .accessory)
+        }
+    }
     var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != oldValue else { return }
@@ -130,6 +137,10 @@ final class AppSettings {
         autoCheckUpdates = Defaults.autoCheckUpdates
         notificationsEnabled = Defaults.notificationsEnabled
         notificationScope = NotificationScope(rawValue: Defaults.notificationScope) ?? .all
+        showInDock = Defaults.showInDock
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        if showInDock {
+            NSApp?.setActivationPolicy(.regular)
+        }
     }
 }

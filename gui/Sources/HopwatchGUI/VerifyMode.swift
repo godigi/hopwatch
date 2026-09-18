@@ -1085,6 +1085,13 @@ private enum VerifyHarness {
         // Revert back
         settings.launchAtLogin = original
         check(settings.launchAtLogin == (SMAppService.mainApp.status == .enabled), "AppSettings.launchAtLogin remains consistent after toggle attempt")
+
+        let originalDock = settings.showInDock
+        defer { settings.showInDock = originalDock }
+        settings.showInDock = true
+        check(Defaults.showInDock == true, "AppSettings.showInDock mutates Defaults.showInDock")
+        settings.showInDock = false
+        check(Defaults.showInDock == false, "AppSettings.showInDock reverts Defaults.showInDock")
     }
 
     // MARK: - Menu-bar latency (dotAndPing)
@@ -1244,6 +1251,13 @@ private enum VerifyHarness {
         )
         check(clearRes.culprit == .none, "Zero faults attributes to none (All Clear)")
         check(clearRes.wifiHealth == .healthy && clearRes.routerHealth == .healthy && clearRes.ispHealth == .healthy, "All hops healthy on zero faults")
+
+        let brRes = HopAttributionResolver.resolve(
+            rules: ["WS-1", "BR-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: 14.0, inetLoss: 0.0
+        )
+        check(brRes.culprit == .mac, "BR-1 attributes to Mac even with advisory WS-1")
+        check(brRes.macHealth == .warning, "BR-1 marks Mac health as warning")
+        check(brRes.badgeTitle == "Culprit: Browser App", "BR-1 gives Culprit: Browser App badge")
     }
 
     private static func runNetworkMemoryTests() {

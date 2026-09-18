@@ -19,4 +19,18 @@ import Testing
         #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil)
         #expect(MenuBarLabel.formatPing(internetRtt: -5.0, gatewayRtt: nil) == nil)
     }
+
+    @Test @MainActor func showInDockDefaultsAndToggles() {
+        let original = Defaults.showInDock
+        defer { Defaults.showInDock = original }
+
+        let settings = AppSettings()
+        #expect(settings.showInDock == Defaults.showInDock)
+
+        settings.showInDock = true
+        #expect(Defaults.showInDock == true)
+
+        settings.showInDock = false
+        #expect(Defaults.showInDock == false)
+    }
 }

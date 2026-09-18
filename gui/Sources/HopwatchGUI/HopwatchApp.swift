@@ -74,6 +74,16 @@ extension HopwatchApp {
     private func bootstrap() async {
         guard !delegate.didBootstrap else { return }
         delegate.didBootstrap = true
+
+        delegate.openDashboardHandler = {
+            openWindow(id: WindowID.dashboard)
+            NSApp.activate(ignoringOtherApps: true)
+            delegate.updateActivationPolicy()
+        }
+        coordinator.notifications.onNotificationResponse = {
+            delegate.openDashboard()
+        }
+
         // `--verify` runs the harness and exits from
         // AppDelegate.applicationWillFinishLaunching before this `.task`
         // could fire; this guard is belt-and-suspenders so a verify launch
@@ -86,6 +96,7 @@ extension HopwatchApp {
         if GalleryMode.isRequested { return }
         coordinator.start()
 
+        var didOpenWindow = false
         // `--open=<tab>` — the self-service verification hook. Opens the
         // dashboard on a named tab at launch, so an automated check (or a
         // screenshot harness) can inspect any view without a human
@@ -105,6 +116,7 @@ extension HopwatchApp {
                 coordinator.requestedDestination = destination
                 openWindow(id: WindowID.dashboard)
                 NSApp.activate(ignoringOtherApps: true)
+                didOpenWindow = true
             }
         }
 
@@ -112,10 +124,23 @@ extension HopwatchApp {
             // Grants can be revoked in System Settings between launches, so
             // the stored answer is a fact about last time, not about now.
             await coordinator.alerts.refreshAuthorization()
+
+            // When opened directly by the user (from the application launcher,
+            // Spotlight, or a reopen event) and not started in the background,
+            // open and focus the dashboard window.
+            if !didOpenWindow && (delegate.pendingOpenDashboard || !CommandLine.arguments.contains("--background")) {
+                delegate.pendingOpenDashboard = false
+                openWindow(id: WindowID.dashboard)
+                NSApp.activate(ignoringOtherApps: true)
+                didOpenWindow = true
+            }
         } else {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: WindowID.onboarding)
+            didOpenWindow = true
         }
+
+        delegate.updateActivationPolicy()
     }
 }
 
@@ -123,11 +148,41 @@ extension HopwatchApp {
 /// a launch hook that fires without a window on screen, and a termination
 /// hook that reaps the monitor child.
 ///
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// `.task` on a menu-bar label can re-run when the label's identity
     /// changes. Bootstrapping twice would spawn a second monitor process
     /// and leave the first orphaned.
     @MainActor var didBootstrap = false
+    @MainActor var openDashboardHandler: (@MainActor () -> Void)?
+    @MainActor var pendingOpenDashboard = false
+
+    @MainActor
+    func openDashboard() {
+        if let openDashboardHandler {
+            openDashboardHandler()
+        } else {
+            pendingOpenDashboard = true
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openDashboard()
+        return true
+    }
+
+    @MainActor
+    func updateActivationPolicy() {
+        let hasContentWindows = NSApp.windows.contains { window in
+            window.isVisible && window.canBecomeMain && !(window.className.contains("NSStatusBarWindow"))
+        }
+        let shouldBeRegular = Defaults.showInDock || hasContentWindows
+        let targetPolicy: NSApplication.ActivationPolicy = shouldBeRegular ? .regular : .accessory
+        if NSApp.activationPolicy() != targetPolicy {
+            NSApp.setActivationPolicy(targetPolicy)
+        }
+    }
 
     /// Earliest launch hook. `--verify` turns the app into a one-shot test
     /// harness (see `VerifyMode.swift`): run the StageResolver logic asserts
@@ -149,6 +204,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // is reached only if it somehow returned, in which case stop
             // the app the conventional way rather than continue launching.
             NSApp.terminate(nil)
+        }
+    }
+
+    @MainActor
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Observe window appearance and closure to keep Dock icon and App
+        // Switcher state in sync with whether a content window is on screen.
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateActivationPolicy()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateActivationPolicy()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didDeminiaturizeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateActivationPolicy()
+            }
         }
     }
 

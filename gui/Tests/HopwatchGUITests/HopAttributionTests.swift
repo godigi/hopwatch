@@ -198,4 +198,42 @@ import Testing
         #expect(ispOutage.culprit == .isp)
         #expect(ispOutage.badgeTitle == "Culprit: ISP Outage")
     }
+
+    @Test func browserDesyncAttributesToMac() {
+        // BR-1 alone: browser updated in background, needs relaunch
+        let brAlone = HopAttributionResolver.resolve(
+            rules: ["BR-1"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 1.5,
+            gatewayLoss: 0.0,
+            inetRTT: 14.0,
+            inetLoss: 0.0
+        )
+        #expect(brAlone.culprit == .mac)
+        #expect(brAlone.macHealth == .warning)
+        #expect(brAlone.wifiHealth == .healthy)
+        #expect(brAlone.routerHealth == .healthy)
+        #expect(brAlone.ispHealth == .healthy)
+        #expect(brAlone.headline == "Browser Needs Relaunch")
+        #expect(brAlone.badgeTitle == "Culprit: Browser App")
+        #expect(brAlone.reassurance.contains("reopening the browser finishes the update"))
+
+        // BR-1 co-occurring with advisory Wi-Fi channel crowding (WS-1):
+        // BR-1 breaks browsing, so Mac app remains primary culprit rather than blaming router/Wi-Fi
+        let brWithCrowding = HopAttributionResolver.resolve(
+            rules: ["WS-1", "BR-1"],
+            isWifi: true,
+            wifiRSSI: -56,
+            gatewayRTT: 15.0,
+            gatewayLoss: 0.0,
+            inetRTT: 40.0,
+            inetLoss: 0.0
+        )
+        #expect(brWithCrowding.culprit == .mac)
+        #expect(brWithCrowding.macHealth == .warning)
+        #expect(brWithCrowding.wifiHealth == .warning)
+        #expect(brWithCrowding.badgeTitle == "Culprit: Browser App")
+        #expect(brWithCrowding.headline == "Browser Needs Relaunch")
+    }
 }

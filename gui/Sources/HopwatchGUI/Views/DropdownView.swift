@@ -28,7 +28,6 @@ struct DropdownView: View {
     /// `wifiCell` — see `resolvedRSSI`'s header. Refreshed by the `.task`
     /// below, at most once per incoming monitor sample.
     @State private var coreWLANRSSI: Int?
-    @State private var didCopySupport = false
     @State private var didShare = false
     @State private var shareFeedback: String?
 
@@ -864,6 +863,20 @@ struct DropdownView: View {
                 coordinator.setMonitoring(enabled: enabled)
             }
 
+            if let routerURL = routerAdminURL {
+                dropdownButton("Open Router Admin Page", icon: "network") {
+                    NSWorkspace.shared.open(routerURL)
+                }
+            }
+
+            // Open Dashboard + Pause/Resume above the line, Share Diagnostics +
+            // Settings + Quit below — the same horizontal inset the rows
+            // themselves use (via `dropdownButton`) so it doesn't run flush to
+            // the panel edge the way an unpadded Divider would.
+            Divider()
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, Theme.Spacing.xs)
+
             Menu {
                 Button("Copy Redacted Report") {
                     copyShareableReport()
@@ -890,25 +903,6 @@ struct DropdownView: View {
                 .padding(.vertical, 5)
             }
             .menuStyle(.borderlessButton)
-
-            dropdownButton(didCopySupport ? "Copied Summary!" : "Copy for Support",
-                           icon: didCopySupport ? "checkmark" : "doc.on.doc") {
-                copySupportSummary()
-            }
-
-            if let routerURL = routerAdminURL {
-                dropdownButton("Open Router Admin Page", icon: "network") {
-                    NSWorkspace.shared.open(routerURL)
-                }
-            }
-
-            // Open Dashboard + Pause/Resume above the line, Settings + Quit
-            // below — the same horizontal inset the rows themselves use
-            // (via `dropdownButton`) so it doesn't run flush to the panel
-            // edge the way an unpadded Divider would.
-            Divider()
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.xs)
 
             dropdownButton("Settings…", icon: "gearshape") {
                 openWindow(id: WindowID.settings)
@@ -991,9 +985,11 @@ struct DropdownView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         Task { @MainActor in
-            didCopySupport = true
+            shareFeedback = "Support summary copied"
+            didShare = true
             try? await Task.sleep(for: .seconds(2))
-            didCopySupport = false
+            shareFeedback = nil
+            didShare = false
         }
     }
 
