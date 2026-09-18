@@ -286,7 +286,11 @@ struct MonitorSample: Decodable, Sendable {
         switch status.severity {
         case "critical": return .critical
         case "warn":     return .warning
-        default:         return .healthy
+        default:
+            if status.degraded { return .warning }
+            let loss = max(internet.lossPct ?? 0, gateway.lossPct ?? 0)
+            if loss > 2.0 { return .warning }
+            return .healthy
         }
     }
 }

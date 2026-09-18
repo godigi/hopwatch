@@ -738,6 +738,15 @@ final class HopwatchCoordinator {
     /// degraded (3 s) takes over for as long as severity stays warn/
     /// critical — `MON_DEGRADED` follows severity in `lib/monitor.sh`'s
     private func evaluateResolutions(sample: MonitorSample) {
+        // If an active resolution exists, verify it remains valid under the new sample.
+        // If packet loss has returned or new alerts/faults appeared, dismiss it immediately.
+        if activeResolution != nil {
+            let hasLoss = (sample.gateway.lossPct ?? 0) > 0 || (sample.internet.lossPct ?? 0) > 0
+            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty || hasLoss {
+                dismissActiveResolution()
+            }
+        }
+
         // Only evaluate resolutions if the link is up and the connection is currently healthy
         guard sample.link.up, sample.status.severity == "ok", alerts.active.isEmpty else {
             if sample.status.severity == "critical" || sample.status.severity == "warn" || sample.publicInfo.captivePortal == true || !alerts.active.isEmpty {
@@ -1163,17 +1172,67 @@ final class HopwatchCoordinator {
         return nil
     }
 
+    /// Whichever report is currently active (live or stored), as a `RunResult`.
+    var currentRunResult: RunResult? {
+        switch reportSource {
+        case .live(let run):        return run
+        case .stored(let detail):   return detail.asRunResult
+        case nil:                   return nil
+        }
+    }
+
+    /// Unified effective packet loss across internet and gateway probes.
+    /// Evaluates whichever is worse so loss on either leg is visible and accounted for.
+    var effectiveLoss: Double? {
+        let inetLoss = monitor.latest?.internet.lossPct
+            ?? latestRun?.snapshot.internetLatency.lossPct
+            ?? currentRunResult?.snapshot.internetLatency.lossPct
+        let gwLoss = monitor.latest?.gateway.lossPct
+            ?? latestRun?.snapshot.gateway.lossPct
+            ?? currentRunResult?.snapshot.gateway.lossPct
+        if let inetLoss, let gwLoss {
+            return max(inetLoss, gwLoss)
+        }
+        return inetLoss ?? gwLoss
+    }
+
+    /// Effective instantaneous or moving RFC 3550 jitter.
+    var currentJitter: Double? {
+        if let live = monitor.latest?.liveJitterMs {
+            return live
+        }
+        return MonitorSeries.movingJitter(samples: monitor.recent)
+    }
+
+    /// Overall connection stability rating evaluated from current RTT, jitter, and packet loss.
+    var currentStability: ConnectionStability {
+        let rtt = monitor.latest?.internet.rttAvgMs ?? monitor.latest?.gateway.rttAvgMs
+            ?? latestRun?.snapshot.internetLatency.rttAvgMs ?? latestRun?.snapshot.gateway.rttAvgMs
+        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: effectiveLoss)
+    }
+
     /// The menu-bar dot. Thin wrapper over `HealthResolver.resolve` — see
     /// that file for the precedence and for why a paused app no longer
     /// reports the last reading from before it stopped looking.
     var currentHealth: Health {
-        HealthResolver.resolve(.init(
+        let activeSnapshot = alerts.activeSorted.first.map {
+            StageResolver.AlertSnapshot(
+                title: $0.title, body: $0.body,
+                raisedAt: $0.raisedAt, rules: $0.rules,
+                severityRank: $0.rules.compactMap(severityRank(forRuleID:)).max() ?? 0,
+                id: $0.id)
+        }
+        let currentRunHealth = latestRun?.snapshot.worstSeverity
+            ?? currentRunResult?.snapshot.worstSeverity
+
+        return HealthResolver.resolve(.init(
             isScanning: isScanning,
             monitoringEnabled: Defaults.monitoringEnabled,
             isPausedForAnyReason: monitor.isPausedForAnyReason,
             monitorRunning: monitor.isRunning,
+            activeAlert: activeSnapshot,
             sampleHealth: monitor.latest?.health,
-            runHealth: latestRun?.snapshot.worstSeverity))
+            runHealth: currentRunHealth))
     }
 
     /// The CLI's severity for one rule ID, ranked so the worst of a set can
@@ -1301,10 +1360,14 @@ final class HopwatchCoordinator {
                 return text
             }
         }
-        if let cause = latestRun?.snapshot.mostLikelyRootCause, !cause.isEmpty {
+        if let res = activeResolution {
+            return res.message.isEmpty ? res.title : "\(res.title) — \(res.message)"
+        }
+        let currentSnapshot = latestRun?.snapshot ?? currentRunResult?.snapshot
+        if let cause = currentSnapshot?.mostLikelyRootCause, !cause.isEmpty {
             return cause
         }
-        if monitor.latest == nil && latestRun == nil { return "Starting up…" }
+        if monitor.latest == nil && latestRun == nil && hydratedReport == nil { return "Starting up…" }
         return "Nothing obviously wrong — your network looks healthy."
     }
 

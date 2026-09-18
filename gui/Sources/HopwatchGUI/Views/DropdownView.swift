@@ -612,16 +612,11 @@ struct DropdownView: View {
     }
 
     private var currentJitter: Double? {
-        if let live = coordinator.monitor.latest?.liveJitterMs {
-            return live
-        }
-        return MonitorSeries.movingJitter(samples: coordinator.monitor.recent)
+        coordinator.currentJitter
     }
 
     private var stability: ConnectionStability {
-        let rtt = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.monitor.latest?.gateway.rttAvgMs
-        let loss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.monitor.latest?.gateway.lossPct
-        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
+        coordinator.currentStability
     }
 
     private var internetValue: (text: String, tint: Color) {

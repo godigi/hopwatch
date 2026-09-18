@@ -32,6 +32,7 @@ enum HealthResolver {
         let monitoringEnabled: Bool
         let isPausedForAnyReason: Bool
         let monitorRunning: Bool
+        let activeAlert: StageResolver.AlertSnapshot?
         /// `MonitorSample.health` for the newest sample, if any.
         let sampleHealth: Health?
         /// `RunSnapshot.worstSeverity` for the newest live run, if any.
@@ -39,11 +40,13 @@ enum HealthResolver {
 
         init(isScanning: Bool, monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, monitorRunning: Bool,
+             activeAlert: StageResolver.AlertSnapshot? = nil,
              sampleHealth: Health?, runHealth: Health?) {
             self.isScanning = isScanning
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
             self.monitorRunning = monitorRunning
+            self.activeAlert = activeAlert
             self.sampleHealth = sampleHealth
             self.runHealth = runHealth
         }
@@ -52,7 +55,12 @@ enum HealthResolver {
     static func resolve(_ i: Inputs) -> Health {
         // A scan is the app looking harder, not looking away. Hold the last
         // reading rather than greying out for its duration.
-        if i.isScanning { return i.sampleHealth ?? i.runHealth ?? .warning }
+        if i.isScanning {
+            if let alert = i.activeAlert {
+                return alert.severityRank >= 3 ? .critical : .warning
+            }
+            return worst(i.sampleHealth, i.runHealth) ?? .warning
+        }
         // Switched off by the user, or held by display sleep / battery /
         // the pause signal. Either can last indefinitely, and while it does
         // the app has no current opinion to report.
@@ -62,8 +70,21 @@ enum HealthResolver {
         // — that is exactly how a crashed monitor came to read as a quiet
         // network.
         if !i.monitorRunning { return .warning }
-        if let sampleHealth = i.sampleHealth { return sampleHealth }
-        if let runHealth = i.runHealth { return runHealth }
+        if let alert = i.activeAlert {
+            return alert.severityRank >= 3 ? .critical : .warning
+        }
+        if let combined = worst(i.sampleHealth, i.runHealth) {
+            return combined
+        }
         return .warning
+    }
+
+    private static func worst(_ a: Health?, _ b: Health?) -> Health? {
+        guard let a else { return b }
+        guard let b else { return a }
+        if a == .critical || b == .critical { return .critical }
+        if a == .warning || b == .warning { return .warning }
+        if a == .paused || b == .paused { return .paused }
+        return .healthy
     }
 }

@@ -299,16 +299,11 @@ struct HomeView: View {
     }
 
     private var currentJitter: Double? {
-        if let live = coordinator.monitor.latest?.liveJitterMs {
-            return live
-        }
-        return MonitorSeries.movingJitter(samples: coordinator.monitor.recent)
+        coordinator.currentJitter
     }
 
     private var currentStability: ConnectionStability {
-        let rtt = latencyMs
-        let loss = currentLoss
-        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
+        coordinator.currentStability
     }
 
     private var jitterSubcaption: String {
@@ -319,7 +314,7 @@ struct HomeView: View {
     }
 
     private var currentLoss: Double? {
-        coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct
+        coordinator.effectiveLoss
     }
 
     private var lossValue: String {
@@ -606,11 +601,7 @@ struct HomeView: View {
     /// Whichever report is on screen, as the `RunResult` the expert
     /// disclosure and the raw-JSON viewer inside it both expect.
     private var currentRunResult: RunResult? {
-        switch coordinator.reportSource {
-        case .live(let run):        return run
-        case .stored(let detail):   return detail.asRunResult
-        case nil:                   return nil
-        }
+        coordinator.currentRunResult
     }
 
     private func expertDisclosure(_ run: RunResult) -> some View {

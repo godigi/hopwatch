@@ -141,4 +141,69 @@ import Testing
         #expect(snap.icon == "wifi")
         #expect(snap.id.contains("Wi-Fi Improved"))
     }
+
+    @MainActor
+    @Test func activeResolutionDismissedWhenLossReturns() {
+        let coord = HopwatchCoordinator()
+        coord.start()
+        coord.recordResolution(
+            title: "Network Stabilized",
+            message: "Packet loss resolved (0% loss, 80 ms ping)."
+        )
+        #expect(coord.activeResolution != nil)
+
+        // Incoming sample with 3% router loss must invalidate resolution immediately
+        var lossSample = MonitorSample()
+        lossSample.link.up = true
+        lossSample.status.measurement = "measured"
+        lossSample.status.severity = "ok"
+        lossSample.gateway.lossPct = 3.0
+        lossSample.internet.lossPct = 0.0
+
+        coord.monitor.onSample?(lossSample)
+        #expect(coord.activeResolution == nil)
+    }
+
+    @Test func healthResolverRespectsActiveAlertAndFaultedRuns() {
+        let alert = StageResolver.AlertSnapshot(
+            title: "Internet Degraded",
+            body: "Loss observed",
+            raisedAt: Date(),
+            rules: ["L2"],
+            severityRank: 2
+        )
+        let alertInputs = HealthResolver.Inputs(
+            isScanning: false,
+            monitoringEnabled: true,
+            isPausedForAnyReason: false,
+            monitorRunning: true,
+            activeAlert: alert,
+            sampleHealth: .healthy,
+            runHealth: nil
+        )
+        #expect(HealthResolver.resolve(alertInputs) == .warning)
+
+        // Faulted run (e.g. Browser Needs Relaunch) persists warning even if live ping is healthy
+        let runFaultInputs = HealthResolver.Inputs(
+            isScanning: false,
+            monitoringEnabled: true,
+            isPausedForAnyReason: false,
+            monitorRunning: true,
+            activeAlert: nil,
+            sampleHealth: .healthy,
+            runHealth: .warning
+        )
+        #expect(HealthResolver.resolve(runFaultInputs) == .warning)
+    }
+
+    @Test func monitorSampleHealthDetectsElevatedLoss() {
+        var sample = MonitorSample()
+        sample.link.up = true
+        sample.status.measurement = "measured"
+        sample.status.severity = "ok"
+        sample.gateway.lossPct = 3.0
+        sample.internet.lossPct = 0.0
+
+        #expect(sample.health == .warning)
+    }
 }

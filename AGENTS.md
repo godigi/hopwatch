@@ -3,12 +3,11 @@
 ## Continuous Development & Release Workflow
 Every change that lands on `main` represents a released version that users can download. The repository is structured so that version bumping, CHANGELOG updates, release tagging, and distribution are automated and predictable.
 
-### 1. Committing Changes
-- Always commit changes using **Conventional Commits**:
-  - `feat:` for new capabilities (triggers a **minor** version bump, e.g. 1.2.0 → 1.3.0).
-  - `fix:` for bug fixes (triggers a **patch** version bump, e.g. 1.2.0 → 1.2.1).
-  - `refactor:`, `perf:`, `chore:` for internal improvements (triggers a **patch** version bump).
-  - Breaking changes (`BREAKING CHANGE:` or `feat!:`) trigger a **major** version bump (e.g. 1.2.0 → 2.0.0).
+### 1. Committing Changes & Version Bumps
+- Anytime small fixes, tweaks, or improvements are made locally, bump the version by a digit (patch bump, e.g. 1.4.0 → 1.4.1):
+  - `fix:` for bug fixes and small adjustments (triggers a **patch** bump, e.g. 1.4.0 → 1.4.1).
+  - `feat:` for substantial new features/capabilities (triggers a **minor** bump, e.g. 1.4.0 → 1.5.0).
+  - Breaking changes (`BREAKING CHANGE:` or `feat!:`) trigger a **major** bump (e.g. 1.0.0 → 2.0.0).
 
 ### 2. Automated Version Bump & Release
 - To ship changes, run `make ship` (or `make ship-all` for full CLI+GUI test runs):
@@ -25,9 +24,10 @@ Every change that lands on `main` represents a released version that users can d
 - Git hooks are maintained in `.githooks/` and active via `git config core.hooksPath .githooks`.
 - If a standard `git push origin main` is run with unreleased commits, the `.githooks/pre-push` hook automatically intercepts it, runs `scripts/bump.py`, tags the release, and pushes the release commit and tags together.
 
-### 4. Local Build & Testing Rule
-Whenever making changes and committing/pushing code:
-- Always rebuild and install the macOS app locally using `make install-gui` (which bundles, signs with stable identity, and installs to `/Applications/Hopwatch.app`), and relaunch it (`open /Applications/Hopwatch.app`) so that the user is continuously testing the latest built version.
+### 4. Local Build, Versioning & Testing Rule
+Whenever making changes locally that should be tested:
+- Always bump the version by a digit so the version number is incremented.
+- Immediately make/compile and install using `make install-gui` (which bundles, signs with stable identity, and installs to `/Applications/Hopwatch.app`), and relaunch it (`open /Applications/Hopwatch.app`) so that the local machine has that latest version ready to test.
 
 ### 5. Local Work vs. Remote Release Gate
 - Development and testing are performed locally first. Changes are kept local until verified.
