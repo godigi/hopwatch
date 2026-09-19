@@ -39,3 +39,5 @@ gui/build/
 # stale the moment the process exits.
 .superpowers/
 gui/Resources/AppIcon.iconset
+.Codex/
+.nimbalyst/

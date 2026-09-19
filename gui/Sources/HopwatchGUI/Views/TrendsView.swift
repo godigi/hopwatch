@@ -277,7 +277,13 @@ struct TrendsView: View {
         default:
             name = m.label
         }
-        return "\(name) (\(m.samples))"
+        let samples: Int
+        if let networkID, let net = store.mergedNetworks.first(where: { $0.id == networkID }) {
+            samples = net.metricSamples[m.key] ?? 0
+        } else {
+            samples = m.samples
+        }
+        return "\(name) (\(samples))"
     }
 
     private var controls: some View {

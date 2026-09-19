@@ -6,6 +6,16 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent false "ISP Outage" and 100% packet loss warnings on ICMP-filtered networks (cafes, hotels, guest Wi-Fi) when TCP/HTTP connectivity is intact.
+- Corrected dropdown router latency reporting displaying "n/a" when only internet ICMP was filtered.
+- Unified `LiveView` stability calculation with `HopwatchCoordinator.currentStability`.
+- Surfaced actionable technical evidence directly beneath the culprit card in `HopAttributionView` via a single "Evidence & Diagnostics" drawer, eliminating nested disclosure clicks.
+- Integrated standalone speed test results into the main dashboard status card, baseline comparisons, and report measurement tables.
+- Fixed `TrendsView` metric picker sample counts to dynamically reflect the selected network rather than global totals.
+- Handled ICMP-filtered networks in menu bar `dot+ping` mode with router latency fallback and "TCP ok" status.
+
 ## [1.4.1] - 2026-09-18
 
 ### Changes

@@ -157,8 +157,10 @@ public enum HopAttributionResolver {
         }
 
         // 3. Evaluate Internet / ISP Health
+        let isIcmpFiltered = ruleSet.contains("TCP-1") || ruleSet.contains("ICMP-1")
+        let effectiveInetLoss = isIcmpFiltered ? nil : inetLoss
         var ispHealth: HopHealth = .healthy
-        if !ruleSet.isDisjoint(with: ispCriticalRules) || (inetLoss != nil && inetLoss! >= 10) {
+        if !ruleSet.isDisjoint(with: ispCriticalRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 10) {
             ispHealth = .critical
         } else if !ruleSet.isDisjoint(with: ispWarningRules) || (bufferbloatInet != nil && bufferbloatInet! >= 150) {
             ispHealth = .warning
@@ -241,10 +243,10 @@ public enum HopAttributionResolver {
             } else if ruleSet.contains("B2") {
                 badgeTitle = "Culprit: Upstream Latency"
                 reassurance = "\(localStatus). The latency surge is occurring upstream in your ISP's network."
-            } else if (inetLoss != nil && inetLoss! >= 95) || ruleSet.contains("P1") || ruleSet.contains("P2") {
+            } else if (effectiveInetLoss != nil && effectiveInetLoss! >= 95) || ruleSet.contains("P1") || ruleSet.contains("P2") {
                 badgeTitle = "Culprit: ISP Outage"
                 reassurance = "\(localStatus). Complete packet loss past your router indicates an upstream ISP outage."
-            } else if let loss = inetLoss, loss > 0 {
+            } else if let loss = effectiveInetLoss, loss > 0 {
                 badgeTitle = "Culprit: Upstream Packet Loss"
                 reassurance = "\(localStatus). Packet loss (\(String(format: "%.0f%%", loss))) is occurring upstream on your ISP's broadband network."
             } else {
@@ -316,7 +318,10 @@ public enum HopAttributionResolver {
     }
 
     static func resolve(sample: MonitorSample, fallbackRSSI: Int? = nil) -> Result {
-        let rules = sample.status.rules
+        var rules = sample.status.rules
+        if sample.status.icmpFiltered && !rules.contains("ICMP-1") && !rules.contains("TCP-1") {
+            rules.append("ICMP-1")
+        }
         let isWifi = sample.link.isWiFi
         return resolve(
             rules: rules,
@@ -338,6 +343,8 @@ public enum HopAttributionResolver {
 /// [Mac] ──(Wi-Fi)──► [Router] ──(Broadband)──► [Internet]
 public struct HopAttributionView: View {
     public let result: HopAttributionResolver.Result
+    @Environment(HopwatchCoordinator.self) private var coordinator
+    @State private var isEvidenceExpanded = false
 
     public init(result: HopAttributionResolver.Result) {
         self.result = result
@@ -382,9 +389,77 @@ public struct HopAttributionView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Expandable Evidence & Diagnostics drawer when there is an active culprit or rules
+            if result.culprit != .none || !result.activeRules.isEmpty {
+                Divider()
+                    .padding(.vertical, 2)
+
+                DisclosureGroup(isExpanded: $isEvidenceExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if result.activeRules.isEmpty {
+                            Text(result.reassurance)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(result.activeRules, id: \.self) { ruleID in
+                                evidenceRow(ruleID: ruleID)
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(result.culprit.badgeTint)
+                        Text(result.activeRules.count > 1 ? "Evidence & Diagnostics (\(result.activeRules.count) findings)" : "Evidence & Diagnostics")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
         }
         .padding(Theme.Spacing.md)
         .cardStyle()
+    }
+
+    @ViewBuilder
+    private func evidenceRow(ruleID: String) -> some View {
+        let rule = coordinator.rulesCatalog.catalog?[ruleID]
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                RuleChip(ruleID: ruleID)
+                if let title = rule?.title {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+            }
+            if let blurb = rule?.blurb {
+                Text(blurb)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let fix = rule?.fix {
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.blue)
+                        .padding(.top, 1)
+                    Text(fix)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.06))
+        )
     }
 
     private func nodeView(title: String, icon: String, health: HopAttributionResolver.HopHealth) -> some View {

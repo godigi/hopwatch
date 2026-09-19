@@ -322,9 +322,7 @@ struct LiveView: View {
     }
 
     private var stability: ConnectionStability {
-        let rtt = monitor.latest?.internet.rttAvgMs ?? monitor.latest?.gateway.rttAvgMs
-        let loss = monitor.latest?.internet.lossPct ?? monitor.latest?.gateway.lossPct
-        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: loss)
+        coordinator.currentStability
     }
 
     private var jitterDetail: String {
@@ -335,7 +333,7 @@ struct LiveView: View {
     }
 
     private var currentLossPct: Double? {
-        monitor.latest?.gateway.lossPct
+        coordinator.effectiveLoss
     }
 
     private var latestLoss: String {

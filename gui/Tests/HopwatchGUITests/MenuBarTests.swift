@@ -18,6 +18,9 @@ import Testing
         #expect(MenuBarLabel.formatPing(internetRtt: 0.0, gatewayRtt: nil) == "0ms")
         #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil)
         #expect(MenuBarLabel.formatPing(internetRtt: -5.0, gatewayRtt: nil) == nil)
+        #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.2, isIcmpFiltered: true) == "5ms")
+        #expect(MenuBarLabel.formatPing(internetRtt: 100.0, gatewayRtt: 4.8, isIcmpFiltered: true) == "5ms")
+        #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, isIcmpFiltered: true) == "TCP ok")
     }
 
     @Test @MainActor func showInDockDefaultsAndToggles() {

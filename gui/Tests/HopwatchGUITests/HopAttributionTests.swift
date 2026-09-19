@@ -236,4 +236,22 @@ import Testing
         #expect(brWithCrowding.badgeTitle == "Culprit: Browser App")
         #expect(brWithCrowding.headline == "Browser Needs Relaunch")
     }
+
+    @Test func icmpFilteredDoesNotAccuseISPOfOutage() {
+        // TCP-1 / ICMP-1: Internet ping blocked by policy while TCP works fine
+        let result = HopAttributionResolver.resolve(
+            rules: ["TCP-1"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 1.5,
+            gatewayLoss: 0.0,
+            inetRTT: nil,
+            inetLoss: 100.0
+        )
+        #expect(result.culprit == .none)
+        #expect(result.wifiHealth == .healthy)
+        #expect(result.routerHealth == .healthy)
+        #expect(result.ispHealth == .healthy)
+        #expect(result.badgeTitle == "All Hops Healthy")
+    }
 }

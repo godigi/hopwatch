@@ -102,6 +102,11 @@ import Testing
         let compLoss = NetworkHistoryStore.compare(sample: sample, baseline: memory)
         #expect(compLoss.lossVerdict == .degraded)
         #expect(compLoss.summaryDescription.contains("8% packet loss"))
+
+        // Monitor sample with standalone speed test fallback
+        let compWithSpeed = NetworkHistoryStore.compare(sample: sample, baseline: memory, fallbackDownMbps: 450.0)
+        #expect(compWithSpeed.currentDownMbps == 450.0)
+        #expect(compWithSpeed.downSpeedVerdict == .faster)
     }
 
     @Test func reliabilityGradeThresholds() {

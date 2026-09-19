@@ -229,7 +229,8 @@ enum NetworkHistoryStore {
     /// Compares a snapshot against a network memory baseline.
     static func compare(
         snapshot: RunSnapshot,
-        baseline: NetworkMemory
+        baseline: NetworkMemory,
+        fallbackDownMbps: Double? = nil
     ) -> NetworkComparison {
         let currentGW = snapshot.gateway.rttAvgMs
         let baseGW = baseline.typicalGatewayLatencyMs
@@ -252,7 +253,7 @@ enum NetworkHistoryStore {
             verdictLoss = .degraded
         }
 
-        let currentDown = snapshot.speedtest?.downMbps
+        let currentDown = snapshot.speedtest?.downMbps ?? fallbackDownMbps
         let baseDown = baseline.typicalDownMbps
         var verdictDown: NetworkComparison.MetricVerdict? = nil
         if let cur = currentDown, let base = baseDown, base > 0 {
@@ -283,7 +284,8 @@ enum NetworkHistoryStore {
     /// Compares a monitor sample against a network memory baseline.
     static func compare(
         sample: MonitorSample,
-        baseline: NetworkMemory
+        baseline: NetworkMemory,
+        fallbackDownMbps: Double? = nil
     ) -> NetworkComparison {
         let currentGW = sample.gateway.rttAvgMs
         let baseGW = baseline.typicalGatewayLatencyMs
@@ -306,6 +308,20 @@ enum NetworkHistoryStore {
             verdictLoss = .degraded
         }
 
+        let currentDown = fallbackDownMbps
+        let baseDown = baseline.typicalDownMbps
+        var verdictDown: NetworkComparison.MetricVerdict? = nil
+        if let cur = currentDown, let base = baseDown, base > 0 {
+            let ratio = cur / base
+            if ratio >= 1.2 {
+                verdictDown = .faster
+            } else if ratio <= 0.75 {
+                verdictDown = .slower
+            } else {
+                verdictDown = .normal
+            }
+        }
+
         return NetworkComparison(
             currentGatewayLatencyMs: currentGW,
             baselineGatewayLatencyMs: baseGW,
@@ -313,7 +329,10 @@ enum NetworkHistoryStore {
             gatewayLatencyDeltaMs: deltaGW,
             currentLossPct: currentLoss,
             baselineLossPct: baseLoss,
-            lossVerdict: verdictLoss
+            lossVerdict: verdictLoss,
+            currentDownMbps: currentDown,
+            baselineDownMbps: baseDown,
+            downSpeedVerdict: verdictDown
         )
     }
 }

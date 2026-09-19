@@ -103,7 +103,7 @@ def find_running_version(
     """Identify the framework version the running browser process loaded."""
     # 1. Search ps output for running helper processes from this bundle
     helper_pattern = re.compile(
-        re.escape(bundle_path) + r"/Contents/Frameworks/" + re.escape(fw_name) + r"/Versions/([0-9.]+)/Helpers/"
+        re.escape(fw_name) + r"/Versions/([0-9.]+)/Helpers/"
     )
     for line in ps_text.splitlines():
         m = helper_pattern.search(line)

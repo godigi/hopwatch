@@ -1110,16 +1110,13 @@ struct DropdownView: View {
         // be presented as the router's current latency.
         guard !coordinator.monitor.isPaused, !coordinator.isScanning,
               let sample = coordinator.monitor.latest else { return nil }
-        let ip = sample.link.gateway
+        guard let ip = sample.link.gateway else { return nil }
         let rtt = sample.gateway.rttAvgMs
         let loss = sample.gateway.lossPct
 
         guard let current = rtt else {
-            guard let ip else { return nil }
-            // Ping blocked by policy, total loss, or simply not measured
-            // yet — three different statements, and an em dash for all
-            // three is how a dead router came to look like an idle one.
-            if icmpFiltered { return ("n/a", ip) }
+            // Total loss or simply not measured yet — two different statements,
+            // and an em dash for both is how a dead router came to look like an idle one.
             if let loss, loss >= 100 { return ("no reply", ip) }
             return ("—", ip)
         }

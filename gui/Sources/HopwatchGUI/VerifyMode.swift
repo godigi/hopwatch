@@ -976,7 +976,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.4.1",
+                version: "1.4.2",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -1105,6 +1105,8 @@ private enum VerifyHarness {
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4) == "5ms", "formatPing falls back to gateway RTT")
         check(MenuBarLabel.formatPing(internetRtt: 25.1, gatewayRtt: 3.0) == "25ms", "formatPing prioritizes internet RTT")
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil, "formatPing is nil when unmeasured")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4, isIcmpFiltered: true) == "5ms", "formatPing handles icmpFiltered with gateway fallback")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, isIcmpFiltered: true) == "TCP ok", "formatPing handles icmpFiltered with TCP ok fallback")
     }
 
     // MARK: - Diagnostic Share
@@ -1258,6 +1260,12 @@ private enum VerifyHarness {
         check(brRes.culprit == .mac, "BR-1 attributes to Mac even with advisory WS-1")
         check(brRes.macHealth == .warning, "BR-1 marks Mac health as warning")
         check(brRes.badgeTitle == "Culprit: Browser App", "BR-1 gives Culprit: Browser App badge")
+
+        let icmpFiltRes = HopAttributionResolver.resolve(
+            rules: ["TCP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: nil, inetLoss: 100.0
+        )
+        check(icmpFiltRes.culprit == .none, "TCP-1 ICMP filtered attributes to none (All Clear)")
+        check(icmpFiltRes.ispHealth == .healthy, "TCP-1 ICMP filtered keeps ISP health as healthy")
     }
 
     private static func runNetworkMemoryTests() {

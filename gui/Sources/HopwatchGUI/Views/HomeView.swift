@@ -81,10 +81,11 @@ struct HomeView: View {
 
                 if let mem = currentNetworkMemory, mem.checkCount >= 2 {
                     let comp: NetworkComparison? = {
+                        let speedDown = coordinator.latestSpeedTest?.downMbps
                         if let snap = currentRunResult?.snapshot {
-                            return NetworkHistoryStore.compare(snapshot: snap, baseline: mem)
+                            return NetworkHistoryStore.compare(snapshot: snap, baseline: mem, fallbackDownMbps: speedDown)
                         } else if let sample = coordinator.monitor.latest {
-                            return NetworkHistoryStore.compare(sample: sample, baseline: mem)
+                            return NetworkHistoryStore.compare(sample: sample, baseline: mem, fallbackDownMbps: speedDown)
                         }
                         return nil
                     }()
@@ -135,15 +136,21 @@ struct HomeView: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if let caption = lastCheckedCaption {
-                        Text(caption)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if coordinator.monitor.isRunning {
-                        Text("Continuous background monitoring active")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        if let caption = lastCheckedCaption {
+                            Text(caption)
+                        } else if coordinator.monitor.isRunning {
+                            Text("Continuous background monitoring active")
+                        }
+                        if let speed = coordinator.latestSpeedTest?.downMbps {
+                            Text("·")
+                            Text(String(format: "↓ %.0f Mbps", speed))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.blue)
+                        }
                     }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 8)
@@ -272,6 +279,9 @@ struct HomeView: View {
     // MARK: - Vital Computations
 
     private var latencyMs: Double? {
+        if coordinator.monitor.latest?.status.icmpFiltered == true {
+            if let gw = coordinator.monitor.latest?.gateway.rttAvgMs { return gw }
+        }
         if let ping = coordinator.monitor.latest?.internet.rttAvgMs { return ping }
         if let gw = coordinator.monitor.latest?.gateway.rttAvgMs { return gw }
         if let ping = coordinator.latestRun?.snapshot.internetLatency.rttAvgMs { return ping }
@@ -292,6 +302,9 @@ struct HomeView: View {
 
     private var latencyQuality: String {
         guard let ms = latencyMs else { return "Waiting for probe" }
+        if coordinator.monitor.latest?.status.icmpFiltered == true {
+            return "Router ping (ICMP filtered)"
+        }
         if ms < 25 { return "Fast & responsive" }
         if ms < 60 { return "Good" }
         if ms < 120 { return "Moderate lag" }
@@ -331,6 +344,9 @@ struct HomeView: View {
 
     private var lossSubcaption: String {
         guard let l = currentLoss else { return "Measuring" }
+        if coordinator.monitor.latest?.status.icmpFiltered == true && l == 0 {
+            return "Clean link (ICMP filtered)"
+        }
         if l == 0 { return "Clean link (0 drops)" }
         if l <= 2.0 { return "Minor packet loss" }
         return "Frequent drops"

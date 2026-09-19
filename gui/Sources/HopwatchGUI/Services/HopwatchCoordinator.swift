@@ -1184,9 +1184,14 @@ final class HopwatchCoordinator {
     /// Unified effective packet loss across internet and gateway probes.
     /// Evaluates whichever is worse so loss on either leg is visible and accounted for.
     var effectiveLoss: Double? {
-        let inetLoss = monitor.latest?.internet.lossPct
+        let isIcmpFiltered = (monitor.latest?.status.icmpFiltered == true)
+            || (latestRun?.snapshot.diagnosis.contains(where: { $0.rule == "TCP-1" || $0.rule == "ICMP-1" }) == true)
+            || (currentRunResult?.snapshot.diagnosis.contains(where: { $0.rule == "TCP-1" || $0.rule == "ICMP-1" }) == true)
+
+        let inetLoss: Double? = isIcmpFiltered ? nil : (monitor.latest?.internet.lossPct
             ?? latestRun?.snapshot.internetLatency.lossPct
-            ?? currentRunResult?.snapshot.internetLatency.lossPct
+            ?? currentRunResult?.snapshot.internetLatency.lossPct)
+
         let gwLoss = monitor.latest?.gateway.lossPct
             ?? latestRun?.snapshot.gateway.lossPct
             ?? currentRunResult?.snapshot.gateway.lossPct
