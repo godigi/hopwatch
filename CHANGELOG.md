@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-09-19
+
 ### Fixed
 
 - Prevent false "ISP Outage" and 100% packet loss warnings on ICMP-filtered networks (cafes, hotels, guest Wi-Fi) when TCP/HTTP connectivity is intact.
@@ -3891,7 +3893,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/godigi/hopwatch/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/godigi/hopwatch/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/godigi/hopwatch/compare/v1.3.3...v1.4.0
 [1.3.3]: https://github.com/godigi/hopwatch/compare/v1.3.2...v1.3.3
