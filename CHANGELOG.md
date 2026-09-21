@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-21
+
+### Changes
+
+- feat: add graded evidence pills, elevate speed & reliability vitals, and unfold technical panel
+
 ## [1.5.0] - 2026-09-21
 
 ### Added
@@ -3909,7 +3915,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/godigi/hopwatch/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/godigi/hopwatch/compare/v1.4.3...v1.5.0
 [1.4.2]: https://github.com/godigi/hopwatch/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/godigi/hopwatch/compare/v1.4.0...v1.4.1
