@@ -43,10 +43,30 @@ enum StageResolver {
         /// drop — the green-card-over-red-timeline gap the dropdown was
         /// rebuilt to close.
         case watching(severity: WatchingSeverity)
+        /// The connection is degraded for everyday activities (Calls, Gaming, Streaming)
+        /// even if no coarse background notification rule has fired yet.
+        case degraded(DegradedSnapshot)
         case healthy
     }
 
     enum WatchingSeverity: String, Sendable { case warn, critical }
+
+    /// A snapshot of service-level degradation (e.g. video calls cutting out or gaming lag)
+    /// synthesized from the suitability engine and live telemetry. Decoupled so StageResolver
+    /// depends on nothing but Foundation.
+    struct DegradedSnapshot: Equatable, Sendable {
+        let headline: String
+        let subtitle: String
+        let isCritical: Bool
+        let affectedActivities: [String]
+
+        init(headline: String, subtitle: String, isCritical: Bool = false, affectedActivities: [String] = []) {
+            self.headline = headline
+            self.subtitle = subtitle
+            self.isCritical = isCritical
+            self.affectedActivities = affectedActivities
+        }
+    }
 
     /// A snapshot of the one active alert the stage renders when the dwell
     /// has elapsed. Decoupled from `AlertEngine.ActiveAlert` so the resolver
@@ -113,13 +133,15 @@ enum StageResolver {
         let linkUp: Bool
         let measurementState: String
         let activeResolution: ResolutionSnapshot?
+        let degradedExperience: DegradedSnapshot?
         init(isScanning: Bool, isArrivalCheck: Bool = false,
              monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
              activeAlert: AlertSnapshot?, severity: String, linkUp: Bool,
              measurementState: String = "unknown",
-             activeResolution: ResolutionSnapshot? = nil) {
+             activeResolution: ResolutionSnapshot? = nil,
+             degradedExperience: DegradedSnapshot? = nil) {
             self.isScanning = isScanning
             self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
@@ -132,6 +154,7 @@ enum StageResolver {
             self.linkUp = linkUp
             self.measurementState = measurementState
             self.activeResolution = activeResolution
+            self.degradedExperience = degradedExperience
         }
     }
 
@@ -158,6 +181,9 @@ enum StageResolver {
         case "critical": return .watching(severity: .critical)
         case "warn":     return .watching(severity: .warn)
         default:
+            if let deg = i.degradedExperience {
+                return .degraded(deg)
+            }
             if let res = i.activeResolution {
                 return .resolved(res)
             }

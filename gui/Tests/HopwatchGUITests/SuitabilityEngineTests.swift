@@ -163,4 +163,92 @@ import Testing
             #expect(item.status == "Offline")
         }
     }
+
+    @Test func synthesizeDegradedExperienceWithCallsAndGamingDegraded() {
+        var sample = MonitorSample()
+        sample.gateway = .init(lossPct: 4.0, rttAvgMs: 29.0, rttJitterMs: 50.0)
+        sample.internet = .init(lossPct: 4.0, rttAvgMs: 101.0, rttJitterMs: 56.0)
+
+        let speed = RunSnapshot.Speedtest(downMbps: 539.0, upMbps: 307.0)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            isLinkUp: true,
+            currentJitter: 56.0,
+            effectiveLoss: 4.0
+        )
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items,
+            monitorSample: sample,
+            currentJitter: 56.0,
+            effectiveLoss: 4.0
+        )
+
+        #expect(degraded != nil)
+        #expect(degraded?.headline == "Unstable for calls & gaming")
+        #expect(degraded?.isCritical == true)
+        #expect(degraded?.affectedActivities == ["Calls", "Gaming"])
+        #expect(degraded?.subtitle.contains("4% packet loss") == true)
+        #expect(degraded?.subtitle.contains("56ms jitter") == true)
+        #expect(degraded?.subtitle.contains("to router") == true)
+        #expect(degraded?.subtitle.contains("4K streaming is fine") == true)
+    }
+
+    @Test func synthesizeDegradedExperienceHighPingForGaming() {
+        var sample = MonitorSample()
+        sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 220.0, rttJitterMs: 4.0)
+
+        let speed = RunSnapshot.Speedtest(downMbps: 150.0, upMbps: 50.0)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            isLinkUp: true,
+            currentJitter: 4.0,
+            effectiveLoss: 0.0
+        )
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items,
+            monitorSample: sample,
+            currentJitter: 4.0,
+            effectiveLoss: 0.0
+        )
+
+        #expect(degraded != nil)
+        #expect(degraded?.headline == "High lag for gaming")
+        #expect(degraded?.affectedActivities.contains("Gaming") == true)
+        #expect(degraded?.subtitle.contains("220 ms") == true)
+    }
+
+    @Test func synthesizeDegradedExperienceHealthyWhenZeroLossAndLowPing() {
+        var sample = MonitorSample()
+        sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 15.0, rttJitterMs: 2.0)
+
+        let speed = RunSnapshot.Speedtest(downMbps: 200.0, upMbps: 50.0)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            isLinkUp: true,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items,
+            monitorSample: sample,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+
+        #expect(degraded == nil)
+    }
 }

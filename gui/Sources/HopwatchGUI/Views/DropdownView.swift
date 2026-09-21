@@ -173,7 +173,13 @@ struct DropdownView: View {
     // MARK: - 3. Status Hero Section
 
     private var stage: StageResolver.Stage {
-        StageResolver.resolve(.init(
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: suitabilityItems,
+            monitorSample: coordinator.monitor.latest,
+            currentJitter: coordinator.currentJitter,
+            effectiveLoss: coordinator.effectiveLoss
+        )
+        return StageResolver.resolve(.init(
             isScanning: coordinator.isScanning,
             isArrivalCheck: coordinator.isArrivalCheck,
             monitoringEnabled: appSettings.monitoringEnabled,
@@ -192,7 +198,8 @@ struct DropdownView: View {
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
             linkUp: coordinator.monitor.latest?.link.up ?? true,
             measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
-            activeResolution: coordinator.activeResolution?.snapshot
+            activeResolution: coordinator.activeResolution?.snapshot,
+            degradedExperience: degraded
         ))
     }
 
@@ -206,6 +213,14 @@ struct DropdownView: View {
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: "All good — watching",
                 subtitle: quietLine
+            )
+        case .degraded(let deg):
+            MenuStatusHeroView(
+                iconName: deg.isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
+                iconTint: deg.isCritical ? .red : Theme.ColorToken.amber,
+                iconBackground: deg.isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash,
+                headline: deg.headline,
+                subtitle: deg.subtitle
             )
         case .resolved(let res):
             MenuStatusHeroView(

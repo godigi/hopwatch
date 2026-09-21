@@ -130,6 +130,19 @@ enum SuitabilityEngine {
             )
         }
 
+        let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
+        if ping >= 250.0 {
+            return Item(
+                id: "calls",
+                title: "Calls",
+                icon: "video",
+                status: "Audio delay",
+                metric: String(format: "%.0f ms delay", ping),
+                tint: Theme.ColorToken.amber,
+                verdict: .degraded
+            )
+        }
+
         return Item(
             id: "calls",
             title: "Calls",
@@ -467,6 +480,94 @@ enum SuitabilityEngine {
             metric: "TCP 443 ok",
             tint: Theme.ColorToken.green,
             verdict: .good
+        )
+    }
+
+    // MARK: - Synthesis
+
+    /// Synthesizes a human-oriented status headline and subtitle when network conditions
+    /// degrade everyday activities (Calls, Gaming, Streaming, Browsing), even if no coarse
+    /// CLI rule has fired. Returns `nil` if all activities are healthy.
+    static func synthesizeDegradedExperience(
+        items: [Item],
+        monitorSample: MonitorSample?,
+        currentJitter: Double? = nil,
+        effectiveLoss: Double? = nil
+    ) -> StageResolver.DegradedSnapshot? {
+        let calls = items.first { $0.id == "calls" }
+        let gaming = items.first { $0.id == "gaming" }
+        let streaming = items.first { $0.id == "streaming" }
+        let browsing = items.first { $0.id == "browsing" }
+
+        let callsBroken = calls?.verdict == .broken
+        let callsDegraded = calls?.verdict == .degraded
+        let gamingBroken = gaming?.verdict == .broken
+        let gamingDegraded = gaming?.verdict == .degraded
+        let streamingBroken = streaming?.verdict == .broken
+        let streamingDegraded = streaming?.verdict == .degraded
+        let browsingBroken = browsing?.verdict == .broken
+        let browsingDegraded = browsing?.verdict == .degraded
+
+        let anyBroken = callsBroken || gamingBroken || streamingBroken || browsingBroken
+        let anyDegraded = callsDegraded || gamingDegraded || streamingDegraded || browsingDegraded
+
+        guard anyBroken || anyDegraded else { return nil }
+
+        let gwLoss = monitorSample?.gateway.lossPct ?? 0.0
+        let inetLoss = effectiveLoss ?? monitorSample?.internet.lossPct ?? 0.0
+        let loss = max(gwLoss, inetLoss)
+        let jitter = currentJitter ?? monitorSample?.internet.rttJitterMs ?? 0.0
+        let isRouterCulprit = gwLoss >= 2.0 || (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0
+        let targetSuffix = isRouterCulprit ? " to router" : ""
+
+        var affected: [String] = []
+        if callsBroken || callsDegraded { affected.append("Calls") }
+        if gamingBroken || gamingDegraded { affected.append("Gaming") }
+        if streamingBroken || streamingDegraded { affected.append("Streaming") }
+        if browsingBroken || browsingDegraded { affected.append("Browsing") }
+
+        let headline: String
+        let subtitle: String
+
+        if (callsBroken || callsDegraded) && (gamingBroken || gamingDegraded) {
+            headline = (callsBroken || gamingBroken) ? "Unstable for calls & gaming" : "Calls & gaming may lag"
+            let streamingOk = streaming?.verdict == .good
+            let streamNote = streamingOk ? " · 4K streaming is fine" : ""
+            if loss >= 1.0 && jitter >= 5.0 {
+                subtitle = String(format: "%.0f%% packet loss · %.0fms jitter%@%@", loss, jitter, targetSuffix, streamNote)
+            } else if loss >= 1.0 {
+                subtitle = String(format: "%.0f%% packet loss%@%@", loss, targetSuffix, streamNote)
+            } else {
+                let ping = monitorSample?.internet.rttAvgMs ?? 0.0
+                subtitle = String(format: "%.0f ms ping · %.0fms jitter%@", ping, jitter, streamNote)
+            }
+        } else if callsBroken || callsDegraded {
+            headline = callsBroken ? "Frequent cutouts on calls" : "Voice & video calls may cut out"
+            subtitle = "\(calls?.metric ?? "")\(targetSuffix) · Browsing & streaming fine"
+        } else if gamingBroken || gamingDegraded {
+            let ping = monitorSample?.internet.rttAvgMs ?? 0.0
+            if gamingBroken {
+                headline = ping >= 140 ? "High lag for gaming" : "Severe lag in games"
+            } else {
+                headline = "Moderate lag in games"
+            }
+            subtitle = "\(gaming?.metric ?? "") · Web browsing & streaming fine"
+        } else if streamingBroken || streamingDegraded {
+            headline = streamingBroken ? "Video streaming is buffering" : "Streaming quality reduced"
+            subtitle = "\(streaming?.metric ?? "") · Calls & browsing fine"
+        } else if browsingBroken || browsingDegraded {
+            headline = browsingBroken ? "Websites aren't loading" : "Web browsing is slow"
+            subtitle = "\(browsing?.metric ?? "")"
+        } else {
+            headline = "Connection is degraded"
+            subtitle = "Some services may experience intermittent slowdowns."
+        }
+
+        return StageResolver.DegradedSnapshot(
+            headline: headline,
+            subtitle: subtitle,
+            isCritical: anyBroken,
+            affectedActivities: affected
         )
     }
 

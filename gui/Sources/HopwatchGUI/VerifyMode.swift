@@ -1473,8 +1473,9 @@ private enum VerifyHarness {
                                pauseReason: String? = nil,
                                lastError: String? = nil,
                                monitorRunning: Bool = true,
-                               measurementState: String = "measured",
-                               activeResolution: StageResolver.ResolutionSnapshot? = nil) -> StageResolver.Inputs {
+                                measurementState: String = "measured",
+                                activeResolution: StageResolver.ResolutionSnapshot? = nil,
+                                degradedExperience: StageResolver.DegradedSnapshot? = nil) -> StageResolver.Inputs {
         StageResolver.Inputs(
             isScanning: isScanning,
             isArrivalCheck: isArrivalCheck,
@@ -1487,7 +1488,8 @@ private enum VerifyHarness {
             severity: severity,
             linkUp: linkUp,
             measurementState: measurementState,
-            activeResolution: activeResolution
+            activeResolution: activeResolution,
+            degradedExperience: degradedExperience
         )
     }
 
@@ -1509,14 +1511,29 @@ private enum VerifyHarness {
         equal(StageResolver.resolve(inputs(severity: "critical")), .watching(severity: .critical), "critical → watching (red, before dwell)")
         equal(StageResolver.resolve(inputs(measurementState: "unknown")), .checking, "unknown measurement → checking, not healthy")
 
-        // An active alert wins over watching — once the dwell elapses the
-        // card carries the alert's prose, which a scan may have enriched.
+        // Degraded stage: Activity-level degradation (calls cutting out, gaming lag)
+        // produces .degraded when severity is ok, closing the contradiction where
+        // the top hero says "All good" while calls/gaming are red.
+        let deg = StageResolver.DegradedSnapshot(headline: "Unstable for calls & gaming",
+                                                subtitle: "4% packet loss to router",
+                                                isCritical: true,
+                                                affectedActivities: ["Calls", "Gaming"])
+        equal(StageResolver.resolve(inputs(severity: "ok", degradedExperience: deg)),
+              .degraded(deg), "ok severity with degraded experience → degraded")
+        equal(StageResolver.resolve(inputs(severity: "warn", degradedExperience: deg)),
+              .watching(severity: .warn), "warn severity precedes degraded")
+        equal(StageResolver.resolve(inputs(severity: "critical", degradedExperience: deg)),
+              .watching(severity: .critical), "critical severity precedes degraded")
+
+        // An active alert wins over watching and degraded
         let alert = StageResolver.AlertSnapshot(title: "No internet connection",
                                                 body: "Checking what happened…",
                                                 raisedAt: Date(),
                                                 rules: ["P1"])
         equal(StageResolver.resolve(inputs(severity: "critical", activeAlert: alert)),
               .alerted(alert), "active alert → alerted (overrides watching)")
+        equal(StageResolver.resolve(inputs(severity: "ok", activeAlert: alert, degradedExperience: deg)),
+              .alerted(alert), "active alert precedes degraded")
 
         // Resolution stage (TASK-027): An active resolution produces .resolved when healthy
         let res = StageResolver.ResolutionSnapshot(title: "Wi-Fi Improved", message: "Moved from 2.4 GHz to 5 GHz (Ch 52).")
@@ -2039,6 +2056,12 @@ private enum VerifyHarness {
                 content(icon: res.icon, tint: .green,
                         title: res.title, tertiary: res.message)
                     .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .degraded(let deg):
+                content(icon: deg.isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
+                        tint: deg.isCritical ? .red : .orange,
+                        title: deg.headline, tertiary: deg.subtitle)
+                    .background((deg.isCritical ? Color.red : Color.orange).opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: 10))
             }
         }
 
@@ -2080,6 +2103,7 @@ private enum VerifyHarness {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let cases: [(String, StageResolver.Stage, String)] = [
             ("healthy",           .healthy,                                  "Watching for changes."),
+            ("degraded",          .degraded(.init(headline: "Unstable for calls & gaming", subtitle: "4% packet loss · 56ms jitter to router", isCritical: true)), "4% packet loss · 56ms jitter to router"),
             ("watching-warn",     .watching(severity: .warn),                "You're losing a few packets to your router."),
             ("watching-critical", .watching(severity: .critical),            "Your Mac has no internet connection at all."),
             // `.alerted` is deliberately absent: it is rendered above from

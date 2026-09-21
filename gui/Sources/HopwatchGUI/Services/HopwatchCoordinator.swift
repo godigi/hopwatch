@@ -1386,6 +1386,31 @@ final class HopwatchCoordinator {
         if let res = activeResolution {
             return res.message.isEmpty ? res.title : "\(res.title) — \(res.message)"
         }
+        if let sample = monitor.latest {
+            let snap = latestRun?.snapshot ?? currentRunResult?.snapshot
+            let items = SuitabilityEngine.evaluateAll(.init(
+                monitorSample: sample,
+                speedTest: snap?.speedtest ?? latestSpeedTest,
+                savedSuitability: snap?.suitability,
+                catalog: rulesCatalog.catalog,
+                firedRules: sample.status.rules,
+                isLinkUp: sample.link.up,
+                isDoubleNat: snap?.wan.doubleNat.detected ?? false,
+                mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
+                vpnActive: sample.vpn.active,
+                vpnName: sample.vpn.name,
+                currentJitter: currentJitter,
+                effectiveLoss: effectiveLoss
+            ))
+            if let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+                items: items,
+                monitorSample: sample,
+                currentJitter: currentJitter,
+                effectiveLoss: effectiveLoss
+            ) {
+                return "\(degraded.headline) — \(degraded.subtitle)"
+            }
+        }
         let currentSnapshot = latestRun?.snapshot ?? currentRunResult?.snapshot
         if let cause = currentSnapshot?.mostLikelyRootCause, !cause.isEmpty {
             return cause
