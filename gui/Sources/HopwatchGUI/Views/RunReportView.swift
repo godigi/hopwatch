@@ -88,7 +88,8 @@ struct RunReportView: View {
     private var hopAttribution: some View {
         HopAttributionView(result: HopAttributionResolver.resolve(
             snapshot: snapshot,
-            fallbackRSSI: liveRSSI
+            fallbackRSSI: liveRSSI,
+            recentRoamed: coordinator.hasRecentRoam
         ))
     }
 

@@ -741,7 +741,7 @@ final class HopwatchCoordinator {
         // If an active resolution exists, verify it remains valid under the new sample.
         // If packet loss has returned or new alerts/faults appeared, dismiss it immediately.
         if activeResolution != nil {
-            let hasLoss = (sample.gateway.lossPct ?? 0) > 0 || (sample.internet.lossPct ?? 0) > 0
+            let hasLoss = (sample.gateway.lossPct ?? 0) >= 3.0 || (sample.internet.lossPct ?? 0) >= 3.0
             if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty || hasLoss {
                 dismissActiveResolution()
             }
@@ -786,8 +786,8 @@ final class HopwatchCoordinator {
                 )
             }
             // Case 4: Network Packet Loss Stabilized
-            else if (prev.gateway.lossPct ?? 0) > 0 || (prev.internet.lossPct ?? 0) > 0,
-                    (sample.gateway.lossPct ?? 0) == 0 && (sample.internet.lossPct ?? 0) == 0 {
+            else if (prev.gateway.lossPct ?? 0) >= 3.0 || (prev.internet.lossPct ?? 0) >= 3.0,
+                    (sample.gateway.lossPct ?? 0) < 1.0 && (sample.internet.lossPct ?? 0) < 1.0 {
                 let ping = sample.internet.rttAvgMs ?? sample.gateway.rttAvgMs
                 let pingText = ping.map { "\(Int($0.rounded())) ms ping" } ?? "low latency"
                 recordResolution(
@@ -1181,6 +1181,17 @@ final class HopwatchCoordinator {
         }
     }
 
+    /// True if any monitor sample in the rolling loss window (~last 10 probes / 100s) recorded a Wi-Fi roam event.
+    var hasRecentRoam: Bool {
+        if monitor.latest?.changes.contains(where: { $0.kind == "wifi-roamed" }) == true {
+            return true
+        }
+        let windowSamples = monitor.recent.suffix(10)
+        return windowSamples.contains { sample in
+            sample.changes.contains { $0.kind == "wifi-roamed" }
+        }
+    }
+
     /// Unified effective packet loss across internet and gateway probes.
     /// Evaluates whichever is worse so loss on either leg is visible and accounted for.
     var effectiveLoss: Double? {
@@ -1195,10 +1206,17 @@ final class HopwatchCoordinator {
         let gwLoss = monitor.latest?.gateway.lossPct
             ?? latestRun?.snapshot.gateway.lossPct
             ?? currentRunResult?.snapshot.gateway.lossPct
-        if let inetLoss, let gwLoss {
-            return max(inetLoss, gwLoss)
+
+        var candidateGW = gwLoss
+        if hasRecentRoam, let gw = candidateGW, gw < 10.0 {
+            // Handover blip: suppress attributing to persistent connection loss if internet is intact
+            candidateGW = inetLoss ?? 0.0
         }
-        return inetLoss ?? gwLoss
+
+        if let inetLoss, let candidateGW {
+            return max(inetLoss, candidateGW)
+        }
+        return inetLoss ?? candidateGW
     }
 
     /// Effective instantaneous or moving RFC 3550 jitter.

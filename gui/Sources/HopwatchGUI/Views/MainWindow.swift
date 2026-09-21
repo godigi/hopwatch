@@ -24,8 +24,8 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .home:     return "Home"
-        case .live:     return "Live"
+        case .home:     return "Overview"
+        case .live:     return "Live monitoring"
         case .activity: return "Activity"
         case .trends:   return "Trends"
         case .networks: return "Networks"
@@ -34,11 +34,11 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .home:     return "house"
+        case .home:     return "macwindow"
         case .live:     return "waveform.path.ecg"
         case .activity: return "bell"
         case .trends:   return "chart.xyaxis.line"
-        case .networks: return "antenna.radiowaves.left.and.right"
+        case .networks: return "wifi"
         }
     }
 }
@@ -47,11 +47,12 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 /// network OK right now, and why?", "what's happening live?", "what
 /// changed?", "which networks have I been on?") replacing the four
 /// segmented tabs `DashboardWindow` used to show. Built from
-/// `nimbalyst-local/mockups/netdiag-main-window.mockup.html` — the sidebar
-/// and Home's layout follow it; the exact styling doesn't.
+/// `nimbalyst-local/mockups/netdiag-main-window.mockup.html` and redesigned per
+/// `docs/design/hopwatch-dashboard.mockup.html`.
 struct MainWindow: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: SidebarSection? = .home
     /// Home's own navigation path, owned here rather than inside `HomeView`
     /// so a `.run(route)` request — which may arrive before this window
@@ -64,6 +65,11 @@ struct MainWindow: View {
             sidebar
         } detail: {
             detail
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                toolbarRightContent
+            }
         }
         .task {
             // Both paths are needed: `.task` catches a request made while
@@ -86,17 +92,147 @@ struct MainWindow: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            // Brand header
+            HStack(spacing: 8) {
+                AppBrandMark()
+                    .frame(width: 24, height: 24)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("Hopwatch")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    Text("v\(AppVersion.display)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
             List(selection: $selection) {
                 ForEach(SidebarSection.allCases) { section in
                     row(section).tag(section)
                 }
             }
             .listStyle(.sidebar)
+
             Divider()
+
+            // Mini network card
+            sidebarNetworkCard
+
+            // Settings button
+            Button {
+                openWindow(id: WindowID.settings)
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12))
+                    Text("Settings")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(Theme.ColorToken.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
             monitoringStatusLine
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.vertical, Theme.Spacing.sm)
         }
+    }
+
+    private var sidebarNetworkCard: some View {
+        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
+        let name = coordinator.wifiDisplayName
+            ?? coordinator.monitor.latest?.link.ssid
+            ?? coordinator.latestRun?.snapshot.wifi?.ssid
+            ?? "Disconnected"
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: isWiFi ? "wifi" : "cable.connector")
+                    .font(.system(size: 12))
+                Text(name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.ColorToken.ink)
+
+            Text("Current network")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ColorToken.muted)
+                .padding(.leading, 18)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private var toolbarRightContent: some View {
+        HStack(spacing: 12) {
+            Text(updatedAgeText)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.ColorToken.muted)
+
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(statusPillColor)
+                    .frame(width: 6, height: 6)
+                Text(statusPillText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(statusPillColor)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(statusPillBackground)
+            .clipShape(Capsule())
+
+            Button {
+                let enabled = !appSettings.monitoringEnabled
+                appSettings.monitoringEnabled = enabled
+                coordinator.setMonitoring(enabled: enabled)
+            } label: {
+                Image(systemName: appSettings.monitoringEnabled ? "pause.fill" : "play.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+            .buttonStyle(.plain)
+            .help(appSettings.monitoringEnabled ? "Pause monitoring" : "Resume monitoring")
+        }
+    }
+
+    private var updatedAgeText: String {
+        guard let ts = coordinator.monitor.latest?.timestamp else { return "Waiting for first sample" }
+        return "Updated \(RelativeTime.string(from: ts))"
+    }
+
+    private var statusPillText: String {
+        if coordinator.isScanning { return "Checking" }
+        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
+        if coordinator.monitor.latest?.status.severity == "critical" { return "Problem" }
+        if coordinator.monitor.latest?.status.severity == "warn" { return "Degraded" }
+        return "Watching"
+    }
+
+    private var statusPillColor: Color {
+        if coordinator.isScanning { return Theme.ColorToken.blue }
+        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
+        if coordinator.monitor.latest?.status.severity == "critical" { return .red }
+        if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amber }
+        return Theme.ColorToken.green
+    }
+
+    private var statusPillBackground: Color {
+        if coordinator.isScanning { return Theme.ColorToken.blueWash }
+        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.neutralWash }
+        if coordinator.monitor.latest?.status.severity == "critical" { return Theme.ColorToken.redWash }
+        if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amberWash }
+        return Theme.ColorToken.greenWash
     }
 
     @ViewBuilder

@@ -23,7 +23,7 @@ struct HopwatchApp: App {
             DropdownView()
                 .environment(coordinator)
                 .environment(coordinator.appSettings)
-                .frame(width: 360)
+                .frame(width: 420)
         } label: {
             MenuBarLabel(coordinator: coordinator, appSettings: coordinator.appSettings)
                 // The only view guaranteed to exist at launch. An
@@ -46,9 +46,9 @@ struct HopwatchApp: App {
                 // 780×560 keeps both readable at the floor; 920×680 default
                 // gives the sidebar room without the content column
                 // shrinking to match the pre-redesign width.
-                .frame(minWidth: 780, minHeight: 560)
+                .frame(minWidth: 840, minHeight: 600)
         }
-        .defaultSize(width: 920, height: 680)
+        .defaultSize(width: 1060, height: 720)
 
         Window("Hopwatch Settings", id: WindowID.settings) {
             SettingsView()

@@ -73,6 +73,7 @@ public enum HopAttributionResolver {
         public let headline: String
         public let reassurance: String
         public let badgeTitle: String
+        public let badgeTint: Color
         public let isWired: Bool
         public let activeRules: [String]
 
@@ -85,6 +86,7 @@ public enum HopAttributionResolver {
             headline: String,
             reassurance: String,
             badgeTitle: String? = nil,
+            badgeTint: Color? = nil,
             isWired: Bool = false,
             activeRules: [String] = []
         ) {
@@ -96,6 +98,7 @@ public enum HopAttributionResolver {
             self.headline = headline
             self.reassurance = reassurance
             self.badgeTitle = badgeTitle ?? culprit.badgeTitle
+            self.badgeTint = badgeTint ?? culprit.badgeTint
             self.isWired = isWired
             self.activeRules = activeRules
         }
@@ -126,7 +129,8 @@ public enum HopAttributionResolver {
         inetRTT: Double? = nil,
         inetLoss: Double? = nil,
         bufferbloatGW: Double? = nil,
-        bufferbloatInet: Double? = nil
+        bufferbloatInet: Double? = nil,
+        recentRoamed: Bool = false
     ) -> Result {
         let ruleSet = Set(rules)
 
@@ -150,7 +154,7 @@ public enum HopAttributionResolver {
 
         // 2. Evaluate Local Router Health
         var routerHealth: HopHealth = .healthy
-        if !ruleSet.isDisjoint(with: routerCriticalRules) || (gatewayLoss != nil && gatewayLoss! >= 10 && wifiHealth == .healthy) {
+        if !ruleSet.isDisjoint(with: routerCriticalRules) || (gatewayLoss != nil && gatewayLoss! >= 10 && wifiHealth == .healthy && !recentRoamed) {
             routerHealth = .critical
         } else if !ruleSet.isDisjoint(with: routerWarningRules) || (bufferbloatGW != nil && bufferbloatGW! >= 150) {
             routerHealth = .warning
@@ -162,7 +166,7 @@ public enum HopAttributionResolver {
         var ispHealth: HopHealth = .healthy
         if !ruleSet.isDisjoint(with: ispCriticalRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 10) {
             ispHealth = .critical
-        } else if !ruleSet.isDisjoint(with: ispWarningRules) || (bufferbloatInet != nil && bufferbloatInet! >= 150) {
+        } else if !ruleSet.isDisjoint(with: ispWarningRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 3.0 && gatewayLoss != nil && gatewayLoss! == 0) || (bufferbloatInet != nil && bufferbloatInet! >= 150) {
             ispHealth = .warning
         }
 
@@ -171,10 +175,19 @@ public enum HopAttributionResolver {
         var headline: String
         let reassurance: String
         var badgeTitle: String
+        var badgeTint: Color? = nil
 
-        // A broken browser process (BR-1) takes precedence over minor/advisory local degradation
-        // when the physical network link is operational.
-        if ruleSet.contains("BR-1") && wifiHealth != .critical && routerHealth != .critical && ispHealth != .critical {
+        // A recent Wi-Fi Roaming handover explains transient gateway packet loss
+        if recentRoamed && isWifi && wifiHealth != .critical && (gatewayLoss ?? 0) < 20.0 {
+            culprit = .wifi
+            headline = "Switched Wi-Fi Access Point"
+            badgeTitle = "Notice: Wi-Fi Roamed"
+            badgeTint = .blue
+            reassurance = "Your Mac recently roamed between Wi-Fi access points. Any momentary packet drop was caused by the wireless handover, and your connection is now stable."
+            if wifiHealth == .healthy {
+                wifiHealth = .warning
+            }
+        } else if ruleSet.contains("BR-1") && wifiHealth != .critical && routerHealth != .critical && ispHealth != .critical {
             culprit = .mac
             headline = "Browser Needs Relaunch"
             badgeTitle = "Culprit: Browser App"
@@ -198,7 +211,7 @@ public enum HopAttributionResolver {
                 badgeTitle = hasDrops ? "Culprit: Crowded Channel" : "Advisory: Crowded Channel"
                 reassurance = "Your Wi-Fi channel is crowded by neighboring networks. If performance is inconsistent, changing your router to a less congested channel will improve stability."
             } else if let rssi = wifiRSSI {
-                reassurance = "Your Wi-Fi signal is weak (\(rssi) dBm). Moving closer to the access point or switching to 5GHz will resolve the packet loss."
+                reassurance = "Your Wi-Fi signal is weak (\(rssi) dBm) based on your Mac's physical position. Moving closer to the access point or switching to 5GHz will resolve the packet loss."
             } else {
                 if let loss = gatewayLoss, loss > 0 {
                     reassurance = "The wireless link between your Mac and the router is dropping packets. Moving closer to the router or toggling Wi-Fi usually fixes this."
@@ -279,12 +292,13 @@ public enum HopAttributionResolver {
             headline: headline,
             reassurance: reassurance,
             badgeTitle: badgeTitle,
+            badgeTint: badgeTint,
             isWired: !isWifi,
             activeRules: rules
         )
     }
 
-    static func resolve(snapshot: RunSnapshot, fallbackRSSI: Int? = nil) -> Result {
+    static func resolve(snapshot: RunSnapshot, fallbackRSSI: Int? = nil, recentRoamed: Bool = false) -> Result {
         let rules = snapshot.diagnosis.compactMap(\.rule)
         let isWifi = snapshot.wifi != nil
         var res = resolve(
@@ -296,7 +310,8 @@ public enum HopAttributionResolver {
             inetRTT: snapshot.internetLatency.rttAvgMs,
             inetLoss: snapshot.internetLatency.lossPct,
             bufferbloatGW: snapshot.bufferbloat.gwDeltaMs,
-            bufferbloatInet: snapshot.bufferbloat.inetDeltaMs
+            bufferbloatInet: snapshot.bufferbloat.inetDeltaMs,
+            recentRoamed: recentRoamed
         )
         if rules.contains("BR-1"),
            let brDiag = snapshot.diagnosis.first(where: { $0.rule == "BR-1" }),
@@ -310,6 +325,7 @@ public enum HopAttributionResolver {
                 headline: res.headline,
                 reassurance: brDiag.summary,
                 badgeTitle: res.badgeTitle,
+                badgeTint: res.badgeTint,
                 isWired: res.isWired,
                 activeRules: res.activeRules
             )
@@ -317,12 +333,20 @@ public enum HopAttributionResolver {
         return res
     }
 
-    static func resolve(sample: MonitorSample, fallbackRSSI: Int? = nil) -> Result {
+    static func resolve(
+        sample: MonitorSample,
+        fallbackRSSI: Int? = nil,
+        recentSamples: [MonitorSample] = [],
+        recentRoamed: Bool = false
+    ) -> Result {
         var rules = sample.status.rules
         if sample.status.icmpFiltered && !rules.contains("ICMP-1") && !rules.contains("TCP-1") {
             rules.append("ICMP-1")
         }
         let isWifi = sample.link.isWiFi
+        let roamedInWindow = sample.changes.contains(where: { $0.kind == "wifi-roamed" })
+            || recentSamples.suffix(10).contains(where: { $0.changes.contains(where: { $0.kind == "wifi-roamed" }) })
+        let hasRoamed = recentRoamed || roamedInWindow
         return resolve(
             rules: rules,
             isWifi: isWifi,
@@ -332,7 +356,8 @@ public enum HopAttributionResolver {
             inetRTT: sample.internet.rttAvgMs,
             inetLoss: sample.internet.lossPct,
             bufferbloatGW: nil,
-            bufferbloatInet: nil
+            bufferbloatInet: nil,
+            recentRoamed: hasRoamed
         )
     }
 }
@@ -356,7 +381,7 @@ public struct HopAttributionView: View {
             HStack(alignment: .center) {
                 HStack(spacing: 6) {
                     Image(systemName: result.culprit == .none ? "checkmark.seal.fill" : "exclamationmark.octagon.fill")
-                        .foregroundStyle(result.culprit.badgeTint)
+                        .foregroundStyle(result.badgeTint)
                         .imageScale(.medium)
                     Text(result.headline)
                         .font(.headline)
@@ -364,10 +389,10 @@ public struct HopAttributionView: View {
                 Spacer()
                 Text(result.badgeTitle)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(result.culprit.badgeTint)
+                    .foregroundStyle(result.badgeTint)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(result.culprit.badgeTint.opacity(0.12), in: Capsule())
+                    .background(result.badgeTint.opacity(0.12), in: Capsule())
             }
 
             // Visual Node & Link Chain
@@ -412,7 +437,7 @@ public struct HopAttributionView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text.magnifyingglass")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(result.culprit.badgeTint)
+                            .foregroundStyle(result.badgeTint)
                         Text(result.activeRules.count > 1 ? "Evidence & Diagnostics (\(result.activeRules.count) findings)" : "Evidence & Diagnostics")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)

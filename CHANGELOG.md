@@ -6,6 +6,20 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Visible App Version Publishing**: Prominently displays the active app version (`v1.5.0`) in both the status dropdown menu (header and footer) and the main dashboard (sidebar brand header and footer status bar).
+- **Wi-Fi Roaming & Handover Detection**: Integrated access point handoff recognition across both live monitoring and diagnostic attribution. Transient gateway drops during wireless roaming are badged as `"Notice: Wi-Fi Roamed"` with reassuring copy, suppressing false router alarms over the 100-second rolling loss window and distinguishing physical roaming from chronic upstream ISP degradation.
+- **Suitability Engine & Experience Grid**: Added 3-column real-time experience breakdown (Voice & Video Calls, Online Gaming, Media Streaming) with calibrated latency, jitter, packet loss, and MTU evaluation.
+
+### Changed
+
+- **Calibrated Packet Loss Rolling Window**: Increased `MONITOR_LOSS_WINDOW_PROBES` from 5 to 10 in `lib/thresholds.sh`, accumulating a statistically robust sample denominator (100 packets for Gateway, 200 packets for Internet) spanning ~100 seconds.
+- **Filtered Warm-up Quantization Spikes**: Suppressed single-drop quantization spikes in `lib/monitor.sh` during monitor warm-up ($S < 40$) so an isolated dropped packet on an initial probe does not calculate as 5% or 10% loss.
+- **Calibrated Connection Stability Thresholds**: In `ConnectionStability`, loss $\le 1.0\%$ remains Optimal (green); minor loss ($1.0\% < \text{loss} \le 4.0\%$) evaluates as Variable (yellow); only sustained loss $> 4.0\%$ evaluates as Unstable (red).
+- **Calibrated Calls & Gaming Suitability**: In `SuitabilityEngine`, Voice & Video Calls degrades to "May cut out" at $\ge 3.0\%$ loss (up from $1.5\%$) and "Frequent cutouts" at $\ge 8.0\%$ loss (up from $5.0\%$). Gaming loss threshold calibrated to $\ge 2.0\%$ for degraded.
+- **Calibrated Dropdown & Dashboard Node Warnings**: In `DropdownView` and `HomeView`, router and internet hop lines only turn warning amber at $\ge 3.0\%$ packet loss or on active diagnosis rules. Incidental loss $< 1.0\%$ is cleanly presented as 0% packet loss.
+
 ## [1.4.2] - 2026-09-19
 
 ### Fixed
@@ -3893,7 +3907,7 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.4.3...HEAD
 [1.4.2]: https://github.com/godigi/hopwatch/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/godigi/hopwatch/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/godigi/hopwatch/compare/v1.3.3...v1.4.0

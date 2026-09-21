@@ -254,4 +254,38 @@ import Testing
         #expect(result.ispHealth == .healthy)
         #expect(result.badgeTitle == "All Hops Healthy")
     }
+
+    @Test func wifiHandoverDetectedAttributesToWifiNotice() {
+        // Recent AP handoff with minor transient gateway loss
+        let result = HopAttributionResolver.resolve(
+            rules: [],
+            isWifi: true,
+            wifiRSSI: -58,
+            gatewayRTT: 2.5,
+            gatewayLoss: 5.0,
+            inetRTT: 15.0,
+            inetLoss: 5.0,
+            recentRoamed: true
+        )
+        #expect(result.culprit == .wifi)
+        #expect(result.badgeTitle == "Notice: Wi-Fi Roamed")
+        #expect(result.routerHealth == .healthy)
+        #expect(result.reassurance.contains("roamed between Wi-Fi access points"))
+    }
+
+    @Test func weakWifiPositionAttributesToWifiCulprit() {
+        // Weak Wi-Fi based on physical position (-78 dBm)
+        let result = HopAttributionResolver.resolve(
+            rules: [],
+            isWifi: true,
+            wifiRSSI: -78,
+            gatewayRTT: 15.0,
+            gatewayLoss: 5.0,
+            inetRTT: 35.0,
+            inetLoss: 5.0
+        )
+        #expect(result.culprit == .wifi)
+        #expect(result.badgeTitle == "Culprit: Weak Wi-Fi")
+        #expect(result.reassurance.contains("physical position"))
+    }
 }

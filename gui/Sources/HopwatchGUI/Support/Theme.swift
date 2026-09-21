@@ -40,6 +40,114 @@ enum Theme {
         /// purpose, since it marks an inline hover state, not a
         /// container.
         static let control: CGFloat = 5
+        /// The route card and popover container radius from the redesign mockup.
+        static let routeCard: CGFloat = 12
+        /// Rounded pill badge radius.
+        static let pill: CGFloat = 20
+        /// Status icon box radius.
+        static let statusIcon: CGFloat = 9
+    }
+
+    // MARK: - Color tokens
+
+    /// Adaptive colors matching docs/design/hopwatch-menu.mockup.html in
+    /// light mode, adapting cleanly to dark mode with system semantic colors.
+    enum ColorToken {
+        static let ink = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.labelColor
+                : NSColor(red: 0x24/255.0, green: 0x32/255.0, blue: 0x48/255.0, alpha: 1.0)
+        }))
+
+        static let muted = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.secondaryLabelColor
+                : NSColor(red: 0x63/255.0, green: 0x71/255.0, blue: 0x87/255.0, alpha: 1.0)
+        }))
+
+        static let quiet = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.tertiaryLabelColor
+                : NSColor(red: 0x7b/255.0, green: 0x87/255.0, blue: 0x97/255.0, alpha: 1.0)
+        }))
+
+        static let line = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.separatorColor
+                : NSColor(red: 0xe3/255.0, green: 0xe8/255.0, blue: 0xef/255.0, alpha: 1.0)
+        }))
+
+        static let cardBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.quaternarySystemFill
+                : NSColor(red: 0xf8/255.0, green: 0xfa/255.0, blue: 0xfc/255.0, alpha: 1.0)
+        }))
+
+        static let footerBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.tertiarySystemFill
+                : NSColor(red: 0xf5/255.0, green: 0xf7/255.0, blue: 0xfa/255.0, alpha: 1.0)
+        }))
+
+        static let nodeBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.windowBackgroundColor
+                : NSColor.white
+        }))
+
+        static let blue = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemBlue
+                : NSColor(red: 0x28/255.0, green: 0x65/255.0, blue: 0xd9/255.0, alpha: 1.0)
+        }))
+
+        static let green = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemGreen
+                : NSColor(red: 0x25/255.0, green: 0x79/255.0, blue: 0x62/255.0, alpha: 1.0)
+        }))
+
+        static let greenWash = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemGreen.withAlphaComponent(0.18)
+                : NSColor(red: 0xe9/255.0, green: 0xf5/255.0, blue: 0xef/255.0, alpha: 1.0)
+        }))
+
+        static let amber = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemOrange
+                : NSColor(red: 0x95/255.0, green: 0x60/255.0, blue: 0x0f/255.0, alpha: 1.0)
+        }))
+
+        static let amberWash = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemOrange.withAlphaComponent(0.18)
+                : NSColor(red: 0xff/255.0, green: 0xf5/255.0, blue: 0xe3/255.0, alpha: 1.0)
+        }))
+
+        static let neutralWash = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.quaternarySystemFill
+                : NSColor(red: 0xee/255.0, green: 0xf1/255.0, blue: 0xf5/255.0, alpha: 1.0)
+        }))
+
+        static let blueWash = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemBlue.withAlphaComponent(0.18)
+                : NSColor(red: 0xed/255.0, green: 0xf3/255.0, blue: 0xff/255.0, alpha: 1.0)
+        }))
+
+        static let red = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemRed
+                : NSColor(red: 0xb9/255.0, green: 0x4b/255.0, blue: 0x43/255.0, alpha: 1.0)
+        }))
+
+        static let redWash = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.systemRed.withAlphaComponent(0.18)
+                : NSColor(red: 0xfd/255.0, green: 0xeb/255.0, blue: 0xea/255.0, alpha: 1.0)
+        }))
     }
 
     /// The opacity every hand-rolled card multiplied `.quaternary` by.

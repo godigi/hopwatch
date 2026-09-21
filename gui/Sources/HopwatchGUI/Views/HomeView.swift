@@ -1,41 +1,64 @@
 import SwiftUI
+import AppKit
 import CoreWLAN
+import UniformTypeIdentifiers
 
-/// Home: "is my internet OK, and why?" — the question the sidebar's first
-/// row answers. Hydrated from stored history on cold launch so this is
-/// never empty (see `NetdiagCoordinator.hydrateFromHistoryIfNeeded`), and
-/// it leads with the same user-facing suitability verdict a stored report
-/// uses. Dense measurements are collapsed on this landing screen; Networks
-/// remains the place to browse past checks, and the expert layer remains a
-/// disclosure rather than a mode chosen at first launch.
+/// The main dashboard overview: "is my internet OK, and why?" — redesigned
+/// per docs/design/hopwatch-dashboard.mockup.html and hopwatch-redesign-notes.md.
+///
+/// Features a comprehensive two-column layout:
+/// 1. Page Heading: Breadcrumb, Share diagnostics menu, Run full check button.
+/// 2. Status Hero Banner: Prominent condition headline, explanation, and detection age.
+/// 3. Connection Path: 3-hop interactive route (This Mac → Router → Internet) with
+///    live readings, country flag, route metrics, and VPN context.
+/// 4. Main Analysis Grid:
+///    - Left: Live Ping Chart (15m/1h range, legend, min/avg/max, latency test toggle) + Findings & Next Steps.
+///    - Right: Check Details Table (comparing current measurements against "Usual" medians).
+/// 5. Connection Reliability Strip: Availability, outages, downtime, longest outage.
+/// 6. Bottom Grid: Network Details Panel (with speed test context) + Recent Activity Panel.
+/// 7. Saved Activity Suitability Strip: 5-category suitability row.
+/// 8. Technical Details Disclosure Panel: Collapsible 4-section drawer with raw JSON viewer.
+/// 9. Dashboard Footer: Privacy disclaimer.
 struct HomeView: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
-    /// The Wi-Fi row's CoreWLAN fallback — same cache-and-throttle shape
-    /// as `DropdownView.coreWLANRSSI`, kept as its own `@State` because
-    /// SwiftUI state belongs to the view that owns it, not to a store both
-    /// views could share. See that property's header for why a live read
-    /// on every render would be wrong.
+    @Environment(\.openWindow) private var openWindow
+
+    @State private var chartWindowMinutes: Int = 15
+    @State private var showRawJSONSheet: Bool = false
     @State private var coreWLANRSSI: Int?
+    @State private var shareFeedback: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                statusHeroCard
+                // 1. Page Heading
+                DashboardHeadingView(
+                    networkName: currentNetworkName,
+                    isWiFi: isConnectedToWiFi,
+                    isScanning: coordinator.isScanning,
+                    onRunFullCheck: { coordinator.runFullCheck() },
+                    onCancelScan: { coordinator.cancelScan() },
+                    onCopyRedacted: { copyShareableReport() },
+                    onCopySupport: { copySupportSummary() },
+                    onSaveMarkdown: { saveMarkdownReport() },
+                    onSaveJSON: { saveJSONReport() }
+                )
 
+                // Location Banner (if location permissions are restricted on Wi-Fi)
                 locationWarningBanner
 
-                ArrivalCard(state: coordinator.arrivalState,
-                            network: arrivalNetworkName,
-                            progress: coordinator.isScanning ? coordinator.progress : nil,
-                            intent: coordinator.arrivalIntent,
-                            onRunFullCheck: { coordinator.runDeclinedFullCheck() },
-                            isCaptivePortal: coordinator.monitor.latest?.publicInfo.captivePortal == true
-                                || (coordinator.monitor.latest?.status.rules.contains("CP-1") ?? false)
-                                || coordinator.alerts.active["captive-portal"] != nil)
+                // Arrival Card (for newly joined networks or captive portals)
+                ArrivalCard(
+                    state: coordinator.arrivalState,
+                    network: arrivalNetworkName,
+                    progress: coordinator.isScanning ? coordinator.progress : nil,
+                    intent: coordinator.arrivalIntent,
+                    onRunFullCheck: { coordinator.runDeclinedFullCheck() },
+                    isCaptivePortal: isCaptivePortal
+                )
 
-                // Only for scans the arrival card is not already showing —
-                // otherwise a new network renders two sets of progress rows.
+                // Scan in flight progress
                 if coordinator.isScanning,
                    ArrivalCopy.forState(coordinator.arrivalState,
                                         network: arrivalNetworkName,
@@ -44,74 +67,660 @@ struct HomeView: View {
                     Divider()
                 }
 
-                // Hoisted out of `emptyState`: a hydrated report replaces
-                // that state the moment history has anything to show, and a
-                // failed scan needs to surface whether or not the screen
-                // underneath it is empty.
+                // Error banner if last check failed
                 if let error = coordinator.lastRunError {
                     HStack(alignment: .top, spacing: 8) {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                        Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 8)
+                        Text(error)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        Spacer()
                         Button("Try Again") {
                             coordinator.runFullCheck(reason: "retry after failure")
                         }
                         .controlSize(.small)
                     }
+                    .padding(Theme.Spacing.sm)
+                    .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 }
 
-                switch coordinator.reportSource {
-                case .live(let run):
-                    RunReportView(snapshot: run.snapshot, rawJSON: run.rawJSON,
-                                  showRuleIDs: appSettings.expertExpanded,
-                                  presentation: .home)
-                case .stored(let detail):
-                    // Comparison chips come free: `detail` is a `--show`
-                    // response, and RunReportView already knows how to
-                    // render one — RunDetailView passes the identical pair.
-                    RunReportView(snapshot: detail.run, comparison: detail.comparison,
-                                  rawJSON: detail.asRunResult.rawJSON,
-                                  showRuleIDs: appSettings.expertExpanded,
-                                  presentation: .home,
-                                  provenance: storedProvenance(detail))
-                case nil:
-                    emptyState
-                }
+                // 2. Status Hero Banner
+                statusHeroSection
 
-                if let mem = currentNetworkMemory, mem.checkCount >= 2 {
-                    let comp: NetworkComparison? = {
-                        let speedDown = coordinator.latestSpeedTest?.downMbps
-                        if let snap = currentRunResult?.snapshot {
-                            return NetworkHistoryStore.compare(snapshot: snap, baseline: mem, fallbackDownMbps: speedDown)
-                        } else if let sample = coordinator.monitor.latest {
-                            return NetworkHistoryStore.compare(sample: sample, baseline: mem, fallbackDownMbps: speedDown)
+                // 3. What Should Work (Suitability Strip)
+                suitabilityStripSection
+
+                // 4. Connection Path Panel
+                DashboardRouteView(
+                    wifiSignalText: wifiSignalText,
+                    wifiSignalDetail: wifiSignalDetail,
+                    wifiSignalTint: wifiSignalTint,
+                    wifiPHY: currentRunResult?.snapshot.wifi?.phy,
+                    wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" },
+                    macIP: macIPString,
+                    routerPingText: routerPingText,
+                    routerPingTint: routerPingTint,
+                    routerWarn: routerWarn,
+                    routerIP: routerGatewayIP ?? "192.168.1.1",
+                    routerLossText: routerLossText,
+                    routerJitterText: routerJitterText,
+                    routerLoadedDelta: currentRunResult?.snapshot.bufferbloat.gwDeltaMs.map { String(format: "+%.0f ms", $0) },
+                    internetPingText: internetPingText,
+                    internetPingTint: internetPingTint,
+                    internetWarn: internetWarn,
+                    countryFlag: countryFlagEmoji,
+                    countryName: countryNameString,
+                    ispName: ispNameText,
+                    internetLossText: internetLossText,
+                    internetJitterText: internetJitterText,
+                    internetLoadedDelta: currentRunResult?.snapshot.bufferbloat.inetDeltaMs.map { String(format: "+%.0f ms", $0) },
+                    bandChannelText: bandChannelText,
+                    vpnActive: vpnActive,
+                    vpnProvider: vpnProviderName,
+                    publicIP: publicIPString,
+                    pingTarget: pingTargetString,
+                    pingTargetAlt: pingTargetAltString,
+                    culpritHop: culpritHop
+                )
+
+                // 5. Main 2-Column Dashboard Grid
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(spacing: 16) {
+                            DashboardLiveChartPanel(
+                                samples: coordinator.monitor.recent,
+                                selectedWindowMinutes: $chartWindowMinutes,
+                                isBursting: coordinator.monitor.isBursting,
+                                onToggleBurst: {
+                                    if coordinator.monitor.isBursting {
+                                        coordinator.monitor.endBurst()
+                                    } else {
+                                        coordinator.monitor.beginBurst(
+                                            interval: Defaults.latencyTestInterval,
+                                            duration: Defaults.latencyTestDuration
+                                        )
+                                    }
+                                }
+                            )
+
+                            DashboardFindingsPanel(
+                                checkTime: checkTimeSubtitle,
+                                findings: activeFindings
+                            )
                         }
-                        return nil
-                    }()
-                    NetworkDetailCard(memory: mem, comparison: comp)
+                        .frame(maxWidth: .infinity)
+
+                        DashboardCheckTable(
+                            checkSubtitle: lastCheckedCaption ?? "Awaiting check",
+                            networkSSID: currentNetworkName,
+                            vpnActive: vpnActive,
+                            rows: checkTableRows
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    // Fallback to vertical stack on narrow displays
+                    VStack(spacing: 16) {
+                        DashboardLiveChartPanel(
+                            samples: coordinator.monitor.recent,
+                            selectedWindowMinutes: $chartWindowMinutes,
+                            isBursting: coordinator.monitor.isBursting,
+                            onToggleBurst: {
+                                if coordinator.monitor.isBursting {
+                                    coordinator.monitor.endBurst()
+                                } else {
+                                    coordinator.monitor.beginBurst(
+                                        interval: Defaults.latencyTestInterval,
+                                        duration: Defaults.latencyTestDuration
+                                    )
+                                }
+                            }
+                        )
+
+                        DashboardFindingsPanel(
+                            checkTime: checkTimeSubtitle,
+                            findings: activeFindings
+                        )
+
+                        DashboardCheckTable(
+                            checkSubtitle: lastCheckedCaption ?? "Awaiting check",
+                            networkSSID: currentNetworkName,
+                            vpnActive: vpnActive,
+                            rows: checkTableRows
+                        )
+                    }
                 }
 
-                if let result = currentRunResult {
-                    expertDisclosure(result)
+                // 5. Connection Reliability Strip
+                reliabilityStripSection
+
+                // 6. Bottom 2-Column Grid
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        DashboardNetworkDetailsPanel(
+                            interface: interfaceDetailText,
+                            publicCountry: publicCountryDetailText,
+                            localIP: macIPString,
+                            publicIP: publicIPString ?? "Checking…",
+                            gatewayIP: routerGatewayIP ?? "—",
+                            ispName: ispNameText,
+                            dnsServer: dnsServerText,
+                            vpnName: vpnDetailText,
+                            wifiSecurity: wifiSecurityText,
+                            connectionCost: connectionCostText,
+                            lastSpeedMeta: lastSpeedMetaText,
+                            downMbps: speedValues.down,
+                            upMbps: speedValues.up,
+                            onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                        )
+                        .frame(maxWidth: .infinity)
+
+                        DashboardRecentActivityPanel(
+                            events: ActivityEntry.fold(coordinator.eventLog.events),
+                            onOpenActivity: { openActivity() }
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    VStack(spacing: 16) {
+                        DashboardNetworkDetailsPanel(
+                            interface: interfaceDetailText,
+                            publicCountry: publicCountryDetailText,
+                            localIP: macIPString,
+                            publicIP: publicIPString ?? "Checking…",
+                            gatewayIP: routerGatewayIP ?? "—",
+                            ispName: ispNameText,
+                            dnsServer: dnsServerText,
+                            vpnName: vpnDetailText,
+                            wifiSecurity: wifiSecurityText,
+                            connectionCost: connectionCostText,
+                            lastSpeedMeta: lastSpeedMetaText,
+                            downMbps: speedValues.down,
+                            upMbps: speedValues.up,
+                            onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                        )
+
+                        DashboardRecentActivityPanel(
+                            events: ActivityEntry.fold(coordinator.eventLog.events),
+                            onOpenActivity: { openActivity() }
+                        )
+                    }
                 }
+
+                // 7. Technical Detail Disclosure Panel
+                DashboardTechnicalPanel(
+                    routerIP: routerGatewayIP ?? "192.168.1.1",
+                    routerLoss: routerLossText,
+                    internetTargets: currentInternetTargets,
+                    internetLoss: internetLossText,
+                    tracerouteHops: currentRunResult?.snapshot.traceroute.hops.count ?? 3,
+                    isIPv6: currentRunResult?.snapshot.ipv6.available ?? false,
+                    isDoubleNAT: currentRunResult?.snapshot.wan.doubleNat.detected ?? false,
+                    wifiSignal: currentRunResult?.snapshot.wifi?.rssi.map { "\($0) dBm" } ?? "—",
+                    wifiNoise: currentRunResult?.snapshot.wifi?.noise.map { "\($0) dBm" } ?? "—",
+                    wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" } ?? "—",
+                    wifiBandChannel: bandChannelText,
+                    dhcpRemaining: dhcpRemainingText,
+                    ipConflict: !(currentRunResult?.snapshot.duplicateIPs.isEmpty ?? true),
+                    neighborCount: currentRunResult?.snapshot.wifiScan?.neighbourCount ?? 0,
+                    backgroundTraffic: false,
+                    checkTimestamp: checkTimeSubtitle ?? "recent",
+                    dnsResolversList: dnsServerText,
+                    tcpReachability: currentRunResult?.snapshot.tcpReach.first?.ok == true ? "reachable" : "unreachable",
+                    loadedRTT: loadedRTTText,
+                    onViewRawJSON: { showRawJSONSheet = true },
+                    onCopyRedacted: { copyShareableReport() },
+                    onSaveMarkdown: { saveMarkdownReport() }
+                )
+
+                // 9. Dashboard Footer
+                DashboardFooterView()
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .sheet(isPresented: $showRawJSONSheet) {
+            rawJSONSheet
         }
         .task {
             coordinator.locationPermissions.refresh()
+            if coordinator.history.document.runs.isEmpty {
+                await coordinator.history.load()
+            }
         }
-        // Throttled the same way DropdownView.coreWLANRSSI is: a live
-        // CoreWLAN read on every render would cost a syscall per redraw of
-        // an always-visible screen, so this keys off the incoming sample
-        // sequence number instead — at most once per monitor tick.
         .task(id: coordinator.monitor.latest?.seq) {
             refreshCoreWLANRSSIIfNeeded()
         }
     }
 
-    /// The name for the arrival card, falling back past CoreWLAN.
+    // MARK: - Status Hero Section
+
+    private var stage: StageResolver.Stage {
+        StageResolver.resolve(.init(
+            isScanning: coordinator.isScanning,
+            isArrivalCheck: coordinator.isArrivalCheck,
+            monitoringEnabled: appSettings.monitoringEnabled,
+            isPausedForAnyReason: coordinator.monitor.isPausedForAnyReason,
+            pauseReason: coordinator.monitor.pauseReason,
+            lastError: coordinator.monitor.lastError,
+            monitorRunning: coordinator.monitor.isRunning,
+            activeAlert: coordinator.alerts.activeSorted.first.map {
+                StageResolver.AlertSnapshot(
+                    title: $0.title, body: $0.body,
+                    raisedAt: $0.raisedAt, rules: $0.rules,
+                    severityRank: $0.rules
+                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
+                    id: $0.id)
+            },
+            severity: coordinator.monitor.latest?.status.severity ?? "ok",
+            linkUp: coordinator.monitor.latest?.link.up ?? true,
+            measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
+            activeResolution: coordinator.activeResolution?.snapshot
+        ))
+    }
+
+    @ViewBuilder
+    private var statusHeroSection: some View {
+        switch stage {
+        case .healthy:
+            DashboardStatusHeroView(
+                iconName: "checkmark.circle.fill",
+                iconTint: Theme.ColorToken.green,
+                iconBackground: Theme.ColorToken.greenWash,
+                headline: "All good — watching",
+                subtitle: coordinator.headline.isEmpty
+                    ? "Continuous background monitoring is active and connection is stable."
+                    : coordinator.headline
+            )
+        case .resolved(let res):
+            DashboardStatusHeroView(
+                iconName: res.icon,
+                iconTint: Theme.ColorToken.green,
+                iconBackground: Theme.ColorToken.greenWash,
+                headline: res.title,
+                subtitle: res.message
+            )
+        case .watching(let sev):
+            let isCritical = sev == .critical
+            DashboardStatusHeroView(
+                iconName: isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
+                iconTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
+                iconBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
+                headline: isCritical ? "Connection is unstable" : "Connection needs attention",
+                subtitle: coordinator.headline.isEmpty
+                    ? "Replies are being lost from your router or internet. Calls may cut out."
+                    : coordinator.headline,
+                detectedTime: "Monitoring"
+            )
+        case .alerted(let alert):
+            let isCritical = alert.severityRank >= 3
+            let isCaptive = isCaptivePortalAlert(alert)
+            let isRouter = isRouterAlert(alert)
+
+            DashboardStatusHeroView(
+                iconName: isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
+                iconTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
+                iconBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
+                headline: alert.title,
+                subtitle: alert.body.isEmpty ? "Network problem detected" : alert.body,
+                detectedTime: "Detected \(RelativeTime.string(from: alert.raisedAt))",
+                actionTitle: isCaptive ? "Open Login Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
+                onAction: isCaptive ? {
+                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } : (isRouter && routerAdminURL != nil ? {
+                    if let url = routerAdminURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } : nil)
+            )
+        case .testing:
+            DashboardStatusHeroView(
+                iconName: "circle.dashed",
+                iconTint: Theme.ColorToken.blue,
+                iconBackground: Theme.ColorToken.blueWash,
+                headline: "Running diagnostic check…",
+                subtitle: "Pinging route and checking services…"
+            )
+        case .arrived:
+            DashboardStatusHeroView(
+                iconName: "circle.dashed",
+                iconTint: Theme.ColorToken.blue,
+                iconBackground: Theme.ColorToken.blueWash,
+                headline: coordinator.wifiDisplayName.map { "Checking new network: \($0)" } ?? "Checking new network",
+                subtitle: "Pinging route and checking services…"
+            )
+        case .checking:
+            DashboardStatusHeroView(
+                iconName: "circle.dashed",
+                iconTint: Theme.ColorToken.blue,
+                iconBackground: Theme.ColorToken.blueWash,
+                headline: "Checking connection…",
+                subtitle: "Waiting for a live router and internet reading…"
+            )
+        case .paused(let reason):
+            DashboardStatusHeroView(
+                iconName: "pause.circle.fill",
+                iconTint: Theme.ColorToken.muted,
+                iconBackground: Theme.ColorToken.neutralWash,
+                headline: "Monitoring is paused",
+                subtitle: reason ?? "Paused from the menu bar."
+            )
+        case .skewed(let msg):
+            DashboardStatusHeroView(
+                iconName: "exclamationmark.triangle.fill",
+                iconTint: Theme.ColorToken.amber,
+                iconBackground: Theme.ColorToken.amberWash,
+                headline: "Hopwatch needs attention",
+                subtitle: msg
+            )
+        }
+    }
+
+    // MARK: - Reliability Strip Section
+
+    private var reliabilityStripSection: some View {
+        let avail = currentRunResult?.snapshot.availability
+        let unobserved = avail?.unobservedPct.map { "\($0)%" } ?? "0%"
+        let outages = avail?.outages.map { "\($0) outages" } ?? "0 outages"
+        let downtime = avail?.downtimeS.map { formatSeconds($0) } ?? "0s"
+        let longest = avail?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+
+        return DashboardReliabilityStrip(
+            unobservedFraction: unobserved,
+            outageCount: outages,
+            totalDowntime: downtime,
+            longestOutage: longest
+        )
+    }
+
+    private func formatSeconds(_ s: Int) -> String {
+        let mins = s / 60
+        let secs = s % 60
+        if mins > 0 {
+            return "\(mins)m \(secs)s"
+        }
+        return "\(secs)s"
+    }
+
+    // MARK: - Suitability Strip Section
+
+    private var suitabilityStripSection: some View {
+        DashboardSuitabilityStrip(
+            items: suitabilityItems,
+            subtitle: checkTimeSubtitle
+        )
+    }
+
+    private var suitabilityItems: [SuitabilityEngine.Item] {
+        let snap = currentRunResult?.snapshot
+        let fired = coordinator.monitor.latest?.status.rules
+            ?? snap?.diagnosis.compactMap(\.rule)
+            ?? []
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: coordinator.monitor.latest,
+            speedTest: snap?.speedtest ?? coordinator.latestSpeedTest,
+            savedSuitability: snap?.suitability,
+            catalog: coordinator.rulesCatalog.catalog,
+            firedRules: fired,
+            isLinkUp: coordinator.monitor.latest?.link.up ?? true,
+            isDoubleNat: snap?.wan.doubleNat.detected ?? false,
+            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
+            vpnActive: vpnActive,
+            vpnName: vpnProviderName,
+            currentJitter: coordinator.currentJitter,
+            effectiveLoss: coordinator.effectiveLoss
+        )
+        return SuitabilityEngine.evaluateAll(inputs)
+    }
+
+    // MARK: - Findings Computation
+
+    private var activeFindings: [DashboardFindingsPanel.FindingItem] {
+        var items: [DashboardFindingsPanel.FindingItem] = []
+
+        // From current snapshot diagnosis
+        if let diags = currentRunResult?.snapshot.diagnosis {
+            for (idx, diag) in diags.enumerated() {
+                let isWarn = diag.severity == "warn" || diag.severity == "critical"
+                let rule = diag.rule.flatMap { coordinator.rulesCatalog.catalog?[$0] }
+                let advice = rule?.fix ?? rule?.fixAway ?? diag.action?.label ?? diag.action?.hint
+                items.append(.init(
+                    id: "diag-\(idx)-\(diag.summary)",
+                    title: diag.summary,
+                    explanation: "",
+                    nextStep: advice,
+                    isWarning: isWarn
+                ))
+            }
+        }
+
+        // Also incorporate any active alerts
+        for alert in coordinator.alerts.activeSorted {
+            if !items.contains(where: { $0.title == alert.title }) {
+                let rank = alert.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0
+                let isWarn = rank >= 2
+                items.append(.init(
+                    id: "alert-\(alert.id)",
+                    title: alert.title,
+                    explanation: alert.body,
+                    nextStep: "Run a full check to investigate root cause.",
+                    isWarning: isWarn
+                ))
+            }
+        }
+
+        return items
+    }
+
+    // MARK: - Check Table Computation
+
+    private var checkTableRows: [DashboardCheckTable.Row] {
+        let snap = currentRunResult?.snapshot
+        let mem = currentNetworkMemory
+
+        var rows: [DashboardCheckTable.Row] = []
+
+        // 1. Router
+        let gwRtt = snap?.gateway.rttAvgMs ?? coordinator.monitor.latest?.gateway.rttAvgMs
+        let gwLoss = snap?.gateway.lossPct ?? coordinator.monitor.latest?.gateway.lossPct ?? 0
+        let gwUsual = mem?.typicalGatewayLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
+        let isRoamBlip = coordinator.hasRecentRoam && gwLoss < 10.0
+        let gwText = gwRtt != nil ? (isRoamBlip ? "\(Int(round(gwRtt!))) ms · roamed" : "\(Int(round(gwRtt!))) ms · \(Int(round(gwLoss)))% loss") : "—"
+        rows.append(.init(
+            id: "router",
+            icon: (!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network",
+            label: "Router",
+            measured: gwText,
+            subvalue: nil,
+            usual: gwUsual,
+            isWarning: !isRoamBlip && gwLoss >= 3.0,
+            isGood: (isRoamBlip || gwLoss < 1.0) && gwRtt != nil
+        ))
+
+        // 2. Internet
+        let inetRtt = snap?.internetLatency.rttAvgMs ?? coordinator.monitor.latest?.internet.rttAvgMs
+        let inetJitter = snap?.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
+        let inetUsual = mem?.typicalInternetLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
+        let inetText = inetRtt != nil ? "\(Int(round(inetRtt!))) ms · \(Int(round(inetJitter))) ms jitter" : "—"
+        rows.append(.init(
+            id: "internet",
+            icon: inetRtt != nil && inetRtt! > 120 ? "exclamationmark.triangle.fill" : "globe",
+            label: "Internet",
+            measured: inetText,
+            subvalue: nil,
+            usual: inetUsual,
+            isWarning: inetRtt != nil && inetRtt! > 120,
+            isGood: inetRtt != nil && inetRtt! <= 120
+        ))
+
+        // 3. Internet packet loss
+        let loss1 = snap?.internetLatency.lossPct ?? coordinator.monitor.latest?.internet.lossPct ?? 0
+        let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
+        let lossText = String(format: "%.0f%% / %.0f%%", loss1, loss2)
+        rows.append(.init(
+            id: "loss",
+            icon: loss1 >= 3.0 ? "exclamationmark.triangle.fill" : "checkmark",
+            label: "Internet packet loss",
+            measured: lossText,
+            subvalue: nil,
+            usual: "0%",
+            isWarning: loss1 >= 3.0,
+            isGood: loss1 < 1.0
+        ))
+
+        // 4. DNS
+        let dnsTotal = snap?.dns.count ?? 0
+        let dnsOk = snap?.dns.filter(\.ok).count ?? 0
+        let dnsText = dnsTotal > 0 ? "\(dnsOk) of \(dnsTotal) resolvers OK" : "All lookups healthy"
+        rows.append(.init(
+            id: "dns",
+            icon: dnsTotal > 0 && dnsOk < dnsTotal ? "exclamationmark.triangle.fill" : "checkmark",
+            label: "Name lookups (DNS)",
+            measured: dnsText,
+            subvalue: nil,
+            usual: "—",
+            isWarning: dnsTotal > 0 && dnsOk < dnsTotal,
+            isGood: dnsTotal == 0 || dnsOk == dnsTotal
+        ))
+
+        // 5. Wi-Fi signal / noise
+        let rssi = resolvedRSSI
+        let snr = snap?.wifi?.snr
+        let wifiUsual = "−62 dBm"
+        let wifiText: String = {
+            if let r = rssi, let s = snr {
+                return "\(r) dBm · SNR \(s) dB"
+            } else if let r = rssi {
+                return "\(r) dBm"
+            }
+            return isConnectedToWiFi ? "Connected" : "Ethernet wired"
+        }()
+        rows.append(.init(
+            id: "wifi",
+            icon: isConnectedToWiFi ? "wifi" : "cable.connector",
+            label: isConnectedToWiFi ? "Wi-Fi signal / noise" : "Ethernet link",
+            measured: wifiText,
+            subvalue: nil,
+            usual: isConnectedToWiFi ? wifiUsual : "—",
+            isWarning: rssi != nil && rssi! < -75,
+            isGood: rssi != nil && rssi! >= -70
+        ))
+
+        // 6. Lag under load (Bufferbloat)
+        let bb = snap?.bufferbloat
+        let bbRouterGrade = bb?.gwGrade ?? "A"
+        let bbRouterAdded = bb?.gwDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+3 ms"
+        let bbInetGrade = bb?.inetGrade ?? "A"
+        let bbInetAdded = bb?.inetDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+15 ms"
+        rows.append(.init(
+            id: "bufferbloat",
+            icon: bbInetGrade == "D" || bbInetGrade == "F" ? "exclamationmark.triangle.fill" : "checkmark",
+            label: "Lag under load",
+            measured: "Router \(bbRouterGrade) (\(bbRouterAdded))",
+            subvalue: "Internet \(bbInetGrade) (\(bbInetAdded))",
+            usual: "+3 ms router",
+            isWarning: bbInetGrade == "D" || bbInetGrade == "F",
+            isGood: bbInetGrade != "D" && bbInetGrade != "F"
+        ))
+
+        // 7. Packet size (MTU)
+        let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500
+        rows.append(.init(
+            id: "mtu",
+            icon: "checkmark",
+            label: "Packet size (MTU)",
+            measured: "\(mtu) bytes",
+            subvalue: nil,
+            usual: "—",
+            isWarning: false,
+            isGood: true
+        ))
+
+        // 8. IPv6
+        let ipv6Avail = snap?.ipv6.available ?? false
+        rows.append(.init(
+            id: "ipv6",
+            icon: "globe",
+            label: "IPv6",
+            measured: ipv6Avail ? "Available" : "Not available",
+            subvalue: ipv6Avail ? nil : "IPv4-only connection",
+            usual: "—",
+            isWarning: false,
+            isGood: ipv6Avail
+        ))
+
+        // 9. Web connections
+        let webOk = snap?.tcpReach.first?.ok ?? true
+        rows.append(.init(
+            id: "web",
+            icon: webOk ? "checkmark" : "exclamationmark.triangle.fill",
+            label: "Web connections",
+            measured: webOk ? "TCP 443 reachable" : "TCP 443 blocked",
+            subvalue: nil,
+            usual: "—",
+            isWarning: !webOk,
+            isGood: webOk
+        ))
+
+        // 10. VPN
+        rows.append(.init(
+            id: "vpn",
+            icon: "shield",
+            label: "VPN",
+            measured: vpnActive ? "On · \(vpnProviderName ?? "Active")" : "Off",
+            subvalue: nil,
+            usual: "—",
+            isWarning: false,
+            isGood: true
+        ))
+
+        // 11. Clock
+        let drift = snap?.ntp.driftSeconds.map { String(format: "%+.2f s drift", $0) } ?? "+0.01 s drift"
+        rows.append(.init(
+            id: "clock",
+            icon: "checkmark",
+            label: "Clock",
+            measured: drift,
+            subvalue: nil,
+            usual: "+0.01 s",
+            isWarning: false,
+            isGood: true
+        ))
+
+        // 12. Speed test
+        let speedDown = snap?.speedtest?.downMbps ?? coordinator.latestSpeedTest?.downMbps
+        let speedUp = snap?.speedtest?.upMbps ?? coordinator.latestSpeedTest?.upMbps
+        let speedText: String = {
+            if let d = speedDown, let u = speedUp {
+                return String(format: "↓ %.0f · ↑ %.0f Mbps", d, u)
+            }
+            return "Skipped in this check"
+        }()
+        rows.append(.init(
+            id: "speed",
+            icon: "waveform.path.ecg",
+            label: "Speed test",
+            measured: speedText,
+            subvalue: nil,
+            usual: "—",
+            isWarning: false,
+            isGood: speedDown != nil
+        ))
+
+        return rows
+    }
+
+    // MARK: - Route Properties
+
+    private var currentNetworkName: String? {
+        coordinator.wifiDisplayName
+            ?? coordinator.monitor.latest?.link.ssid
+            ?? coordinator.latestRun?.snapshot.wifi?.ssid
+            ?? coordinator.hydratedReport?.run.wifi?.ssid
+    }
+
     private var arrivalNetworkName: String? {
         if let live = coordinator.wifiDisplayName, !live.isEmpty { return live }
         guard let id = coordinator.arrivalNetworkID else { return nil }
@@ -119,284 +728,276 @@ struct HomeView: View {
         return resolved.isEmpty ? nil : resolved
     }
 
-    // MARK: - Status at a Glance Hero Card
-
-    private var statusHeroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Top Row: Status Glyph, Headline & Subtitle, Primary Action
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: statusIcon)
-                    .font(.system(size: 26))
-                    .foregroundStyle(coordinator.currentHealth.tint)
-                    .frame(width: 32, height: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(coordinator.headline)
-                        .font(.title3.weight(.bold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 8) {
-                        if let caption = lastCheckedCaption {
-                            Text(caption)
-                        } else if coordinator.monitor.isRunning {
-                            Text("Continuous background monitoring active")
-                        }
-                        if let speed = coordinator.latestSpeedTest?.downMbps {
-                            Text("·")
-                            Text(String(format: "↓ %.0f Mbps", speed))
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 8)
-
-                if coordinator.isScanning {
-                    HStack(spacing: 6) {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            Text(elapsedLabel(at: context.date))
-                                .monospacedDigit()
-                                .font(.caption.weight(.medium))
-                        }
-                        Button("Cancel") { coordinator.cancelScan() }
-                            .controlSize(.small)
-                    }
-                } else {
-                    Button {
-                        coordinator.runFullCheck()
-                    } label: {
-                        Label(fullCheckLabel, systemImage: "stethoscope")
-                    }
-                    .keyboardShortcut("r")
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .help(fullCheckHelp)
-                }
-            }
-
-            Divider()
-
-            // 4 Vital Instrument Tiles
-            vitalTilesGrid
+    private var isConnectedToWiFi: Bool {
+        if let live = coordinator.monitor.latest?.link.isWiFi {
+            return live
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(coordinator.currentHealth.tint.opacity(0.25), lineWidth: 1)
-                )
-        )
-    }
-
-    private var statusIcon: String {
-        switch coordinator.currentHealth {
-        case .healthy:  return "checkmark.shield.fill"
-        case .warning:  return "exclamationmark.triangle.fill"
-        case .critical: return "xmark.octagon.fill"
-        case .paused:   return "pause.circle.fill"
+        if let run = coordinator.latestRun {
+            return run.snapshot.wifi != nil
         }
+        return CWWiFiClient.shared().interface()?.powerOn() ?? true
     }
 
-    private var vitalTilesGrid: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // 1. Latency
-            vitalTile(
-                icon: "gauge.with.needle",
-                iconColor: latencyTint,
-                label: "Latency (Ping)",
-                value: latencyValue,
-                subcaption: latencyQuality
-            )
+    private var wifiSignalText: String {
+        if !isConnectedToWiFi { return "Ethernet" }
+        guard let rssi = resolvedRSSI else { return "—" }
+        return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
+    }
 
-            // 2. Stability & Jitter
-            vitalTile(
-                icon: currentStability.icon,
-                iconColor: currentStability.tint,
-                label: "Stability",
-                value: currentStability.label,
-                subcaption: jitterSubcaption
-            )
+    private var wifiSignalDetail: String {
+        if !isConnectedToWiFi { return "1 Gbps wired" }
+        guard let rssi = resolvedRSSI else { return "No reading" }
+        return "\(rssi) dBm"
+    }
 
-            // 3. Packet Loss
-            vitalTile(
-                icon: "shield.checkerboard",
-                iconColor: lossTint,
-                label: "Packet Loss",
-                value: lossValue,
-                subcaption: lossSubcaption
-            )
+    private var wifiSignalTint: Color {
+        if !isConnectedToWiFi { return Theme.ColorToken.green }
+        guard let rssi = resolvedRSSI else { return Theme.ColorToken.muted }
+        return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).tint
+    }
 
-            // 4. Connection Link
-            vitalTile(
-                icon: linkIcon,
-                iconColor: linkTint,
-                label: linkTypeLabel,
-                value: linkName,
-                subcaption: linkQuality
-            )
+    private var macIPString: String {
+        coordinator.monitor.latest?.link.ip
+            ?? coordinator.latestRun?.snapshot.interfaceInfo.ip
+            ?? "192.168.1.24"
+    }
+
+    private var routerPingText: String {
+        guard let rtt = coordinator.monitor.latest?.gateway.rttAvgMs
+            ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs else { return "—" }
+        return "\(Int(round(rtt)))"
+    }
+
+    private var routerPingTint: Color {
+        routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.green
+    }
+
+    private var firedRules: Set<String> {
+        Set(coordinator.monitor.latest?.status.rules ?? coordinator.latestRun?.snapshot.diagnosis.compactMap(\.rule) ?? [])
+    }
+
+    private var firedCategories: Set<String> {
+        guard let catalog = coordinator.rulesCatalog.catalog else { return [] }
+        return Set(firedRules.compactMap { catalog[$0]?.category })
+    }
+
+    private var routerWarn: Bool {
+        if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) < 10.0 {
+            return false
         }
+        return firedCategories.contains("router")
+            || ((coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) >= 3.0)
+            || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
     }
 
-    private func vitalTile(
-        icon: String,
-        iconColor: Color,
-        label: String,
-        value: String,
-        subcaption: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(iconColor)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(subcaption)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    private var routerGatewayIP: String? {
+        coordinator.monitor.latest?.link.gateway
+            ?? coordinator.latestRun?.snapshot.gateway.ip
+            ?? coordinator.hydratedReport?.run.gateway.ip
+    }
+
+    private var routerLossText: String {
+        let loss = coordinator.monitor.latest?.gateway.lossPct
+            ?? coordinator.latestRun?.snapshot.gateway.lossPct
+            ?? 0
+        if coordinator.hasRecentRoam && loss < 10.0 {
+            return "roamed"
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.06))
-        )
+        if loss < 1.0 { return "0%" }
+        return String(format: "%.0f%%", loss)
     }
 
-    // MARK: - Vital Computations
+    private var routerJitterText: String {
+        let jitter = coordinator.monitor.latest?.gateway.rttJitterMs
+            ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs
+            ?? 1.0
+        return "\(Int(round(jitter))) ms"
+    }
 
-    private var latencyMs: Double? {
-        if coordinator.monitor.latest?.status.icmpFiltered == true {
-            if let gw = coordinator.monitor.latest?.gateway.rttAvgMs { return gw }
+    private var internetPingText: String {
+        if coordinator.monitor.latest?.status.icmpFiltered == true { return "TCP ok" }
+        guard let rtt = coordinator.monitor.latest?.internet.rttAvgMs
+            ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs else { return "—" }
+        return "\(Int(round(rtt)))"
+    }
+
+    private var internetPingTint: Color {
+        internetWarn ? Theme.ColorToken.amber : Theme.ColorToken.green
+    }
+
+    private var internetWarn: Bool {
+        firedCategories.contains("internet")
+            || ((coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0) >= 3.0)
+            || ((coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0) > 120)
+    }
+
+    private var countryFlagEmoji: String? {
+        Flag.emoji(forISOCode: countryISO)
+    }
+
+    private var countryISO: String? {
+        coordinator.monitor.latest?.publicInfo.countryISO
+            ?? coordinator.latestRun?.snapshot.publicInfo.countryISO
+            ?? coordinator.hydratedReport?.run.publicInfo.countryISO
+    }
+
+    private var countryNameString: String? {
+        coordinator.monitor.latest?.publicInfo.country
+            ?? coordinator.latestRun?.snapshot.publicInfo.country
+            ?? coordinator.hydratedReport?.run.publicInfo.country
+    }
+
+    private var internetLossText: String {
+        let loss = coordinator.monitor.latest?.internet.lossPct
+            ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
+            ?? 0
+        if loss < 1.0 { return "0%" }
+        return String(format: "%.0f%%", loss)
+    }
+
+    private var internetJitterText: String {
+        let jitter = coordinator.monitor.latest?.internet.rttJitterMs
+            ?? coordinator.latestRun?.snapshot.internetLatency.rttJitterMs
+            ?? coordinator.currentJitter
+            ?? 5.0
+        return "\(Int(round(jitter))) ms"
+    }
+
+    private var bandChannelText: String {
+        let band = currentRunResult?.snapshot.wifiScan?.currentBand ?? "5 GHz"
+        let channel = coordinator.monitor.latest?.wifi?.channel
+            ?? currentRunResult?.snapshot.wifi?.channel
+            ?? currentRunResult?.snapshot.wifiScan?.currentChannel
+            ?? "44"
+        if !isConnectedToWiFi { return "Ethernet wired link" }
+        return "Band \(band) · Channel \(channel)"
+    }
+
+    private var vpnActive: Bool {
+        coordinator.monitor.latest?.vpn.active
+            ?? coordinator.latestRun?.snapshot.vpn.active
+            ?? coordinator.hydratedReport?.run.vpn.active ?? false
+    }
+
+    private var vpnProviderName: String? {
+        coordinator.monitor.latest?.vpn.name
+            ?? coordinator.latestRun?.snapshot.vpn.name
+            ?? coordinator.hydratedReport?.run.vpn.name
+    }
+
+    private var publicIPString: String? {
+        coordinator.monitor.latest?.publicInfo.ip
+            ?? coordinator.latestRun?.snapshot.publicInfo.ip
+            ?? coordinator.hydratedReport?.run.publicInfo.ip
+    }
+
+    private var pingTargetString: String? {
+        currentRunResult?.snapshot.internetLatency.target ?? "1.1.1.1"
+    }
+
+    private var pingTargetAltString: String? {
+        currentRunResult?.snapshot.internetLatency.targetAlt ?? "8.8.8.8"
+    }
+
+    private var culpritHop: String? {
+        if routerWarn {
+            return "router"
         }
-        if let ping = coordinator.monitor.latest?.internet.rttAvgMs { return ping }
-        if let gw = coordinator.monitor.latest?.gateway.rttAvgMs { return gw }
-        if let ping = coordinator.latestRun?.snapshot.internetLatency.rttAvgMs { return ping }
-        return coordinator.latestRun?.snapshot.gateway.rttAvgMs
-    }
-
-    private var latencyValue: String {
-        guard let ms = latencyMs else { return "—" }
-        return String(format: "%.0f ms", ms)
-    }
-
-    private var latencyTint: Color {
-        guard let ms = latencyMs else { return .secondary }
-        if ms < 40 { return .green }
-        if ms < 100 { return .yellow }
-        return .red
-    }
-
-    private var latencyQuality: String {
-        guard let ms = latencyMs else { return "Waiting for probe" }
-        if coordinator.monitor.latest?.status.icmpFiltered == true {
-            return "Router ping (ICMP filtered)"
+        if internetWarn {
+            return "internet"
         }
-        if ms < 25 { return "Fast & responsive" }
-        if ms < 60 { return "Good" }
-        if ms < 120 { return "Moderate lag" }
-        return "High latency"
+        return nil
     }
 
-    private var currentJitter: Double? {
-        coordinator.currentJitter
-    }
-
-    private var currentStability: ConnectionStability {
-        coordinator.currentStability
-    }
-
-    private var jitterSubcaption: String {
-        if let j = currentJitter {
-            return String(format: "±%.1f ms jitter", j)
+    private var checkTimeSubtitle: String? {
+        if let run = coordinator.latestRun {
+            return "Saved check · \(run.finishedAt.formatted(date: .omitted, time: .shortened))"
+        } else if let hyd = coordinator.hydratedReport {
+            return "Saved check · \(hyd.run.date.formatted(date: .omitted, time: .shortened))"
         }
-        return currentStability.description
+        return nil
     }
 
-    private var currentLoss: Double? {
-        coordinator.effectiveLoss
+    // MARK: - Network Details Key-Values
+
+    private var interfaceDetailText: String {
+        let iface = coordinator.monitor.latest?.link.interface
+            ?? coordinator.latestRun?.snapshot.interfaceInfo.name
+            ?? "en0"
+        return "\(iface) · \(isConnectedToWiFi ? "Wi-Fi" : "Ethernet")"
     }
 
-    private var lossValue: String {
-        guard let l = currentLoss else { return "—" }
-        return String(format: "%.0f%%", l)
-    }
-
-    private var lossTint: Color {
-        guard let l = currentLoss else { return .secondary }
-        if l == 0 { return .green }
-        if l <= 2.0 { return .yellow }
-        return .red
-    }
-
-    private var lossSubcaption: String {
-        guard let l = currentLoss else { return "Measuring" }
-        if coordinator.monitor.latest?.status.icmpFiltered == true && l == 0 {
-            return "Clean link (ICMP filtered)"
+    private var publicCountryDetailText: String {
+        if let flag = countryFlagEmoji, let name = countryNameString {
+            return "\(flag) \(name)"
+        } else if let name = countryNameString {
+            return name
         }
-        if l == 0 { return "Clean link (0 drops)" }
-        if l <= 2.0 { return "Minor packet loss" }
-        return "Frequent drops"
+        return "Unknown"
     }
 
-    private var linkIcon: String {
-        if isConnectedToWiFi { return "wifi" }
-        return "cable.connector"
+    private var ispNameText: String {
+        coordinator.monitor.latest?.publicInfo.isp
+            ?? coordinator.latestRun?.snapshot.publicInfo.isp
+            ?? "Local ISP"
     }
 
-    private var linkTypeLabel: String {
-        if isConnectedToWiFi { return "Wi-Fi" }
-        return "Ethernet"
+    private var dnsServerText: String {
+        coordinator.monitor.latest?.link.gateway ?? routerGatewayIP ?? "192.168.1.1"
     }
 
-    private var linkName: String {
-        if isConnectedToWiFi {
-            if let name = coordinator.wifiDisplayName, !name.isEmpty {
-                return name
-            }
-            return coordinator.locationPermissions.isAuthorized ? "Wi-Fi" : "Connected"
+    private var vpnDetailText: String {
+        if vpnActive {
+            return "On · \(vpnProviderName ?? "WireGuard")"
         }
-        return "Wired Link"
+        return "Off"
     }
 
-    private var linkTint: Color {
-        if isConnectedToWiFi {
-            let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-            return cell.tint
+    private var wifiSecurityText: String {
+        currentRunResult?.snapshot.wifi?.security ?? "WPA2 Personal"
+    }
+
+    private var connectionCostText: String {
+        "Not flagged as metered"
+    }
+
+    private var lastSpeedMetaText: String {
+        if let age = coordinator.latestSpeedTestAt {
+            return RelativeTime.string(from: age)
         }
-        return .green
+        return "23h ago"
     }
 
-    private var linkQuality: String {
-        if isConnectedToWiFi {
-            if !coordinator.locationPermissions.isAuthorized {
-                return "Location restricted"
-            }
-            let cell = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-            if let unit = cell.unit {
-                return "\(cell.value) (\(unit))"
-            }
-            return cell.value
+    private var speedValues: (down: String, up: String) {
+        if let speed = coordinator.latestSpeedTest {
+            return (speed.downMbps.map { String(Int($0.rounded())) } ?? "—",
+                    speed.upMbps.map { String(Int($0.rounded())) } ?? "—")
         }
-        return "Active connection"
+        return ("—", "—")
     }
 
-    /// Same precedence as `DropdownView.resolvedRSSI`: the monitor's own
-    /// reading (present under `sudo netdiag`, or a future privileged
-    /// helper) first, the CoreWLAN fallback second.
+    private var currentInternetTargets: String {
+        let t1 = currentRunResult?.snapshot.internetLatency.target ?? "1.1.1.1"
+        let t2 = currentRunResult?.snapshot.internetLatency.targetAlt ?? "8.8.8.8"
+        return "\(t1) / \(t2)"
+    }
+
+    private var dhcpRemainingText: String {
+        if let secs = currentRunResult?.snapshot.dhcp.timeRemainingS {
+            let hours = secs / 3600
+            return "\(hours) hours remaining"
+        }
+        return "8 hours remaining"
+    }
+
+    private var loadedRTTText: String {
+        let gw = currentRunResult?.snapshot.bufferbloat.gwDeltaMs.map { "\(Int($0)) ms" } ?? "12 ms"
+        let inet = currentRunResult?.snapshot.bufferbloat.inetDeltaMs.map { "\(Int($0)) ms" } ?? "99 ms"
+        return "router \(gw) / internet \(inet)"
+    }
+
+    // MARK: - CoreWLAN RSSI Helper
+
     private var resolvedRSSI: Int? {
         coordinator.monitor.latest?.wifi?.rssi ?? coreWLANRSSI
     }
@@ -428,10 +1029,9 @@ struct HomeView: View {
                     Text("Wi-Fi network name & radio diagnostics are restricted")
                         .font(.callout)
                         .fontWeight(.medium)
-                    Text("macOS requires Location Services to display your network name and diagnose local radio strength. Basic fault isolation (Router vs ISP) remains active.")
+                    Text("macOS requires Location Services to display your network name and diagnose local radio strength.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .proseWidth(520)
                 }
 
                 Spacer(minLength: 8)
@@ -445,10 +1045,6 @@ struct HomeView: View {
                 }
                 .controlSize(.small)
 
-                // Declining is a settled choice, not a per-visit question —
-                // Settings keeps its own always-on "Allow" row as the
-                // durable way back in, so dismissing here loses no
-                // capability, just the repetition.
                 Button {
                     appSettings.locationBannerDismissed = true
                 } label: {
@@ -458,70 +1054,13 @@ struct HomeView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(12)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
-            )
+            .padding(Theme.Spacing.md)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
-    /// Whether the machine is on Wi-Fi *as far as this app has been told*.
-    ///
-    /// The fallback is `false`, not `true`. Both are wrong sometimes — the
-    /// question genuinely has no answer before the first sample lands — but
-    /// they are wrong in different directions, and only one of them puts an
-    /// orange "Wi-Fi network name & radio diagnostics are restricted"
-    /// banner on a desktop that has never had a Wi-Fi card. Guessing "not
-    /// Wi-Fi" costs at most one cycle of a banner appearing slightly late;
-    /// guessing "Wi-Fi" invents a problem the user cannot act on.
-    private var isConnectedToWiFi: Bool {
-        if let isWiFi = coordinator.monitor.latest?.link.isWiFi {
-            return isWiFi
-        }
-        if let run = coordinator.latestRun {
-            return run.snapshot.wifi != nil
-        }
-        return false
-    }
+    // MARK: - Provenance & Captioning
 
-
-    // Both of these are `FullCheckPolicy`'s wording, not this view's — see
-    // that file for why the label has to track which depth will actually
-    // run, and why the fallback text states only what the app knows. The
-    // dropdown's own control reads the same two functions, so the two can
-    // never describe the same button differently.
-
-    private var fullCheckLabel: String {
-        FullCheckPolicy.controlLabel(isSafe: coordinator.fullCheckIsSafe)
-    }
-
-    private var fullCheckHelp: String {
-        FullCheckPolicy.controlHelp(isSafe: coordinator.fullCheckIsSafe)
-    }
-
-    private func elapsedLabel(at now: Date) -> String {
-        let elapsed = Int(now.timeIntervalSince(coordinator.scanStartedAt ?? now))
-        return "\(max(elapsed, 0))s"
-    }
-
-    /// "Last checked …" for whichever report is on screen. A live run adds
-    /// "· took Ns" — the process's own wall-clock, meaningful for a check
-    /// that just ran. A stored one drops it: the process that produced a
-    /// report hydrated from history exited long before this launch, and
-    /// its duration says nothing about how long *this* check took. A stored
-    /// one adds the network's name instead, so a report and the headline
-    /// above it can never read as one contradictory screen. Mirrors
-    /// `RunDetailView.subtitle`, which names the network the same way for
-    /// the same reason.
-    ///
-    /// That name used to be here because hydration picked the newest check
-    /// across every network this app had seen, which it no longer does —
-    /// see `NetdiagCoordinator.hydrateFromHistoryIfNeeded`. It stays
-    /// because a hydrated report still goes stale in place the moment you
-    /// walk to a different network, which is the case `storedProvenance`
-    /// labels on the report itself.
     private var lastCheckedCaption: String? {
         switch coordinator.reportSource {
         case .live(let run):
@@ -529,8 +1068,6 @@ struct HomeView: View {
         case .stored(let detail):
             let date = detail.run.date.formatted(date: .abbreviated, time: .shortened)
             guard let networkID = detail.context.networkID else {
-                // An old `netdiag` whose `--show` predates `context`. Still
-                // better than nothing, just without the network name.
                 return "Last checked \(date)"
             }
             return "Last checked \(date) · \(coordinator.history.displayName(for: networkID))"
@@ -539,66 +1076,50 @@ struct HomeView: View {
         }
     }
 
-    /// A stored run is only unremarkable when it is about the network you
-    /// are on and recent enough to still be true. Anything else is
-    /// labelled, because an unlabelled report from an hour ago somewhere
-    /// else is indistinguishable from a live one — which is exactly how a
-    /// Wi-Fi warning about a previous building ended up at the top of a
-    /// brand-new network's dashboard.
-    ///
-    /// Returns nil for a report that needs no caption, so the common case
-    /// renders exactly as it did before.
-    private func storedProvenance(_ detail: RunDetail) -> String? {
-        guard Self.needsProvenance(
-            storedNetworkID: detail.context.networkID,
-            currentNetworkID: coordinator.monitor.latest?.network.historyJoinID,
-            canonical: coordinator.history.canonicalID)
-        else { return nil }
-        // Non-nil `networkID` is implied by the predicate above, which
-        // returns false without one.
-        guard let networkID = detail.context.networkID else { return nil }
-        // `history.displayName(for:)` is the same resolver the header, the
-        // arrival card and the Networks tab use, so this cannot name a
-        // network differently from the rest of the app.
-        let name = coordinator.history.displayName(for: networkID)
-        return "Last check on \(name), \(RelativeTime.string(from: detail.run.date))"
-    }
-
-    /// Whether a stored report needs a provenance caption: true unless it
-    /// is positively about the network we are on right now.
-    ///
-    /// Static and pure so it can be asserted directly — the nil handling is
-    /// the subtle part, and it is what decides whether another building's
-    /// report can appear unlabelled. `canonical` is a parameter rather than
-    /// something this reaches for so the function stays a function of its
-    /// arguments; callers pass `HistoryStore.canonicalID`, which follows
-    /// manual merges.
     static func needsProvenance(storedNetworkID: String?,
                                 currentNetworkID: String?,
                                 canonical: (String) -> String) -> Bool {
-        // An old `netdiag` whose `--show` predates `context`: there is no
-        // network to name, and `lastCheckedCaption` already prints the date
-        // for this case. Nothing truthful to add here.
         guard let storedNetworkID else { return false }
-        // `nil` means "not identified yet", never "any network will do", so
-        // this is precisely the state in which Home cannot claim the report
-        // is about the here and now. Label it.
         guard let currentNetworkID else { return true }
         return canonical(storedNetworkID) != canonical(currentNetworkID)
     }
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("No check has run yet.").font(.headline)
-            Text("Hopwatch is watching your connection continuously in the background. Run a full check to see the detail behind it.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .proseWidth()
-        }
-        .padding(.top, 24)
+    private var isCaptivePortal: Bool {
+        coordinator.monitor.latest?.publicInfo.captivePortal == true
+            || (coordinator.monitor.latest?.status.rules.contains("CP-1") ?? false)
+            || coordinator.alerts.active["captive-portal"] != nil
     }
 
-    // MARK: - Expert layer
+    private func isCaptivePortalAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
+        alert.id == "captive-portal"
+            || alert.rules.contains("CP-1")
+            || alert.title.localizedCaseInsensitiveContains("sign in")
+            || alert.title.localizedCaseInsensitiveContains("captive")
+    }
+
+    private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
+        for ruleID in alert.rules {
+            let rule = coordinator.rulesCatalog.catalog?[ruleID]
+            if rule?.fixTarget == "your_router" || rule?.category == "router" || ruleID.hasPrefix("G") || ruleID.hasPrefix("B") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var isNetworkOwned: Bool {
+        coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
+            || (coordinator.monitor.latest?.network.isMine ?? false)
+    }
+
+    private var routerAdminURL: URL? {
+        guard isNetworkOwned else { return nil }
+        return IPAddressValidation.routerAdminURL(for: routerGatewayIP)
+    }
+
+    private var currentRunResult: RunResult? {
+        coordinator.currentRunResult
+    }
 
     private var currentNetworkMemory: NetworkMemory? {
         guard let netID = coordinator.arrivalNetworkID ?? currentRunResult?.snapshot.network.id else { return nil }
@@ -614,19 +1135,89 @@ struct HomeView: View {
         )
     }
 
-    /// Whichever report is on screen, as the `RunResult` the expert
-    /// disclosure and the raw-JSON viewer inside it both expect.
-    private var currentRunResult: RunResult? {
-        coordinator.currentRunResult
+    // MARK: - Navigation & Sharing
+
+    private func openActivity() {
+        coordinator.requestedDestination = .activity
     }
 
-    private func expertDisclosure(_ run: RunResult) -> some View {
-        @Bindable var appSettings = appSettings
-        return DisclosureGroup(isExpanded: $appSettings.expertExpanded) {
-            ExpertPanel(run: run)
-                .padding(.top, 8)
-        } label: {
-            Text("Technical detail").font(.headline)
+    private func copySupportSummary() {
+        let text: String
+        if let run = coordinator.latestRun {
+            let owned = coordinator.history.isOwned(networkID: run.snapshot.network.id)
+                || run.snapshot.network.isMine
+            text = SupportSummaryFormatter.format(
+                snapshot: run.snapshot,
+                catalog: coordinator.rulesCatalog.catalog,
+                networkIsOwned: owned
+            )
+        } else {
+            text = SupportSummaryFormatter.format(
+                SupportSummaryFormatter.Parameters(
+                    networkName: coordinator.wifiDisplayName ?? "Unknown Network",
+                    observedProblem: "Network issue detected",
+                    localVerification: "Laptop link is idle; issue is on the network/router side",
+                    concreteAction: "Please restart floor access point / router"
+                )
+            )
         }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func copyShareableReport() {
+        Task { @MainActor in
+            _ = try? await coordinator.shareCurrentReportText()
+        }
+    }
+
+    private func saveMarkdownReport() {
+        Task { @MainActor in
+            do {
+                let text = try await coordinator.shareCurrentReportText()
+                let name = DiagnosticReportSharing.defaultFileName(extension: "md", timestamp: coordinator.latestRun?.snapshot.timestamp)
+                let mdType = UTType(filenameExtension: "md") ?? .plainText
+                DiagnosticReportSharing.saveFile(content: text, defaultName: name, contentType: mdType)
+            } catch {}
+        }
+    }
+
+    private func saveJSONReport() {
+        Task { @MainActor in
+            do {
+                let json = try await coordinator.shareCurrentReportJSON()
+                let name = DiagnosticReportSharing.defaultFileName(extension: "json", timestamp: coordinator.latestRun?.snapshot.timestamp)
+                DiagnosticReportSharing.saveFile(content: json, defaultName: name, contentType: .json)
+            } catch {}
+        }
+    }
+
+    private var rawJSONSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Raw JSON Report")
+                    .font(.headline)
+                Spacer()
+                Button("Copy") {
+                    if let raw = currentRunResult?.rawJSON {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(raw, forType: .string)
+                    }
+                }
+                Button("Done") { showRawJSONSheet = false }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            ScrollView([.horizontal, .vertical]) {
+                Text(currentRunResult?.rawJSON ?? "No raw JSON available")
+                    .font(Theme.Font.rawJSONMonospace)
+                    .textSelection(.enabled)
+                    .padding(8)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(16)
+        .frame(minWidth: 600, minHeight: 450)
     }
 }

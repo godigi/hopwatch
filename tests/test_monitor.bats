@@ -403,13 +403,13 @@ scanner_rules() {
 
 @test "the window trims to its cap and sums counts, not ratios" {
   local summary
-  # Seven probes' worth: only the newest five may survive. Deliberately
+  # Twelve probes' worth: only the newest ten may survive. Deliberately
   # unequal counts so a ratio-averaging implementation fails this while an
   # integer accumulation passes.
-  summary="$(_mon_loss_summarize "10:10 20:0 20:0 20:0 20:5 20:0 20:1")"
-  [ "${summary%%|*}" = "20:0 20:0 20:5 20:0 20:1" ]
+  summary="$(_mon_loss_summarize "10:10 10:10 20:0 20:0 20:0 20:5 20:0 20:1 20:0 20:0 20:0 20:0")"
+  [ "${summary%%|*}" = "20:0 20:0 20:0 20:5 20:0 20:1 20:0 20:0 20:0 20:0" ]
   local totals="${summary#*|}"
-  [ "${totals%%|*}" = "100" ]
+  [ "${totals%%|*}" = "200" ]
   [ "${totals##*|}" = "6" ]
 }
 

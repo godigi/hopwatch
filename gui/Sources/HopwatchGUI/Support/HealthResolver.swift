@@ -73,8 +73,15 @@ enum HealthResolver {
         if let alert = i.activeAlert {
             return alert.severityRank >= 3 ? .critical : .warning
         }
-        if let combined = worst(i.sampleHealth, i.runHealth) {
-            return combined
+        // A live measured sample from the continuous monitor is the real-time
+        // ground truth. An older one-off scan's diagnostic advisories (e.g. channel
+        // contention, bufferbloat grade) must not permanently lock the menu dot to
+        // amber when the connection is healthy and no alerts are active.
+        if let sampleHealth = i.sampleHealth {
+            return sampleHealth
+        }
+        if let runHealth = i.runHealth {
+            return runHealth
         }
         return .warning
     }

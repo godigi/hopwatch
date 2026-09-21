@@ -831,7 +831,7 @@ RULES: list[dict[str, object]] = [
         # different costume: a fault that comes and goes cannot claim an
         # activity "won't hold up", which a reader takes as a statement
         # about right now.
-        "impacts": {"calls": "degraded", "streaming": "degraded",
+        "impacts": {"calls": "degraded",
                     "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Pause heavy downloads during calls or games, or enable Smart "
@@ -867,7 +867,7 @@ RULES: list[dict[str, object]] = [
         # different costume: a fault that comes and goes cannot claim an
         # activity "won't hold up", which a reader takes as a statement
         # about right now.
-        "impacts": {"calls": "degraded", "streaming": "degraded",
+        "impacts": {"calls": "degraded",
                     "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Call the ISP and ask about firmware updates for their "

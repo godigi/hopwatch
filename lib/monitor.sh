@@ -307,7 +307,13 @@ _mon_loss_summarize() {
 # Report a leg's windowed loss percentage from its totals. Kept separate
 # so the rounding rule lives in exactly one place.
 _mon_loss_pct() {
-  awk -v s="$1" -v l="$2" 'BEGIN { if (s > 0) printf "%.0f", l * 100 / s }'
+  awk -v s="$1" -v l="$2" 'BEGIN {
+    if (s <= 0) exit
+    # Suppress single-packet quantization spikes on warm-up samples (s < 40)
+    # so a single drop on an initial cycle does not falsely read as 5% or 10%.
+    if (l == 1 && s < 40) { print "0"; exit }
+    printf "%.0f", l * 100 / s
+  }'
 }
 
 # Clear both windows: a dead link or a different network invalidates every

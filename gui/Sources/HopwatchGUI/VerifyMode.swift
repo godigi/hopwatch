@@ -976,7 +976,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.4.2",
+                version: "1.4.3",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -1266,6 +1266,19 @@ private enum VerifyHarness {
         )
         check(icmpFiltRes.culprit == .none, "TCP-1 ICMP filtered attributes to none (All Clear)")
         check(icmpFiltRes.ispHealth == .healthy, "TCP-1 ICMP filtered keeps ISP health as healthy")
+
+        let roamedRes = HopAttributionResolver.resolve(
+            rules: [], isWifi: true, wifiRSSI: -58, gatewayRTT: 2.0, gatewayLoss: 5.0, recentRoamed: true
+        )
+        check(roamedRes.culprit == .wifi, "Recent Wi-Fi roaming attributes to Wi-Fi")
+        check(roamedRes.badgeTitle == "Notice: Wi-Fi Roamed", "Wi-Fi roaming gives Notice: Wi-Fi Roamed badge")
+        check(roamedRes.routerHealth == .healthy, "Router remains healthy during roaming handoff")
+
+        let weakPosRes = HopAttributionResolver.resolve(
+            rules: [], isWifi: true, wifiRSSI: -78, gatewayRTT: 14.0, gatewayLoss: 5.0
+        )
+        check(weakPosRes.culprit == .wifi, "Weak Wi-Fi signal attributes to Wi-Fi")
+        check(weakPosRes.reassurance.contains("physical position"), "Weak Wi-Fi attributes to physical position")
     }
 
     private static func runNetworkMemoryTests() {
@@ -1400,10 +1413,12 @@ private enum VerifyHarness {
 
         let elevatedPing = ConnectionStability.evaluate(rtt: 95.0, jitter: 5.0, loss: 0.0)
         check(elevatedPing.level == .variable, "rtt > 75ms evaluates to .variable")
-        check(elevatedPing.label == "Elevated Ping", "steady high ping is labelled Elevated Ping")
+        let minorLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 2.5)
+        check(minorLoss.level == .variable, "loss between 1% and 4% evaluates to .variable")
+        check(minorLoss.label == "Minor Loss", "minor loss label is Minor Loss")
 
-        let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 3.5)
-        check(unstableLoss.level == .unstable, "loss > 2% evaluates to .unstable")
+        let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 5.0)
+        check(unstableLoss.level == .unstable, "loss > 4% evaluates to .unstable")
 
         let unstableJitter = ConnectionStability.evaluate(rtt: 20.0, jitter: 60.0, loss: 0.0)
         check(unstableJitter.level == .unstable, "jitter > 50ms evaluates to .unstable")

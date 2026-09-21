@@ -107,11 +107,11 @@ MONITOR_INET_PING_COUNT=20
 # burst is — 20 packets still makes one drop read 5% and then back to 0%,
 # which is movement of the probe, not of the network. The monitor
 # therefore reports lost×100÷sent over a rolling window of the last N
-# probes, refreshed every fast cycle. Five × twenty packets is a
-# 100-packet denominator: one dropped packet moves the reported figure one
-# point, real loss ramps smoothly toward the thresholds, and routine noise
-# contributes a fraction of a percent that decays out within ~a minute.
-MONITOR_LOSS_WINDOW_PROBES=5
+# probes, refreshed every fast cycle. Ten probes accumulates a 100-packet
+# denominator for gateway (10 × 10) and 200 packets for internet (10 × 20):
+# one dropped packet moves the reported figure by 1% or 0.5%, real loss ramps
+# smoothly toward the thresholds, and routine noise decays out.
+MONITOR_LOSS_WINDOW_PROBES=10
 
 # A single cycle's loss is a blip, not a condition: at MONITOR_PING_COUNT=10
 # one dropped packet reads as 10%, exactly LOSS_WARN_PCT. Requiring the same

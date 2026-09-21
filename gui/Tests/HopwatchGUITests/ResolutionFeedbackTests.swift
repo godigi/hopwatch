@@ -183,8 +183,8 @@ import Testing
         )
         #expect(HealthResolver.resolve(alertInputs) == .warning)
 
-        // Faulted run (e.g. Browser Needs Relaunch) persists warning even if live ping is healthy
-        let runFaultInputs = HealthResolver.Inputs(
+        // When monitoring is active with no alerts, live sample health is the source of truth
+        let liveHealthyInputs = HealthResolver.Inputs(
             isScanning: false,
             monitoringEnabled: true,
             isPausedForAnyReason: false,
@@ -193,7 +193,19 @@ import Testing
             sampleHealth: .healthy,
             runHealth: .warning
         )
-        #expect(HealthResolver.resolve(runFaultInputs) == .warning)
+        #expect(HealthResolver.resolve(liveHealthyInputs) == .healthy)
+
+        // When no live sample has been received yet, the newest run's severity provides fallback
+        let fallbackInputs = HealthResolver.Inputs(
+            isScanning: false,
+            monitoringEnabled: true,
+            isPausedForAnyReason: false,
+            monitorRunning: true,
+            activeAlert: nil,
+            sampleHealth: nil,
+            runHealth: .warning
+        )
+        #expect(HealthResolver.resolve(fallbackInputs) == .warning)
     }
 
     @Test func monitorSampleHealthDetectsElevatedLoss() {

@@ -165,12 +165,12 @@ struct ConnectionStability: Sendable, Equatable {
 
     /// Evaluates stability index combining realistic internet thresholds (Option A)
     /// and decoupling link stability from baseline distance latency (Option B):
-    /// - Optimal (green): Loss == 0%, Jitter <= 15ms, RTT <= 75ms (flawless, rock-solid stability)
+    /// - Optimal (green): Loss <= 1.0%, Jitter <= 15ms, RTT <= 75ms (flawless, rock-solid stability)
     /// - Variable (yellow):
     ///   * Jitter 15–50ms (labelled "High Jitter" if > 25ms, "Variable" if 15–25ms)
-    ///   * Loss > 0% and <= 2% (minor loss)
+    ///   * Loss > 1.0% and <= 4.0% (minor loss)
     ///   * RTT > 75ms and <= 150ms (labelled "Elevated Ping" when jitter is steady)
-    /// - Unstable (red): Packet loss > 2%, Jitter > 50ms, or RTT > 150ms
+    /// - Unstable (red): Packet loss > 4.0%, Jitter > 50ms, or RTT > 150ms
     static func evaluate(rtt: Double?, jitter: Double?, loss: Double?) -> ConnectionStability {
         guard let rtt else {
             return ConnectionStability(
@@ -184,15 +184,15 @@ struct ConnectionStability: Sendable, Equatable {
         let l = loss ?? 0.0
         let j = jitter ?? 0.0
 
-        if l > 2.0 || j > 50.0 || rtt > 150.0 {
-            let label = l > 2.0 ? "Unstable" : (j > 50.0 ? "High Jitter" : "Unstable")
+        if l > 4.0 || j > 50.0 || rtt > 150.0 {
+            let label = l > 4.0 ? "Unstable" : (j > 50.0 ? "High Jitter" : "Unstable")
             return ConnectionStability(
                 level: .unstable,
                 label: label,
                 description: "Expect dropouts, buffering, and call audio glitching",
                 icon: "exclamationmark.triangle.fill"
             )
-        } else if j > 15.0 || l > 0.0 || rtt > 75.0 {
+        } else if j > 15.0 || l > 1.0 || rtt > 75.0 {
             let label: String
             let desc: String
             if j > 25.0 {
@@ -201,7 +201,7 @@ struct ConnectionStability: Sendable, Equatable {
             } else if j > 15.0 {
                 label = "Variable"
                 desc = "Moderate jitter variance (±\(Int(round(j)))ms); acceptable for streaming and general browsing"
-            } else if l > 0.0 {
+            } else if l > 1.0 {
                 label = "Minor Loss"
                 desc = "Slight packet loss (\(String(format: "%.1f%%", l))); may cause occasional retransmissions"
             } else {

@@ -427,3 +427,794 @@ enum EventStyle {
         }
     }
 }
+
+// MARK: - Redesign Menu Components (hopwatch-menu.mockup.html)
+
+struct AppBrandMark: View {
+    var size: CGFloat = 32
+
+    var body: some View {
+        if let appIcon = NSApp.applicationIconImage {
+            Image(nsImage: appIcon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else if let bundleIcon = Bundle.main.image(forResource: "AppIcon") {
+            Image(nsImage: bundleIcon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Theme.ColorToken.blue)
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: size * 0.55, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+        }
+    }
+}
+
+struct MenuHeaderView: View {
+    let statusPillText: String
+    let statusPillColor: Color
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 8) {
+                AppBrandMark(size: 28)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("Hopwatch")
+                        .font(.system(size: 17, weight: .bold))
+                        .kerning(-0.5)
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    Text("v\(AppVersion.display)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusPillColor)
+                        .frame(width: 6, height: 6)
+                    Text(statusPillText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Theme.ColorToken.neutralWash, in: Capsule())
+
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 11)
+    }
+}
+
+struct MenuStatusHeroView: View {
+    let iconName: String
+    let iconTint: Color
+    let iconBackground: Color
+    let headline: String
+    let subtitle: String
+    var isChecking: Bool = false
+    var actionTitle: String? = nil
+    var onAction: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.Radius.statusIcon)
+                    .fill(iconBackground)
+                    .frame(width: 30, height: 30)
+
+                if isChecking {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: iconName)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(iconTint)
+                }
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(headline)
+                    .font(.system(size: 18, weight: .semibold))
+                    .kerning(-0.45)
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let actionTitle, let onAction {
+                    Button(actionTitle, action: onAction)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) {
+            Divider().foregroundStyle(Theme.ColorToken.line)
+        }
+    }
+}
+
+struct ConnectionRouteView: View {
+    let wifiReadingLabel: String
+    let wifiReadingValue: String
+    let wifiReadingTint: Color
+    let macIcon: String
+    let macStatusGood: Bool
+    let macDetail: String
+
+    let routerPingValue: String
+    let routerPingTint: Color
+    let routerStatusGood: Bool
+    let routerDetail: String
+    let routerWarn: Bool
+
+    let internetPingValue: String
+    let internetPingTint: Color
+    let internetStatusGood: Bool
+    let countryFlag: String?
+    let countryName: String?
+    let publicIP: String?
+    let internetDetail: String
+    let internetWarn: Bool
+
+    let firstLinkLabel: String
+    let secondLinkLabel: String
+
+    let jitterMs: Double?
+    let jitterWarn: Bool
+    let jitterDescription: String
+
+    let vpnActive: Bool
+    let vpnName: String?
+    let vpnFreshness: String
+
+    let cadenceText: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Meta header row
+            HStack {
+                Text("Your connection")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
+                Text(cadenceText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 6)
+
+            // 3-Hop Route
+            ZStack(alignment: .top) {
+                // Connecting dashed lines and labels
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let x1 = w * (1.0 / 6.0)
+                    let x2 = w * (3.0 / 6.0)
+                    let x3 = w * (5.0 / 6.0)
+                    let lineY: CGFloat = 85
+
+                    // Hop 1 -> Hop 2 line
+                    Path { path in
+                        path.move(to: CGPoint(x: x1 + 28, y: lineY))
+                        path.addLine(to: CGPoint(x: x2 - 28, y: lineY))
+                    }
+                    .stroke(
+                        routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.line,
+                        style: StrokeStyle(lineWidth: 2, dash: [4, 4])
+                    )
+
+                    // Hop 2 -> Hop 3 line
+                    Path { path in
+                        path.move(to: CGPoint(x: x2 + 28, y: lineY))
+                        path.addLine(to: CGPoint(x: x3 - 28, y: lineY))
+                    }
+                    .stroke(
+                        internetWarn ? Theme.ColorToken.amber : Theme.ColorToken.line,
+                        style: StrokeStyle(lineWidth: 2, dash: [4, 4])
+                    )
+
+                    // First link label
+                    Text(firstLinkLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .position(x: (x1 + x2) / 2.0, y: lineY + 12)
+
+                    // Second link label
+                    Text(secondLinkLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .position(x: (x2 + x3) / 2.0, y: lineY + 12)
+                }
+
+                HStack(alignment: .top, spacing: 0) {
+                    // Hop 1: This Mac
+                    VStack(spacing: 4) {
+                        VStack(spacing: 2) {
+                            Text(wifiReadingLabel)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                            Text(wifiReadingValue)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(wifiReadingTint)
+                                .lineLimit(1)
+                        }
+                        .frame(height: 52)
+
+                        hopNode(
+                            icon: macIcon,
+                            isWarning: false,
+                            statusGood: macStatusGood,
+                            flag: nil
+                        )
+
+                        Text("This Mac")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .padding(.top, 6)
+
+                        Text(macDetail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    // Hop 2: Router
+                    VStack(spacing: 4) {
+                        VStack(spacing: 2) {
+                            Text("Router ping")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                            pingReadingText(routerPingValue, tint: routerPingTint)
+                        }
+                        .frame(height: 52)
+
+                        hopNode(
+                            icon: "network",
+                            isWarning: routerWarn,
+                            statusGood: routerStatusGood,
+                            flag: nil
+                        )
+
+                        Text("Router")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .padding(.top, 6)
+
+                        Text(routerDetail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    // Hop 3: Internet
+                    VStack(spacing: 4) {
+                        VStack(spacing: 2) {
+                            Text("Internet ping")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                            pingReadingText(internetPingValue, tint: internetPingTint)
+                        }
+                        .frame(height: 52)
+
+                        hopNode(
+                            icon: "globe",
+                            isWarning: internetWarn,
+                            statusGood: internetStatusGood,
+                            flag: countryFlag
+                        )
+
+                        Text("Internet")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .padding(.top, 6)
+
+                        if let countryName, !countryName.isEmpty {
+                            Text(countryName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.ink)
+                                .lineLimit(1)
+                            Text("Public IP country")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                        }
+
+                        if internetWarn {
+                            Text(internetDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.amber)
+                                .lineLimit(1)
+                        } else if countryName == nil {
+                            Text(internetDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
+            // Jitter line
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 12))
+                        .foregroundStyle(jitterWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
+                    Text("Internet jitter")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                    if let jitter = jitterMs {
+                        Text(String(format: "%.0f ms", jitter))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(jitterWarn ? Theme.ColorToken.amber : Theme.ColorToken.ink)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+                Spacer()
+                Text(jitterDescription)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+            .padding(.top, 11)
+            .padding(.horizontal, 4)
+            .overlay(alignment: .top) {
+                Divider().foregroundStyle(Theme.ColorToken.line)
+            }
+
+            // VPN context line
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(vpnActive ? Theme.ColorToken.blue : Theme.ColorToken.muted)
+                    if vpnActive {
+                        Text("VPN on")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.blue)
+                        if let name = vpnName, !name.isEmpty {
+                            Text("· \(name)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                        }
+                    } else {
+                        Text("VPN off")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+                Spacer()
+                Text(vpnFreshness)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+            .padding(.top, 9)
+            .padding(.horizontal, 4)
+            .overlay(alignment: .top) {
+                Divider().foregroundStyle(Theme.ColorToken.line)
+            }
+        }
+        .padding(12)
+        .background(Theme.ColorToken.cardBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.routeCard)
+                .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+        )
+    }
+
+    private func pingReadingText(_ value: String, tint: Color) -> some View {
+        let parts = value.split(separator: " ")
+        return HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(parts.first.map(String.init) ?? value)
+                .font(.system(size: 22, weight: .bold))
+                .kerning(-0.5)
+                .foregroundStyle(tint)
+            if parts.count > 1 {
+                Text(parts.dropFirst().joined(separator: " "))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func hopNode(icon: String, isWarning: Bool, statusGood: Bool, flag: String?) -> some View {
+        ZStack {
+            Circle()
+                .fill(isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground)
+                .frame(width: 56, height: 56)
+                .shadow(color: Color.black.opacity(0.04), radius: 3, y: 1)
+                .overlay(
+                    Circle()
+                        .strokeBorder(isWarning ? Color(red: 0xe9/255.0, green: 0xc4/255.0, blue: 0x86/255.0) : Theme.ColorToken.line, lineWidth: 1)
+                )
+
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(isWarning ? Theme.ColorToken.amber : (statusGood ? Theme.ColorToken.green : Theme.ColorToken.muted))
+
+            // Status badge bottom-right
+            Circle()
+                .fill(statusGood ? Theme.ColorToken.green : Theme.ColorToken.amber)
+                .frame(width: 17, height: 17)
+                .overlay(
+                    Circle().strokeBorder(Color.white, lineWidth: 2)
+                )
+                .overlay(
+                    Text(statusGood ? "✓" : "!")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(.white)
+                )
+                .offset(x: 20, y: 20)
+
+            // Country flag badge top-right
+            if let flag {
+                Text(flag)
+                    .font(.system(size: 14))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Theme.ColorToken.nodeBackground)
+                            .shadow(color: Color.black.opacity(0.1), radius: 2, y: 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+                    )
+                    .offset(x: 21, y: -20)
+            }
+        }
+        .frame(width: 56, height: 56)
+    }
+}
+
+struct ExperienceGridView: View {
+    let calls: ExperienceStatus
+    let gaming: ExperienceStatus
+    let streaming: ExperienceStatus
+
+    struct ExperienceStatus {
+        let label: String
+        let tint: Color
+        var metric: String? = nil
+
+        init(label: String, tint: Color, metric: String? = nil) {
+            self.label = label
+            self.tint = tint
+            self.metric = metric
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("What this feels like")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.ink)
+
+            HStack(spacing: 0) {
+                item(title: "Calls", icon: "video", status: calls)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+                    .frame(height: 32)
+                    .padding(.horizontal, 8)
+
+                item(title: "Gaming", icon: "gamecontroller", status: gaming)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+                    .frame(height: 32)
+                    .padding(.horizontal, 8)
+
+                item(title: "Streaming", icon: "play.rectangle", status: streaming)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func item(title: String, icon: String, status: ExperienceStatus) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Text(title)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+
+            Text(status.label)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(status.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            if let metric = status.metric {
+                Text(metric)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+struct MenuSpeedView: View {
+    let downMbps: String
+    let upMbps: String
+    let meta: String
+
+    var body: some View {
+        HStack(alignment: .center) {
+            HStack(spacing: 16) {
+                HStack(spacing: 3) {
+                    Text("↓ \(downMbps)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    Text("Mbps")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+                HStack(spacing: 3) {
+                    Text("↑ \(upMbps)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    Text("Mbps")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("Last speed test")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Text(meta)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 10)
+        .overlay(alignment: .top) {
+            Divider().foregroundStyle(Theme.ColorToken.line)
+        }
+        .overlay(alignment: .bottom) {
+            Divider().foregroundStyle(Theme.ColorToken.line)
+        }
+    }
+}
+
+struct MenuActivitySnippetView: View {
+    let event: ActivityEntry?
+    let onOpenActivity: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Recent activity")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                Spacer()
+                Button("View all") {
+                    onOpenActivity()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.blue)
+            }
+
+            if let event {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(EventStyle.tint(for: event.kind))
+                            .frame(width: 7, height: 7)
+                        Text(event.summary)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .lineLimit(1)
+                        Spacer()
+                        RelativeTimeText(date: event.latest)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                    if let detail = event.detail {
+                        Text(detail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                            .padding(.leading, 15)
+                    }
+                }
+            } else {
+                Text("No changes in the last 24 hours")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .padding(.vertical, 2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct MenuActionsView: View {
+    let isScanning: Bool
+    let onOpenDashboard: () -> Void
+    let onRunFullCheck: () -> Void
+    let onCancelScan: () -> Void
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Button(action: onOpenDashboard) {
+                HStack(spacing: 7) {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Open dashboard")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(Theme.ColorToken.blue, in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+
+            if isScanning {
+                Button(action: onCancelScan) {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Cancel check")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button(action: onRunFullCheck) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "stethoscope")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        Text("Run full check")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.ColorToken.nodeBackground)
+                            .shadow(color: Color.black.opacity(0.04), radius: 2, y: 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+struct MenuFooterView: View {
+    let networkName: String?
+    let isWiFi: Bool
+    let monitoringEnabled: Bool
+    let onToggleMonitoring: () -> Void
+    let onCopyReport: () -> Void
+    let onCopySupport: () -> Void
+    let onSaveMarkdown: () -> Void
+    let onSaveJSON: () -> Void
+    let onQuit: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: isWiFi ? "wifi" : "cable.connector")
+                    .font(.system(size: 11))
+                Text(networkName ?? "DISCONNECTED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.ColorToken.muted)
+
+            Spacer()
+
+            HStack(spacing: 10) {
+                Button(action: onToggleMonitoring) {
+                    HStack(spacing: 4) {
+                        Image(systemName: monitoringEnabled ? "pause.fill" : "play.fill")
+                            .font(.system(size: 9))
+                        Text(monitoringEnabled ? "Pause" : "Resume")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(Theme.ColorToken.muted)
+                }
+                .buttonStyle(.plain)
+
+                Menu {
+                    Button("Copy Redacted Report", action: onCopyReport)
+                    Button("Copy for Support", action: onCopySupport)
+                    Divider()
+                    Button("Save as Markdown (.md)…", action: onSaveMarkdown)
+                    Button("Save Redacted JSON (.json)…", action: onSaveJSON)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Text("v\(AppVersion.display)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted.opacity(0.8))
+
+                Button("Quit", action: onQuit)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            }
+        }
+        .padding(.horizontal, 17)
+        .padding(.vertical, 10)
+        .background(Theme.ColorToken.footerBackground)
+        .overlay(alignment: .top) {
+            Divider().foregroundStyle(Theme.ColorToken.line)
+        }
+    }
+}
+
