@@ -88,10 +88,13 @@ struct HomeView: View {
                 // 2. Status Hero Banner
                 statusHeroSection
 
-                // 3. What Should Work (Suitability Strip)
+                // 3. Key Vitals Row (Speed & Connection Reliability)
+                keyVitalsSection
+
+                // 4. What Should Work (Suitability Strip)
                 suitabilityStripSection
 
-                // 4. Connection Path Panel
+                // 5. Connection Path Panel
                 DashboardRouteView(
                     wifiSignalText: wifiSignalText,
                     wifiSignalDetail: wifiSignalDetail,
@@ -124,7 +127,7 @@ struct HomeView: View {
                     culpritHop: culpritHop
                 )
 
-                // 5. Main 2-Column Dashboard Grid
+                // 6. Main 2-Column Dashboard Grid (Ping Chart & Findings vs Graded Check Details)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(spacing: 16) {
@@ -192,10 +195,7 @@ struct HomeView: View {
                     }
                 }
 
-                // 5. Connection Reliability Strip
-                reliabilityStripSection
-
-                // 6. Bottom 2-Column Grid
+                // 7. Bottom 2-Column Grid (Network Details & Recent Activity)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 16) {
                         DashboardNetworkDetailsPanel(
@@ -248,7 +248,7 @@ struct HomeView: View {
                     }
                 }
 
-                // 7. Technical Detail Disclosure Panel
+                // 8. Technical Detail Panel (Permanently unfolded and visible)
                 DashboardTechnicalPanel(
                     routerIP: routerGatewayIP ?? "192.168.1.1",
                     routerLoss: routerLossText,
@@ -418,21 +418,67 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Reliability Strip Section
+    // MARK: - Key Vitals Section
 
-    private var reliabilityStripSection: some View {
-        let avail = currentRunResult?.snapshot.availability
-        let unobserved = avail?.unobservedPct.map { "\($0)%" } ?? "0%"
-        let outages = avail?.outages.map { "\($0) outages" } ?? "0 outages"
-        let downtime = avail?.downtimeS.map { formatSeconds($0) } ?? "0s"
-        let longest = avail?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+    private var keyVitalsSection: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                DashboardSpeedCard(
+                    downMbps: speedValues.down,
+                    upMbps: speedValues.up,
+                    testedMeta: lastSpeedMetaText,
+                    isScanning: coordinator.isScanning,
+                    onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                )
+                .frame(maxWidth: .infinity)
 
-        return DashboardReliabilityStrip(
-            unobservedFraction: unobserved,
-            outageCount: outages,
-            totalDowntime: downtime,
-            longestOutage: longest
-        )
+                DashboardReliabilityCard(
+                    observationSummary: reliabilityObservationSummary,
+                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "0 outages",
+                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "0s",
+                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+                )
+                .frame(maxWidth: .infinity)
+            }
+
+            VStack(spacing: 16) {
+                DashboardSpeedCard(
+                    downMbps: speedValues.down,
+                    upMbps: speedValues.up,
+                    testedMeta: lastSpeedMetaText,
+                    isScanning: coordinator.isScanning,
+                    onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                )
+
+                DashboardReliabilityCard(
+                    observationSummary: reliabilityObservationSummary,
+                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "0 outages",
+                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "0s",
+                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+                )
+            }
+        }
+    }
+
+    private var reliabilityObservationSummary: String {
+        guard let avail = currentRunResult?.snapshot.availability else {
+            return "Monitoring started recently · No prior data in last 24h"
+        }
+        let unobserved = avail.unobservedPct ?? 100
+        if unobserved >= 99 {
+            return "Monitoring started recently · No history recorded in last 24h"
+        } else if unobserved > 0 {
+            let observedPct = max(1, 100 - unobserved)
+            let observedHours = Double(24 * observedPct) / 100.0
+            if observedHours >= 1.0 {
+                return String(format: "Last 24h · Monitored for ~%.0fh (%d%% offline or asleep)", observedHours, unobserved)
+            } else {
+                let observedMins = max(1, Int(round(observedHours * 60)))
+                return "Last 24h · Monitored for ~\(observedMins)m (\(unobserved)% offline or asleep)"
+            }
+        } else {
+            return "Last 24 hours · Continuously monitored"
+        }
     }
 
     private func formatSeconds(_ s: Int) -> String {
@@ -522,43 +568,195 @@ struct HomeView: View {
 
         var rows: [DashboardCheckTable.Row] = []
 
-        // 1. Router
         let gwRtt = snap?.gateway.rttAvgMs ?? coordinator.monitor.latest?.gateway.rttAvgMs
         let gwLoss = snap?.gateway.lossPct ?? coordinator.monitor.latest?.gateway.lossPct ?? 0
-        let gwUsual = mem?.typicalGatewayLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
         let isRoamBlip = coordinator.hasRecentRoam && gwLoss < 10.0
-        let gwText = gwRtt != nil ? (isRoamBlip ? "\(Int(round(gwRtt!))) ms · roamed" : "\(Int(round(gwRtt!))) ms · \(Int(round(gwLoss)))% loss") : "—"
-        rows.append(.init(
-            id: "router",
-            icon: (!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network",
-            label: "Router",
-            measured: gwText,
-            subvalue: nil,
-            usual: gwUsual,
-            isWarning: !isRoamBlip && gwLoss >= 3.0,
-            isGood: (isRoamBlip || gwLoss < 1.0) && gwRtt != nil
-        ))
-
-        // 2. Internet
         let inetRtt = snap?.internetLatency.rttAvgMs ?? coordinator.monitor.latest?.internet.rttAvgMs
         let inetJitter = snap?.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
+        let loss1 = snap?.internetLatency.lossPct ?? coordinator.monitor.latest?.internet.lossPct ?? 0
+        let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
+        let rssi = resolvedRSSI
+        let snr = snap?.wifi?.snr
+        let noise = snap?.wifi?.noise
+        let channel = coordinator.monitor.latest?.wifi?.channel
+            ?? snap?.wifi?.channel
+            ?? snap?.wifiScan?.currentChannel
+        let neighborCount = snap?.wifiScan?.neighbourCount ?? 0
+
+        // 1. Jitter (Matching user mockup)
+        let jitterBadge: DashboardCheckTable.GradeBadge = {
+            if inetJitter >= 20 {
+                return .init(label: "Unstable", tone: .critical)
+            } else if inetJitter >= 10 {
+                return .init(label: "Degraded", tone: .warn)
+            } else {
+                return .init(label: "Good", tone: .good)
+            }
+        }()
+        rows.append(.init(
+            id: "jitter",
+            icon: "waveform.path",
+            label: "Jitter",
+            measured: "\(Int(round(inetJitter))) ms",
+            subvalue: nil,
+            usual: "—",
+            badge: jitterBadge,
+            isWarning: inetJitter >= 10,
+            isGood: inetJitter < 10
+        ))
+
+        // 2. Packet loss to router (Matching user mockup)
+        let gwLossBadge: DashboardCheckTable.GradeBadge = {
+            if isRoamBlip {
+                return .init(label: "Roamed", tone: .good)
+            } else if gwLoss >= 10.0 {
+                return .init(label: "Unstable", tone: .critical)
+            } else if gwLoss >= 3.0 {
+                return .init(label: "Degraded", tone: .warn)
+            } else {
+                return .init(label: "Good", tone: .good)
+            }
+        }()
+        rows.append(.init(
+            id: "gw-loss",
+            icon: (!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network",
+            label: "Packet loss to router",
+            measured: "\(Int(round(gwLoss)))%",
+            subvalue: nil,
+            usual: "0%",
+            badge: gwLossBadge,
+            isWarning: !isRoamBlip && gwLoss >= 3.0,
+            isGood: (isRoamBlip || gwLoss < 1.0)
+        ))
+
+        // 3. Wi-Fi channel (Matching user mockup)
+        if isConnectedToWiFi {
+            let isCrowded = neighborCount > 3
+            let channelText = channel != nil ? "\(channel!)" : (bandChannelText.isEmpty ? "Connected" : bandChannelText)
+            let channelBadge = DashboardCheckTable.GradeBadge(
+                label: isCrowded ? "Crowded" : "Clear",
+                tone: isCrowded ? .warn : .good
+            )
+            rows.append(.init(
+                id: "wifi-channel",
+                icon: isCrowded ? "antenna.radiowaves.left.and.right.slash" : "antenna.radiowaves.left.and.right",
+                label: "Wi-Fi channel",
+                measured: channelText,
+                subvalue: neighborCount > 0 ? "\(neighborCount) neighboring networks" : nil,
+                usual: "—",
+                badge: channelBadge,
+                isWarning: isCrowded,
+                isGood: !isCrowded
+            ))
+        }
+
+        // 4. Signal (Matching user mockup)
+        if isConnectedToWiFi {
+            let signalBadge: DashboardCheckTable.GradeBadge = {
+                guard let r = rssi else { return .init(label: "Good", tone: .good) }
+                if r >= -55 { return .init(label: "Excellent", tone: .good) }
+                if r >= -65 { return .init(label: "Good", tone: .good) }
+                if r >= -75 { return .init(label: "Degraded", tone: .warn) }
+                return .init(label: "Weak", tone: .critical)
+            }()
+            rows.append(.init(
+                id: "wifi-signal",
+                icon: "wifi",
+                label: "Signal",
+                measured: rssi.map { "\($0) dBm" } ?? "Connected",
+                subvalue: nil,
+                usual: "−62 dBm",
+                badge: signalBadge,
+                isWarning: rssi != nil && rssi! < -70,
+                isGood: rssi != nil && rssi! >= -65
+            ))
+        }
+
+        // 5. Noise (Matching user mockup)
+        if isConnectedToWiFi, let n = noise {
+            let noiseBadge = DashboardCheckTable.GradeBadge(
+                label: n <= -85 ? "Good" : "Elevated",
+                tone: n <= -85 ? .good : .warn
+            )
+            rows.append(.init(
+                id: "wifi-noise",
+                icon: "waveform.badge.magnifyingglass",
+                label: "Noise",
+                measured: "\(n) dBm",
+                subvalue: nil,
+                usual: "−86 dBm",
+                badge: noiseBadge,
+                isWarning: n > -85,
+                isGood: n <= -85
+            ))
+        }
+
+        // 6. SNR (Matching user mockup)
+        if isConnectedToWiFi, let s = snr {
+            let snrBadge: DashboardCheckTable.GradeBadge = {
+                if s >= 25 { return .init(label: "Good", tone: .good) }
+                if s >= 15 { return .init(label: "Low", tone: .warn) }
+                return .init(label: "Poor", tone: .critical)
+            }()
+            rows.append(.init(
+                id: "wifi-snr",
+                icon: "chart.bar.fill",
+                label: "SNR",
+                measured: "\(s) dB",
+                subvalue: nil,
+                usual: "25 dB",
+                badge: snrBadge,
+                isWarning: s < 20,
+                isGood: s >= 20
+            ))
+        }
+
+        // 7. Router Ping
+        let gwUsual = mem?.typicalGatewayLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
+        let gwPingBadge: DashboardCheckTable.GradeBadge = {
+            guard let r = gwRtt else { return .init(label: "Good", tone: .good) }
+            if r > 50 { return .init(label: "Slow", tone: .warn) }
+            return .init(label: "Good", tone: .good)
+        }()
+        rows.append(.init(
+            id: "router",
+            icon: "network",
+            label: "Router latency",
+            measured: gwRtt != nil ? "\(Int(round(gwRtt!))) ms" : "—",
+            subvalue: nil,
+            usual: gwUsual,
+            badge: gwPingBadge,
+            isWarning: gwRtt != nil && gwRtt! > 50,
+            isGood: gwRtt != nil && gwRtt! <= 50
+        ))
+
+        // 8. Internet Ping
         let inetUsual = mem?.typicalInternetLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
-        let inetText = inetRtt != nil ? "\(Int(round(inetRtt!))) ms · \(Int(round(inetJitter))) ms jitter" : "—"
+        let inetPingBadge: DashboardCheckTable.GradeBadge = {
+            guard let r = inetRtt else { return .init(label: "Good", tone: .good) }
+            if r > 120 { return .init(label: "Elevated", tone: .warn) }
+            return .init(label: "Good", tone: .good)
+        }()
         rows.append(.init(
             id: "internet",
             icon: inetRtt != nil && inetRtt! > 120 ? "exclamationmark.triangle.fill" : "globe",
-            label: "Internet",
-            measured: inetText,
+            label: "Internet latency",
+            measured: inetRtt != nil ? "\(Int(round(inetRtt!))) ms" : "—",
             subvalue: nil,
             usual: inetUsual,
+            badge: inetPingBadge,
             isWarning: inetRtt != nil && inetRtt! > 120,
             isGood: inetRtt != nil && inetRtt! <= 120
         ))
 
-        // 3. Internet packet loss
-        let loss1 = snap?.internetLatency.lossPct ?? coordinator.monitor.latest?.internet.lossPct ?? 0
-        let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
+        // 9. Internet packet loss
         let lossText = String(format: "%.0f%% / %.0f%%", loss1, loss2)
+        let lossBadge: DashboardCheckTable.GradeBadge = {
+            if loss1 >= 10.0 { return .init(label: "Unstable", tone: .critical) }
+            if loss1 >= 3.0 { return .init(label: "Degraded", tone: .warn) }
+            if loss1 > 0 { return .init(label: "Minor", tone: .warn) }
+            return .init(label: "Good", tone: .good)
+        }()
         rows.append(.init(
             id: "loss",
             icon: loss1 >= 3.0 ? "exclamationmark.triangle.fill" : "checkmark",
@@ -566,14 +764,19 @@ struct HomeView: View {
             measured: lossText,
             subvalue: nil,
             usual: "0%",
+            badge: lossBadge,
             isWarning: loss1 >= 3.0,
             isGood: loss1 < 1.0
         ))
 
-        // 4. DNS
+        // 10. DNS
         let dnsTotal = snap?.dns.count ?? 0
         let dnsOk = snap?.dns.filter(\.ok).count ?? 0
         let dnsText = dnsTotal > 0 ? "\(dnsOk) of \(dnsTotal) resolvers OK" : "All lookups healthy"
+        let dnsBadge = DashboardCheckTable.GradeBadge(
+            label: (dnsTotal > 0 && dnsOk < dnsTotal) ? "Degraded" : "Good",
+            tone: (dnsTotal > 0 && dnsOk < dnsTotal) ? .warn : .good
+        )
         rows.append(.init(
             id: "dns",
             icon: dnsTotal > 0 && dnsOk < dnsTotal ? "exclamationmark.triangle.fill" : "checkmark",
@@ -581,39 +784,21 @@ struct HomeView: View {
             measured: dnsText,
             subvalue: nil,
             usual: "—",
+            badge: dnsBadge,
             isWarning: dnsTotal > 0 && dnsOk < dnsTotal,
             isGood: dnsTotal == 0 || dnsOk == dnsTotal
         ))
 
-        // 5. Wi-Fi signal / noise
-        let rssi = resolvedRSSI
-        let snr = snap?.wifi?.snr
-        let wifiUsual = "−62 dBm"
-        let wifiText: String = {
-            if let r = rssi, let s = snr {
-                return "\(r) dBm · SNR \(s) dB"
-            } else if let r = rssi {
-                return "\(r) dBm"
-            }
-            return isConnectedToWiFi ? "Connected" : "Ethernet wired"
-        }()
-        rows.append(.init(
-            id: "wifi",
-            icon: isConnectedToWiFi ? "wifi" : "cable.connector",
-            label: isConnectedToWiFi ? "Wi-Fi signal / noise" : "Ethernet link",
-            measured: wifiText,
-            subvalue: nil,
-            usual: isConnectedToWiFi ? wifiUsual : "—",
-            isWarning: rssi != nil && rssi! < -75,
-            isGood: rssi != nil && rssi! >= -70
-        ))
-
-        // 6. Lag under load (Bufferbloat)
+        // 11. Lag under load (Bufferbloat)
         let bb = snap?.bufferbloat
         let bbRouterGrade = bb?.gwGrade ?? "A"
         let bbRouterAdded = bb?.gwDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+3 ms"
         let bbInetGrade = bb?.inetGrade ?? "A"
         let bbInetAdded = bb?.inetDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+15 ms"
+        let bbBadge = DashboardCheckTable.GradeBadge(
+            label: "Grade \(bbInetGrade)",
+            tone: (bbInetGrade == "A" || bbInetGrade == "B") ? .good : (bbInetGrade == "C" ? .warn : .critical)
+        )
         rows.append(.init(
             id: "bufferbloat",
             icon: bbInetGrade == "D" || bbInetGrade == "F" ? "exclamationmark.triangle.fill" : "checkmark",
@@ -621,12 +806,17 @@ struct HomeView: View {
             measured: "Router \(bbRouterGrade) (\(bbRouterAdded))",
             subvalue: "Internet \(bbInetGrade) (\(bbInetAdded))",
             usual: "+3 ms router",
+            badge: bbBadge,
             isWarning: bbInetGrade == "D" || bbInetGrade == "F",
             isGood: bbInetGrade != "D" && bbInetGrade != "F"
         ))
 
-        // 7. Packet size (MTU)
+        // 12. Packet size (MTU)
         let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500
+        let mtuBadge = DashboardCheckTable.GradeBadge(
+            label: mtu >= 1400 ? "Standard" : "Reduced",
+            tone: mtu >= 1400 ? .good : .warn
+        )
         rows.append(.init(
             id: "mtu",
             icon: "checkmark",
@@ -634,12 +824,17 @@ struct HomeView: View {
             measured: "\(mtu) bytes",
             subvalue: nil,
             usual: "—",
+            badge: mtuBadge,
             isWarning: false,
             isGood: true
         ))
 
-        // 8. IPv6
+        // 13. IPv6
         let ipv6Avail = snap?.ipv6.available ?? false
+        let ipv6Badge = DashboardCheckTable.GradeBadge(
+            label: ipv6Avail ? "Active" : "IPv4 only",
+            tone: ipv6Avail ? .good : .neutral
+        )
         rows.append(.init(
             id: "ipv6",
             icon: "globe",
@@ -647,12 +842,17 @@ struct HomeView: View {
             measured: ipv6Avail ? "Available" : "Not available",
             subvalue: ipv6Avail ? nil : "IPv4-only connection",
             usual: "—",
+            badge: ipv6Badge,
             isWarning: false,
             isGood: ipv6Avail
         ))
 
-        // 9. Web connections
+        // 14. Web connections
         let webOk = snap?.tcpReach.first?.ok ?? true
+        let webBadge = DashboardCheckTable.GradeBadge(
+            label: webOk ? "Good" : "Blocked",
+            tone: webOk ? .good : .critical
+        )
         rows.append(.init(
             id: "web",
             icon: webOk ? "checkmark" : "exclamationmark.triangle.fill",
@@ -660,36 +860,12 @@ struct HomeView: View {
             measured: webOk ? "TCP 443 reachable" : "TCP 443 blocked",
             subvalue: nil,
             usual: "—",
+            badge: webBadge,
             isWarning: !webOk,
             isGood: webOk
         ))
 
-        // 10. VPN
-        rows.append(.init(
-            id: "vpn",
-            icon: "shield",
-            label: "VPN",
-            measured: vpnActive ? "On · \(vpnProviderName ?? "Active")" : "Off",
-            subvalue: nil,
-            usual: "—",
-            isWarning: false,
-            isGood: true
-        ))
-
-        // 11. Clock
-        let drift = snap?.ntp.driftSeconds.map { String(format: "%+.2f s drift", $0) } ?? "+0.01 s drift"
-        rows.append(.init(
-            id: "clock",
-            icon: "checkmark",
-            label: "Clock",
-            measured: drift,
-            subvalue: nil,
-            usual: "+0.01 s",
-            isWarning: false,
-            isGood: true
-        ))
-
-        // 12. Speed test
+        // 15. Speed test
         let speedDown = snap?.speedtest?.downMbps ?? coordinator.latestSpeedTest?.downMbps
         let speedUp = snap?.speedtest?.upMbps ?? coordinator.latestSpeedTest?.upMbps
         let speedText: String = {
@@ -698,13 +874,20 @@ struct HomeView: View {
             }
             return "Skipped in this check"
         }()
+        let speedBadge: DashboardCheckTable.GradeBadge = {
+            guard let d = speedDown else { return .init(label: "Skipped", tone: .neutral) }
+            if d >= 100 { return .init(label: "Fast", tone: .good) }
+            if d >= 25 { return .init(label: "Good", tone: .good) }
+            return .init(label: "Slow", tone: .warn)
+        }()
         rows.append(.init(
             id: "speed",
             icon: "waveform.path.ecg",
-            label: "Speed test",
+            label: "Throughput / Speed",
             measured: speedText,
             subvalue: nil,
             usual: "—",
+            badge: speedBadge,
             isWarning: false,
             isGood: speedDown != nil
         ))

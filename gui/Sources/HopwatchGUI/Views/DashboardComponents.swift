@@ -878,6 +878,36 @@ struct DashboardFindingsPanel: View {
 // MARK: - 6. Check Details Table
 
 struct DashboardCheckTable: View {
+    enum GradeTone: Equatable, Sendable {
+        case good
+        case warn
+        case critical
+        case neutral
+
+        var foreground: Color {
+            switch self {
+            case .good: return Theme.ColorToken.green
+            case .warn: return Theme.ColorToken.amber
+            case .critical: return Theme.ColorToken.red
+            case .neutral: return Theme.ColorToken.muted
+            }
+        }
+
+        var background: Color {
+            switch self {
+            case .good: return Theme.ColorToken.greenWash
+            case .warn: return Theme.ColorToken.amberWash
+            case .critical: return Theme.ColorToken.redWash
+            case .neutral: return Theme.ColorToken.neutralWash
+            }
+        }
+    }
+
+    struct GradeBadge: Equatable, Sendable {
+        let label: String
+        let tone: GradeTone
+    }
+
     struct Row: Identifiable {
         let id: String
         let icon: String
@@ -885,8 +915,21 @@ struct DashboardCheckTable: View {
         let measured: String
         let subvalue: String?
         let usual: String
+        let badge: GradeBadge?
         let isWarning: Bool
         let isGood: Bool
+
+        init(id: String, icon: String, label: String, measured: String, subvalue: String? = nil, usual: String, badge: GradeBadge? = nil, isWarning: Bool = false, isGood: Bool = false) {
+            self.id = id
+            self.icon = icon
+            self.label = label
+            self.measured = measured
+            self.subvalue = subvalue
+            self.usual = usual
+            self.badge = badge
+            self.isWarning = isWarning
+            self.isGood = isGood
+        }
     }
 
     let checkSubtitle: String
@@ -900,10 +943,10 @@ struct DashboardCheckTable: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Theme.ColorToken.muted)
-                        Text("Check details")
+                        Image(systemName: "list.bullet.clipboard.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.ColorToken.blue)
+                        Text("Check details & evidence")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                     }
@@ -930,7 +973,7 @@ struct DashboardCheckTable: View {
             HStack(spacing: 0) {
                 Text("Measurement")
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Measured")
+                Text("Measured & State")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("Usual")
                     .frame(width: 70, alignment: .trailing)
@@ -946,9 +989,9 @@ struct DashboardCheckTable: View {
             // Table Rows
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
-                    HStack(alignment: .top, spacing: 0) {
+                    HStack(alignment: .center, spacing: 0) {
                         // Label
-                        HStack(alignment: .top, spacing: 6) {
+                        HStack(alignment: .center, spacing: 6) {
                             Image(systemName: row.icon)
                                 .font(.system(size: 11))
                                 .foregroundStyle(row.isWarning ? Theme.ColorToken.amber : (row.isGood ? Theme.ColorToken.green : Theme.ColorToken.muted))
@@ -959,15 +1002,29 @@ struct DashboardCheckTable: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                        // Measured
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.measured)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .foregroundStyle(row.isWarning ? Theme.ColorToken.amber : Theme.ColorToken.ink)
-                            if let sub = row.subvalue {
-                                Text(sub)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(Theme.ColorToken.muted)
+                        // Measured & Grade Badge
+                        HStack(alignment: .center, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.measured)
+                                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(row.isWarning ? Theme.ColorToken.amber : Theme.ColorToken.ink)
+                                if let sub = row.subvalue {
+                                    Text(sub)
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+                                }
+                            }
+
+                            Spacer(minLength: 4)
+
+                            if let badge = row.badge {
+                                Text(badge.label)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(badge.tone.foreground)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2.5)
+                                    .background(badge.tone.background)
+                                    .clipShape(Capsule())
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1018,7 +1075,179 @@ struct DashboardCheckTable: View {
     }
 }
 
-// MARK: - 7. Connection Reliability Strip
+// MARK: - 7. Vitals Cards (Speed & Reliability)
+
+struct DashboardSpeedCard: View {
+    let downMbps: String
+    let upMbps: String
+    let testedMeta: String?
+    let isScanning: Bool
+    let onRunSpeedTest: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "gauge.with.dots.needle.bottom.50percent")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.blue)
+                    Text("Throughput & Speed")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                }
+
+                Spacer()
+
+                Button(action: onRunSpeedTest) {
+                    HStack(spacing: 4) {
+                        if isScanning {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("Testing…")
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("Test Speed")
+                        }
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Theme.ColorToken.blueWash)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(isScanning)
+            }
+
+            // Speed Metrics
+            HStack(spacing: 16) {
+                // Download
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.ColorToken.green)
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(downMbps)
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundStyle(downMbps == "—" ? Theme.ColorToken.muted : Theme.ColorToken.ink)
+                            Text("Mbps")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                        }
+                        Text("Download")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider().frame(height: 32)
+
+                // Upload
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.ColorToken.blue)
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(upMbps)
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundStyle(upMbps == "—" ? Theme.ColorToken.muted : Theme.ColorToken.ink)
+                            Text("Mbps")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                        }
+                        Text("Upload")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Subtitle
+            Text(testedMeta ?? "Run a full check to test download and upload speed.")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ColorToken.muted)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Theme.ColorToken.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+        )
+    }
+}
+
+struct DashboardReliabilityCard: View {
+    let observationSummary: String
+    let outageCount: String
+    let totalDowntime: String
+    let longestOutage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header
+            HStack(spacing: 6) {
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.green)
+                Text("Connection Reliability")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                Spacer()
+            }
+
+            // Metrics in a row
+            HStack(spacing: 0) {
+                metric(title: outageCount, subtitle: "Recorded drops")
+                    .frame(maxWidth: .infinity)
+
+                Divider().frame(height: 32)
+
+                metric(title: totalDowntime, subtitle: "Total downtime")
+                    .frame(maxWidth: .infinity)
+
+                Divider().frame(height: 32)
+
+                metric(title: longestOutage, subtitle: "Longest outage")
+                    .frame(maxWidth: .infinity)
+            }
+
+            // Subtitle
+            Text(observationSummary)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ColorToken.muted)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Theme.ColorToken.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
+        )
+    }
+
+    private func metric(title: String, subtitle: String) -> some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.ink)
+            Text(subtitle)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ColorToken.muted)
+        }
+    }
+}
 
 struct DashboardReliabilityStrip: View {
     let unobservedFraction: String
@@ -1033,7 +1262,7 @@ struct DashboardReliabilityStrip: View {
                 Text("Connection reliability")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.ColorToken.ink)
-                Text("Last 24 hours · \(unobservedFraction) unobserved")
+                Text(unobservedFraction)
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.muted)
             }
@@ -1392,104 +1621,94 @@ struct DashboardTechnicalPanel: View {
     let onCopyRedacted: () -> Void
     let onSaveMarkdown: () -> Void
 
-    @State private var isExpanded = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                    Text("Technical detail")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.ColorToken.ink)
-                    Text("Route hops, radio, DNS, DHCP, local traffic and raw report")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                    Spacer()
-                }
-                .padding(.horizontal, 17)
-                .padding(.vertical, 14)
+            // Panel Header (Permanently unfolded)
+            HStack(spacing: 8) {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.ColorToken.blue)
+                Text("Technical Detail & Telemetry")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                Text("Route hops, radio telemetry, DNS, DHCP, and diagnostic reports")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 17)
+            .padding(.vertical, 14)
 
-            if isExpanded {
-                Divider().foregroundStyle(Theme.ColorToken.line)
+            Divider().foregroundStyle(Theme.ColorToken.line)
 
-                // 2x2 Grid of Technical Details
-                Grid(alignment: .topLeading, horizontalSpacing: 24, verticalSpacing: 16) {
-                    GridRow {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Route & reachability · saved check")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.ink)
-                            bullet("Router: \(routerIP) · \(routerLoss)")
-                            bullet("Internet probes: \(internetTargets) · \(internetLoss)")
-                            bullet("Traceroute: \(tracerouteHops) responding hops")
-                            bullet(isIPv6 ? "IPv6 available" : "IPv6 unavailable; connection uses IPv4")
-                            bullet(isDoubleNAT ? "Double NAT detected" : "NAT topology: no double NAT detected")
-                            bullet("Public IP location describes lookup exit, not every app route")
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Wi-Fi & local network · saved check")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.ink)
-                            bullet("Signal \(wifiSignal) · noise \(wifiNoise) · SNR \(wifiSNR)")
-                            bullet(wifiBandChannel)
-                            bullet("DHCP lease: \(dhcpRemaining)")
-                            bullet(ipConflict ? "IP conflict flagged" : "No duplicate IP detected")
-                            bullet("Channel scan: \(neighborCount) neighboring networks")
-                            bullet(backgroundTraffic ? "High background traffic measured" : "Local traffic: no background transfer flagged")
-                        }
+            // 2x2 Grid of Technical Details (Always visible)
+            Grid(alignment: .topLeading, horizontalSpacing: 24, verticalSpacing: 16) {
+                GridRow {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Route & reachability · saved check")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        bullet("Router: \(routerIP) · \(routerLoss)")
+                        bullet("Internet probes: \(internetTargets) · \(internetLoss)")
+                        bullet("Traceroute: \(tracerouteHops) responding hops")
+                        bullet(isIPv6 ? "IPv6 available" : "IPv6 unavailable; connection uses IPv4")
+                        bullet(isDoubleNAT ? "Double NAT detected" : "NAT topology: no double NAT detected")
+                        bullet("Public IP location describes lookup exit, not every app route")
                     }
 
-                    GridRow {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Test context")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.ink)
-                            bullet("Check run at \(checkTimestamp)")
-                            bullet("DNS: \(dnsResolversList)")
-                            bullet("TCP 1.1.1.1:443 · \(tcpReachability)")
-                            bullet("Loaded RTT: \(loadedRTT)")
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Reports & saved checks")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.ink)
-                            Text("Inspect full raw report for per-hop tables and individual probes.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                            Text("Copy a redacted report when sharing with support.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                        }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Wi-Fi & local network · saved check")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        bullet("Signal \(wifiSignal) · noise \(wifiNoise) · SNR \(wifiSNR)")
+                        bullet(wifiBandChannel)
+                        bullet("DHCP lease: \(dhcpRemaining)")
+                        bullet(ipConflict ? "IP conflict flagged" : "No duplicate IP detected")
+                        bullet("Channel scan: \(neighborCount) neighboring networks")
+                        bullet(backgroundTraffic ? "High background traffic measured" : "Local traffic: no background transfer flagged")
                     }
                 }
-                .padding(17)
 
-                // Actions
-                HStack(spacing: 10) {
-                    Button("View raw JSON", action: onViewRawJSON)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    Button("Copy redacted report", action: onCopyRedacted)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    Button("Save Markdown…", action: onSaveMarkdown)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                GridRow {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Test context")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        bullet("Check run at \(checkTimestamp)")
+                        bullet("DNS: \(dnsResolversList)")
+                        bullet("TCP 1.1.1.1:443 · \(tcpReachability)")
+                        bullet("Loaded RTT: \(loadedRTT)")
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Reports & diagnostic tools")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        Text("Inspect full raw report for per-hop tables and individual probes.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        Text("Copy a redacted report when sharing with support.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
                 }
-                .padding(.horizontal, 17)
-                .padding(.bottom, 15)
             }
+            .padding(17)
+
+            // Actions
+            HStack(spacing: 10) {
+                Button("View raw JSON", action: onViewRawJSON)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("Copy redacted report", action: onCopyRedacted)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("Save Markdown…", action: onSaveMarkdown)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 17)
+            .padding(.bottom, 15)
         }
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
