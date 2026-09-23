@@ -14,17 +14,36 @@
 #         invoked from lib/diagnosis.sh rather than from output_run)
 
 build_json() {
-  # Most-likely root cause = first critical diagnosis, else first warn,
-  # else empty. DIAG_SEV/DIAG are parallel arrays.
-  MOST_LIKELY_ROOT_CAUSE=""
-  local s i
-  for s in critical warn; do
+  # Most-likely root cause = first critical diagnosis, else warn (BR-1 outranks
+  # other warnings because it breaks active browsing), else info. Preserve what
+  # diagnosis_run computed unless empty.
+  if [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+    local i s
     for i in "${!DIAG[@]}"; do
-      if [ "${DIAG_SEV[$i]}" = "$s" ] && [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+      if [ "${DIAG_SEV[$i]}" = "critical" ]; then
         MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+        break
       fi
     done
-  done
+    if [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+      for i in "${!DIAG[@]}"; do
+        if [ "${DIAG_SEV[$i]}" = "warn" ] && [ "${DIAG_RULE[$i]}" = "BR-1" ]; then
+          MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+          break
+        fi
+      done
+    fi
+    if [ -z "$MOST_LIKELY_ROOT_CAUSE" ]; then
+      for s in warn info; do
+        for i in "${!DIAG[@]}"; do
+          if [ "${DIAG_SEV[$i]}" = "$s" ]; then
+            MOST_LIKELY_ROOT_CAUSE="${DIAG[$i]}"
+            break 2
+          fi
+        done
+      done
+    fi
+  fi
 
   NETDIAG_VERSION="$NETDIAG_VERSION" \
   NETDIAG_TIMESTAMP="$TIMESTAMP_ISO" \

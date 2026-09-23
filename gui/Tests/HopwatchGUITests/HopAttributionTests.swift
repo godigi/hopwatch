@@ -235,6 +235,23 @@ import Testing
         #expect(brWithCrowding.wifiHealth == .warning)
         #expect(brWithCrowding.badgeTitle == "Culprit: Browser App")
         #expect(brWithCrowding.headline == "Browser Needs Relaunch")
+
+        // BR-1 co-occurring with weak Wi-Fi (W1, RSSI -79 dBm):
+        // Browser is broken on disk, so Mac app remains culprit rather than blaming weak Wi-Fi
+        let brWithWeakWifi = HopAttributionResolver.resolve(
+            rules: ["W1", "BR-1"],
+            isWifi: true,
+            wifiRSSI: -79,
+            gatewayRTT: 10.0,
+            gatewayLoss: 0.0,
+            inetRTT: 25.0,
+            inetLoss: 0.0
+        )
+        #expect(brWithWeakWifi.culprit == .mac)
+        #expect(brWithWeakWifi.macHealth == .warning)
+        #expect(brWithWeakWifi.wifiHealth == .warning)
+        #expect(brWithWeakWifi.badgeTitle == "Culprit: Browser App")
+        #expect(brWithWeakWifi.headline == "Browser Needs Relaunch")
     }
 
     @Test func icmpFilteredDoesNotAccuseISPOfOutage() {

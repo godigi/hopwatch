@@ -560,6 +560,22 @@ _mon_probe_wifi_signal() {
   fi
 }
 
+_mon_probe_browser() {
+  MON_BROWSER_DESYNC_COUNT=0
+  MON_BROWSER_DESYNC_APP=""
+  local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/browser_check.py"
+  [ -f "$helper" ] || return 0
+  local out
+  out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
+  [ -n "$out" ] || return 0
+  local status count app _
+  IFS=$'\t' read -r status count app _ <<< "$out"
+  if [ "$status" = "DESYNC" ] && [ "${count:-0}" -gt 0 ]; then
+    MON_BROWSER_DESYNC_COUNT="$count"
+    MON_BROWSER_DESYNC_APP="$app"
+  fi
+}
+
 # ── Slow tier ────────────────────────────────────────────────────────────
 
 _mon_probe_public() {
@@ -764,6 +780,11 @@ _mon_rules() {
     MON_INET_LOSS_STREAK=0
   fi
 
+  # BR-1 — Browser may not work correctly after background update
+  if [ "${MON_BROWSER_DESYNC_COUNT:-0}" -gt 0 ]; then
+    _mon_add_rule warn BR-1
+  fi
+
   # Cadence follows severity, not rule count: an info-level VPN notice is
   # not a reason to probe twice as often.
   case "$MON_SEVERITY" in
@@ -929,6 +950,8 @@ _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
 monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
   local prev_network_id="" network_changed announced_pause=0
+  MON_BROWSER_DESYNC_COUNT=0
+  MON_BROWSER_DESYNC_APP=""
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
   local parent_pid="$PPID"
@@ -1030,6 +1053,7 @@ monitor_run() {
         _mon_probe_dns
         _mon_probe_tcp
         _mon_probe_wifi_signal
+        _mon_probe_browser
         next_medium=$((now + MONITOR_MEDIUM_INTERVAL))
       fi
       # The slow tier is the only external call, so it is the only one

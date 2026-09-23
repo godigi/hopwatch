@@ -109,8 +109,8 @@ public enum HopAttributionResolver {
     private static let macCriticalRules: Set<String> = []
     private static let macWarningRules: Set<String> = ["BR-1", "CK-1", "EDNS-1"]
 
-    private static let wifiCriticalRules: Set<String> = ["G1", "W1", "WD-1"]
-    private static let wifiWarningRules: Set<String> = ["W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
+    private static let wifiCriticalRules: Set<String> = ["G1", "WD-1"]
+    private static let wifiWarningRules: Set<String> = ["W1", "W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
 
     private static let routerCriticalRules: Set<String> = ["G2", "DI-1"]
     private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3"]
@@ -146,7 +146,7 @@ public enum HopAttributionResolver {
         var wifiHealth: HopHealth = .healthy
         if !isWifi {
             wifiHealth = .healthy // Ethernet wired
-        } else if !ruleSet.isDisjoint(with: wifiCriticalRules) || (wifiRSSI != nil && wifiRSSI! <= -80) {
+        } else if !ruleSet.isDisjoint(with: wifiCriticalRules) {
             wifiHealth = .critical
         } else if !ruleSet.isDisjoint(with: wifiWarningRules) || (wifiRSSI != nil && wifiRSSI! <= -75) {
             wifiHealth = .warning
@@ -187,7 +187,7 @@ public enum HopAttributionResolver {
             if wifiHealth == .healthy {
                 wifiHealth = .warning
             }
-        } else if ruleSet.contains("BR-1") && wifiHealth != .critical && routerHealth != .critical && ispHealth != .critical {
+        } else if ruleSet.contains("BR-1") && !ruleSet.contains("N1") && !ruleSet.contains("N1b") && !ruleSet.contains("P1") && (gatewayLoss ?? 0) < 50.0 {
             culprit = .mac
             headline = "Browser Needs Relaunch"
             badgeTitle = "Culprit: Browser App"

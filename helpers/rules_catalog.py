@@ -1223,7 +1223,7 @@ RULES: list[dict[str, object]] = [
         "title": "Browser may not work correctly after background update",
         "category": "internet",
         "severity": "warn",
-        "scope": "scan",
+        "scope": "both",
         "blurb": (
             "A web browser updated in the background while open, and files its "
             "active session needs were removed from disk. This can cause new tabs "

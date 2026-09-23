@@ -6,6 +6,13 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Browser Desynchronization Alerting (`BR-1`)**: Added `browser-desync` alert definition (`AlertDefinition`) in GUI, enabling instant alert banners, stage resolver attribution, and macOS notifications when a Chromium browser silently updates in the background.
+- **Root Cause Determination in `build_json` (`lib/output.sh`)**: Prevented `build_json` from clobbering `MOST_LIKELY_ROOT_CAUSE` and ensured `BR-1` root cause takes priority over advisory warnings like weak Wi-Fi (`W1`) or crowded channels (`WS-1`).
+- **3-Hop Attribution Wi-Fi Health Classification (`HopAttributionResolver.swift`)**: Moved `W1` from critical to warning rules, and prioritized `BR-1` for Mac app attribution (`"Culprit: Browser App"`) whenever there is no total physical link outage.
+- **Continuous Background Monitoring (`lib/monitor.sh`, `rules_catalog.py`)**: Added `_mon_probe_browser` to the medium monitoring tier so background update desyncs are detected live without requiring a manual full scan.
+
 ## [1.7.1] - 2026-09-23
 
 ### Changes

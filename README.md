@@ -117,17 +117,26 @@ window is gone by the time you can investigate — Hopwatch proactively monitors
 your connection live in your menu bar (or via `hopwatch --monitor` / `--watch`),
 flagging regressions and drops the moment they occur.
 
-### Hopwatch vs. Traditional Tools
+### 🧭 Who is Hopwatch For?
 
-| Capability | `ping` / `traceroute` | `speedtest-cli` | `mtr` | **Hopwatch** |
-|:---|:---:|:---:|:---:|:---:|
-| **Root-Cause Attribution** (Wi-Fi vs Router vs ISP) | ❌ | ❌ | ❌ | ✅ **Automatic Culprit Detection** |
-| **Loaded Bufferbloat Grading** (A–F) | ❌ | ❌ | ❌ | ✅ **Loaded vs Idle Jitter** |
-| **Wi-Fi Radio Health & Sticky APs** | ❌ | ❌ | ❌ | ✅ **RSSI, SNR, PHY & Overlaps** |
-| **Per-Network Historical Baseline** | ❌ | ❌ | ❌ | ✅ **Scored vs Median History** |
-| **Safe Sanitized Sharing** | ❌ | ❌ | ❌ | ✅ **Masks IPs, SSIDs, MACs** |
-| **Continuous Menu Bar Monitor** | ❌ | ❌ | ❌ | ✅ **Native SwiftUI App** |
-| **Zero Jargon Plain-English Fixes** | ❌ | ❌ | ❌ | ✅ **Clear Next Steps** |
+* **Remote Workers & Video Callers:** Stop wondering if Zoom or Meet froze because of your Wi-Fi, mesh handoff, router overload, or your ISP. Hopwatch isolates the exact failing hop in seconds.
+* **Gamers & Streamers:** Catch micro-stutters, loaded bufferbloat jitter spikes, and packet loss before and during competitive matches.
+* **IT Support & Helpdesks:** Hand non-technical users a tool that generates an instant, 1-click sanitized diagnostic report safe to paste into ISP tickets—zero IP, MAC, or SSID leaks.
+* **Engineers & Homelabbers:** Enjoy a native SwiftUI menu bar companion alongside a full scriptable headless CLI (`hopwatch --json`) that slots directly into terminal workflows and launchd automations.
+
+### 🥊 How Hopwatch Compares
+
+| Capability | Hopwatch | Menu Bar Stats <br><sub>*(Stats / iStat)*</sub> | Standalone Speedtests <br><sub>*(Ookla / Fast)*</sub> | Wi-Fi Analyzers <br><sub>*(WiFi Explorer)*</sub> | Latency Monitors <br><sub>*(PingPlotter)*</sub> | Traditional CLI <br><sub>*(ping / mtr)*</sub> |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Hop Attribution** <br><sub>*(Mac ➔ Router ➔ ISP)*</sub> | **Automatic** <br>*(Pinpoints culprit)* | ❌ <br>*(Throughput only)* | ❌ | ❌ | Partial <br>*(Raw hop list)* | ❌ <br>*(Manual trace)* |
+| **Plain-English Diagnosis** <br><sub>*(Zero-jargon actionable fixes)*</sub> | **Yes** <br>*(Evidence + fix)* | ❌ | ❌ | ❌ | ❌ <br>*(Manual graph reading)* | ❌ |
+| **Loaded Bufferbloat Grading** <br><sub>*(A–F rating + latency under load)*</sub> | **Yes** <br>*(Loaded vs idle jitter)* | ❌ | Partial <br>*(Web-only)* | ❌ | ❌ | ❌ |
+| **Local Process Attribution** <br><sub>*(Identify bandwidth hogs on your Mac)*</sub> | **Yes** <br>*(Flags backup/downloads)* | Partial <br>*(Current rate only)* | ❌ | ❌ | ❌ | ❌ |
+| **Wi-Fi Radio & Sticky AP Detection** <br><sub>*(RSSI, SNR, channel congestion)*</sub> | **Yes** <br>*(BSSID roaming checks)* | ❌ | ❌ | **Yes** <br>*(Deep RF scans)* | ❌ | ❌ |
+| **Continuous Menu Bar Telemetry** <br><sub>*(Real-time latency & link status)*</sub> | **Yes** <br>*(Native macOS)* | **Yes** <br>*(Activity only)* | ❌ | ❌ | ❌ | ❌ |
+| **Persistent Outage Journal** <br><sub>*(Track flapping across sleep/wake)*</sub> | **Yes** <br>*(SQLite/JSON history)* | ❌ | ❌ | ❌ | Partial <br>*(Session-based)* | ❌ |
+| **Safe Sanitized Sharing** <br><sub>*(1-click redacted export for tickets)*</sub> | **Yes** <br>*(Masks IPs, MACs, SSIDs)* | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Price & Privacy** | **Free & Open Source** <br>*(100% local, zero telemetry)* | Free / Paid | Ad-supported / Tracking | $20 – $100+ | $40+ / Subscription | Free / Built-in |
 
 If you'd rather read the script before piping it to a shell — a reasonable
 habit — clone instead:

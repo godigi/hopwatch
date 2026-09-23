@@ -179,6 +179,14 @@ struct AlertDefinition: Identifiable, Sendable {
             suppressedByICMPFilter: false, oncePerNetwork: true,
             caption: "Checked only during a full check; fires once per network, then won't repeat for 24 hours.",
             interimBody: "Two routers are chained together in your home, which can cause gaming and VPN issues."),
+
+        AlertDefinition(
+            id: "browser-desync", title: "Browser needs relaunch",
+            rules: ["BR-1"],
+            dwell: 0, cooldown: 1800, resolves: true, scanOnly: false,
+            suppressedByICMPFilter: false, oncePerNetwork: false,
+            caption: "Fires immediately when a browser silently updated in the background while open; won't repeat for 30 minutes.",
+            interimBody: "Quitting and reopening your browser restores normal browsing."),
     ]
 
     static func byID(_ id: String) -> AlertDefinition? { all.first { $0.id == id } }

@@ -149,3 +149,40 @@ diag_text_for() {
   diag_has BR-1 || { echo "BR-1 did not fire"; return 1; }
   [[ "$MOST_LIKELY_ROOT_CAUSE" == *"We detected that Google Chrome may not be working correctly right now"* ]]
 }
+
+@test "output: build_json preserves BR-1 root cause over weak WiFi W1" {
+  accuracy_baseline
+  # shellcheck source=../lib/output.sh
+  . "$REPO/lib/output.sh"
+  IS_WIFI=1
+  WIFI_RSSI=-79
+  THRESH_WIFI_RSSI_POOR=-75
+  BROWSER_DESYNC_COUNT=1
+  BROWSER_DESYNC_APP="Google Chrome"
+  BROWSER_DESYNC_RUNNING_VER="153.0.8010.53"
+  BROWSER_DESYNC_DISK_VER="154.0.8037.58"
+  BROWSER_DESYNC_PID="1846"
+
+  diagnosis_run >/dev/null
+  diag_has W1 || { echo "W1 did not fire"; return 1; }
+  diag_has BR-1 || { echo "BR-1 did not fire"; return 1; }
+
+  local json
+  json="$(build_json)"
+  local root_cause
+  root_cause="$(python3 -c "import json, sys; print(json.loads(sys.stdin.read()).get('most_likely_root_cause', ''))" <<< "$json")"
+  [[ "$root_cause" == *"We detected that Google Chrome may not be working correctly right now"* ]]
+}
+
+@test "monitor: _mon_rules adds BR-1 when browser desync detected" {
+  # shellcheck source=../lib/monitor.sh
+  . "$REPO/lib/monitor.sh"
+  MON_LINK_UP=1
+  MON_BROWSER_DESYNC_COUNT=1
+  MON_BROWSER_DESYNC_APP="Google Chrome"
+
+  _mon_rules
+  [[ " $MON_RULES " == *" BR-1 "* ]]
+  [ "$MON_SEVERITY" = "warn" ]
+}
+
