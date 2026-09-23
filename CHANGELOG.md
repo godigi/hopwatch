@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-09-23
+
 ### Fixed
 
 - **Browser Desynchronization Alerting (`BR-1`)**: Added `browser-desync` alert definition (`AlertDefinition`) in GUI, enabling instant alert banners, stage resolver attribution, and macOS notifications when a Chromium browser silently updates in the background.
@@ -3934,7 +3936,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/godigi/hopwatch/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/godigi/hopwatch/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/godigi/hopwatch/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/godigi/hopwatch/compare/v1.5.0...v1.6.0
