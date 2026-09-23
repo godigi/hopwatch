@@ -138,6 +138,17 @@ flagging regressions and drops the moment they occur.
 | **Safe Sanitized Sharing** <br><sub>*(1-click redacted export for tickets)*</sub> | **Yes** <br>*(Masks IPs, MACs, SSIDs)* | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Price & Privacy** | **Free & Open Source** <br>*(100% local, zero telemetry)* | Free / Paid | Ad-supported / Tracking | $20 – $100+ | $40+ / Subscription | Free / Built-in |
 
+### 🔍 How Hopwatch Differs from Other macOS Tools
+
+No single tool combines local Wi-Fi radio health, multi-hop latency attribution, loaded bufferbloat testing, and plain-English diagnosis into one open-source app:
+
+* **vs. PingPlotter ($6.99–$29/mo or Cloud):** PingPlotter is a long-standing tool for multi-hop ICMP/TCP traceroute graphing. Hopwatch provides live hop-by-hop latency and outage journaling directly in your macOS menu bar and terminal for free. Crucially, Hopwatch automates the diagnosis—instead of requiring you to decipher complex waterfall graphs, Hopwatch isolates whether the root cause is your Wi-Fi link, router, or ISP, while also checking bufferbloat and local Mac process lag.
+* **vs. WiFi Signal & WiFi Explorer ($5 – $149+ by Intuitibits):** WiFi Signal and WiFi Explorer are top-tier RF spectrum tools for Wi-Fi engineers analyzing 802.11 frames, channel overlap, and BSSIDs. Hopwatch incorporates essential Wi-Fi telemetry (RSSI, SNR, PHY rate, channel congestion, sticky AP roaming), but bridges the gap to the rest of your network—diagnosing your router, DNS resolvers, bufferbloat, and upstream ISP hops.
+* **vs. PeakHour 6 ($19.99/yr or $59.99 lifetime):** PeakHour is a commercial macOS menu bar app that tracks router throughput and connection quality. Hopwatch is 100% free and open-source (MIT), requires no account or subscription, includes a headless scriptable CLI (`hopwatch --json` / `--expert`) that integrates into shell scripts and launchd, runs 40+ deep Unix diagnostic checks, and offers 1-click sanitized/redacted sharing for ISP support tickets.
+* **vs. Stats & iStat Menus:** Menu bar resource monitors display raw bandwidth throughput (MB/s up/down). However, high bandwidth does not mean a healthy connection, and a stalled link will simply show 0 KB/s without explaining why. Hopwatch measures *quality* (latency, jitter, packet loss, DNS resolution) to show why your connection actually failed.
+* **vs. Apple's Built-in Tools (`networkQuality` & Wireless Diagnostics):** macOS includes `networkQuality` (RPM responsiveness) and Wireless Diagnostics. However, `networkQuality` has no menu bar UI, continuous monitoring, or outage history, while Wireless Diagnostics produces multi-megabyte `sysdiagnose` tarballs meant for Apple engineers. Hopwatch translates low-level Darwin diagnostics into actionable, plain-English fixes in seconds.
+
+
 If you'd rather read the script before piping it to a shell — a reasonable
 habit — clone instead:
 
