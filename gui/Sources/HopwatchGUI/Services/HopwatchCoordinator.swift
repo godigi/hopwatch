@@ -638,6 +638,110 @@ final class HopwatchCoordinator {
         arrivalIntent = .starting
     }
 
+    /// Sets up a synthetic healthy sample for GalleryMode previews.
+    func adoptGalleryMonitorSample(networkID: String?, displayName: String?) {
+        let name = displayName ?? "Home Wi-Fi"
+        self.liveSSID = name
+
+        let now = Date()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        // Create a realistic sequence of ~20 samples for sparklines and live charts
+        var historySamples: [MonitorSample] = []
+        let baselineGwRtt = 3.2
+        let baselineInetRtt = 17.8
+
+        for i in (0..<30).reversed() {
+            let sampleDate = now.addingTimeInterval(-Double(i * 10))
+            let gwJitter = Double((i * 7) % 5) * 0.2 - 0.4
+            let inetJitter = Double((i * 13) % 7) * 0.4 - 1.2
+            let s = MonitorSample(
+                schema: 2,
+                version: AppVersion.display,
+                ts: formatter.string(from: sampleDate),
+                seq: 100 - i,
+                gapS: 0,
+                jitterMs: 1.2,
+                refreshed: ["fast", "medium", "slow"],
+                link: .init(
+                    up: true,
+                    interface: "en0",
+                    type: "wifi",
+                    ip: "192.168.1.142",
+                    gateway: "192.168.1.1",
+                    gatewayMAC: "14:91:82:aa:bb:cc",
+                    ssid: name,
+                    bssid: "14:91:82:aa:bb:cc"
+                ),
+                network: .init(
+                    id: networkID ?? "wifi:ssid=\(name)",
+                    label: name,
+                    groupId: networkID ?? "mac:14:91:82:aa:bb:cc"
+                ),
+                vpn: .init(
+                    active: false,
+                    type: nil,
+                    name: nil
+                ),
+                gateway: .init(
+                    lossPct: 0.0,
+                    rttAvgMs: max(1.0, baselineGwRtt + gwJitter),
+                    rttJitterMs: 0.4
+                ),
+                internet: .init(
+                    lossPct: 0.0,
+                    rttAvgMs: max(10.0, baselineInetRtt + inetJitter),
+                    rttJitterMs: 1.2
+                ),
+                wifi: .init(
+                    rssi: -52,
+                    noise: -92,
+                    snr: 40,
+                    channel: "149 (5 GHz, 80 MHz)"
+                ),
+                dns: .init(
+                    ok: true,
+                    resolver: "192.168.1.1",
+                    elapsedMs: 8.4
+                ),
+                tcp: .init(
+                    anyOk: true,
+                    targets: [
+                        .init(host: "1.1.1.1", port: 443, ok: true, elapsedMs: 16.2),
+                        .init(host: "8.8.8.8", port: 443, ok: true, elapsedMs: 18.1)
+                    ]
+                ),
+                publicInfo: .init(
+                    ok: true,
+                    ip: "198.51.100.42",
+                    isp: "Fiber Broadband",
+                    asn: "AS13335",
+                    city: "San Francisco",
+                    country: "United States",
+                    countryISO: "US",
+                    captivePortal: false
+                ),
+                status: .init(
+                    severity: "ok",
+                    measurement: "measured",
+                    rules: [],
+                    icmpFiltered: false,
+                    degraded: false,
+                    paused: false,
+                    cadenceS: 10
+                ),
+                changes: []
+            )
+            historySamples.append(s)
+        }
+
+        if let latestSample = historySamples.last {
+            monitor.adoptGallerySample(latestSample, historical: historySamples)
+        }
+    }
+
+
     /// What the app is about to do on its own about an unchecked network.
     ///
     /// Exists because "unchecked" alone cannot tell a user whether to wait

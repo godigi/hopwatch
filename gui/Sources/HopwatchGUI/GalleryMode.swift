@@ -126,8 +126,8 @@ enum GalleryMode {
             // The one the memory note says cannot be screenshotted: a
             // MenuBarExtra panel is not in the window list, so no capture
             // tool can reach it. Hosted directly, it draws like anything else.
-            Screen(name: "dropdown", size: NSSize(width: 360, height: 620)) {
-                wrap(DropdownView().frame(width: 360))
+            Screen(name: "dropdown", size: NSSize(width: 420, height: 680)) {
+                wrap(DropdownView().frame(width: 420))
             },
             Screen(name: "main-window", size: NSSize(width: 920, height: 680)) {
                 wrap(MainWindow())
@@ -219,6 +219,12 @@ enum GalleryMode {
         // besides, since an unidentified current network is exactly the
         // case that gets labelled. See `adoptGalleryArrivalState`.
         coordinator.adoptGalleryArrivalState(networkID: standIn)
+
+        // Provide a healthy synthetic live sample so DropdownView, HomeView,
+        // and LiveView render active monitoring instead of checking placeholders.
+        let networkName = standIn.map { coordinator.history.displayName(for: $0) } ?? "Home Wi-Fi"
+        coordinator.adoptGalleryMonitorSample(networkID: standIn, displayName: networkName)
+
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this
         // paragraph's whole claim is that a screenshot run writes nothing.

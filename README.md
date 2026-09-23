@@ -22,12 +22,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/dropdown-dark.png" width="380" alt="Hopwatch Menu Bar Dropdown" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
+  <img src="docs/assets/dropdown-dark.png" width="340" alt="Hopwatch Menu Bar Dropdown" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12); margin-right: 12px;" />
+  <img src="docs/assets/home-dark.png" width="460" alt="Hopwatch Dashboard Overview" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
 </p>
 
 <p align="center">
   <a href="docs/SCREENSHOTS.md"><b>📸 Explore the Full UI Screenshot Gallery (Light & Dark Mode) ➔</b></a>
 </p>
+
 
 </div>
 

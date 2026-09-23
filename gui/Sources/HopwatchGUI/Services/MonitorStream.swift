@@ -441,4 +441,19 @@ final class MonitorStream {
             self.start()
         }
     }
+
+    /// Populates synthetic sample data for GalleryMode previews without running a child process.
+    func adoptGallerySample(_ sample: MonitorSample, historical: [MonitorSample] = []) {
+        self.latest = sample
+        self.isRunning = true
+        self.isPaused = false
+        self.pauseReason = nil
+        self.lastError = nil
+        if historical.isEmpty {
+            self.recent = [sample]
+        } else {
+            self.recent = historical
+        }
+    }
 }
+
