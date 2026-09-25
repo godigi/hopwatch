@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-09-25
+
+### Changes
+
+- fix: tune packet loss sensitivity thresholds, add monitor rest intervals, and router admin reachability
+
 ## [1.7.2] - 2026-09-23
 
 ### Fixed
@@ -3936,7 +3942,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/godigi/hopwatch/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/godigi/hopwatch/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/godigi/hopwatch/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/godigi/hopwatch/compare/v1.6.0...v1.7.0
