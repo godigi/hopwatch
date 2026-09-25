@@ -5,6 +5,13 @@ import UniformTypeIdentifiers
 /// Utilities for exporting and sharing redacted diagnostics across RunReportView and DropdownView.
 enum DiagnosticReportSharing {
 
+    private static let lock = NSLock()
+    private static let fallbackDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd-HHmmss"
+        return df
+    }()
+
     /// Default file name based on run timestamp or current date.
     nonisolated static func defaultFileName(extension ext: String, timestamp: String? = nil) -> String {
         let base: String
@@ -14,9 +21,10 @@ enum DiagnosticReportSharing {
                 .replacingOccurrences(of: "Z", with: "")
             base = "netdiag-report-\(sanitized)"
         } else {
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd-HHmmss"
-            base = "netdiag-report-\(df.string(from: Date()))"
+            lock.lock()
+            let formatted = fallbackDateFormatter.string(from: Date())
+            lock.unlock()
+            base = "netdiag-report-\(formatted)"
         }
         return "\(base).\(ext)"
     }

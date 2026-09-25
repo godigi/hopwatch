@@ -563,17 +563,15 @@ _mon_probe_wifi_signal() {
 
 _mon_probe_browser() {
   MON_BROWSER_DESYNC_COUNT=0
-  MON_BROWSER_DESYNC_APP=""
   local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/browser_check.py"
   [ -f "$helper" ] || return 0
   local out
   out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
   [ -n "$out" ] || return 0
-  local status count app _
-  IFS=$'\t' read -r status count app _ <<< "$out"
+  local status count _
+  IFS=$'\t' read -r status count _ <<< "$out"
   if [ "$status" = "DESYNC" ] && [ "${count:-0}" -gt 0 ]; then
     MON_BROWSER_DESYNC_COUNT="$count"
-    MON_BROWSER_DESYNC_APP="$app"
   fi
 }
 
@@ -952,7 +950,6 @@ monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
   local prev_network_id="" network_changed announced_pause=0
   MON_BROWSER_DESYNC_COUNT=0
-  MON_BROWSER_DESYNC_APP=""
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
   local parent_pid="$PPID"

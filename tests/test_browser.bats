@@ -179,10 +179,26 @@ diag_text_for() {
   . "$REPO/lib/monitor.sh"
   MON_LINK_UP=1
   MON_BROWSER_DESYNC_COUNT=1
-  MON_BROWSER_DESYNC_APP="Google Chrome"
 
   _mon_rules
   [[ " $MON_RULES " == *" BR-1 "* ]]
   [ "$MON_SEVERITY" = "warn" ]
 }
+
+@test "output: build_json reports desync true and correct count when multiple browsers desync" {
+  accuracy_baseline
+  # shellcheck source=../lib/output.sh
+  . "$REPO/lib/output.sh"
+  BROWSER_DESYNC_COUNT=2
+  BROWSER_DESYNC_APP="Google Chrome"
+  BROWSER_DESYNC_RUNNING_VER="153.0.8010.53"
+  BROWSER_DESYNC_DISK_VER="154.0.8037.58"
+  BROWSER_DESYNC_PID="1846"
+
+  local json
+  json="$(build_json)"
+  run python3 -c "import json, sys; d = json.loads(sys.stdin.read())['browser_health']; assert d['desync'] is True; assert d['desync_count'] == 2" <<< "$json"
+  [ "$status" -eq 0 ]
+}
+
 

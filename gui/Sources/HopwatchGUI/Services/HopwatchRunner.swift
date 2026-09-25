@@ -314,6 +314,8 @@ struct HopwatchRunner {
                         }
                     }
                 } catch {
+                    outPipe.fileHandleForReading.readabilityHandler = nil
+                    errPipe.fileHandleForReading.readabilityHandler = nil
                     stderrLines?.finish()
                     continuation.resume(throwing: NetdiagError.scriptError(error.localizedDescription))
                 }

@@ -425,7 +425,7 @@ final class HopwatchCoordinator {
         if latestSpeedTest == nil {
             if let st = hydratedReport?.run.speedtest, st.downMbps != nil {
                 latestSpeedTest = st
-                latestSpeedTestAt = hydratedReport?.run.timestamp.flatMap { HistoryDocument.iso.date(from: $0) }
+                latestSpeedTestAt = hydratedReport?.run.timestamp.flatMap { FastISO8601.parse($0) }
             } else if let speed = history.latestSpeedTest() {
                 latestSpeedTest = RunSnapshot.Speedtest(downMbps: speed.down, upMbps: speed.up)
                 latestSpeedTestAt = speed.date

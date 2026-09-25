@@ -36,7 +36,7 @@ enum MonitorSeries {
         var gaps: [Gap] = []
 
         var points: [Point] { segments.flatMap { $0 } }
-        var isEmpty: Bool { points.isEmpty }
+        var isEmpty: Bool { segments.allSatisfy(\.isEmpty) }
         var latest: Point? { segments.last?.last }
     }
 
@@ -117,7 +117,7 @@ enum MonitorSeries {
     /// If samples already have measured probe burst jitter, prioritizes the latest sample's
     /// `liveJitterMs`, falling back to the inter-sample RFC 3550 moving estimate.
     static func movingJitter(samples: [MonitorSample]) -> Double? {
-        if let latestJitter = samples.reversed().compactMap(\.liveJitterMs).first {
+        if let latestJitter = samples.reversed().first(where: { $0.liveJitterMs != nil })?.liveJitterMs {
             return latestJitter
         }
 

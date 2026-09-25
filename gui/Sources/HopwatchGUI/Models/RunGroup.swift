@@ -32,11 +32,25 @@ struct RunGroup: Identifiable, Sendable {
         runs.last ?? leadRun
     }
 
-    /// Clean time display: "1:47 AM" for a single check, or "1:44 AM – 1:47 AM" for a span.
-    var timeDescription: String {
+    fileprivate static let lock = NSLock()
+    private static let timeFormatter: DateFormatter = {
         let fmt = DateFormatter()
         fmt.timeStyle = .short
         fmt.dateStyle = .none
+        return fmt
+    }()
+    fileprivate static let daySectionFormatter: DateFormatter = {
+        let dateFmt = DateFormatter()
+        dateFmt.dateStyle = .medium
+        dateFmt.timeStyle = .none
+        return dateFmt
+    }()
+
+    /// Clean time display: "1:47 AM" for a single check, or "1:44 AM – 1:47 AM" for a span.
+    var timeDescription: String {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        let fmt = Self.timeFormatter
         if isSingle {
             return fmt.string(from: leadRun.date)
         } else {
@@ -116,10 +130,6 @@ struct DaySection: Identifiable, Sendable {
         let nowDay = calendar.startOfDay(for: Date())
         let yesterday = calendar.date(byAdding: .day, value: -1, to: nowDay)
 
-        let dateFmt = DateFormatter()
-        dateFmt.dateStyle = .medium
-        dateFmt.timeStyle = .none
-
         return buckets.map { day, dayGroups in
             let label: String
             if day == nowDay {
@@ -127,7 +137,9 @@ struct DaySection: Identifiable, Sendable {
             } else if let yesterday, day == yesterday {
                 label = "Yesterday"
             } else {
-                label = dateFmt.string(from: day)
+                RunGroup.lock.lock()
+                label = RunGroup.daySectionFormatter.string(from: day)
+                RunGroup.lock.unlock()
             }
             return DaySection(id: "\(day.timeIntervalSince1970)",
                               label: label,

@@ -27,7 +27,7 @@ browser_run() {
   BROWSER_DESYNC_DISK_VER=""
   BROWSER_DESYNC_PID=""
 
-  local helper="${HELPERS_DIR:-helpers}/browser_check.py"
+  local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/browser_check.py"
   if [ ! -f "$helper" ]; then
     return 0
   fi

@@ -602,12 +602,22 @@ struct DashboardLiveChartPanel: View {
     }
 
     private var internetStats: (min: Double, avg: Double, max: Double)? {
-        let values = internetSeries.points.map(\.value)
-        guard !values.isEmpty else { return nil }
-        let minVal = values.min() ?? 0
-        let maxVal = values.max() ?? 0
-        let avgVal = values.reduce(0, +) / Double(values.count)
-        return (minVal, avgVal, maxVal)
+        let segments = internetSeries.segments
+        var minVal = Double.infinity
+        var maxVal = -Double.infinity
+        var sum = 0.0
+        var count = 0
+        for segment in segments {
+            for point in segment {
+                let v = point.value
+                if v < minVal { minVal = v }
+                if v > maxVal { maxVal = v }
+                sum += v
+                count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        return (minVal, sum / Double(count), maxVal)
     }
 
     var body: some View {
@@ -674,8 +684,8 @@ struct DashboardLiveChartPanel: View {
                 .frame(height: 145)
             } else {
                 Chart {
-                    ForEach(Array(internetSeries.segments.enumerated()), id: \.offset) { _, segment in
-                        ForEach(segment) { point in
+                    ForEach(internetSeries.segments.indices, id: \.self) { idx in
+                        ForEach(internetSeries.segments[idx]) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Ping", point.value),
@@ -686,8 +696,8 @@ struct DashboardLiveChartPanel: View {
                         }
                     }
 
-                    ForEach(Array(routerSeries.segments.enumerated()), id: \.offset) { _, segment in
-                        ForEach(segment) { point in
+                    ForEach(routerSeries.segments.indices, id: \.self) { idx in
+                        ForEach(routerSeries.segments[idx]) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Ping", point.value),

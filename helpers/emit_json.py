@@ -706,7 +706,7 @@ def main() -> None:
             ],
         },
         "browser_health": {
-            "desync": _bool("BROWSER_DESYNC_COUNT"),
+            "desync": (_maybe_int("BROWSER_DESYNC_COUNT") or 0) > 0,
             "desync_count": _maybe_int("BROWSER_DESYNC_COUNT") or 0,
             "app": _env("BROWSER_DESYNC_APP"),
             "running_version": _env("BROWSER_DESYNC_RUNNING_VER"),

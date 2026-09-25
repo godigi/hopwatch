@@ -113,6 +113,7 @@ docs/JSON-SCHEMA.md for the shape.
 from __future__ import annotations
 
 import argparse
+import bisect
 import hashlib
 import json
 import math
@@ -556,8 +557,10 @@ def percentile_rank(ordered: list[float], value: float) -> float:
     flawless run at the 100th percentile and, for a lower-is-better metric,
     announce it as the worst thing that has ever happened on this network.
     """
-    below = sum(1 for v in ordered if v < value)
-    tied = sum(1 for v in ordered if v == value)
+    if not ordered:
+        return 50.0
+    below = bisect.bisect_left(ordered, value)
+    tied = bisect.bisect_right(ordered, value) - below
     return 100.0 * (below + tied / 2) / len(ordered)
 
 

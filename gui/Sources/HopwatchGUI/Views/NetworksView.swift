@@ -762,10 +762,16 @@ struct NetworksView: View {
         return String(format: "%.1f ms", median)
     }
 
-    private func dateRange(_ net: HistoryDocument.Network) -> String {
-        guard let first = net.firstSeenDate, let last = net.lastSeenDate else { return "—" }
+    @MainActor
+    private static let dateRangeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "d MMM yy"
+        return f
+    }()
+
+    private func dateRange(_ net: HistoryDocument.Network) -> String {
+        guard let first = net.firstSeenDate, let last = net.lastSeenDate else { return "—" }
+        let f = Self.dateRangeFormatter
         return first == last ? f.string(from: first)
             : "\(f.string(from: first)) – \(f.string(from: last))"
     }

@@ -183,15 +183,16 @@ struct ActivityView: View {
         }
     }
 
-    private func dayLabel(_ day: Date) -> String {
+    @MainActor
+    private static let relativeDayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .full
         f.timeStyle = .none
-        // "Today" and "Yesterday" where they apply — same relative-date
-        // formatting RunListView's day grouping uses, for the same reason:
-        // the recent events are the interesting ones, and a full date
-        // makes the reader work out which of them that is.
         f.doesRelativeDateFormatting = true
-        return f.string(from: day)
+        return f
+    }()
+
+    private func dayLabel(_ day: Date) -> String {
+        Self.relativeDayFormatter.string(from: day)
     }
 }
