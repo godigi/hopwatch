@@ -309,9 +309,10 @@ _mon_loss_summarize() {
 _mon_loss_pct() {
   awk -v s="$1" -v l="$2" 'BEGIN {
     if (s <= 0) exit
-    # Suppress single-packet quantization spikes on warm-up samples (s < 40)
-    # so a single drop on an initial cycle does not falsely read as 5% or 10%.
-    if (l == 1 && s < 40) { print "0"; exit }
+    # Suppress quantization spikes on warm-up samples when denominator is small
+    # so routine 1-2 drop bursts do not falsely swing the percentage into warning bands.
+    if (l == 1 && s < 80) { print "0"; exit }
+    if (l == 2 && s < 50) { print "0"; exit }
     printf "%.0f", l * 100 / s
   }'
 }
@@ -1124,10 +1125,14 @@ monitor_run() {
     # Sleep only the remainder: the probes themselves take 2-6 s, and
     # sleeping a full interval on top would make the real cadence drift
     # well past what the app's Settings slider claims.
-    local spent remain
+    # Enforce a minimal rest pause (1-2s) so we never hammer the interface
+    # in an unthrottled back-to-back loop when probes run close to the cadence.
+    local spent remain min_rest=2
     spent=$((EPOCHSECONDS - now))
     remain=$((cadence - spent))
-    [ "$remain" -gt 0 ] && _mon_sleep "$remain"
+    [ "$cadence" -le 2 ] && min_rest=1
+    [ "$remain" -lt "$min_rest" ] && remain="$min_rest"
+    _mon_sleep "$remain"
   done
   return 0
 }

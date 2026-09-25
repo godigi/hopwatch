@@ -596,6 +596,12 @@ struct ConnectionRouteView: View {
     let firstLinkLabel: String
     let secondLinkLabel: String
 
+    var wifiWarning: Bool = false
+    var isWifiLaggy: Bool = false
+    var routerAdminURL: URL? = nil
+    var routerAdminAvailable: Bool = false
+    var jitterLabel: String = "Jitter"
+
     let jitterMs: Double?
     let jitterWarn: Bool
     let jitterDescription: String
@@ -637,7 +643,7 @@ struct ConnectionRouteView: View {
                         path.addLine(to: CGPoint(x: x2 - 28, y: lineY))
                     }
                     .stroke(
-                        routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.line,
+                        (routerWarn || isWifiLaggy) ? Theme.ColorToken.amber : Theme.ColorToken.line,
                         style: StrokeStyle(lineWidth: 2, dash: [4, 4])
                     )
 
@@ -654,7 +660,7 @@ struct ConnectionRouteView: View {
                     // First link label
                     Text(firstLinkLabel)
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.ColorToken.muted)
+                        .foregroundStyle(isWifiLaggy ? Theme.ColorToken.amber : Theme.ColorToken.muted)
                         .position(x: (x1 + x2) / 2.0, y: lineY + 12)
 
                     // Second link label
@@ -671,16 +677,24 @@ struct ConnectionRouteView: View {
                             Text(wifiReadingLabel)
                                 .font(.system(size: 10))
                                 .foregroundStyle(Theme.ColorToken.muted)
-                            Text(wifiReadingValue)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(wifiReadingTint)
-                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                if wifiWarning {
+                                    Image(systemName: "wifi.exclamationmark")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(Theme.ColorToken.amber)
+                                }
+                                Text(wifiReadingValue)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(wifiReadingTint)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                            }
                         }
                         .frame(height: 52)
 
                         hopNode(
                             icon: macIcon,
-                            isWarning: false,
+                            isWarning: !macStatusGood,
                             statusGood: macStatusGood,
                             flag: nil
                         )
@@ -719,10 +733,27 @@ struct ConnectionRouteView: View {
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 6)
 
-                        Text(routerDetail)
-                            .font(.system(size: 10))
-                            .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
-                            .lineLimit(1)
+                        if routerAdminAvailable, let routerAdminURL {
+                            Button {
+                                NSWorkspace.shared.open(routerAdminURL)
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Text(routerDetail)
+                                        .underline()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 8))
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open router admin page (\(routerAdminURL.absoluteString))")
+                        } else {
+                            Text(routerDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        }
                     }
                     .frame(maxWidth: .infinity)
 
@@ -780,7 +811,7 @@ struct ConnectionRouteView: View {
                     Image(systemName: "waveform.path.ecg")
                         .font(.system(size: 12))
                         .foregroundStyle(jitterWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
-                    Text("Internet jitter")
+                    Text(jitterLabel)
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ColorToken.muted)
                     if let jitter = jitterMs {
@@ -915,16 +946,19 @@ struct ExperienceGridView: View {
     let calls: ExperienceStatus
     let gaming: ExperienceStatus
     let streaming: ExperienceStatus
+    var browsing: ExperienceStatus? = nil
 
     struct ExperienceStatus {
         let label: String
         let tint: Color
         var metric: String? = nil
+        var helpText: String? = nil
 
-        init(label: String, tint: Color, metric: String? = nil) {
+        init(label: String, tint: Color, metric: String? = nil, helpText: String? = nil) {
             self.label = label
             self.tint = tint
             self.metric = metric
+            self.helpText = helpText
         }
     }
 
@@ -934,23 +968,34 @@ struct ExperienceGridView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.ink)
 
+            let dividerPadding: CGFloat = browsing != nil ? 6 : 8
+
             HStack(spacing: 0) {
                 item(title: "Calls", icon: "video", status: calls)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 Divider()
                     .frame(height: 32)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, dividerPadding)
 
                 item(title: "Gaming", icon: "gamecontroller", status: gaming)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 Divider()
                     .frame(height: 32)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, dividerPadding)
 
                 item(title: "Streaming", icon: "play.rectangle", status: streaming)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let browsing {
+                    Divider()
+                        .frame(height: 32)
+                        .padding(.horizontal, dividerPadding)
+
+                    item(title: "Browsing", icon: "globe", status: browsing)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -980,6 +1025,7 @@ struct ExperienceGridView: View {
                     .lineLimit(1)
             }
         }
+        .help(status.helpText ?? "\(title): \(status.label)")
     }
 }
 

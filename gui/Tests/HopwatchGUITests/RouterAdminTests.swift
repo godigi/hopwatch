@@ -48,4 +48,16 @@ import Testing
         let url4 = IPAddressValidation.routerAdminURL(for: nil)
         #expect(url4 == nil)
     }
+
+    @Test func routerAdminProbeStoreHandlesInvalidAndNilIPs() async {
+        let store = RouterAdminProbeStore.shared
+        let resNil = await store.checkAvailability(for: nil)
+        #expect(!resNil)
+
+        let resPublic = await store.checkAvailability(for: "8.8.8.8")
+        #expect(!resPublic)
+
+        let resEmpty = await store.checkAvailability(for: "")
+        #expect(!resEmpty)
+    }
 }

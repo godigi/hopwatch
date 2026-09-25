@@ -339,6 +339,54 @@ struct DropdownView: View {
 
     // MARK: - 4. Connection Route Section
 
+    private var isWifiLaggy: Bool {
+        guard coordinator.monitor.latest?.link.isWiFi == true else { return false }
+        let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
+        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
+        return gwPing >= 35.0 || gwJitter >= 25.0 || gwLoss >= 5.0
+    }
+
+    private var resolvedBand: String? {
+        if let band = coordinator.latestRun?.snapshot.wifiScan?.currentBand {
+            return band
+        }
+        if let chStr = coordinator.monitor.latest?.wifi?.channel {
+            if chStr.contains("2.4") { return "2.4 GHz" }
+            if chStr.contains("5 GHz") || chStr.contains("5GHz") { return "5 GHz" }
+            if chStr.contains("6 GHz") || chStr.contains("6GHz") { return "6 GHz" }
+            let firstDigits = chStr.components(separatedBy: CharacterSet.decimalDigits.inverted).first { !$0.isEmpty }
+            if let firstDigits, let ch = Int(firstDigits) {
+                if ch <= 14 { return "2.4 GHz" }
+                if ch >= 32 { return "5 GHz" }
+            }
+        }
+        return nil
+    }
+
+    private var macDetailText: String {
+        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
+        guard isWiFi else {
+            return coordinator.monitor.latest?.link.ip ?? "Ethernet"
+        }
+        if let rssi = resolvedRSSI {
+            if let band = resolvedBand {
+                return "\(rssi) dBm · \(band)"
+            }
+            return "\(rssi) dBm"
+        }
+        return coordinator.monitor.latest?.link.ip ?? "Wi-Fi link"
+    }
+
+    private var isGatewayJitterDominant: Bool {
+        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
+        return gwJitter >= 20.0
+    }
+
+    private var jitterLabel: String {
+        "Jitter"
+    }
+
     private var connectionRouteSection: some View {
         let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
         let linkUp = coordinator.monitor.latest?.link.up ?? true
@@ -349,8 +397,8 @@ struct DropdownView: View {
             wifiReadingValue: isWiFi ? wifiCell.value : (linkUp ? "Connected" : "Down"),
             wifiReadingTint: isWiFi ? wifiCell.tint : (linkUp ? Theme.ColorToken.green : .red),
             macIcon: isWiFi ? "laptopcomputer" : "cable.connector",
-            macStatusGood: linkUp && (wifiRuleTint == nil || wifiRuleTint == .green),
-            macDetail: isWiFi ? (resolvedRSSI.map { "\($0) dBm" } ?? (coordinator.monitor.latest?.link.ip ?? "Wi-Fi link")) : (coordinator.monitor.latest?.link.ip ?? "Ethernet"),
+            macStatusGood: linkUp && !isWifiLaggy && (wifiRuleTint == nil || wifiRuleTint == .green),
+            macDetail: macDetailText,
             routerPingValue: routerPingText,
             routerPingTint: routerPingTint,
             routerStatusGood: !routerWarn,
@@ -366,8 +414,13 @@ struct DropdownView: View {
             internetWarn: internetWarn,
             firstLinkLabel: isWiFi ? "Wi-Fi" : "Wired",
             secondLinkLabel: "Broadband",
+            wifiWarning: isWiFi && isWifiLaggy,
+            isWifiLaggy: isWiFi && isWifiLaggy,
+            routerAdminURL: routerAdminURL,
+            routerAdminAvailable: coordinator.routerAdminAvailable,
+            jitterLabel: jitterLabel,
             jitterMs: currentJitter,
-            jitterWarn: (currentJitter ?? 0) >= 30.0,
+            jitterWarn: (currentJitter ?? 0) >= 30.0 || (isGatewayJitterDominant && (currentJitter ?? 0) >= 20.0),
             jitterDescription: jitterDescriptionText,
             vpnActive: vpnActive,
             vpnName: vpnName,
@@ -389,7 +442,8 @@ struct DropdownView: View {
     }
 
     private var routerPingTint: Color {
-        if routerWarn {
+        let rtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
+        if routerWarn || rtt >= 25.0 {
             return Theme.ColorToken.amber
         }
         return Theme.ColorToken.ink
@@ -416,11 +470,13 @@ struct DropdownView: View {
         if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
             return false
         }
-        return firedCategories.contains("router") || ((coordinator.monitor.latest?.gateway.lossPct ?? 0) >= 3.0)
+        return firedCategories.contains("router") || ((coordinator.monitor.latest?.gateway.lossPct ?? 0) >= 5.0)
     }
 
     private var internetWarn: Bool {
-        firedCategories.contains("internet") || ((coordinator.monitor.latest?.internet.lossPct ?? 0) >= 3.0)
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
+        return firedCategories.contains("internet") || (inetLoss >= 5.0 && inetLoss > gwLoss + 2.0)
     }
 
     private var routerDetailText: String {
@@ -467,7 +523,8 @@ struct DropdownView: View {
         ExperienceGridView(
             calls: callsExperience,
             gaming: gamingExperience,
-            streaming: streamingExperience
+            streaming: streamingExperience,
+            browsing: browsingExperience
         )
     }
 
@@ -492,23 +549,30 @@ struct DropdownView: View {
 
     private var callsExperience: ExperienceGridView.ExperienceStatus {
         if let item = suitabilityItems.first(where: { $0.id == "calls" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric)
+            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
         }
-        return .init(label: "Clear audio", tint: Theme.ColorToken.green, metric: "0% loss")
+        return .init(label: "Clear audio", tint: Theme.ColorToken.green, metric: "0% loss", helpText: "Clear audio for voice & video calls")
     }
 
     private var gamingExperience: ExperienceGridView.ExperienceStatus {
         if let item = suitabilityItems.first(where: { $0.id == "gaming" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric)
+            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
         }
-        return .init(label: "Smooth", tint: Theme.ColorToken.green, metric: "Low ping")
+        return .init(label: "Smooth", tint: Theme.ColorToken.green, metric: "Low ping", helpText: "Stable latency and jitter for online multiplayer gaming")
     }
 
     private var streamingExperience: ExperienceGridView.ExperienceStatus {
         if let item = suitabilityItems.first(where: { $0.id == "streaming" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric)
+            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
         }
-        return .init(label: "HD ready", tint: Theme.ColorToken.green, metric: "Buffer ready")
+        return .init(label: "HD ready", tint: Theme.ColorToken.green, metric: "Clean link", helpText: "Sufficient bandwidth for smooth streaming")
+    }
+
+    private var browsingExperience: ExperienceGridView.ExperienceStatus {
+        if let item = suitabilityItems.first(where: { $0.id == "browsing" }) {
+            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
+        }
+        return .init(label: "Fast", tint: Theme.ColorToken.green, metric: "TCP 443 ok", helpText: "Fast DNS resolution and reliable HTTPS connectivity")
     }
 
     // MARK: - 6. Speed Test Section
@@ -636,6 +700,12 @@ struct DropdownView: View {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
+        if isWifiLaggy {
+            let label = (content.value.lowercased() == "good" || content.value.lowercased() == "excellent")
+                ? "Good (laggy)"
+                : "\(content.value) (laggy)"
+            return (label, content.unit, Theme.ColorToken.amber)
+        }
         return (content.value, content.unit, wifiRuleTint ?? content.tint)
     }
 

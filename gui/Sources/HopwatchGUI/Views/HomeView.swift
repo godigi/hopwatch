@@ -124,7 +124,9 @@ struct HomeView: View {
                     publicIP: publicIPString,
                     pingTarget: pingTargetString,
                     pingTargetAlt: pingTargetAltString,
-                    culpritHop: culpritHop
+                    culpritHop: culpritHop,
+                    routerAdminURL: routerAdminURL,
+                    routerAdminAvailable: coordinator.routerAdminAvailable
                 )
 
                 // 6. Main 2-Column Dashboard Grid (Ping Chart & Findings vs Graded Check Details)
@@ -985,7 +987,7 @@ struct HomeView: View {
             return false
         }
         return firedCategories.contains("router")
-            || ((coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) >= 3.0)
+            || ((coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) >= 5.0)
             || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
     }
 
@@ -1025,9 +1027,12 @@ struct HomeView: View {
     }
 
     private var internetWarn: Bool {
-        firedCategories.contains("internet")
-            || ((coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0) >= 3.0)
-            || ((coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0) > 120)
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0
+        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0
+        return firedCategories.contains("internet")
+            || (inetLoss >= 5.0 && inetLoss > gwLoss + 2.0)
+            || (inetPing > 120)
     }
 
     private var countryFlagEmoji: String? {

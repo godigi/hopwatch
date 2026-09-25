@@ -108,6 +108,8 @@ final class HopwatchCoordinator {
     /// in memory only: a backoff that survived relaunch would punish a
     /// user for quitting the app. Reset when the network changes or an
     /// attempt starts.
+    private(set) var routerAdminAvailable = false
+    private var lastProbedRouterIP: String?
     private var arrivalAttempts = 0
     private var nextArrivalAttemptAt: Date?
     /// Carried from `attemptArrival` to the scan's completion, which is
@@ -501,6 +503,16 @@ final class HopwatchCoordinator {
                     ? (change.to ?? change.from) : nil,
                 network: sample.network.id,
                 date: sample.timestamp)
+        }
+
+        if let gwIP = sample.link.gateway, gwIP != lastProbedRouterIP {
+            lastProbedRouterIP = gwIP
+            Task { [weak self] in
+                let available = await RouterAdminProbeStore.shared.checkAvailability(for: gwIP)
+                await MainActor.run {
+                    self?.routerAdminAvailable = available
+                }
+            }
         }
 
         // Not identified yet — the CLI has no group and no usable record

@@ -204,6 +204,8 @@ struct DashboardRouteView: View {
     let pingTarget: String?
     var pingTargetAlt: String? = nil
     var culpritHop: String? = nil
+    var routerAdminURL: URL? = nil
+    var routerAdminAvailable: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -322,10 +324,27 @@ struct DashboardRouteView: View {
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 7)
 
-                        Text("\(routerIP) · gateway")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
-                            .lineLimit(1)
+                        if routerAdminAvailable, let routerAdminURL {
+                            Button {
+                                NSWorkspace.shared.open(routerAdminURL)
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Text("\(routerIP) · gateway")
+                                        .underline()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 8))
+                                }
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open router admin page (\(routerAdminURL.absoluteString))")
+                        } else {
+                            Text("\(routerIP) · gateway")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        }
 
                         if let delta = routerLoadedDelta {
                             Text("Load: \(delta)")
@@ -1592,6 +1611,7 @@ struct DashboardSuitabilityStrip: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(item.tint.opacity(0.25), lineWidth: 1)
         )
+        .help(item.helpText ?? "\(item.title): \(item.status)")
     }
 }
 
