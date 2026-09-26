@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.8.4] - 2026-09-26
+
 ### Fixed
 - **Sub-1% Packet Loss Formatting**: Display one decimal place for packet loss below 1% (e.g. `0.3% packet loss`) across the menu dropdown, status subtitles, experience cards, and dashboard vitals, instead of truncating/rounding to `0%`.
 - **False 0% Packet Loss on Warning**: Prevent internet hop node from displaying `"0% packet loss"` in amber/red warning styling when warned due to high latency, jitter, or application degradation; now accurately shows the contributing factor (e.g. latency/jitter or connection status).
@@ -3987,7 +3989,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.3...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.4...HEAD
+[1.8.4]: https://github.com/godigi/hopwatch/compare/v1.8.3...v1.8.4
 [1.8.3]: https://github.com/godigi/hopwatch/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/godigi/hopwatch/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/godigi/hopwatch/compare/v1.8.0...v1.8.1
