@@ -1065,6 +1065,12 @@ private enum VerifyHarness {
         let res3 = MonitorSeries.build([s3, s4], tier: "fast") { $0.gateway.rttAvgMs }
         check(res3.gaps.isEmpty, "continuous stream produces no gaps")
         check(res3.segments.count == 1 && res3.segments[0].count == 2, "continuous stream produces a single segment with all points")
+
+        // Test 5: identifiedSegments provides stable Date id and wraps all points safely for SwiftUI charts
+        check(res1.identifiedSegments.count == 2, "identifiedSegments count matches segments")
+        check(res1.identifiedSegments[0].id == res1.segments[0][0].date, "identifiedSegment 0 id equals its first point date")
+        check(res1.identifiedSegments[1].id == res1.segments[1][0].date, "identifiedSegment 1 id equals its first point date")
+        check(res1.identifiedSegments[0].points.count == 1 && res1.identifiedSegments[1].points.count == 1, "identifiedSegments preserve point count")
     }
 
     // MARK: - Launch at login (SMAppService)

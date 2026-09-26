@@ -29,11 +29,28 @@ enum MonitorSeries {
         var id: Date { start }
     }
 
+    /// A stretch of continuous measurements without gaps.
+    struct Segment: Identifiable, Equatable {
+        let id: Date
+        let points: [Point]
+
+        init(points: [Point]) {
+            self.id = points.first?.date ?? Date.distantPast
+            self.points = points
+        }
+    }
+
     struct Result {
         /// One entry per unbroken stretch. Charts draw each as its own
         /// series so no line spans two of them.
         var segments: [[Point]] = []
         var gaps: [Gap] = []
+
+        var identifiedSegments: [Segment] {
+            segments.compactMap { pts in
+                pts.isEmpty ? nil : Segment(points: pts)
+            }
+        }
 
         var points: [Point] { segments.flatMap { $0 } }
         var isEmpty: Bool { segments.allSatisfy(\.isEmpty) }

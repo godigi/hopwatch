@@ -527,16 +527,16 @@ struct LiveChart: View {
             }
             // One series per segment, so no line is drawn across a stretch
             // where nothing was measured.
-            ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
-                ForEach(segment) { point in
+            ForEach(series.identifiedSegments) { segment in
+                ForEach(segment.points) { point in
                     LineMark(x: .value("Time", point.date),
                              y: .value("Value", point.value),
-                             series: .value("segment", index))
+                             series: .value("segment", segment.id.timeIntervalSinceReferenceDate))
                         .foregroundStyle(Color.accentColor)
                     PointMark(x: .value("Time", point.date),
                               y: .value("Value", point.value))
                         .foregroundStyle(Color.accentColor)
-                        .symbolSize(segment.count > 120 ? 4 : 14)
+                        .symbolSize(segment.points.count > 120 ? 4 : 14)
                 }
             }
             if let hovered {

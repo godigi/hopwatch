@@ -19,6 +19,7 @@ import os
 final class LocationPermissionStore: NSObject, CLLocationManagerDelegate {
 
     private(set) var status: CLAuthorizationStatus = .notDetermined
+    var onAuthorizationChange: (@MainActor (CLAuthorizationStatus) -> Void)?
     private let locationManager = CLLocationManager()
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "location")
 
@@ -51,7 +52,13 @@ final class LocationPermissionStore: NSObject, CLLocationManagerDelegate {
     }
 
     func refresh() {
-        status = locationManager.authorizationStatus
+        let newStatus = locationManager.authorizationStatus
+        let changed = newStatus != status
+        status = newStatus
+        if changed {
+            log.info("location authorization status changed via refresh: \(String(describing: newStatus.rawValue), privacy: .public)")
+            onAuthorizationChange?(newStatus)
+        }
     }
 
     func requestAuthorization() {
@@ -112,8 +119,12 @@ final class LocationPermissionStore: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let newStatus = manager.authorizationStatus
         Task { @MainActor in
+            let changed = self.status != newStatus
             self.status = newStatus
             self.log.info("location authorization status changed: \(String(describing: newStatus.rawValue), privacy: .public)")
+            if changed {
+                self.onAuthorizationChange?(newStatus)
+            }
         }
     }
 }

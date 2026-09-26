@@ -70,11 +70,11 @@ struct ExpertPanel: View {
                 Text("no data").font(.caption2).foregroundStyle(.tertiary)
             } else {
                 Chart {
-                    ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
-                        ForEach(segment) { point in
+                    ForEach(series.identifiedSegments) { segment in
+                        ForEach(segment.points) { point in
                             LineMark(x: .value("Time", point.date),
                                      y: .value(title, point.value),
-                                     series: .value("segment", index))
+                                     series: .value("segment", segment.id.timeIntervalSinceReferenceDate))
                                 .foregroundStyle(Color.accentColor)
                         }
                     }

@@ -56,12 +56,16 @@ struct DropdownView: View {
             Button("Save Redacted JSON (.json)…") { saveJSONReport() }
         }
         .task {
+            coordinator.refreshLocationState()
             if coordinator.history.document.runs.isEmpty {
                 await coordinator.history.load()
             }
         }
         .task(id: coordinator.monitor.latest?.seq) {
             refreshCoreWLANRSSIIfNeeded()
+        }
+        .onAppear {
+            coordinator.refreshLocationState()
         }
     }
 

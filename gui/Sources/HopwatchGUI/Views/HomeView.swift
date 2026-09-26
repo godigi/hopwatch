@@ -285,13 +285,19 @@ struct HomeView: View {
             rawJSONSheet
         }
         .task {
-            coordinator.locationPermissions.refresh()
+            coordinator.refreshLocationState()
             if coordinator.history.document.runs.isEmpty {
                 await coordinator.history.load()
             }
         }
         .task(id: coordinator.monitor.latest?.seq) {
             refreshCoreWLANRSSIIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            coordinator.refreshLocationState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            coordinator.refreshLocationState()
         }
     }
 

@@ -47,6 +47,12 @@ final class HopwatchCoordinator {
     /// notifications, not stored history).
     let eventLog = EventStore()
 
+    init() {
+        locationPermissions.onAuthorizationChange = { [weak self] _ in
+            self?.refreshLocationState()
+        }
+    }
+
     private var updateCheckTask: Task<Void, Never>?
     private(set) var latestRun: RunResult?
     /// Home's fallback for a session that has not run a scan yet.
@@ -1188,13 +1194,23 @@ final class HopwatchCoordinator {
 
     // MARK: - Presentation helpers
 
+    /// Refreshes Location Services authorization and unredacts Wi-Fi details
+    /// if newly granted.
+    func refreshLocationState() {
+        locationPermissions.refresh()
+        if locationPermissions.isAuthorized {
+            refreshLiveWiFi()
+            adoptLiveSSIDAsNameIfNeeded()
+        }
+    }
+
     /// Refresh `liveSSID` from CoreWLAN. Called once per monitor sample
     /// rather than from a view body: a `CWWiFiClient` read is a real
     /// syscall, and `wifiDisplayName` is read on every redraw of an
     /// always-visible menu. Returns nil when Location is not authorized —
     /// CoreWLAN returns a redacted `<SSID>` / nil in that state, and
     /// passing that through would surface a raw placeholder as a name.
-    private func refreshLiveWiFi() {
+    func refreshLiveWiFi() {
         // CoreWLAN's `interface()` returns the current Wi-Fi interface, but
         // has been observed returning nil on some builds even when
         // associated; fall back to the first power-on interface from
@@ -1240,11 +1256,14 @@ final class HopwatchCoordinator {
         guard let live = liveSSID, !live.isEmpty,
               !live.contains("<redacted>"), !live.contains("hidden by macOS"),
               let id = monitor.latest?.network.historyJoinID else { return }
+        // If the user has assigned their own custom name (and it's not a placeholder), don't overwrite it
+        if let custom = history.customName(for: id), !custom.isEmpty,
+           !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
+           !Self.isRawNetworkKey(custom) {
+            return
+        }
         let current = history.displayName(for: id)
-        let currentIsUgly = current.isEmpty || current == id
-            || current.contains("<redacted>") || current.contains("hidden by macOS")
-            || Self.isRawNetworkKey(current)
-        guard currentIsUgly, current != live else { return }
+        guard current != live else { return }
         history.rename(id, to: live)
         log.info("adopted live SSID as name for \(id, privacy: .public)")
     }
@@ -1553,9 +1572,9 @@ final class HopwatchCoordinator {
         // (the Networks tab, the adopt-as-name path) is found from here
         // too.
         if let id = monitor.latest?.network.historyJoinID {
-            let custom = history.displayName(for: id)
-            if !custom.isEmpty, custom != id, !custom.contains("<redacted>"),
-               !custom.contains("hidden by macOS"), !Self.isRawNetworkKey(custom) {
+            if let custom = history.customName(for: id), !custom.isEmpty,
+               !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
+               !Self.isRawNetworkKey(custom) {
                 return custom
             }
         }
@@ -1566,6 +1585,15 @@ final class HopwatchCoordinator {
         if let live = liveSSID, !live.isEmpty,
            !live.contains("<redacted>"), !live.contains("hidden by macOS") {
             return live
+        }
+        // Without live SSID or custom rename, check if HistoryStore has a
+        // recorded SSID from a past scan.
+        if let id = monitor.latest?.network.historyJoinID {
+            let hist = history.displayName(for: id)
+            if !hist.isEmpty, hist != id, !hist.contains("<redacted>"),
+               !hist.contains("hidden by macOS"), !Self.isRawNetworkKey(hist) {
+                return hist
+            }
         }
         // Without Location and without a rename, the CLI's raw label is a
         // MAC-keyed string nobody recognises; hide it rather than show

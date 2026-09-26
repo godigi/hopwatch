@@ -684,24 +684,24 @@ struct DashboardLiveChartPanel: View {
                 .frame(height: 145)
             } else {
                 Chart {
-                    ForEach(internetSeries.segments.indices, id: \.self) { idx in
-                        ForEach(internetSeries.segments[idx]) { point in
+                    ForEach(internetSeries.identifiedSegments) { segment in
+                        ForEach(segment.points) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Ping", point.value),
-                                series: .value("Series", "Internet")
+                                series: .value("Series", "Internet-\(segment.id.timeIntervalSinceReferenceDate)")
                             )
                             .foregroundStyle(Theme.ColorToken.blue)
                             .lineStyle(StrokeStyle(lineWidth: 1.75))
                         }
                     }
 
-                    ForEach(routerSeries.segments.indices, id: \.self) { idx in
-                        ForEach(routerSeries.segments[idx]) { point in
+                    ForEach(routerSeries.identifiedSegments) { segment in
+                        ForEach(segment.points) { point in
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Ping", point.value),
-                                series: .value("Series", "Router")
+                                series: .value("Series", "Router-\(segment.id.timeIntervalSinceReferenceDate)")
                             )
                             .foregroundStyle(Theme.ColorToken.amber)
                             .lineStyle(StrokeStyle(lineWidth: 1.75))

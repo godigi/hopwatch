@@ -86,6 +86,11 @@ final class HistoryStore {
 
     // MARK: - Naming
 
+    func customName(for networkID: String) -> String? {
+        let key = canonicalID(networkID)
+        return customNames[key]
+    }
+
     func displayName(for networkID: String) -> String {
         let key = canonicalID(networkID)
         if let custom = customNames[key], !custom.isEmpty { return custom }
