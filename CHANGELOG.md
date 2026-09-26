@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-25
+
+### Changes
+
+- feat: integrate Sentry crash reporting with PII scrubbing and privacy controls
+
 ## [1.7.5] - 2026-09-25
 
 ### Changes
@@ -3954,7 +3960,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.7.5...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/godigi/hopwatch/compare/v1.7.5...v1.8.0
 [1.7.5]: https://github.com/godigi/hopwatch/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/godigi/hopwatch/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/godigi/hopwatch/compare/v1.7.2...v1.7.3
