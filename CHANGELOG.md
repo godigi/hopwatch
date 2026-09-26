@@ -8,9 +8,13 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [1.8.1] - 2026-09-26
 
-### Changes
+### Fixed — False Flag Alarm Eliminations
+- **Router ICMP Rate Limiting**: Added downstream validation across `HopwatchCoordinator`, `MonitorSample`, and `SuitabilityEngine`. When internet loss is clean (< 2%), isolated packet loss to the local gateway is recognized as benign router control-plane rate limiting and suppressed from sounding false alarms or degrading call/gaming suitability.
+- **Double NAT & CGNAT (`NAT-1`, `NAT-1b`)**: Removed false gaming degradation; Double NAT and ISP-side CGNAT no longer penalize outbound gaming suitability. Updated diagnostic advice to clarify that Double NAT only affects inbound peer hosting.
+- **Secondary DNS Silent Fallback (`D5`, `V6-2`)**: Removed false calls and streaming degradations. Delayed DNS fallback only impacts initial page navigation (`browsing`).
+- **AirDrop Latency Spikes (`AWDL-1`)**: Refined attribution headline to `"AirDrop Latency Spikes"` and culprit badge to `"Culprit: macOS AirDrop"`, clarifying that Wi-Fi hardware and signal are healthy. Removed calls degradation while preserving accurate gaming spike notices.
+- **iCloud Private Relay (`PR-1`)**: Removed false degradations on calls, gaming, and VPN; architectural privacy routing for Safari and Mail is properly treated as neutral diagnostic info.
 
-- fix: eliminate false flag activity degradation and refine diagnostic attribution
 
 ## [1.8.0] - 2026-09-25
 

@@ -136,6 +136,8 @@ jobs:
         run: cat /tmp/notes.md
 
       - name: Build and package GUI DMG & ZIP
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
           make -C gui dmg
           dmg="gui/build/Hopwatch-${VERSION}.dmg"
