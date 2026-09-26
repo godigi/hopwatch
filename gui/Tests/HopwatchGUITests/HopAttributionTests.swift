@@ -129,6 +129,8 @@ import Testing
         )
         #expect(awdl.culprit == .wifi)
         #expect(awdl.wifiHealth == .warning)
+        #expect(awdl.headline == "AirDrop Latency Spikes")
+        #expect(awdl.badgeTitle == "Culprit: macOS AirDrop")
         #expect(awdl.reassurance.contains("Apple Wireless Direct Link"))
 
         // D5: Primary DNS unresponsive, falling back to secondary

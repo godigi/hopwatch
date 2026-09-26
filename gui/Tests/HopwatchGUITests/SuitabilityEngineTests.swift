@@ -720,5 +720,94 @@ import Testing
         #expect(gaming.verdict == .good)
         #expect(gaming.status == "Responsive" || gaming.status == "Smooth")
     }
+
+    @Test func d5DnsFallbackDoesNotDegradeCallsOrStreaming() {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        let speed = RunSnapshot.Speedtest(downMbps: 200.0, upMbps: 50.0)
+
+        // When D5 (silent DNS fallback delay) fires, it should only affect Browsing.
+        // Active Calls and Video Streaming must remain Good.
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            firedRules: ["D5"],
+            isLinkUp: true,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        let streaming = SuitabilityEngine.evaluateStreaming(inputs)
+
+        #expect(calls.verdict == .good)
+        #expect(streaming.verdict == .good)
+    }
+
+    @Test func awdlChannelHoppingDegradesGamingOnlyNotCalls() throws {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 15.0, rttJitterMs: 3.0)
+        let speed = RunSnapshot.Speedtest(downMbps: 200.0, upMbps: 50.0)
+
+        let catalogJSON = """
+        {"schema": 5, "rules": [
+          {"id": "AWDL-1", "title": "Apple Wireless Direct Link latency spikes",
+           "impacts": {"gaming": "degraded"},
+           "fix": "Turn off AirDrop", "fix_target": "you"}
+        ]}
+        """.data(using: .utf8)!
+        let catalog = try JSONDecoder().decode(RulesCatalog.self, from: catalogJSON)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            catalog: catalog,
+            firedRules: ["AWDL-1"],
+            isLinkUp: true,
+            currentJitter: 3.0,
+            effectiveLoss: 0.0
+        )
+
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        let gaming = SuitabilityEngine.evaluateGaming(inputs)
+
+        #expect(calls.verdict == .good)
+        #expect(gaming.verdict == .degraded)
+    }
+
+    @Test func privateRelayDoesNotDegradeCallsOrGaming() throws {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        let speed = RunSnapshot.Speedtest(downMbps: 200.0, upMbps: 50.0)
+
+        // PR-1 represents iCloud Private Relay, which only affects Safari and Mail.
+        // It has no impacts key, so it must not degrade Calls, Gaming, or VPN.
+        let catalogJSON = """
+        {"schema": 5, "rules": [
+          {"id": "PR-1", "title": "iCloud Private Relay active",
+           "fix": "Nothing to fix", "fix_target": "nobody"}
+        ]}
+        """.data(using: .utf8)!
+        let catalog = try JSONDecoder().decode(RulesCatalog.self, from: catalogJSON)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            speedTest: speed,
+            catalog: catalog,
+            firedRules: ["PR-1"],
+            isLinkUp: true,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        let gaming = SuitabilityEngine.evaluateGaming(inputs)
+        let vpn = SuitabilityEngine.evaluateVPN(inputs)
+
+        #expect(calls.verdict == .good)
+        #expect(gaming.verdict == .good)
+        #expect(vpn.verdict == .good)
+    }
 }
+
 

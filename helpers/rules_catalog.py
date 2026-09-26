@@ -421,16 +421,15 @@ RULES: list[dict[str, object]] = [
             "Apple Wireless Direct Link is active for AirDrop, AirPlay, or "
             "Sidecar. The Wi-Fi radio periodically leaves the current channel "
             "to scan social channels, introducing latency spikes and "
-            "micro-stutters during video calls or multiplayer gaming."
+            "micro-stutters during multiplayer gaming."
         ),
         "doc": "DIAGNOSIS-RULES.md#awdl-1--apple-wireless-direct-link-channel-hopping",
         "impacts": {
-            "calls": "degraded",
             "gaming": "degraded",
         },
         "fix": (
             "Set AirDrop receiving to Off in Control Center, or disconnect "
-            "Sidecar and AirPlay while on important calls or gaming."
+            "Sidecar and AirPlay while gaming or performing latency-sensitive tasks."
         ),
         "fix_target": "you",
     },
@@ -776,8 +775,6 @@ RULES: list[dict[str, object]] = [
         ),
         "doc": "DIAGNOSIS-RULES.md#d5--unresponsive-primary-dns-resolver-silent-fallback",
         "impacts": {
-            "calls": "degraded",
-            "streaming": "degraded",
             "browsing": "degraded",
         },
         "fix": (
@@ -969,7 +966,7 @@ RULES: list[dict[str, object]] = [
             "falling back to IPv4."
         ),
         "doc": "DIAGNOSIS-RULES.md#v6-2--unresponsive-ipv6-dns-resolver",
-        "impacts": {"streaming": "degraded", "browsing": "degraded"},
+        "impacts": {"browsing": "degraded"},
         "fix": (
             "Restart your router to re-acquire its IPv6 prefix lease and "
             "refresh its DNS advertisement, or update its IPv6 DNS "
@@ -1252,7 +1249,6 @@ RULES: list[dict[str, object]] = [
             "than the results shown here."
         ),
         "doc": "DIAGNOSIS-RULES.md#pr-1--icloud-private-relay-active",
-        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Nothing to fix — this is working as Apple intended to protect "
             "your privacy. If Safari feels slow while this report looks "

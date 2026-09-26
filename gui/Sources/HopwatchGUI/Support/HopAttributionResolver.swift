@@ -201,6 +201,8 @@ public enum HopAttributionResolver {
             badgeTitle = culprit.badgeTitle
 
             if ruleSet.contains("AWDL-1") {
+                headline = "AirDrop Latency Spikes"
+                badgeTitle = "Culprit: macOS AirDrop"
                 reassurance = "Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping is causing periodic latency spikes. Setting AirDrop to 'Receiving Off' in Control Center restores steady ping."
             } else if ruleSet.contains("W6") {
                 reassurance = "Your Mac is connected to the slower 2.4 GHz band while a faster 5 GHz band is available. Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."
