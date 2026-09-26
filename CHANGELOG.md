@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-26
+
+### Changes
+
+- fix: resolve false positive Wi-Fi laggy flag and restore internet hop culprit attribution
+
 ## [1.8.2] - 2026-09-26
 
 ### Changes
@@ -3976,7 +3982,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.3...HEAD
+[1.8.3]: https://github.com/godigi/hopwatch/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/godigi/hopwatch/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/godigi/hopwatch/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/godigi/hopwatch/compare/v1.7.5...v1.8.0
