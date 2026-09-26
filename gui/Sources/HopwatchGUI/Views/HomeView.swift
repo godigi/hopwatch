@@ -988,19 +988,34 @@ struct HomeView: View {
         return Set(firedRules.compactMap { catalog[$0]?.category })
     }
 
-    private var routerWarn: Bool {
-        if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) < 10.0 {
-            return false
-        }
+    private var routeWarningResult: RouteWarningResolver.Result {
+        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
+        let linkUp = coordinator.monitor.latest?.link.up ?? true
         let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
         let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0
-        if inetLoss <= 1.0 && gwLoss < 20.0 {
-            return firedCategories.contains("router")
-                || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
-        }
-        return firedCategories.contains("router")
-            || (gwLoss >= 5.0)
-            || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
+        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0
+        let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0
+        let inetJitter = coordinator.monitor.latest?.internet.rttJitterMs ?? coordinator.latestRun?.snapshot.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
+        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs ?? 0
+
+        return RouteWarningResolver.resolve(
+            linkUp: linkUp,
+            isWiFi: isWiFi,
+            stage: stage,
+            firedCategories: firedCategories,
+            gwLoss: gwLoss,
+            gwPing: gwPing,
+            gwJitter: gwJitter,
+            inetLoss: inetLoss,
+            inetPing: inetPing,
+            inetJitter: inetJitter,
+            hasRecentRoam: coordinator.hasRecentRoam,
+            wifiRuleTint: wifiSignalTint == Theme.ColorToken.amber ? .yellow : (wifiSignalTint == .red ? .red : nil)
+        )
+    }
+
+    private var routerWarn: Bool {
+        routeWarningResult.routerWarn
     }
 
     private var routerGatewayIP: String? {
@@ -1046,12 +1061,7 @@ struct HomeView: View {
     }
 
     private var internetWarn: Bool {
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0
-        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0
-        return firedCategories.contains("internet")
-            || (inetLoss >= 5.0 && inetLoss > gwLoss + 2.0)
-            || (inetPing > 120)
+        routeWarningResult.internetWarn
     }
 
     private var countryFlagEmoji: String? {
@@ -1123,13 +1133,7 @@ struct HomeView: View {
     }
 
     private var culpritHop: String? {
-        if routerWarn {
-            return "router"
-        }
-        if internetWarn {
-            return "internet"
-        }
-        return nil
+        routeWarningResult.culpritHop
     }
 
     private var checkTimeSubtitle: String? {

@@ -343,12 +343,38 @@ struct DropdownView: View {
 
     // MARK: - 4. Connection Route Section
 
-    private var isWifiLaggy: Bool {
-        guard coordinator.monitor.latest?.link.isWiFi == true else { return false }
+    private var routeWarningResult: RouteWarningResolver.Result {
+        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
+        let linkUp = coordinator.monitor.latest?.link.up ?? true
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
+        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
+        let inetJitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
         let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
         let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
-        return gwPing >= 35.0 || gwJitter >= 25.0 || gwLoss >= 5.0
+
+        return RouteWarningResolver.resolve(
+            linkUp: linkUp,
+            isWiFi: isWiFi,
+            stage: stage,
+            firedCategories: firedCategories,
+            gwLoss: gwLoss,
+            gwPing: gwPing,
+            gwJitter: gwJitter,
+            inetLoss: inetLoss,
+            inetPing: inetPing,
+            inetJitter: inetJitter,
+            hasRecentRoam: coordinator.hasRecentRoam,
+            wifiRuleTint: wifiRuleTint
+        )
+    }
+
+    private var isWifiLaggy: Bool {
+        routeWarningResult.isWifiLaggy
+    }
+
+    private var macStatusGood: Bool {
+        routeWarningResult.macStatusGood
     }
 
     private var resolvedBand: String? {
@@ -401,7 +427,7 @@ struct DropdownView: View {
             wifiReadingValue: isWiFi ? wifiCell.value : (linkUp ? "Connected" : "Down"),
             wifiReadingTint: isWiFi ? wifiCell.tint : (linkUp ? Theme.ColorToken.green : .red),
             macIcon: isWiFi ? "laptopcomputer" : "cable.connector",
-            macStatusGood: linkUp && !isWifiLaggy && (wifiRuleTint == nil || wifiRuleTint == .green),
+            macStatusGood: macStatusGood,
             macDetail: macDetailText,
             routerPingValue: routerPingText,
             routerPingTint: routerPingTint,
@@ -471,21 +497,11 @@ struct DropdownView: View {
     }
 
     private var routerWarn: Bool {
-        if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
-            return false
-        }
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
-        if inetLoss <= 1.0 && gwLoss < 20.0 {
-            return firedCategories.contains("router")
-        }
-        return firedCategories.contains("router") || (gwLoss >= 5.0)
+        routeWarningResult.routerWarn
     }
 
     private var internetWarn: Bool {
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
-        return firedCategories.contains("internet") || (inetLoss >= 5.0 && inetLoss > gwLoss + 2.0)
+        routeWarningResult.internetWarn
     }
 
     private var routerDetailText: String {
@@ -503,8 +519,16 @@ struct DropdownView: View {
     }
 
     private var internetDetailText: String {
-        if let loss = coordinator.monitor.latest?.internet.lossPct, loss >= 1.0 {
+        let loss = coordinator.monitor.latest?.internet.lossPct ?? 0
+        let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
+        if loss >= 1.0 && jitter >= 30.0 {
+            return String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+        }
+        if loss >= 1.0 {
             return String(format: "%.0f%% packet loss", loss)
+        }
+        if jitter >= 30.0 && !isGatewayJitterDominant {
+            return String(format: "%.0f ms jitter", jitter)
         }
         if icmpFiltered {
             return "Ping blocked"

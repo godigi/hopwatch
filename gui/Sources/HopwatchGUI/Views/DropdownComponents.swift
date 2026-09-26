@@ -779,26 +779,32 @@ struct ConnectionRouteView: View {
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 6)
 
-                        if let countryName, !countryName.isEmpty {
-                            Text(countryName)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.ink)
-                                .lineLimit(1)
-                            Text("Public IP country")
-                                .font(.system(size: 8))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                        }
-
                         if internetWarn {
                             Text(internetDetail)
-                                .font(.system(size: 10))
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(Theme.ColorToken.amber)
                                 .lineLimit(1)
-                        } else if countryName == nil {
-                            Text(internetDetail)
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                                .lineLimit(1)
+                            if let countryName, !countryName.isEmpty {
+                                Text(countryName)
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                                    .lineLimit(1)
+                            }
+                        } else {
+                            if let countryName, !countryName.isEmpty {
+                                Text(countryName)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Theme.ColorToken.ink)
+                                    .lineLimit(1)
+                                Text("Public IP country")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                            } else {
+                                Text(internetDetail)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity)
