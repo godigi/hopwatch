@@ -120,11 +120,11 @@ enum SuitabilityEngine {
 
             if loss >= 8.0 {
                 status = "Frequent cutouts"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "High packet loss (≥8%) causing severe audio dropouts, choppy speech, and frozen video"
             } else if jitter >= 50.0 {
                 status = "Severe stutter"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "Extreme jitter (≥50ms) causing jitter buffer overruns, severe robotic distortion, and audio stutter"
             } else if ping >= 400.0 {
                 status = "Heavy delay"
@@ -136,7 +136,7 @@ enum SuitabilityEngine {
                 help = "Insufficient upload bandwidth (<0.4 Mbps) to sustain stable voice or video calls"
             } else {
                 status = "Frequent cutouts"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "Network conditions causing frequent audio cutouts or call failures"
             }
 
@@ -160,11 +160,11 @@ enum SuitabilityEngine {
 
             if loss >= 3.0 {
                 status = "May cut out"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "Elevated packet loss (≥3%) may cause words to drop, robotic audio, and momentary video stutter"
             } else if jitter >= 25.0 {
                 status = "Audio stutter"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "Elevated jitter (≥25ms) causing audio pitch warping, robotic voice, or micro-stutters"
             } else if ping >= 250.0 {
                 status = "Audio delay"
@@ -180,7 +180,7 @@ enum SuitabilityEngine {
                 help = "Low download bandwidth (<1.5 Mbps) may cause incoming video feeds to drop resolution or pause"
             } else {
                 status = "May cut out"
-                metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
                 help = "Network conditions or route issues may cause intermittent voice or video degradation"
             }
 
@@ -199,7 +199,7 @@ enum SuitabilityEngine {
         // 3. Good conditions:
         // Pristine HD Video tier: upload >= 3.0 Mbps, loss < 1.0%, jitter < 8.0ms, ping < 150.0ms
         // Standard Clear Audio tier: loss < 1.0%, jitter < 15.0ms
-        let metric = String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+        let metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
         if let up = upMbps, up >= 3.0, loss < 1.0, jitter < 8.0, ping < 150.0 {
             return Item(
                 id: "calls",
@@ -248,7 +248,7 @@ enum SuitabilityEngine {
             let speedStr = mbps >= 10.0 ? String(format: "%.0f Mbps ↓", mbps) : String(format: "%.1f Mbps ↓", mbps)
 
             if mbps < 2.5 || loss >= 15.0 {
-                let metric = loss >= 15.0 ? String(format: "%.0f%% loss", loss) : speedStr
+                let metric = loss >= 15.0 ? LossFormatter.formatLoss(loss) : speedStr
                 let help = loss >= 15.0
                     ? "Severe packet loss (≥15%) causing video playback buffer starvation and frequent freezing"
                     : "Insufficient download bandwidth (<2.5 Mbps) causing video to stall and buffer"
@@ -263,7 +263,7 @@ enum SuitabilityEngine {
                     helpText: help
                 )
             } else if mbps < 8.0 || loss >= 8.0 {
-                let metric = loss >= 8.0 ? String(format: "%.0f%% loss", loss) : speedStr
+                let metric = loss >= 8.0 ? LossFormatter.formatLoss(loss) : speedStr
                 let help = loss >= 8.0
                     ? "Packet loss (≥8%) causes throughput drops, forcing video players to downgrade to standard definition (SD)"
                     : "Limited download speed (<8.0 Mbps) restricts streaming to standard definition (SD)"
@@ -305,7 +305,7 @@ enum SuitabilityEngine {
         // When speed test is not available yet:
         // Ping is NOT used to degrade streaming. Only catastrophic loss degrades it.
         let impacts = catalogImpacts(for: "streaming", in: inputs)
-        let metric = loss > 0 ? String(format: "%.0f%% loss", loss) : "Clean link"
+        let metric = loss > 0 ? LossFormatter.formatLoss(loss) : "Clean link"
 
         if impacts.contains("broken") || loss >= 15.0 {
             return Item(
@@ -407,8 +407,8 @@ enum SuitabilityEngine {
         // For gaming, packet loss causes rubberbanding and input drops, which takes priority
         // over raw jitter when reporting the compact metric.
         let metric: String
-        if loss >= 1.0 {
-            metric = String(format: "%.0f ms · %.0f%% loss", ping, loss)
+        if loss > 0 {
+            metric = String(format: "%.0f ms · %@", ping, LossFormatter.formatLoss(loss))
         } else {
             metric = String(format: "%.0f ms · %.0fms jit", ping, jitter)
         }
@@ -634,7 +634,7 @@ enum SuitabilityEngine {
                 help = "Outbound HTTPS (port 443) traffic is blocked or unreachable; websites cannot load"
             } else if loss >= 15.0 {
                 status = "Pages stall"
-                metric = String(format: "%.0f%% loss", loss)
+                metric = LossFormatter.formatLoss(loss)
                 help = "Severe packet loss (≥15%) causes TCP connection stalls and failed web page rendering"
             } else {
                 status = "Offline"
@@ -662,7 +662,7 @@ enum SuitabilityEngine {
 
             if loss >= 6.0 {
                 status = "Sluggish"
-                metric = String(format: "%.0f%% loss", loss)
+                metric = LossFormatter.formatLoss(loss)
                 help = "Elevated packet loss (≥6%) causes TCP retransmissions and delayed web page rendering"
             } else if let dnsMs = dnsElapsed, dnsMs >= 250.0 {
                 status = "Slow lookups"
@@ -701,7 +701,7 @@ enum SuitabilityEngine {
             metric = String(format: "%.0fms DNS", dnsMs)
             help = "Fast DNS lookups (<60ms) and responsive HTTPS connectivity for snappy web browsing"
         } else if loss > 0 {
-            metric = String(format: "%.0f%% loss", loss)
+            metric = LossFormatter.formatLoss(loss)
             help = "Low packet loss and reliable HTTPS connectivity for web browsing"
         } else {
             metric = "TCP 443 ok"
@@ -754,7 +754,7 @@ enum SuitabilityEngine {
         let inetLoss = effectiveLoss ?? monitorSample?.internet.lossPct ?? 0.0
         // Downstream validation: if internet loss is clean (< 2.0%), isolated router loss (< 20%)
         // is control-plane rate limiting and does not indicate data-plane link drops.
-        let effectiveGWLoss = (inetLoss < 2.0 && gwLoss < 20.0) ? inetLoss : gwLoss
+        let effectiveGWLoss = (inetLoss < 2.0 && gwLoss < 20.0) ? min(gwLoss, inetLoss) : gwLoss
         let loss = max(effectiveGWLoss, inetLoss)
         let jitter = currentJitter ?? monitorSample?.internet.rttJitterMs ?? 0.0
         let isWiFi = monitorSample?.link.isWiFi ?? false
@@ -774,24 +774,24 @@ enum SuitabilityEngine {
             headline = (callsBroken || gamingBroken) ? "Unstable for calls & gaming" : "Calls & gaming may lag"
             let streamingOk = streaming?.verdict == .good
             let streamNote = streamingOk ? " · 4K streaming is fine" : ""
-            if loss >= 1.0 && jitter >= 5.0 {
-                if inetLoss >= 1.0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0 {
+            if loss > 0 && jitter >= 5.0 {
+                if inetLoss > 0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0 {
                     let jitLabel = isWiFi ? "Wi-Fi jitter" : "jitter to router"
-                    subtitle = String(format: "%.0f%% internet packet loss · %.0fms %@%@", inetLoss, jitter, jitLabel, streamNote)
-                } else if effectiveGWLoss >= 1.0 && inetLoss < 1.0 {
+                    subtitle = String(format: "%@ internet packet loss · %.0fms %@%@", LossFormatter.formatPct(inetLoss), jitter, jitLabel, streamNote)
+                } else if effectiveGWLoss > 0 && inetLoss < 1.0 {
                     let lossLabel = isWiFi ? "Wi-Fi packet loss" : "packet loss to router"
-                    subtitle = String(format: "%.0f%% %@ · %.0fms jitter%@", effectiveGWLoss, lossLabel, jitter, streamNote)
+                    subtitle = String(format: "%@ %@ · %.0fms jitter%@", LossFormatter.formatPct(effectiveGWLoss), lossLabel, jitter, streamNote)
                 } else {
-                    subtitle = String(format: "%.0f%% packet loss · %.0fms jitter%@%@", loss, jitter, targetSuffix, streamNote)
+                    subtitle = String(format: "%@ · %.0fms jitter%@%@", LossFormatter.formatPacketLoss(loss), jitter, targetSuffix, streamNote)
                 }
-            } else if loss >= 1.0 {
-                if inetLoss >= 1.0 && effectiveGWLoss < 1.0 && isRouterCulprit {
-                    subtitle = String(format: "%.0f%% internet packet loss%@", inetLoss, streamNote)
-                } else if effectiveGWLoss >= 1.0 && inetLoss < 1.0 {
+            } else if loss > 0 {
+                if inetLoss > 0 && effectiveGWLoss < 1.0 && isRouterCulprit {
+                    subtitle = String(format: "%@ internet packet loss%@", LossFormatter.formatPct(inetLoss), streamNote)
+                } else if effectiveGWLoss > 0 && inetLoss < 1.0 {
                     let lossLabel = isWiFi ? "Wi-Fi packet loss" : "packet loss to router"
-                    subtitle = String(format: "%.0f%% %@%@", effectiveGWLoss, lossLabel, streamNote)
+                    subtitle = String(format: "%@ %@%@", LossFormatter.formatPct(effectiveGWLoss), lossLabel, streamNote)
                 } else {
-                    subtitle = String(format: "%.0f%% packet loss%@%@", loss, targetSuffix, streamNote)
+                    subtitle = String(format: "%@%@%@", LossFormatter.formatPacketLoss(loss), targetSuffix, streamNote)
                 }
             } else {
                 let ping = monitorSample?.internet.rttAvgMs ?? 0.0

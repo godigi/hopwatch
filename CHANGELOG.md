@@ -6,6 +6,11 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Sub-1% Packet Loss Formatting**: Display one decimal place for packet loss below 1% (e.g. `0.3% packet loss`) across the menu dropdown, status subtitles, experience cards, and dashboard vitals, instead of truncating/rounding to `0%`.
+- **False 0% Packet Loss on Warning**: Prevent internet hop node from displaying `"0% packet loss"` in amber/red warning styling when warned due to high latency, jitter, or application degradation; now accurately shows the contributing factor (e.g. latency/jitter or connection status).
+- **Effective Gateway Loss Clamping**: Fixed downstream validation in `SuitabilityEngine` to use `min(gwLoss, inetLoss)` instead of unconditionally overwriting router loss with internet loss, preventing false attribution of upstream packet loss to local Wi-Fi.
+
 ## [1.8.3] - 2026-09-26
 
 ### Changes

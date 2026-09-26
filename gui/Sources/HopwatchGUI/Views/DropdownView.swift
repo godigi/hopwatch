@@ -176,13 +176,17 @@ struct DropdownView: View {
 
     // MARK: - 3. Status Hero Section
 
-    private var stage: StageResolver.Stage {
-        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+    private var degradedExperience: StageResolver.DegradedSnapshot? {
+        SuitabilityEngine.synthesizeDegradedExperience(
             items: suitabilityItems,
             monitorSample: coordinator.monitor.latest,
             currentJitter: coordinator.currentJitter,
             effectiveLoss: coordinator.effectiveLoss
         )
+    }
+
+    private var stage: StageResolver.Stage {
+        let degraded = degradedExperience
         return StageResolver.resolve(.init(
             isScanning: coordinator.isScanning,
             isArrivalCheck: coordinator.isArrivalCheck,
@@ -509,11 +513,11 @@ struct DropdownView: View {
             return "Wi-Fi roamed"
         }
         let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        if let loss = coordinator.monitor.latest?.gateway.lossPct, loss >= 1.0 {
+        if let loss = coordinator.monitor.latest?.gateway.lossPct, loss > 0 {
             if inetLoss <= 1.0 && loss < 20.0 {
                 return routerGatewayIP ?? "default gateway"
             }
-            return String(format: "%.0f%% packet loss", loss)
+            return LossFormatter.formatPacketLoss(loss)
         }
         return routerGatewayIP ?? "default gateway"
     }
@@ -521,17 +525,31 @@ struct DropdownView: View {
     private var internetDetailText: String {
         let loss = coordinator.monitor.latest?.internet.lossPct ?? 0
         let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
-        if loss >= 1.0 && jitter >= 30.0 {
-            return String(format: "%.0f%% loss · %.0fms jit", loss, jitter)
+        let ping = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
+
+        if loss > 0 && jitter >= 30.0 {
+            return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
         }
-        if loss >= 1.0 {
-            return String(format: "%.0f%% packet loss", loss)
+        if loss > 0 {
+            return LossFormatter.formatPacketLoss(loss)
         }
         if jitter >= 30.0 && !isGatewayJitterDominant {
             return String(format: "%.0f ms jitter", jitter)
         }
         if icmpFiltered {
             return "Ping blocked"
+        }
+        if internetWarn {
+            if ping >= 120.0 {
+                return String(format: "%.0f ms latency", ping)
+            }
+            if jitter >= 20.0 {
+                return String(format: "%.0f ms jitter", jitter)
+            }
+            if let degHeadline = degradedExperience?.headline {
+                return degHeadline
+            }
+            return "Connection degraded"
         }
         return "0% packet loss"
     }

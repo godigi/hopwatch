@@ -338,7 +338,7 @@ struct LiveView: View {
 
     private var latestLoss: String {
         guard let l = currentLossPct else { return "—" }
-        return String(format: "%.0f%%", l)
+        return LossFormatter.formatPct(l)
     }
 
     private var lossTint: Color {
@@ -351,6 +351,7 @@ struct LiveView: View {
     private var lossDetail: String {
         guard let l = currentLossPct else { return "Measuring" }
         if l == 0 { return "0 drops" }
+        if l < 1.0 { return "\(LossFormatter.formatPct(l)) loss" }
         if l <= 2.0 { return "Minor loss" }
         return "Frequent drops"
     }

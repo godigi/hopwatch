@@ -266,7 +266,7 @@ public enum HopAttributionResolver {
                 reassurance = "\(localStatus). Complete packet loss past your router indicates an upstream ISP outage."
             } else if let loss = effectiveInetLoss, loss > 0 {
                 badgeTitle = "Culprit: Upstream Packet Loss"
-                reassurance = "\(localStatus). Packet loss (\(String(format: "%.0f%%", loss))) is occurring upstream on your ISP's broadband network."
+                reassurance = "\(localStatus). Packet loss (\(LossFormatter.formatPct(loss))) is occurring upstream on your ISP's broadband network."
             } else {
                 reassurance = "\(localStatus). The packet loss and downtime are upstream on your ISP's broadband network."
             }

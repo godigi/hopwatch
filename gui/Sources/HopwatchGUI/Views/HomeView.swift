@@ -645,7 +645,7 @@ struct HomeView: View {
             id: "gw-loss",
             icon: (!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network",
             label: "Packet loss to router",
-            measured: "\(Int(round(gwLoss)))%",
+            measured: LossFormatter.formatPct(gwLoss),
             subvalue: nil,
             usual: "0%",
             badge: gwLossBadge,
@@ -774,7 +774,7 @@ struct HomeView: View {
         ))
 
         // 9. Internet packet loss
-        let lossText = String(format: "%.0f%% / %.0f%%", loss1, loss2)
+        let lossText = "\(LossFormatter.formatPct(loss1)) / \(LossFormatter.formatPct(loss2))"
         let lossBadge: DashboardCheckTable.GradeBadge = {
             if loss1 >= 10.0 { return .init(label: "Unstable", tone: .critical) }
             if loss1 >= 3.0 { return .init(label: "Degraded", tone: .warn) }
@@ -1038,8 +1038,7 @@ struct HomeView: View {
             // Downstream internet is clean; isolated router drop is ICMP rate limiting
             return "0%"
         }
-        if loss < 1.0 { return "0%" }
-        return String(format: "%.0f%%", loss)
+        return LossFormatter.formatPct(loss)
     }
 
     private var routerJitterText: String {
@@ -1084,8 +1083,7 @@ struct HomeView: View {
         let loss = coordinator.monitor.latest?.internet.lossPct
             ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
             ?? 0
-        if loss < 1.0 { return "0%" }
-        return String(format: "%.0f%%", loss)
+        return LossFormatter.formatPct(loss)
     }
 
     private var internetJitterText: String {

@@ -808,6 +808,57 @@ import Testing
         #expect(gaming.verdict == .good)
         #expect(vpn.verdict == .good)
     }
+
+    @Test func subOnePercentLossDisplaysDecimalInMetricsAndSubtitle() {
+        var sample = MonitorSample()
+        sample.link = .init(up: true, type: "wifi")
+        sample.gateway = .init(lossPct: 0.0, rttAvgMs: 12.0, rttJitterMs: 2.0)
+        sample.internet = .init(lossPct: 0.3, rttAvgMs: 85.0, rttJitterMs: 6.0)
+
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 6.0,
+            effectiveLoss: 0.3
+        )
+
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        #expect(calls.metric.contains("0.3% loss"))
+
+        let gaming = SuitabilityEngine.evaluateGaming(inputs)
+        #expect(gaming.metric.contains("0.3% loss"))
+
+        let streaming = SuitabilityEngine.evaluateStreaming(inputs)
+        #expect(streaming.metric.contains("0.3% loss"))
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items,
+            monitorSample: sample,
+            currentJitter: 6.0,
+            effectiveLoss: 0.3
+        )
+
+        #expect(degraded != nil)
+        #expect(degraded?.subtitle.contains("0.3% loss") == true)
+
+        // When multiple activities are degraded, packet loss label appears in dual subtitle
+        let dualInputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 26.0,
+            effectiveLoss: 0.3
+        )
+        let dualItems = SuitabilityEngine.evaluateAll(dualInputs)
+        let degradedDual = SuitabilityEngine.synthesizeDegradedExperience(
+            items: dualItems,
+            monitorSample: sample,
+            currentJitter: 26.0,
+            effectiveLoss: 0.3
+        )
+        #expect(degradedDual != nil)
+        #expect(degradedDual?.subtitle.contains("0.3% packet loss") == true || degradedDual?.subtitle.contains("0.3% internet packet loss") == true)
+    }
 }
 
 

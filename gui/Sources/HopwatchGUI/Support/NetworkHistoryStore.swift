@@ -147,7 +147,7 @@ struct NetworkComparison: Sendable, Equatable {
             }
         }
         if let loss = currentLossPct, loss > 0 {
-            notes.append(String(format: "%.0f%% packet loss", loss))
+            notes.append(LossFormatter.formatPacketLoss(loss))
         }
         if notes.isEmpty {
             return "Typical performance for this network"

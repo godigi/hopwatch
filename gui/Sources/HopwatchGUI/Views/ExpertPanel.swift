@@ -184,7 +184,7 @@ struct ExpertPanel: View {
         table("Per-hop loss", rows: run.snapshot.mtr.hops.map { h in
             (h.lossPct.map { $0 > 0 } == true ? "exclamationmark" : "checkmark",
              "\(h.n ?? 0). \(h.ip ?? "???")",
-             "\(h.lossPct.map { String(format: "%.0f%% loss", $0) } ?? "—") · \(h.avgMs.map { String(format: "%.1f ms", $0) } ?? "—")")
+             "\(h.lossPct.map { LossFormatter.formatLoss($0) } ?? "—") · \(h.avgMs.map { String(format: "%.1f ms", $0) } ?? "—")")
         })
     }
 

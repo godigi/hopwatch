@@ -832,7 +832,7 @@ struct RunReportView: View {
         let primary = snapshot.internetLatency.lossPct
         let alt = snapshot.internetLatency.lossPctAlt
         guard primary != nil || alt != nil else { return absentReason }
-        func pct(_ v: Double?) -> String { v.map { String(format: "%.0f%%", $0) } ?? "?" }
+        func pct(_ v: Double?) -> String { v.map { LossFormatter.formatPct($0) } ?? "?" }
         let text = "\(pct(primary)) / \(pct(alt)) to two targets"
         // "clean" is not a verdict about the network, it is the reading:
         // both probes came back whole. Mirrors lib/headline.sh's own
@@ -909,10 +909,10 @@ struct RunReportView: View {
     private func format(_ value: Double?, _ fmt: String, loss: Double?) -> String {
         guard let value else {
             guard let loss, loss > 0 else { return absentReason }
-            return String(format: "%.0f%% loss, no reply", loss)
+            return "\(LossFormatter.formatLoss(loss)), no reply"
         }
         var text = String(format: fmt, value)
-        if let loss, loss > 0 { text += String(format: " · %.0f%% loss", loss) }
+        if let loss, loss > 0 { text += " · \(LossFormatter.formatLoss(loss))" }
         return text
     }
 
