@@ -281,7 +281,7 @@ wan_diagnosis_run() {
   if [ "$WAN_DOUBLE_NAT" -eq 1 ]; then
     local _isp_note=""
     [ -n "$WAN_NAT_ISP_CHAIN" ] && _isp_note=", then your ISP transit ($WAN_NAT_ISP_CHAIN)"
-    add_diag warn NAT-1 "You have ${WAN_NAT_HOME_COUNT} routers chained together in your home (${WAN_NAT_HOME_CHAIN})${_isp_note}. That breaks games, Plex, Steam in-home streaming, video doorbells, and anything else that needs to \"open a port\" — incoming connections get lost between the routers. Fix: log into the outer router's admin page and set it to \"bridge mode\" or \"access-point mode\" so the inner router does the routing alone."
+    add_diag warn NAT-1 "You have ${WAN_NAT_HOME_COUNT} routers chained together in your home (${WAN_NAT_HOME_CHAIN})${_isp_note}. That can interfere with peer-to-peer game hosting, Plex, Steam in-home streaming, video doorbells, and anything else that needs to \"open a port\" — incoming connections get lost between the routers. Fix: log into the outer router's admin page and set it to \"bridge mode\" or \"access-point mode\" so the inner router does the routing alone."
   elif [ "$WAN_NAT_ISP_COUNT" -gt 1 ]; then
     add_diag info NAT-1b "Your ISP routes you through their internal network (${WAN_NAT_ISP_CHAIN}) before reaching the public internet. That's their normal setup, not a problem on your end; mentioning it because it explains why traceroute shows private-network addresses several hops in."
   fi

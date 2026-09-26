@@ -205,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             // the app the conventional way rather than continue launching.
             NSApp.terminate(nil)
         }
+        CrashReporter.start()
     }
 
     @MainActor

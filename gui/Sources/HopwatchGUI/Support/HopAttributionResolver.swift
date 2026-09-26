@@ -153,16 +153,19 @@ public enum HopAttributionResolver {
         }
 
         // 2. Evaluate Local Router Health
+        let isIcmpFiltered = ruleSet.contains("TCP-1") || ruleSet.contains("ICMP-1")
+        let effectiveInetLoss = isIcmpFiltered ? nil : inetLoss
+        let isIsolatedGatewayLoss = (effectiveInetLoss != nil && effectiveInetLoss! <= 1.0 && (gatewayLoss ?? 0) < 20.0)
+        let isRealGatewayLoss = (gatewayLoss != nil && gatewayLoss! >= 10 && wifiHealth == .healthy && !recentRoamed && !isIsolatedGatewayLoss)
+
         var routerHealth: HopHealth = .healthy
-        if !ruleSet.isDisjoint(with: routerCriticalRules) || (gatewayLoss != nil && gatewayLoss! >= 10 && wifiHealth == .healthy && !recentRoamed) {
+        if !ruleSet.isDisjoint(with: routerCriticalRules) || isRealGatewayLoss {
             routerHealth = .critical
         } else if !ruleSet.isDisjoint(with: routerWarningRules) || (bufferbloatGW != nil && bufferbloatGW! >= 150) {
             routerHealth = .warning
         }
 
         // 3. Evaluate Internet / ISP Health
-        let isIcmpFiltered = ruleSet.contains("TCP-1") || ruleSet.contains("ICMP-1")
-        let effectiveInetLoss = isIcmpFiltered ? nil : inetLoss
         var ispHealth: HopHealth = .healthy
         if !ruleSet.isDisjoint(with: ispCriticalRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 10) {
             ispHealth = .critical

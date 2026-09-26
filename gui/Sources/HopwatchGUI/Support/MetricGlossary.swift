@@ -95,7 +95,7 @@ public enum MetricGlossary {
             key: "router",
             title: "Router (Local Gateway)",
             summary: "The physical router in your home or office that bridges your Mac to the wider internet.",
-            impact: "High latency or packet loss to your router points to local Wi-Fi interference, a damaged cable, or a struggling router, rather than an issue with your ISP."
+            impact: "High latency or sustained loss to your router points to Wi-Fi interference, a bad cable, or router struggle. Note: if internet loss is 0%, isolated router ping drops are normal ICMP rate-limiting by the router's CPU and do not affect gaming, calls, or browsing."
         ),
         Entry(
             key: "internet",

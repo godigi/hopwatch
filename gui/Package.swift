@@ -20,9 +20,15 @@ import PackageDescription
 let package = Package(
     name: "HopwatchGUI",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.40.0")
+    ],
     targets: [
         .executableTarget(
             name: "HopwatchGUI",
+            dependencies: [
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ],
             path: "Sources/HopwatchGUI"
         ),
         .testTarget(

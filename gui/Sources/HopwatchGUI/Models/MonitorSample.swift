@@ -288,7 +288,11 @@ struct MonitorSample: Decodable, Sendable {
         case "warn":     return .warning
         default:
             if status.degraded { return .warning }
-            let loss = max(internet.lossPct ?? 0, gateway.lossPct ?? 0)
+            let inetLoss = internet.lossPct ?? 0
+            let gwLoss = gateway.lossPct ?? 0
+            // Downstream validation: if internet is healthy (<= 1.0%), isolated router loss
+            // (< 20%) is control-plane rate limiting and does not degrade user traffic.
+            let loss = (inetLoss <= 1.0 && gwLoss < 20.0) ? inetLoss : max(inetLoss, gwLoss)
             if loss > 2.0 { return .warning }
             return .healthy
         }

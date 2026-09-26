@@ -992,8 +992,14 @@ struct HomeView: View {
         if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) < 10.0 {
             return false
         }
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0
+        if inetLoss <= 1.0 && gwLoss < 20.0 {
+            return firedCategories.contains("router")
+                || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
+        }
         return firedCategories.contains("router")
-            || ((coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0) >= 5.0)
+            || (gwLoss >= 5.0)
             || ((coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0) > 30)
     }
 
@@ -1009,6 +1015,13 @@ struct HomeView: View {
             ?? 0
         if coordinator.hasRecentRoam && loss < 10.0 {
             return "roamed"
+        }
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct
+            ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
+            ?? 0
+        if inetLoss <= 1.0 && loss < 20.0 {
+            // Downstream internet is clean; isolated router drop is ICMP rate limiting
+            return "0%"
         }
         if loss < 1.0 { return "0%" }
         return String(format: "%.0f%%", loss)

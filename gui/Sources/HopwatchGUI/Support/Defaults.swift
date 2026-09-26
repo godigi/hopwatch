@@ -43,6 +43,7 @@ enum Defaults {
             Key.notificationsEnabled: true,
             Key.notificationScope: "all",
             Key.showInDock: false,
+            Key.crashReportingEnabled: true,
         ])
 
         // On first launch of com.godigi.hopwatch, import legacy user preferences
@@ -110,6 +111,14 @@ enum Defaults {
         static let lastNotifiedUpdateVersion = "lastNotifiedUpdateVersion"
         static let locationBannerDismissed = "locationBannerDismissed"
         static let phaseDurationSamples = "phaseDurationSamples"
+        static let crashReportingEnabled = "crashReportingEnabled"
+    }
+
+    // MARK: - Crash Reporting
+
+    static var crashReportingEnabled: Bool {
+        get { d.object(forKey: Key.crashReportingEnabled) as? Bool ?? true }
+        set { d.set(newValue, forKey: Key.crashReportingEnabled) }
     }
 
     // MARK: - Updates

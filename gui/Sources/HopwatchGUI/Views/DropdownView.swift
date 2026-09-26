@@ -474,7 +474,12 @@ struct DropdownView: View {
         if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
             return false
         }
-        return firedCategories.contains("router") || ((coordinator.monitor.latest?.gateway.lossPct ?? 0) >= 5.0)
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
+        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
+        if inetLoss <= 1.0 && gwLoss < 20.0 {
+            return firedCategories.contains("router")
+        }
+        return firedCategories.contains("router") || (gwLoss >= 5.0)
     }
 
     private var internetWarn: Bool {
@@ -487,7 +492,11 @@ struct DropdownView: View {
         if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
             return "Wi-Fi roamed"
         }
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
         if let loss = coordinator.monitor.latest?.gateway.lossPct, loss >= 1.0 {
+            if inetLoss <= 1.0 && loss < 20.0 {
+                return routerGatewayIP ?? "default gateway"
+            }
             return String(format: "%.0f%% packet loss", loss)
         }
         return routerGatewayIP ?? "default gateway"

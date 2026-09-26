@@ -652,7 +652,7 @@ import Testing
             effectiveLoss: 16.0
         )
 
-        let items = SuitabilityEngine.evaluateAll(inputs)
+        _ = SuitabilityEngine.evaluateAll(inputs)
         // With 16% loss, Calls and Gaming will also degrade if present.
         // Test streaming in isolation to verify its headline synthesizer:
         let streamingItem = SuitabilityEngine.evaluateStreaming(inputs)
@@ -666,4 +666,59 @@ import Testing
         #expect(degraded?.headline == "Severe packet loss buffering video")
         #expect(degraded?.subtitle.contains("16% loss") == true)
     }
+
+    @Test func isolatedRouterLossWithCleanInternetDoesNotDegradeCallsOrGaming() {
+        // Router drops 6% of pings due to control-plane rate limiting, but internet loss is 0%
+        var sample = MonitorSample()
+        sample.link = .init(up: true, type: "wifi")
+        sample.gateway = .init(lossPct: 6.0, rttAvgMs: 2.5, rttJitterMs: 1.5)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 18.0, rttJitterMs: 2.0)
+
+        // Effective loss should reflect downstream reality (0.0%), not isolated router ping loss
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let calls = items.first(where: { $0.id == "calls" })
+        let gaming = items.first(where: { $0.id == "gaming" })
+
+        #expect(calls?.verdict == .good)
+        #expect(calls?.status == "Clear audio" || calls?.status == "HD video ready")
+        #expect(gaming?.verdict == .good)
+        #expect(gaming?.status == "Responsive" || gaming?.status == "Smooth")
+
+        // No degraded experience banner should be synthesized
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items,
+            monitorSample: sample,
+            currentJitter: 2.0,
+            effectiveLoss: 0.0
+        )
+        #expect(degraded == nil)
+    }
+
+    @Test func doubleNatDoesNotDegradeGamingSuitability() {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 25.0, rttJitterMs: 3.0)
+
+        // When Double NAT is present (isDoubleNat: true, or fired NAT-1/NAT-1b rule),
+        // gaming should remain Smooth/Responsive, not degraded or "Lag likely".
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            firedRules: ["NAT-1", "NAT-1b"],
+            isLinkUp: true,
+            isDoubleNat: true,
+            currentJitter: 3.0,
+            effectiveLoss: 0.0
+        )
+
+        let gaming = SuitabilityEngine.evaluateGaming(inputs)
+        #expect(gaming.verdict == .good)
+        #expect(gaming.status == "Responsive" || gaming.status == "Smooth")
+    }
 }
+

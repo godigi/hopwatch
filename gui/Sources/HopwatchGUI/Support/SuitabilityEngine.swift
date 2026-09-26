@@ -752,10 +752,13 @@ enum SuitabilityEngine {
 
         let gwLoss = monitorSample?.gateway.lossPct ?? 0.0
         let inetLoss = effectiveLoss ?? monitorSample?.internet.lossPct ?? 0.0
-        let loss = max(gwLoss, inetLoss)
+        // Downstream validation: if internet loss is clean (< 2.0%), isolated router loss (< 20%)
+        // is control-plane rate limiting and does not indicate data-plane link drops.
+        let effectiveGWLoss = (inetLoss < 2.0 && gwLoss < 20.0) ? inetLoss : gwLoss
+        let loss = max(effectiveGWLoss, inetLoss)
         let jitter = currentJitter ?? monitorSample?.internet.rttJitterMs ?? 0.0
         let isWiFi = monitorSample?.link.isWiFi ?? false
-        let isRouterCulprit = gwLoss >= 2.0 || (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0
+        let isRouterCulprit = (effectiveGWLoss >= 2.0) || (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0
         let targetSuffix = isRouterCulprit ? (isWiFi ? " on Wi-Fi" : " to router") : ""
 
         var affected: [String] = []
@@ -775,18 +778,18 @@ enum SuitabilityEngine {
                 if inetLoss >= 1.0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0 {
                     let jitLabel = isWiFi ? "Wi-Fi jitter" : "jitter to router"
                     subtitle = String(format: "%.0f%% internet packet loss · %.0fms %@%@", inetLoss, jitter, jitLabel, streamNote)
-                } else if gwLoss >= 1.0 && inetLoss < 1.0 {
+                } else if effectiveGWLoss >= 1.0 && inetLoss < 1.0 {
                     let lossLabel = isWiFi ? "Wi-Fi packet loss" : "packet loss to router"
-                    subtitle = String(format: "%.0f%% %@ · %.0fms jitter%@", gwLoss, lossLabel, jitter, streamNote)
+                    subtitle = String(format: "%.0f%% %@ · %.0fms jitter%@", effectiveGWLoss, lossLabel, jitter, streamNote)
                 } else {
                     subtitle = String(format: "%.0f%% packet loss · %.0fms jitter%@%@", loss, jitter, targetSuffix, streamNote)
                 }
             } else if loss >= 1.0 {
-                if inetLoss >= 1.0 && gwLoss < 1.0 && isRouterCulprit {
+                if inetLoss >= 1.0 && effectiveGWLoss < 1.0 && isRouterCulprit {
                     subtitle = String(format: "%.0f%% internet packet loss%@", inetLoss, streamNote)
-                } else if gwLoss >= 1.0 && inetLoss < 1.0 {
+                } else if effectiveGWLoss >= 1.0 && inetLoss < 1.0 {
                     let lossLabel = isWiFi ? "Wi-Fi packet loss" : "packet loss to router"
-                    subtitle = String(format: "%.0f%% %@%@", gwLoss, lossLabel, streamNote)
+                    subtitle = String(format: "%.0f%% %@%@", effectiveGWLoss, lossLabel, streamNote)
                 } else {
                     subtitle = String(format: "%.0f%% packet loss%@%@", loss, targetSuffix, streamNote)
                 }

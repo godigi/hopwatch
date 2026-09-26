@@ -1349,6 +1349,13 @@ final class HopwatchCoordinator {
         }
 
         if let inetLoss, let candidateGW {
+            // Downstream validation: Packets to the internet must traverse the local gateway.
+            // If internet through-traffic is clean (loss < 2%), any isolated router ping loss
+            // is harmless ICMP control-plane rate-limiting by the router's CPU, NOT physical
+            // link loss. Only propagate gateway loss when internet also shows loss or is unmeasured.
+            if inetLoss < 2.0 && candidateGW > inetLoss {
+                return inetLoss
+            }
             return max(inetLoss, candidateGW)
         }
         return inetLoss ?? candidateGW

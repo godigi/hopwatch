@@ -152,13 +152,13 @@ import Testing
         )
         #expect(coord.activeResolution != nil)
 
-        // Incoming sample with 3% router loss must invalidate resolution immediately
+        // Incoming sample with 3% packet loss must invalidate resolution immediately
         var lossSample = MonitorSample()
         lossSample.link.up = true
         lossSample.status.measurement = "measured"
         lossSample.status.severity = "ok"
         lossSample.gateway.lossPct = 3.0
-        lossSample.internet.lossPct = 0.0
+        lossSample.internet.lossPct = 3.0
 
         coord.monitor.onSample?(lossSample)
         #expect(coord.activeResolution == nil)
@@ -213,9 +213,15 @@ import Testing
         sample.link.up = true
         sample.status.measurement = "measured"
         sample.status.severity = "ok"
+
+        // 1. Elevated internet loss triggers warning
+        sample.gateway.lossPct = 0.0
+        sample.internet.lossPct = 3.0
+        #expect(sample.health == .warning)
+
+        // 2. Isolated router ping loss with clean internet stays healthy (harmless ICMP rate limiting)
         sample.gateway.lossPct = 3.0
         sample.internet.lossPct = 0.0
-
-        #expect(sample.health == .warning)
+        #expect(sample.health == .healthy)
     }
 }

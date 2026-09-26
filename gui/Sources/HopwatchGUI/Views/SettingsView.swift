@@ -138,6 +138,13 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            Section("Crash Reporting & Privacy") {
+                Toggle("Share anonymous crash reports", isOn: $appSettings.crashReportingEnabled)
+                Text("Automatically sends crash stack traces to help diagnose unexpected quits. Usernames and personal file paths are redacted, and no network names or traffic are recorded.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
         // Each slider now applies on its own release (onEditingChanged

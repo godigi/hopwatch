@@ -1608,15 +1608,11 @@ RULES: list[dict[str, object]] = [
             "or access-point mode usually fixes it."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1--double-nat-detected",
-        # Not "broken". Double NAT breaks *inbound* connections — port
-        # forwarding, UPnP, hosting — and modern multiplayer runs outbound
-        # to matchmaking servers, so it plays. What you get is Strict /
-        # Type-3 NAT: slower matchmaking, cannot host, some peers
-        # unreachable, party chat flaky. The rule's own prose says it
-        # "breaks games", which is loose — the things it truly breaks are
-        # the port-forwarding-dependent ones (Plex, Steam in-home
-        # streaming, doorbells) and those have no row here.
-        "impacts": {"gaming": "degraded", "vpn": "degraded"},
+        # Double NAT breaks inbound connections (hosting, incoming port forwarding)
+        # but modern multiplayer connects outbound to dedicated game servers, so
+        # actual gameplay ping and latency are unaffected. VPN tunnels (especially
+        # incoming peer tunnels or strict corporate endpoints) may face traversal issues.
+        "impacts": {"vpn": "degraded"},
         "fix": (
             "Log into the outer router's admin page and switch it to "
             "\"bridge mode\" or \"access point mode\" so the inner "
@@ -1646,9 +1642,6 @@ RULES: list[dict[str, object]] = [
             "shows private-network addresses partway along the path."
         ),
         "doc": "DIAGNOSIS-RULES.md#nat-1b--isp-side-private-transit-not-your-double-nat",
-        # Same reasoning as NAT-1: inbound reach is what suffers, and a
-        # game that connects outbound still plays.
-        "impacts": {"gaming": "degraded", "vpn": "degraded"},
         "fix": (
             "Nothing to fix — this is normal for how your ISP built "
             "their own network, not a fault. It only explains why a "

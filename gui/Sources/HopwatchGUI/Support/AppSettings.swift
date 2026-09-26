@@ -85,6 +85,12 @@ final class AppSettings {
             NSApp?.setActivationPolicy(showInDock ? .regular : .accessory)
         }
     }
+    var crashReportingEnabled: Bool {
+        didSet {
+            Defaults.crashReportingEnabled = crashReportingEnabled
+            CrashReporter.setEnabled(crashReportingEnabled)
+        }
+    }
     var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != oldValue else { return }
@@ -138,6 +144,7 @@ final class AppSettings {
         notificationsEnabled = Defaults.notificationsEnabled
         notificationScope = NotificationScope(rawValue: Defaults.notificationScope) ?? .all
         showInDock = Defaults.showInDock
+        crashReportingEnabled = Defaults.crashReportingEnabled
         launchAtLogin = SMAppService.mainApp.status == .enabled
         if showInDock {
             NSApp?.setActivationPolicy(.regular)
