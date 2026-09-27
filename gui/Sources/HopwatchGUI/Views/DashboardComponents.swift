@@ -206,6 +206,12 @@ struct DashboardRouteView: View {
     var culpritHop: String? = nil
     var routerAdminURL: URL? = nil
     var routerAdminAvailable: Bool = false
+    var internetDetailText: String? = nil
+    var routerDetailText: String? = nil
+    var isCritical: Bool = false
+    var isWiFi: Bool = true
+    var macStatusGood: Bool = true
+    var isWifiLaggy: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -239,7 +245,7 @@ struct DashboardRouteView: View {
                         path.addLine(to: CGPoint(x: x2 - 28, y: lineY))
                     }
                     .stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle(routerWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6))
+                    .foregroundStyle((routerWarn || isWifiLaggy) ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6))
 
                     // Dashed line hop2 -> hop3
                     Path { path in
@@ -250,9 +256,10 @@ struct DashboardRouteView: View {
                     .foregroundStyle(internetWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6))
 
                     // Intermediate labels
-                    Text("Wi-Fi · local connection")
+                    let firstLink = isWiFi ? (isWifiLaggy ? "Wi-Fi (laggy) · local connection" : "Wi-Fi · local connection") : "Wired · local connection"
+                    Text(firstLink)
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.ColorToken.muted)
+                        .foregroundStyle(isWifiLaggy ? Theme.ColorToken.amber : Theme.ColorToken.muted)
                         .position(x: (x1 + x2) / 2.0, y: lineY + 14)
 
                     Text("Broadband · internet connection")
@@ -265,13 +272,15 @@ struct DashboardRouteView: View {
                     // Hop 1: This Mac
                     VStack(spacing: 3) {
                         VStack(spacing: 2) {
-                            Text("Wi-Fi signal")
+                            Text(isWiFi ? "Wi-Fi signal" : "Interface link")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Theme.ColorToken.muted)
                             HStack(alignment: .firstTextBaseline, spacing: 3) {
                                 Text(wifiSignalText)
-                                    .font(.system(size: 20, weight: .semibold))
+                                    .font(.system(size: (wifiSignalText.contains("laggy") ? 16 : 20), weight: .semibold))
                                     .foregroundStyle(wifiSignalTint)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                                 Text(wifiSignalDetail)
                                     .font(.system(size: 11))
                                     .foregroundStyle(Theme.ColorToken.muted)
@@ -279,7 +288,14 @@ struct DashboardRouteView: View {
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "laptopcomputer", isWarning: false, flag: nil, isCulprit: false)
+                        let isMacCulprit = culpritHop == "wifi" || culpritHop == "mac"
+                        hopNode(
+                            icon: isWiFi ? "laptopcomputer" : "cable.connector",
+                            isWarning: !macStatusGood || isWifiLaggy,
+                            flag: nil,
+                            isCulprit: isMacCulprit,
+                            isCritical: isCritical
+                        )
 
                         Text("This Mac")
                             .font(.system(size: 12, weight: .semibold))
@@ -308,23 +324,34 @@ struct DashboardRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                             HStack(alignment: .firstTextBaseline, spacing: 2) {
                                 Text(routerPingText)
-                                    .font(.system(size: 20, weight: .semibold))
+                                    .font(.system(size: routerPingText == "no reply" ? 14 : 20, weight: .semibold))
                                     .foregroundStyle(routerPingTint)
-                                Text("ms")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.ColorToken.muted)
+                                if routerPingText != "—" && routerPingText != "no reply" {
+                                    Text("ms")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+                                }
                             }
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "network", isWarning: routerWarn, flag: nil, isCulprit: culpritHop == "router")
+                        hopNode(icon: "network", isWarning: routerWarn, flag: nil, isCulprit: culpritHop == "router", isCritical: isCritical)
 
                         Text("Router")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 7)
 
-                        if routerAdminAvailable, let routerAdminURL {
+                        if routerWarn, let detail = routerDetailText, !detail.isEmpty {
+                            Text(detail)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber)
+                                .lineLimit(1)
+                            Text("\(routerIP) · gateway")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        } else if routerAdminAvailable, let routerAdminURL {
                             Button {
                                 NSWorkspace.shared.open(routerAdminURL)
                             } label: {
@@ -362,23 +389,41 @@ struct DashboardRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                             HStack(alignment: .firstTextBaseline, spacing: 2) {
                                 Text(internetPingText)
-                                    .font(.system(size: 20, weight: .semibold))
+                                    .font(.system(size: (internetPingText == "no reply" || internetPingText == "TCP ok") ? 14 : 20, weight: .semibold))
                                     .foregroundStyle(internetPingTint)
-                                Text("ms")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.ColorToken.muted)
+                                if internetPingText != "—" && internetPingText != "no reply" && internetPingText != "TCP ok" {
+                                    Text("ms")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+                                }
                             }
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "globe", isWarning: internetWarn, flag: countryFlag, isCulprit: culpritHop == "internet")
+                        hopNode(icon: "globe", isWarning: internetWarn, flag: countryFlag, isCulprit: culpritHop == "internet", isCritical: isCritical)
 
                         Text("Internet")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 7)
 
-                        if let isp = ispName, !isp.isEmpty {
+                        if internetWarn, let detail = internetDetailText, !detail.isEmpty {
+                            Text(detail)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber)
+                                .lineLimit(1)
+                            if let isp = ispName, !isp.isEmpty {
+                                Text(isp)
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                                    .lineLimit(1)
+                            } else if let countryName, !countryName.isEmpty {
+                                Text(countryName)
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                                    .lineLimit(1)
+                            }
+                        } else if let isp = ispName, !isp.isEmpty {
                             Text(isp)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(Theme.ColorToken.ink)
@@ -520,27 +565,30 @@ struct DashboardRouteView: View {
         )
     }
 
-    private func hopNode(icon: String, isWarning: Bool, flag: String?, isCulprit: Bool) -> some View {
-        ZStack {
+    private func hopNode(icon: String, isWarning: Bool, flag: String?, isCulprit: Bool, isCritical: Bool = false) -> some View {
+        let culpritTint = isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
+        let culpritWash = isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash
+
+        return ZStack {
             Circle()
-                .fill(isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground)
+                .fill(isCulprit ? culpritWash : (isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground))
                 .frame(width: 44, height: 44)
                 .overlay(
                     Circle()
-                        .strokeBorder(isCulprit ? Theme.ColorToken.red : (isWarning ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.line), lineWidth: isCulprit ? 2 : 1)
+                        .strokeBorder(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.line), lineWidth: isCulprit ? 2 : 1)
                 )
-                .shadow(color: isCulprit ? Theme.ColorToken.red.opacity(0.15) : Color.black.opacity(0.04), radius: isCulprit ? 5 : 3, y: 1)
+                .shadow(color: isCulprit ? culpritTint.opacity(0.15) : Color.black.opacity(0.04), radius: isCulprit ? 5 : 3, y: 1)
 
             Image(systemName: icon)
                 .font(.system(size: 20))
-                .foregroundStyle(isCulprit ? Theme.ColorToken.red : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
+                .foregroundStyle(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
 
             // Status Check or Warning Badge
             Circle()
-                .fill(isCulprit ? Theme.ColorToken.red : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
+                .fill(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
                 .frame(width: 15, height: 15)
                 .overlay(
-                    Image(systemName: isWarning ? "exclamationmark" : "checkmark")
+                    Image(systemName: (isWarning || isCulprit) ? "exclamationmark" : "checkmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.white)
                 )
@@ -553,7 +601,7 @@ struct DashboardRouteView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1.5)
-                    .background(Theme.ColorToken.red)
+                    .background(culpritTint)
                     .clipShape(Capsule())
                     .offset(y: -26)
             }
@@ -582,6 +630,7 @@ struct DashboardLiveChartPanel: View {
     let samples: [MonitorSample]
     @Binding var selectedWindowMinutes: Int
     let isBursting: Bool
+    var burstUntil: Date? = nil
     let onToggleBurst: () -> Void
 
     private var filteredSamples: [MonitorSample] {
@@ -590,7 +639,7 @@ struct DashboardLiveChartPanel: View {
     }
 
     private var internetSeries: MonitorSeries.Result {
-        MonitorSeries.build(filteredSamples, tier: "medium") { sample in
+        MonitorSeries.build(filteredSamples, tier: "fast") { sample in
             sample.status.icmpFiltered ? nil : sample.internet.rttAvgMs
         }
     }
@@ -628,9 +677,26 @@ struct DashboardLiveChartPanel: View {
                     Text("Ping over time")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.ColorToken.ink)
-                    Text("Live samples · last hour retained")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.ColorToken.muted)
+                    if isBursting {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Theme.ColorToken.blue)
+                                .frame(width: 6, height: 6)
+                            if let until = burstUntil {
+                                Text("Testing latency · 2s interval until \(until.formatted(date: .omitted, time: .standard))")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Theme.ColorToken.blue)
+                            } else {
+                                Text("Testing latency · sampling every \(Defaults.latencyTestInterval)s")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Theme.ColorToken.blue)
+                            }
+                        }
+                    } else {
+                        Text("Live samples · last hour retained")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
                 }
 
                 Spacer()
@@ -756,23 +822,45 @@ struct DashboardLiveChartPanel: View {
 
             // Chart Actions Bar
             HStack {
-                Text("Response time in ms · lower is better")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.ColorToken.muted)
+                if isBursting {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Sampling fast cadence (every \(Defaults.latencyTestInterval)s)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.blue)
+                    }
+                } else {
+                    Text("Response time in ms · lower is better")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
 
                 Spacer()
 
                 Button(action: onToggleBurst) {
-                    Text(isBursting ? "Stop latency test" : "Start latency test")
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(Theme.ColorToken.nodeBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
-                        )
+                    HStack(spacing: 5) {
+                        if isBursting {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 8))
+                            Text("Stop latency test")
+                                .font(.system(size: 11, weight: .semibold))
+                        } else {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 9))
+                            Text("Start latency test")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                    }
+                    .foregroundStyle(isBursting ? Theme.ColorToken.blue : Theme.ColorToken.ink)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(isBursting ? Theme.ColorToken.blueWash : Theme.ColorToken.nodeBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isBursting ? Theme.ColorToken.blue.opacity(0.35) : Theme.ColorToken.line, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -1106,12 +1194,186 @@ struct DashboardCheckTable: View {
 
 // MARK: - 7. Vitals Cards (Speed & Reliability)
 
+/// Custom visual progress bar for in-flight speed tests, providing continuous animation
+/// and live throughput / percentage metrics.
+struct SpeedTestProgressBarView: View {
+    let speed: ScanProgress.Speed?
+
+    private var direction: ScanProgress.Speed.Direction {
+        speed?.direction ?? .prep
+    }
+
+    private var stageTitle: String {
+        guard let speed = speed else {
+            return "Connecting to speed test server…"
+        }
+        switch speed.direction {
+        case .download: return "Testing download bandwidth…"
+        case .upload:   return "Testing upload bandwidth…"
+        case .ping:     return "Testing latency & jitter…"
+        case .prep:     return "Connecting to server…"
+        case .other:    return speed.stage.isEmpty ? "Testing speed…" : PhaseLabel.humanised(speed.stage)
+        }
+    }
+
+    private var stageIcon: (name: String, color: Color) {
+        switch direction {
+        case .download:
+            return ("arrow.down.circle.fill", Theme.ColorToken.green)
+        case .upload:
+            return ("arrow.up.circle.fill", Theme.ColorToken.blue)
+        case .ping:
+            return ("waveform.path", Theme.ColorToken.amber)
+        case .prep, .other:
+            return ("gauge.with.dots.needle.bottom.50percent", Theme.ColorToken.blue)
+        }
+    }
+
+    private var progressGradient: LinearGradient {
+        switch direction {
+        case .download:
+            return LinearGradient(
+                colors: [Color.green.opacity(0.85), Color.teal],
+                startPoint: .leading, endPoint: .trailing
+            )
+        case .upload:
+            return LinearGradient(
+                colors: [Color.blue.opacity(0.85), Color.cyan],
+                startPoint: .leading, endPoint: .trailing
+            )
+        case .ping:
+            return LinearGradient(
+                colors: [Color.orange.opacity(0.85), Theme.ColorToken.amber],
+                startPoint: .leading, endPoint: .trailing
+            )
+        case .prep, .other:
+            return LinearGradient(
+                colors: [Theme.ColorToken.blue.opacity(0.6), Theme.ColorToken.blue],
+                startPoint: .leading, endPoint: .trailing
+            )
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Stage Status and Live Throughput Pill
+            HStack(spacing: 6) {
+                Image(systemName: stageIcon.name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(stageIcon.color)
+
+                Text(stageTitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.ink)
+
+                Spacer()
+
+                if let mbps = speed?.mbps, (direction == .download || direction == .upload) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(direction == .download ? Theme.ColorToken.green : Theme.ColorToken.blue)
+                            .frame(width: 5, height: 5)
+                        Text(String(format: "%.1f Mbps", mbps))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Theme.ColorToken.neutralWash)
+                    .clipShape(Capsule())
+                } else if let progress = speed?.progress, progress > 0 {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            }
+
+            // Custom Visual Progress Track
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Theme.ColorToken.neutralWash)
+                        .frame(height: 6)
+
+                    if let progress = speed?.progress, progress > 0 {
+                        let clamped = min(max(progress, 0.0), 1.0)
+                        let barWidth = max(6, geo.size.width * CGFloat(clamped))
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(progressGradient)
+                            .frame(width: barWidth, height: 6)
+                            .animation(.easeOut(duration: 0.2), value: progress)
+                    } else {
+                        IndeterminateSpeedShimmer(gradient: progressGradient, totalWidth: geo.size.width)
+                    }
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Shimmer animation bar used when the speed test backend doesn't emit continuous fractions
+/// or while waiting for throughput stages to spin up.
+struct IndeterminateSpeedShimmer: View {
+    let gradient: LinearGradient
+    let totalWidth: CGFloat
+    @State private var offsetFraction: CGFloat = 0.0
+
+    var body: some View {
+        let pillWidth = max(40, totalWidth * 0.3)
+        let travelDistance = max(0, totalWidth - pillWidth)
+        RoundedRectangle(cornerRadius: 3)
+            .fill(gradient)
+            .frame(width: pillWidth, height: 6)
+            .offset(x: offsetFraction * travelDistance)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                    offsetFraction = 1.0
+                }
+            }
+    }
+}
+
 struct DashboardSpeedCard: View {
     let downMbps: String
     let upMbps: String
     let testedMeta: String?
     let isScanning: Bool
+    var isSpeedTesting: Bool = false
+    var speedProgress: ScanProgress.Speed? = nil
     let onRunSpeedTest: () -> Void
+    var onCancelSpeedTest: (() -> Void)? = nil
+
+    private var displayedDownMbps: String {
+        if isSpeedTesting, let speed = speedProgress {
+            if speed.direction == .download, let mbps = speed.mbps {
+                return String(format: "%.1f", mbps)
+            } else if let dl = speed.downloadMbps {
+                return String(format: "%.1f", dl)
+            }
+        }
+        return downMbps
+    }
+
+    private var displayedUpMbps: String {
+        if isSpeedTesting, let speed = speedProgress {
+            if speed.direction == .upload, let mbps = speed.mbps {
+                return String(format: "%.1f", mbps)
+            } else if let ul = speed.uploadMbps {
+                return String(format: "%.1f", ul)
+            }
+        }
+        return upMbps
+    }
+
+    private var isDownloadActive: Bool {
+        isSpeedTesting && speedProgress?.direction == .download
+    }
+
+    private var isUploadActive: Bool {
+        isSpeedTesting && speedProgress?.direction == .upload
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1128,27 +1390,44 @@ struct DashboardSpeedCard: View {
 
                 Spacer()
 
-                Button(action: onRunSpeedTest) {
-                    HStack(spacing: 4) {
-                        if isScanning {
-                            ProgressView()
-                                .controlSize(.mini)
-                            Text("Testing…")
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("Test Speed")
+                if isSpeedTesting {
+                    Button(action: { onCancelSpeedTest?() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("Cancel")
                         }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.ColorToken.neutralWash)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.ColorToken.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.ColorToken.blueWash)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .buttonStyle(.plain)
+                } else {
+                    Button(action: onRunSpeedTest) {
+                        HStack(spacing: 4) {
+                            if isScanning {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                Text("Testing…")
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("Test Speed")
+                            }
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.ColorToken.blueWash)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isScanning)
                 }
-                .buttonStyle(.plain)
-                .disabled(isScanning)
             }
 
             // Speed Metrics
@@ -1160,12 +1439,21 @@ struct DashboardSpeedCard: View {
                         .foregroundStyle(Theme.ColorToken.green)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(downMbps)
+                            Text(displayedDownMbps)
                                 .font(.system(size: 20, weight: .bold, design: .monospaced))
-                                .foregroundStyle(downMbps == "—" ? Theme.ColorToken.muted : Theme.ColorToken.ink)
+                                .foregroundStyle(displayedDownMbps == "—" ? Theme.ColorToken.muted : (isDownloadActive ? Theme.ColorToken.green : Theme.ColorToken.ink))
                             Text("Mbps")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(Theme.ColorToken.muted)
+                            if isDownloadActive {
+                                Text("LIVE")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Theme.ColorToken.green)
+                                    .clipShape(Capsule())
+                            }
                         }
                         Text("Download")
                             .font(.system(size: 10))
@@ -1183,12 +1471,21 @@ struct DashboardSpeedCard: View {
                         .foregroundStyle(Theme.ColorToken.blue)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(upMbps)
+                            Text(displayedUpMbps)
                                 .font(.system(size: 20, weight: .bold, design: .monospaced))
-                                .foregroundStyle(upMbps == "—" ? Theme.ColorToken.muted : Theme.ColorToken.ink)
+                                .foregroundStyle(displayedUpMbps == "—" ? Theme.ColorToken.muted : (isUploadActive ? Theme.ColorToken.blue : Theme.ColorToken.ink))
                             Text("Mbps")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(Theme.ColorToken.muted)
+                            if isUploadActive {
+                                Text("LIVE")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Theme.ColorToken.blue)
+                                    .clipShape(Capsule())
+                            }
                         }
                         Text("Upload")
                             .font(.system(size: 10))
@@ -1198,11 +1495,28 @@ struct DashboardSpeedCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            // Visual Speedtest Progress Bar
+            if isSpeedTesting {
+                SpeedTestProgressBarView(speed: speedProgress)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
             // Subtitle
-            Text(testedMeta ?? "Run a full check to test download and upload speed.")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.ColorToken.muted)
+            if isSpeedTesting {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(activeTestingSubtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
                 .lineLimit(1)
+            } else {
+                Text(testedMeta ?? "Run a speed test to check download and upload bandwidth.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -1212,6 +1526,18 @@ struct DashboardSpeedCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
         )
+        .animation(.easeInOut(duration: 0.25), value: isSpeedTesting)
+    }
+
+    private var activeTestingSubtitle: String {
+        guard let speed = speedProgress else { return "Testing connection throughput in real time…" }
+        switch speed.direction {
+        case .download: return "Testing download bandwidth against server…"
+        case .upload:   return "Testing upload bandwidth against server…"
+        case .ping:     return "Testing round-trip latency and jitter…"
+        case .prep:     return "Connecting to speed test server…"
+        case .other:    return speed.stage.isEmpty ? "Testing connection throughput in real time…" : PhaseLabel.humanised(speed.stage)
+        }
     }
 }
 
@@ -1353,6 +1679,7 @@ struct DashboardNetworkDetailsPanel: View {
     let lastSpeedMeta: String
     let downMbps: String
     let upMbps: String
+    var isScanning: Bool = false
     let onRunSpeedTest: () -> Void
 
     var body: some View {
@@ -1401,11 +1728,20 @@ struct DashboardNetworkDetailsPanel: View {
                         .foregroundStyle(Theme.ColorToken.ink)
 
                     Button(action: onRunSpeedTest) {
-                        Text("Run speed test")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.blue)
+                        HStack(spacing: 4) {
+                            if isScanning {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                Text("Testing…")
+                            } else {
+                                Text("Run speed test")
+                            }
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.blue)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isScanning)
                 }
             }
             .padding(.horizontal, 17)

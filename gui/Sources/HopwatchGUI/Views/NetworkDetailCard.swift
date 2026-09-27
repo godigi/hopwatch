@@ -191,7 +191,7 @@ struct NetworkDetailCard: View {
                     comparisonChip(
                         icon: "antenna.radiowaves.left.and.right",
                         title: "Loss",
-                        value: String(format: "%.0f%%", curLoss),
+                        value: LossFormatter.formatPct(curLoss),
                         verdict: comp.lossVerdict,
                         detail: curLoss == 0 ? "Clean link" : "Loss detected"
                     )

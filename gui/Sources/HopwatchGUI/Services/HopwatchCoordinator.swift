@@ -71,8 +71,17 @@ final class HopwatchCoordinator {
     /// view body never pays for the CoreWLAN syscall.
     private(set) var liveSSID: String?
     private(set) var isScanning = false
+    private(set) var activeScanDepth: NetdiagRunner.Depth?
     private(set) var scanStartedAt: Date?
     private(set) var lastRunError: String?
+
+    var isSpeedTestOnly: Bool {
+        isScanning && activeScanDepth == .speedOnly
+    }
+
+    var isSpeedTesting: Bool {
+        isSpeedTestOnly || progress.isSpeedTesting
+    }
     /// The last `--speed-only` result, kept apart from `latestRun`. A speed
     /// test measures one thing and diagnoses nothing, so letting it become
     /// the current report would replace a full diagnosis with a card that
@@ -1018,6 +1027,14 @@ final class HopwatchCoordinator {
         return runScan(depth: .full, reason: reason)
     }
 
+    /// Runs a focused speed test (--speed-only) to measure download, upload,
+    /// latency and jitter without running a full diagnostic check.
+    /// Updates latestSpeedTest and reloads history.
+    @discardableResult
+    func runSpeedTest(reason: String = "speed test requested") -> Bool {
+        launch(depth: .speedOnly, reason: reason, target: nil, adoptAsReport: false)
+    }
+
     /// Returns `true` once the scan has actually been handed to a `Task` —
     /// `false` when the guard below declined it. That distinction is the
     /// whole point of the return value: a caller that only finds out a scan
@@ -1026,12 +1043,13 @@ final class HopwatchCoordinator {
     /// happen on the same synchronous call.
     @discardableResult
     private func launch(depth: NetdiagRunner.Depth, reason: String,
-                        target: String?, adoptAsReport: Bool) -> Bool {
+                        target: String? = nil, adoptAsReport: Bool) -> Bool {
         guard !isScanning else {
             log.debug("scan already running, ignoring request: \(reason, privacy: .public)")
             return false
         }
         isScanning = true
+        activeScanDepth = depth
         scanStartedAt = Date()
         lastRunError = nil
         progress.reset()
@@ -1052,6 +1070,7 @@ final class HopwatchCoordinator {
             guard let self else { return }
             defer {
                 self.isScanning = false
+                self.activeScanDepth = nil
                 self.scanStartedAt = nil
                 self.scanWasAlertTriggered = false
                 self.alerts.scanInProgress = false

@@ -83,11 +83,15 @@ struct HopwatchRunner {
         /// connection that is already failing makes the user's situation
         /// worse in the middle of whatever they were doing.
         case alertTriggered
+        /// Focused throughput test: runs --speed-only to measure download, upload,
+        /// latency and jitter, recording the result to history without diagnosing the whole link.
+        case speedOnly
         var arguments: [String] {
             switch self {
             case .full:           return ["--json", "--no-gping"]
             case .quick:          return ["--json", "--no-gping", "--quick"]
             case .alertTriggered: return ["--json", "--no-gping", "--no-bufferbloat", "--no-speed"]
+            case .speedOnly:      return ["--json", "--no-gping", "--speed-only"]
             }
         }
 
@@ -99,6 +103,7 @@ struct HopwatchRunner {
             case .full:           return "about a minute"
             case .quick:          return "about 10 seconds"
             case .alertTriggered: return "about 30 seconds"
+            case .speedOnly:      return "about 20 seconds"
             }
         }
     }

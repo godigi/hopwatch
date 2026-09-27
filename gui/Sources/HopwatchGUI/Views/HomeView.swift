@@ -59,7 +59,7 @@ struct HomeView: View {
                 )
 
                 // Scan in flight progress
-                if coordinator.isScanning,
+                if coordinator.isScanning && !coordinator.isSpeedTestOnly,
                    ArrivalCopy.forState(coordinator.arrivalState,
                                         network: arrivalNetworkName,
                                         intent: coordinator.arrivalIntent) == nil {
@@ -126,7 +126,13 @@ struct HomeView: View {
                     pingTargetAlt: pingTargetAltString,
                     culpritHop: culpritHop,
                     routerAdminURL: routerAdminURL,
-                    routerAdminAvailable: coordinator.routerAdminAvailable
+                    routerAdminAvailable: coordinator.routerAdminAvailable,
+                    internetDetailText: internetDetailText,
+                    routerDetailText: routerDetailText,
+                    isCritical: isStageCritical,
+                    isWiFi: isConnectedToWiFi,
+                    macStatusGood: macStatusGood,
+                    isWifiLaggy: isWifiLaggy
                 )
 
                 // 6. Main 2-Column Dashboard Grid (Ping Chart & Findings vs Graded Check Details)
@@ -137,10 +143,14 @@ struct HomeView: View {
                                 samples: coordinator.monitor.recent,
                                 selectedWindowMinutes: $chartWindowMinutes,
                                 isBursting: coordinator.monitor.isBursting,
+                                burstUntil: coordinator.monitor.burstUntil,
                                 onToggleBurst: {
                                     if coordinator.monitor.isBursting {
                                         coordinator.monitor.endBurst()
                                     } else {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            chartWindowMinutes = 15
+                                        }
                                         coordinator.monitor.beginBurst(
                                             interval: Defaults.latencyTestInterval,
                                             duration: Defaults.latencyTestDuration
@@ -171,10 +181,14 @@ struct HomeView: View {
                             samples: coordinator.monitor.recent,
                             selectedWindowMinutes: $chartWindowMinutes,
                             isBursting: coordinator.monitor.isBursting,
+                            burstUntil: coordinator.monitor.burstUntil,
                             onToggleBurst: {
                                 if coordinator.monitor.isBursting {
                                     coordinator.monitor.endBurst()
                                 } else {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        chartWindowMinutes = 15
+                                    }
                                     coordinator.monitor.beginBurst(
                                         interval: Defaults.latencyTestInterval,
                                         duration: Defaults.latencyTestDuration
@@ -214,7 +228,8 @@ struct HomeView: View {
                             lastSpeedMeta: lastSpeedMetaText,
                             downMbps: speedValues.down,
                             upMbps: speedValues.up,
-                            onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                            isScanning: coordinator.isScanning,
+                            onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") }
                         )
                         .frame(maxWidth: .infinity)
 
@@ -240,7 +255,8 @@ struct HomeView: View {
                             lastSpeedMeta: lastSpeedMetaText,
                             downMbps: speedValues.down,
                             upMbps: speedValues.up,
-                            onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                            isScanning: coordinator.isScanning,
+                            onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") }
                         )
 
                         DashboardRecentActivityPanel(
@@ -344,7 +360,7 @@ struct HomeView: View {
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: "All good — watching",
                 subtitle: coordinator.headline.isEmpty
-                    ? "Continuous background monitoring is active and connection is stable."
+                    ? quietLine
                     : coordinator.headline
             )
         case .degraded(let deg):
@@ -442,6 +458,26 @@ struct HomeView: View {
         }
     }
 
+    private var quietLine: String {
+        var parts: [String] = []
+        if let since = NetworkEvent.timeSinceLast(coordinator.eventLog.events, now: .now) {
+            if since < 60 {
+                parts.append("Nothing has changed in under a minute")
+            } else {
+                let f = DateComponentsFormatter()
+                f.allowedUnits = since >= 3600 ? [.hour, .minute] : [.minute]
+                f.unitsStyle = .abbreviated
+                if let s = f.string(from: since) {
+                    parts.append("Nothing has changed in \(s)")
+                }
+            }
+        } else {
+            parts.append("Watching for changes")
+        }
+        if let name = coordinator.wifiDisplayName ?? currentNetworkName { parts.append("on \(name)") }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: - Key Vitals Section
 
     private var keyVitalsSection: some View {
@@ -452,7 +488,10 @@ struct HomeView: View {
                     upMbps: speedValues.up,
                     testedMeta: lastSpeedMetaText,
                     isScanning: coordinator.isScanning,
-                    onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                    isSpeedTesting: coordinator.isSpeedTesting,
+                    speedProgress: coordinator.progress.speed,
+                    onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") },
+                    onCancelSpeedTest: { coordinator.cancelScan() }
                 )
                 .frame(maxWidth: .infinity)
 
@@ -471,7 +510,10 @@ struct HomeView: View {
                     upMbps: speedValues.up,
                     testedMeta: lastSpeedMetaText,
                     isScanning: coordinator.isScanning,
-                    onRunSpeedTest: { coordinator.runFullCheck(reason: "speed test requested") }
+                    isSpeedTesting: coordinator.isSpeedTesting,
+                    speedProgress: coordinator.progress.speed,
+                    onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") },
+                    onCancelSpeedTest: { coordinator.cancelScan() }
                 )
 
                 DashboardReliabilityCard(
@@ -945,10 +987,37 @@ struct HomeView: View {
         return CWWiFiClient.shared().interface()?.powerOn() ?? true
     }
 
+    private var isWifiLaggy: Bool {
+        routeWarningResult.isWifiLaggy
+    }
+
+    private var macStatusGood: Bool {
+        routeWarningResult.macStatusGood
+    }
+
+    private var wifiRuleTint: Color? {
+        guard let catalog = coordinator.rulesCatalog.catalog else { return nil }
+        let hits = firedRules.compactMap { catalog[$0] }
+            .filter { $0.categories.contains("wifi") }
+        guard !hits.isEmpty else { return nil }
+        if hits.contains(where: { $0.severity == "critical" }) { return .red }
+        if hits.contains(where: { $0.severity == "warn" }) { return .yellow }
+        if hits.contains(where: { $0.severity == "varies" }) {
+            return coordinator.monitor.latest?.status.severity == "critical" ? .red : .yellow
+        }
+        return nil
+    }
+
     private var wifiSignalText: String {
         if !isConnectedToWiFi { return "Ethernet" }
         guard let rssi = resolvedRSSI else { return "—" }
-        return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
+        let base = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
+        if isWifiLaggy {
+            return (base.lowercased() == "good" || base.lowercased() == "excellent")
+                ? "Good (laggy)"
+                : "\(base) (laggy)"
+        }
+        return base
     }
 
     private var wifiSignalDetail: String {
@@ -960,7 +1029,14 @@ struct HomeView: View {
     private var wifiSignalTint: Color {
         if !isConnectedToWiFi { return Theme.ColorToken.green }
         guard let rssi = resolvedRSSI else { return Theme.ColorToken.muted }
-        return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).tint
+        if isWifiLaggy {
+            return Theme.ColorToken.amber
+        }
+        let content = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale)
+        if let ruleTint = wifiRuleTint {
+            return ruleTint == .red ? Theme.ColorToken.red : Theme.ColorToken.amber
+        }
+        return content.tint
     }
 
     private var macIPString: String {
@@ -970,13 +1046,34 @@ struct HomeView: View {
     }
 
     private var routerPingText: String {
+        guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
+        let loss = coordinator.monitor.latest?.gateway.lossPct
+            ?? coordinator.latestRun?.snapshot.gateway.lossPct
+            ?? 0
+        if loss >= 100 { return "no reply" }
         guard let rtt = coordinator.monitor.latest?.gateway.rttAvgMs
             ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs else { return "—" }
         return "\(Int(round(rtt)))"
     }
 
+    private var isStageCritical: Bool {
+        switch stage {
+        case .watching(let sev):
+            return sev == .critical
+        case .degraded(let deg):
+            return deg.isCritical
+        case .alerted(let alert):
+            return alert.severityRank >= 3
+        default:
+            return false
+        }
+    }
+
     private var routerPingTint: Color {
-        routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.green
+        if routerWarn {
+            return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
+        }
+        return Theme.ColorToken.green
     }
 
     private var firedRules: Set<String> {
@@ -1010,7 +1107,7 @@ struct HomeView: View {
             inetPing: inetPing,
             inetJitter: inetJitter,
             hasRecentRoam: coordinator.hasRecentRoam,
-            wifiRuleTint: wifiSignalTint == Theme.ColorToken.amber ? .yellow : (wifiSignalTint == .red ? .red : nil)
+            wifiRuleTint: wifiRuleTint
         )
     }
 
@@ -1049,14 +1146,100 @@ struct HomeView: View {
     }
 
     private var internetPingText: String {
+        guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
         if coordinator.monitor.latest?.status.icmpFiltered == true { return "TCP ok" }
+        let loss = coordinator.monitor.latest?.internet.lossPct
+            ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
+            ?? 0
+        if loss >= 100 { return "no reply" }
         guard let rtt = coordinator.monitor.latest?.internet.rttAvgMs
             ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs else { return "—" }
         return "\(Int(round(rtt)))"
     }
 
     private var internetPingTint: Color {
-        internetWarn ? Theme.ColorToken.amber : Theme.ColorToken.green
+        if internetWarn {
+            return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
+        }
+        return Theme.ColorToken.green
+    }
+
+    private var isGatewayJitterDominant: Bool {
+        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs
+            ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs ?? 0
+        return gwJitter >= 20.0
+    }
+
+    private var routerDetailText: String {
+        let loss = coordinator.monitor.latest?.gateway.lossPct
+            ?? coordinator.latestRun?.snapshot.gateway.lossPct
+            ?? 0
+        if coordinator.hasRecentRoam && loss < 10.0 {
+            return "Wi-Fi roamed"
+        }
+        let inetLoss = coordinator.monitor.latest?.internet.lossPct
+            ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
+            ?? 0
+        if inetLoss <= 1.0 && loss < 20.0 {
+            return routerGatewayIP ?? "default gateway"
+        }
+        if loss > 0 {
+            return LossFormatter.formatPacketLoss(loss)
+        }
+        if routerWarn {
+            let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs
+                ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs ?? 0
+            let gwRtt = coordinator.monitor.latest?.gateway.rttAvgMs
+                ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0
+            if gwJitter >= 20.0 {
+                return String(format: "±%.0f ms jitter", gwJitter)
+            }
+            if gwRtt >= 30.0 {
+                return String(format: "%.0f ms latency", gwRtt)
+            }
+            return "Router latency"
+        }
+        return routerGatewayIP ?? "default gateway"
+    }
+
+    private var internetDetailText: String {
+        let loss = coordinator.monitor.latest?.internet.lossPct
+            ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
+            ?? 0
+        let jitter = coordinator.currentJitter
+            ?? coordinator.monitor.latest?.internet.rttJitterMs
+            ?? coordinator.latestRun?.snapshot.internetLatency.rttJitterMs
+            ?? 0
+        let ping = coordinator.monitor.latest?.internet.rttAvgMs
+            ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs
+            ?? 0
+        let icmpFiltered = coordinator.monitor.latest?.status.icmpFiltered ?? false
+
+        if loss > 0 && jitter >= 30.0 {
+            return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+        }
+        if loss > 0 {
+            return LossFormatter.formatPacketLoss(loss)
+        }
+        if jitter >= 30.0 && !isGatewayJitterDominant {
+            return String(format: "%.0f ms jitter", jitter)
+        }
+        if icmpFiltered {
+            return "Ping blocked"
+        }
+        if internetWarn {
+            if ping >= 120.0 {
+                return String(format: "%.0f ms latency", ping)
+            }
+            if jitter >= 20.0 {
+                return String(format: "%.0f ms jitter", jitter)
+            }
+            if case .degraded(let deg) = stage {
+                return deg.headline
+            }
+            return "Connection degraded"
+        }
+        return "0% packet loss"
     }
 
     private var internetWarn: Bool {
@@ -1186,19 +1369,28 @@ struct HomeView: View {
         "Not flagged as metered"
     }
 
-    private var lastSpeedMetaText: String {
-        if let age = coordinator.latestSpeedTestAt {
-            return RelativeTime.string(from: age)
+    private var speedValues: (down: String, up: String, age: String?) {
+        if let speed = coordinator.latestSpeedTest {
+            let age = coordinator.latestSpeedTestAt
+                .map { RelativeTime.string(from: $0) }
+            return (speed.downMbps.map { String(Int($0.rounded())) } ?? "—",
+                    speed.upMbps.map { String(Int($0.rounded())) } ?? "—",
+                    age)
         }
-        return "23h ago"
+        if let stored = coordinator.history.latestSpeedTest(
+            for: coordinator.monitor.latest?.network.historyJoinID ?? currentRunResult?.snapshot.network.historyJoinID) {
+            return (String(Int(stored.down.rounded())),
+                    stored.up.map { String(Int($0.rounded())) } ?? "—",
+                    RelativeTime.string(from: stored.date))
+        }
+        return ("—", "—", nil)
     }
 
-    private var speedValues: (down: String, up: String) {
-        if let speed = coordinator.latestSpeedTest {
-            return (speed.downMbps.map { String(Int($0.rounded())) } ?? "—",
-                    speed.upMbps.map { String(Int($0.rounded())) } ?? "—")
+    private var lastSpeedMetaText: String {
+        if let age = speedValues.age {
+            return vpnActive ? "\(age) · before VPN" : age
         }
-        return ("—", "—")
+        return "not tested yet"
     }
 
     private var currentInternetTargets: String {

@@ -519,6 +519,17 @@ struct DropdownView: View {
             }
             return LossFormatter.formatPacketLoss(loss)
         }
+        if routerWarn {
+            let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
+            let gwRtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
+            if gwJitter >= 20.0 {
+                return String(format: "±%.0f ms jitter", gwJitter)
+            }
+            if gwRtt >= 30.0 {
+                return String(format: "%.0f ms latency", gwRtt)
+            }
+            return "Router latency"
+        }
         return routerGatewayIP ?? "default gateway"
     }
 

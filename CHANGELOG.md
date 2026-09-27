@@ -6,6 +6,22 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Speed Test Isolation & Custom Visual Progress Bar**: The "Test Speed" buttons on the dashboard and network details panel now run a dedicated, isolated speed test (`--speed-only`) instead of kicking off an entire 27-phase full diagnostic check. Added an interactive, real-time speed progress bar with stage-specific gradient animations, live throughput updates, and cancel controls directly inside the dashboard's "Throughput & Speed" card.
+
+### Fixed
+- **Dashboard Culprit Tone**: Fixed route path node styling so that non-critical warnings and service-level degradations tint the culprit node in amber rather than alarmist critical red. Only severe critical issues (loss ≥10%, link down, full outage) trigger red culprit styling.
+- **Route Node Issue Explanations**: Display specific issue descriptions (e.g. latency, jitter, or degraded headline) directly beneath the Router and Internet nodes on the Dashboard when warned, avoiding ambiguity when packet loss is 0%.
+- **Network Detail Card Loss Formatting**: Formatted live comparison loss chip with `LossFormatter.formatPct` so sub-1% loss values display with decimals instead of truncating to `0%`.
+- **Dashboard & Menu Bar Parity**:
+  - Hop 1 ("This Mac" / Local Link) on the Dashboard now mirrors the Menu Bar with dynamic Wi-Fi/Wired icons, Wi-Fi lag warning states (`"Good (laggy)"`), Mac/Wi-Fi culprit attribution, amber connection lines during Wi-Fi lag, and evaluation of catalog Wi-Fi diagnostic rules (`W1`-`W6`, `AWDL-1`).
+  - Menu Bar router node now explains jitter (`±X ms jitter`) and latency (`X ms latency`) alongside packet loss on warnings.
+  - Dashboard speed card now reflects historical speed test data when active snapshot is absent and displays `"· before VPN"` context.
+  - Outage ping display on Dashboard route nodes shows `"no reply"` when loss reaches 100% and suppresses the `"ms"` suffix for non-numeric statuses (`"no reply"`, `"TCP ok"`, `"—"`).
+  - Dashboard healthy status hero banner displays the dynamic quiet line (`"Nothing has changed in Xm on NetworkName"`).
+  - Internet node detail checks for gateway jitter dominance before attributing jitter to broadband.
+- **Dashboard Latency Test Fast-Tier Sampling & Live Reactivity**: Fixed the dashboard ping chart's internet series which was inadvertently filtering for medium-tier (60s) samples, restoring fast-tier sampling so both router and internet pings capture every 2-second burst sample in real time. Added active testing feedback with an animated progress spinner, a countdown/until notice, styled active button states, and automatically switched the chart window to 15m when starting the test.
+
 ## [1.8.4] - 2026-09-26
 
 ### Fixed
