@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-27
+
 ### Added
 - **Speed Test Isolation & Custom Visual Progress Bar**: The "Test Speed" buttons on the dashboard and network details panel now run a dedicated, isolated speed test (`--speed-only`) instead of kicking off an entire 27-phase full diagnostic check. Added an interactive, real-time speed progress bar with stage-specific gradient animations, live throughput updates, and cancel controls directly inside the dashboard's "Throughput & Speed" card.
 
@@ -4005,7 +4007,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.8.4...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/godigi/hopwatch/compare/v1.8.4...v1.9.0
 [1.8.4]: https://github.com/godigi/hopwatch/compare/v1.8.3...v1.8.4
 [1.8.3]: https://github.com/godigi/hopwatch/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/godigi/hopwatch/compare/v1.8.1...v1.8.2
