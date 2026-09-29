@@ -6,6 +6,20 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-28
+
+### Added
+- **Overview Dashboard Visual Redesign**: Overhauled the Overview tab layout into an explicit 2-column side-by-side dashboard:
+  - **Upper Row**: Live Ping Chart, Findings & Next Steps, and Recent Activity in the left column paired side-by-side with the comprehensive Check Details & Evidence Table on the right.
+  - **Check Details & Evidence Table**: Full 15-check row telemetry list (Jitter, Packet Loss, Bufferbloat, MTU, Router Gateway, Local DNS, Internet DNS, Multi-CDN, Captive Portal, etc.) with explicit status badges, descriptions, and usual medians.
+  - **Lower Row**: Network Details 2×5 grid (SSID, BSSID, Channel, Interface, Gateway, DNS, Public IP, IPv6, Security, Band) side-by-side with Technical Detail & Telemetry 2×5 grid and quick action links (*Configure Interface…*, *View Raw JSON*, *Copy Redacted Report*, *Save Markdown…*).
+  - **Hero & Suitability Strip**: Clean hero card with right-aligned status pill badge (*All systems nominal*) and restructured 5 suitability cards (*Calls, Streaming, Gaming, VPN / Remote, Browsing*) with multi-line metrics to eliminate text truncation (`...`).
+
+### Improved
+- **Networks Tab Header & History Controls**: Separated network detail header into two distinct rows to prevent SSID title squeezing on narrow views, and hid internal picker labels in the check history bar to prevent vertical wrapping.
+- **Trends Scope Window**: Converted history window selector buttons to compact labels (`24h`, `7d`, `30d`, `All`) and widened the picker frame to prevent button text overlap.
+- **Live Monitoring Headline**: Cleaned up the live connection card headline to display `"All good — watching"` during nominal operation.
+
 ## [1.9.0] - 2026-09-27
 
 ### Added
@@ -4007,7 +4021,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/godigi/hopwatch/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/godigi/hopwatch/compare/v1.8.4...v1.9.0
 [1.8.4]: https://github.com/godigi/hopwatch/compare/v1.8.3...v1.8.4
 [1.8.3]: https://github.com/godigi/hopwatch/compare/v1.8.2...v1.8.3
