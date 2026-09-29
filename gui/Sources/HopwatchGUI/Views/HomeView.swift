@@ -135,47 +135,8 @@ struct HomeView: View {
                     isWifiLaggy: isWifiLaggy
                 )
 
-                // 6. Main 2-Column Dashboard Grid (Ping Chart & Findings vs Graded Check Details)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(spacing: 16) {
-                            DashboardLiveChartPanel(
-                                samples: coordinator.monitor.recent,
-                                selectedWindowMinutes: $chartWindowMinutes,
-                                isBursting: coordinator.monitor.isBursting,
-                                burstUntil: coordinator.monitor.burstUntil,
-                                onToggleBurst: {
-                                    if coordinator.monitor.isBursting {
-                                        coordinator.monitor.endBurst()
-                                    } else {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            chartWindowMinutes = 15
-                                        }
-                                        coordinator.monitor.beginBurst(
-                                            interval: Defaults.latencyTestInterval,
-                                            duration: Defaults.latencyTestDuration
-                                        )
-                                    }
-                                }
-                            )
-
-                            DashboardFindingsPanel(
-                                checkTime: checkTimeSubtitle,
-                                findings: activeFindings
-                            )
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        DashboardCheckTable(
-                            checkSubtitle: lastCheckedCaption ?? "Awaiting check",
-                            networkSSID: currentNetworkName,
-                            vpnActive: vpnActive,
-                            rows: checkTableRows
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    // Fallback to vertical stack on narrow displays
+                // 6. Main 2-Column Dashboard Grid (Ping Chart, Findings & Recent Activity vs Graded Check Details)
+                HStack(alignment: .top, spacing: 16) {
                     VStack(spacing: 16) {
                         DashboardLiveChartPanel(
                             samples: coordinator.monitor.recent,
@@ -202,97 +163,66 @@ struct HomeView: View {
                             findings: activeFindings
                         )
 
-                        DashboardCheckTable(
-                            checkSubtitle: lastCheckedCaption ?? "Awaiting check",
-                            networkSSID: currentNetworkName,
-                            vpnActive: vpnActive,
-                            rows: checkTableRows
-                        )
-                    }
-                }
-
-                // 7. Bottom 2-Column Grid (Network Details & Recent Activity)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        DashboardNetworkDetailsPanel(
-                            interface: interfaceDetailText,
-                            publicCountry: publicCountryDetailText,
-                            localIP: macIPString,
-                            publicIP: publicIPString ?? "Checking…",
-                            gatewayIP: routerGatewayIP ?? "—",
-                            ispName: ispNameText,
-                            dnsServer: dnsServerText,
-                            vpnName: vpnDetailText,
-                            wifiSecurity: wifiSecurityText,
-                            connectionCost: connectionCostText,
-                            lastSpeedMeta: lastSpeedMetaText,
-                            downMbps: speedValues.down,
-                            upMbps: speedValues.up,
-                            isScanning: coordinator.isScanning,
-                            onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") }
-                        )
-                        .frame(maxWidth: .infinity)
-
-                        DashboardRecentActivityPanel(
-                            events: ActivityEntry.fold(coordinator.eventLog.events),
-                            onOpenActivity: { openActivity() }
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    VStack(spacing: 16) {
-                        DashboardNetworkDetailsPanel(
-                            interface: interfaceDetailText,
-                            publicCountry: publicCountryDetailText,
-                            localIP: macIPString,
-                            publicIP: publicIPString ?? "Checking…",
-                            gatewayIP: routerGatewayIP ?? "—",
-                            ispName: ispNameText,
-                            dnsServer: dnsServerText,
-                            vpnName: vpnDetailText,
-                            wifiSecurity: wifiSecurityText,
-                            connectionCost: connectionCostText,
-                            lastSpeedMeta: lastSpeedMetaText,
-                            downMbps: speedValues.down,
-                            upMbps: speedValues.up,
-                            isScanning: coordinator.isScanning,
-                            onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") }
-                        )
-
                         DashboardRecentActivityPanel(
                             events: ActivityEntry.fold(coordinator.eventLog.events),
                             onOpenActivity: { openActivity() }
                         )
                     }
+                    .frame(maxWidth: .infinity)
+
+                    DashboardCheckTable(
+                        checkSubtitle: lastCheckedCaption ?? "Awaiting check",
+                        networkSSID: currentNetworkName,
+                        vpnActive: vpnActive,
+                        rows: checkTableRows
+                    )
+                    .frame(maxWidth: .infinity)
                 }
 
-                // 8. Technical Detail Panel (Permanently unfolded and visible)
-                DashboardTechnicalPanel(
-                    routerIP: routerGatewayIP ?? "192.168.1.1",
-                    routerLoss: routerLossText,
-                    internetTargets: currentInternetTargets,
-                    internetLoss: internetLossText,
-                    tracerouteHops: currentRunResult?.snapshot.traceroute.hops.count ?? 3,
-                    isIPv6: currentRunResult?.snapshot.ipv6.available ?? false,
-                    isDoubleNAT: currentRunResult?.snapshot.wan.doubleNat.detected ?? false,
-                    wifiSignal: currentRunResult?.snapshot.wifi?.rssi.map { "\($0) dBm" } ?? "—",
-                    wifiNoise: currentRunResult?.snapshot.wifi?.noise.map { "\($0) dBm" } ?? "—",
-                    wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" } ?? "—",
-                    wifiBandChannel: bandChannelText,
-                    dhcpRemaining: dhcpRemainingText,
-                    ipConflict: !(currentRunResult?.snapshot.duplicateIPs.isEmpty ?? true),
-                    neighborCount: currentRunResult?.snapshot.wifiScan?.neighbourCount ?? 0,
-                    backgroundTraffic: false,
-                    checkTimestamp: checkTimeSubtitle ?? "recent",
-                    dnsResolversList: dnsServerText,
-                    tcpReachability: currentRunResult?.snapshot.tcpReach.first?.ok == true ? "reachable" : "unreachable",
-                    loadedRTT: loadedRTTText,
-                    onViewRawJSON: { showRawJSONSheet = true },
-                    onCopyRedacted: { copyShareableReport() },
-                    onSaveMarkdown: { saveMarkdownReport() }
-                )
+                // 7. Deep Configuration & Telemetry Grid (Network Details & Technical Details Side-by-Side)
+                HStack(alignment: .top, spacing: 16) {
+                    DashboardNetworkDetailsPanel(
+                        interface: interfaceDetailText,
+                        publicCountry: publicCountryDetailText,
+                        localIP: macIPString,
+                        publicIP: publicIPString ?? "Checking…",
+                        gatewayIP: routerGatewayIP ?? "—",
+                        ispName: ispNameText,
+                        dnsServer: dnsServerText,
+                        vpnName: vpnDetailText,
+                        wifiSecurity: wifiSecurityText,
+                        connectionCost: connectionCostText,
+                        routerAdminURL: routerAdminURL,
+                        routerAdminAvailable: coordinator.routerAdminAvailable,
+                        onOpenNetworkSettings: {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity)
 
-                // 9. Dashboard Footer
+                    DashboardTechnicalPanel(
+                        tracerouteHops: currentRunResult?.snapshot.traceroute.hops.count ?? 3,
+                        isIPv6: currentRunResult?.snapshot.ipv6.available ?? false,
+                        isDoubleNAT: currentRunResult?.snapshot.wan.doubleNat.detected ?? false,
+                        wifiBandChannel: bandChannelText,
+                        wifiSignal: currentRunResult?.snapshot.wifi?.rssi.map { "\($0) dBm" } ?? "—",
+                        wifiNoise: currentRunResult?.snapshot.wifi?.noise.map { "\($0) dBm" } ?? "—",
+                        wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" } ?? "—",
+                        dhcpRemaining: dhcpRemainingText,
+                        ipConflict: !(currentRunResult?.snapshot.duplicateIPs.isEmpty ?? true),
+                        neighborCount: currentRunResult?.snapshot.wifiScan?.neighbourCount ?? 0,
+                        loadedRTT: loadedRTTText,
+                        appVersion: AppVersion.display,
+                        onViewRawJSON: { showRawJSONSheet = true },
+                        onCopyRedacted: { copyShareableReport() },
+                        onSaveMarkdown: { saveMarkdownReport() }
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+
+                // 8. Dashboard Footer
                 DashboardFooterView()
             }
             .padding(24)
@@ -359,9 +289,10 @@ struct HomeView: View {
                 iconTint: Theme.ColorToken.green,
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: "All good — watching",
-                subtitle: coordinator.headline.isEmpty
-                    ? quietLine
-                    : coordinator.headline
+                subtitle: "Network is responsive with zero packet loss and low jitter to your router and the internet.",
+                statusPillText: "All systems nominal",
+                statusPillTint: Color(red: 0.08, green: 0.5, blue: 0.24),
+                statusPillBackground: Theme.ColorToken.greenWash
             )
         case .degraded(let deg):
             DashboardStatusHeroView(
@@ -370,6 +301,9 @@ struct HomeView: View {
                 iconBackground: deg.isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
                 headline: deg.headline,
                 subtitle: deg.subtitle,
+                statusPillText: deg.isCritical ? "Critical issue" : "Issue detected",
+                statusPillTint: deg.isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
+                statusPillBackground: deg.isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
                 detectedTime: "Live"
             )
         case .resolved(let res):
@@ -378,7 +312,10 @@ struct HomeView: View {
                 iconTint: Theme.ColorToken.green,
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: res.title,
-                subtitle: res.message
+                subtitle: res.message,
+                statusPillText: "Resolved",
+                statusPillTint: Theme.ColorToken.green,
+                statusPillBackground: Theme.ColorToken.greenWash
             )
         case .watching(let sev):
             let isCritical = sev == .critical
@@ -390,6 +327,9 @@ struct HomeView: View {
                 subtitle: coordinator.headline.isEmpty
                     ? "Replies are being lost from your router or internet. Calls may cut out."
                     : coordinator.headline,
+                statusPillText: isCritical ? "Connection unstable" : "Needs attention",
+                statusPillTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
+                statusPillBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
                 detectedTime: "Monitoring"
             )
         case .alerted(let alert):
@@ -403,6 +343,9 @@ struct HomeView: View {
                 iconBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
                 headline: alert.title,
                 subtitle: alert.body.isEmpty ? "Network problem detected" : alert.body,
+                statusPillText: isCritical ? "Critical alert" : "Active alert",
+                statusPillTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
+                statusPillBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
                 detectedTime: "Detected \(RelativeTime.string(from: alert.raisedAt))",
                 actionTitle: isCaptive ? "Open Login Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
                 onAction: isCaptive ? {

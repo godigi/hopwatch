@@ -304,10 +304,10 @@ struct TrendsView: View {
             .frame(maxWidth: 260)
 
             Picker("Window", selection: $window) {
-                ForEach(HistoryWindow.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(HistoryWindow.allCases) { Text($0.shortLabel).tag($0) }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 180)
+            .frame(width: 220)
 
             Spacer()
 

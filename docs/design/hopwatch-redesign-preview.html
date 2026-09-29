@@ -1,0 +1,2223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hopwatch — Complete High-Fidelity App Architecture</title>
+  <style>
+    :root {
+      --ink: #1e293b;
+      --muted: #64748b;
+      --quiet: #94a3b8;
+      --line: #e2e8f0;
+      --card-bg: #ffffff;
+      --app-bg: #f8fafc;
+      --sidebar-bg: #f1f5f9;
+      --blue: #2563eb;
+      --blue-wash: #eff6ff;
+      --green: #10b981;
+      --green-wash: #ecfdf5;
+      --amber: #f59e0b;
+      --amber-wash: #fffbeb;
+      --red: #ef4444;
+      --red-wash: #fef2f2;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0b1120;
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Walkthrough Banner */
+    .concept-header {
+      max-width: 1280px;
+      width: 100%;
+      margin-bottom: 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: var(--radius-lg);
+      padding: 14px 20px;
+      color: #f8fafc;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+    }
+    .concept-title h1 {
+      margin: 0 0 4px;
+      font-size: 16.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #3b82f6;
+      color: #fff;
+    }
+    .concept-title p {
+      margin: 0;
+      color: #94a3b8;
+      font-size: 11.5px;
+    }
+    .concept-toggles {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .toggle-btn {
+      background: #334155;
+      border: 1px solid #475569;
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .toggle-btn:hover { background: #475569; }
+    .toggle-btn.active {
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+
+    /* The Main macOS Window Shell */
+    .mac-window {
+      width: 100%;
+      max-width: 1280px;
+      height: 940px;
+      background: var(--app-bg);
+      border-radius: 14px;
+      border: 1px solid #334155;
+      box-shadow: 0 25px 60px -15px rgba(0,0,0,0.6);
+      display: grid;
+      grid-template-columns: 215px 1fr;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+    .traffic-lights {
+      padding: 14px 16px 10px;
+      display: flex;
+      gap: 7px;
+    }
+    .traffic-light {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .tl-red { background: #ff5f56; border: 1px solid #e0443e; }
+    .tl-yellow { background: #ffbd2e; border: 1px solid #dea123; }
+    .tl-green { background: #27c93f; border: 1px solid #1aab29; }
+
+    .brand-section {
+      padding: 0 16px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-logo {
+      width: 24px;
+      height: 24px;
+      background: #2563eb;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 800;
+      font-size: 13px;
+    }
+    .brand-text { font-weight: 700; font-size: 14px; color: var(--ink); }
+    .brand-ver { font-size: 11px; color: var(--muted); font-weight: 500; }
+
+    .nav-list {
+      padding: 4px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      color: #475569;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .nav-item:hover { background: #e2e8f0; color: var(--ink); }
+    .nav-item.active { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
+    .nav-icon { font-size: 14px; width: 18px; text-align: center; }
+    .nav-badge {
+      margin-left: auto;
+      background: #ef4444;
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+
+    .sidebar-footer {
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      background: #edf2f7;
+    }
+    .mini-network { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+    .mini-network-name { font-weight: 650; font-size: 11.5px; color: var(--ink); display: flex; align-items: center; gap: 5px; }
+    .mini-network-meta { font-size: 10px; color: var(--muted); }
+    .sidebar-actions { display: flex; gap: 6px; }
+    .btn-side {
+      flex: 1;
+      padding: 5px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+      text-align: center;
+    }
+    .btn-side:hover { background: #f8fafc; }
+
+    /* Content Area */
+    .content-area {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--app-bg);
+    }
+    .window-toolbar {
+      height: 44px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: white;
+    }
+    .toolbar-title { font-weight: 650; font-size: 13.5px; }
+    .toolbar-status { display: flex; align-items: center; gap: 10px; }
+    .pill {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .pill.good { background: var(--green-wash); color: #047857; }
+    .pill.warn { background: var(--amber-wash); color: #b45309; }
+    .pill.bad { background: var(--red-wash); color: #b91c1c; }
+
+    .main-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px 28px;
+    }
+
+    /* Views */
+    .view-container { display: none; }
+    .view-container.active { display: block; }
+
+    /* Shared Components */
+    .btn {
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--ink);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .btn-primary { background: var(--blue); border-color: var(--blue); color: white; }
+    .card-header {
+      padding: 11px 16px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-title { font-size: 12.5px; font-weight: 650; color: var(--ink); }
+    .card-meta { font-size: 10.5px; color: var(--muted); }
+
+    /* Overview View */
+    .overview-view { display: flex; flex-direction: column; gap: 12px; }
+
+    /* Page Header */
+    .page-header { display: flex; align-items: center; justify-content: space-between; }
+    .page-title-box h2 { margin: 0; font-size: 18.5px; font-weight: 700; letter-spacing: -0.3px; }
+    .page-subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+
+    /* Status Hero Banner */
+    .status-hero {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+      border-left: 4px solid var(--green);
+    }
+    .status-hero.degraded { border-left-color: var(--amber); background: #fffdfa; }
+    .hero-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--green-wash);
+      color: var(--green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+    .status-hero.degraded .hero-icon { background: var(--amber-wash); color: var(--amber); }
+    .hero-text h3 { margin: 0; font-size: 13.5px; font-weight: 700; }
+    .hero-text p { margin: 2px 0 0; font-size: 11px; color: var(--muted); line-height: 1.4; }
+    .hero-meta { margin-left: auto; font-size: 10.5px; color: var(--quiet); white-space: nowrap; }
+
+    /* Key Vitals (Speed & Reliability 2-Col Card) */
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .vitals-box {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .vitals-box-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+    .vitals-box-head strong { font-size: 12px; font-weight: 650; }
+    .vitals-box-values { display: flex; gap: 20px; align-items: baseline; }
+    .vitals-big-num { font-size: 18px; font-weight: 750; color: var(--ink); }
+    .vitals-subtext { font-size: 10px; color: var(--muted); }
+
+    /* Suitability Strip (Full Width 5 Cards) */
+    .suitability-strip-panel {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .suitability-header-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .suitability-title-left {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .suitability-title-left strong { font-size: 12px; font-weight: 650; color: var(--ink); }
+    .suitability-title-left span { font-size: 11px; color: var(--muted); }
+    .suitability-live-tag { font-size: 10px; color: var(--quiet); }
+
+    .suitability-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .suit-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: all 0.15s;
+      position: relative;
+    }
+    .suit-card:hover {
+      border-color: #cbd5e1;
+      background: #f1f5f9;
+    }
+    .suit-card-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .suit-icon-circle {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+    .suit-icon-circle.good { background: var(--green-wash); color: #047857; }
+    .suit-icon-circle.warn { background: var(--amber-wash); color: #b45309; }
+    .suit-icon-circle.bad { background: var(--red-wash); color: #b91c1c; }
+
+    .suit-card-title {
+      font-size: 11px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+    .suit-status-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9.5px;
+    }
+    .suit-status-text { font-weight: 600; }
+    .suit-status-text.good { color: #059669; }
+    .suit-status-text.warn { color: #d97706; }
+    .suit-status-text.bad { color: #dc2626; }
+
+    .suit-metric-val {
+      font-size: 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+    }
+    .suit-consequence-text {
+      font-size: 9.5px;
+      color: var(--muted);
+      line-height: 1.25;
+      margin-top: 1px;
+    }
+
+    /* 3-Hop Route Card */
+    .route-card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .route-hops {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 8px 24px 12px;
+      position: relative;
+    }
+    .route-hops::before, .route-hops::after {
+      content: "";
+      position: absolute;
+      top: 48px;
+      height: 2px;
+      z-index: 1;
+      background: #cbd5e1;
+    }
+    .route-hops::before { left: 20%; right: 50%; }
+    .route-hops::after { left: 50%; right: 20%; }
+    .route-hops.has-culprit::after {
+      background: repeating-linear-gradient(90deg, #f59e0b 0 6px, transparent 6px 10px);
+    }
+
+    .hop-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      z-index: 2;
+      text-align: center;
+    }
+    .hop-reading-top { font-size: 9.5px; color: var(--muted); margin-bottom: 3px; }
+    .hop-reading-val { font-size: 19px; font-weight: 700; line-height: 1.1; margin-bottom: 7px; }
+    .hop-reading-val.good { color: var(--green); }
+    .hop-reading-val.warn { color: var(--amber); }
+
+    .hop-circle {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: white;
+      border: 2px solid #cbd5e1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      position: relative;
+      box-shadow: 0 0 0 5px white;
+    }
+    .hop-circle.warning { border-color: var(--amber); background: #fffbeb; color: var(--amber); }
+    .hop-flag {
+      position: absolute;
+      top: -4px;
+      right: -6px;
+      font-size: 13px;
+      background: white;
+      border-radius: 4px;
+      padding: 1px 3px;
+      border: 1px solid var(--line);
+    }
+    .hop-name { margin-top: 7px; font-weight: 650; font-size: 11.5px; }
+    .hop-desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    .route-metrics-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 7px 16px;
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+      font-size: 10px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .route-metrics-bar strong { color: var(--ink); font-weight: 600; }
+    .route-metrics-bar .warn { color: var(--amber); font-weight: 600; }
+
+    .route-footer-bar {
+      padding: 7px 16px;
+      border-top: 1px solid var(--line);
+      background: #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+    }
+
+    /* Core Balanced 2-Column Grid (Zero Vertical Gaps) */
+    .balanced-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .column-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .panel-box {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .findings-card.has-issues { border-color: #fed7aa; background: #fffdfa; }
+    .finding-item { padding: 9px 15px; display: flex; gap: 9px; align-items: flex-start; }
+    .finding-title { font-weight: 650; font-size: 11px; }
+    .finding-desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .finding-action { margin-top: 3px; font-size: 10px; font-weight: 600; color: var(--ink); }
+
+    .segment-picker { display: flex; background: #f1f5f9; border-radius: 6px; padding: 2px; gap: 2px; }
+    .segment-btn { border: 0; background: none; font-size: 10px; padding: 2px 6px; border-radius: 4px; color: var(--muted); cursor: pointer; }
+    .segment-btn.active { background: white; color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+    /* Evidence Table (15 Graded Checks) */
+    .evidence-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.5px;
+    }
+    .evidence-table th {
+      text-align: left;
+      padding: 5px 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 10px;
+    }
+    .evidence-table td {
+      padding: 5px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: middle;
+    }
+    .evidence-table tr:last-child td { border-bottom: none; }
+    .row-label { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    .row-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+    .row-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-left: 4px;
+    }
+    .badge-good { background: var(--green-wash); color: #047857; }
+    .badge-warn { background: var(--amber-wash); color: #b45309; }
+    .badge-bad { background: var(--red-wash); color: #b91c1c; }
+    .badge-neutral { background: #f1f5f9; color: var(--muted); }
+
+    /* Bottom 2-Column Deep Configuration & Telemetry Section */
+    .deep-details-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .details-table-grid {
+      padding: 10px 16px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 16px;
+      font-size: 10.5px;
+    }
+    .detail-item-title { font-size: 9.5px; color: var(--muted); margin-bottom: 1px; }
+    .detail-item-val { font-weight: 600; color: var(--ink); word-break: break-all; }
+    .action-links-row {
+      display: flex;
+      gap: 12px;
+      padding: 8px 16px;
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+      font-size: 10.5px;
+    }
+    .action-links-row a {
+      color: var(--blue);
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .action-links-row a:hover { text-decoration: underline; }
+
+    /* Live Monitoring Tab */
+    .live-gauges-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .gauge-tile {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .gauge-tile-head { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); }
+    .gauge-tile-val { font-size: 20px; font-weight: 800; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+    .gauge-tile-sub { font-size: 9.5px; color: var(--muted); }
+
+    /* Trends Tab */
+    .trends-controls-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+    }
+    .trends-select {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      background: white;
+      font-weight: 500;
+      color: var(--ink);
+    }
+    .trends-verdict-card {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Networks Split View */
+    .networks-container {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      height: 750px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .networks-list-col {
+      background: #f8fafc;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .networks-search-bar { padding: 10px; border-bottom: 1px solid var(--line); }
+    .networks-search-input {
+      width: 100%;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    .network-row-item {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      transition: background 0.1s;
+    }
+    .network-row-item:hover { background: #f1f5f9; }
+    .network-row-item.active { background: #dbeafe; }
+    .networks-detail-col {
+      padding: 16px 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .comparison-strip {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Concept & Walkthrough Header -->
+  <div class="concept-header">
+    <div class="concept-title">
+      <h1>Hopwatch 5-Tab Architecture <span class="badge">Zero Data Loss · No Whitespace Gaps</span></h1>
+      <p>High-fidelity visual design preview across all 5 app views with live health state simulation.</p>
+    </div>
+    <div class="concept-toggles">
+      <span style="font-size:11px; color:#94a3b8; margin-right:4px;">Live Simulation:</span>
+      <button class="toggle-btn active" id="btn-state-good" onclick="setHealthState('good')">✓ Healthy Network</button>
+      <button class="toggle-btn" id="btn-state-degraded" onclick="setHealthState('degraded')">⚠️ Degraded (Wi-Fi Loss & Jitter)</button>
+    </div>
+  </div>
+
+  <!-- Main macOS App Window Shell -->
+  <div class="mac-window">
+    
+    <!-- 1. SIDEBAR -->
+    <div class="sidebar">
+      <div class="traffic-lights">
+        <span class="traffic-light tl-red"></span>
+        <span class="traffic-light tl-yellow"></span>
+        <span class="traffic-light tl-green"></span>
+      </div>
+
+      <div class="brand-section">
+        <div class="brand-logo">H</div>
+        <div>
+          <div class="brand-text">Hopwatch</div>
+          <div class="brand-ver">v1.4.15 (Stable)</div>
+        </div>
+      </div>
+
+      <div class="nav-list">
+        <div class="nav-item active" id="nav-overview" onclick="switchTab('overview')">
+          <span class="nav-icon">📊</span>
+          <span>Overview</span>
+          <span class="nav-badge" id="overview-badge" style="display:none;">1</span>
+        </div>
+        <div class="nav-item" id="nav-live" onclick="switchTab('live')">
+          <span class="nav-icon">📈</span>
+          <span>Live Monitoring</span>
+        </div>
+        <div class="nav-item" id="nav-activity" onclick="switchTab('activity')">
+          <span class="nav-icon">📋</span>
+          <span>Activity</span>
+        </div>
+        <div class="nav-item" id="nav-trends" onclick="switchTab('trends')">
+          <span class="nav-icon">📉</span>
+          <span>Trends</span>
+        </div>
+        <div class="nav-item" id="nav-networks" onclick="switchTab('networks')">
+          <span class="nav-icon">🌐</span>
+          <span>Networks</span>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="mini-network">
+          <span class="mini-network-name">📶 MOBILIADOS 101</span>
+          <span class="mini-network-meta">Wi-Fi 6 · 5 GHz (Ch 44)</span>
+        </div>
+        <div class="sidebar-actions">
+          <button class="btn-side" onclick="alert('Running immediate background scan...')">Check Now</button>
+          <button class="btn-side" onclick="alert('Opening Preferences...')">Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. CONTENT AREA -->
+    <div class="content-area">
+      
+      <!-- Top Window Toolbar -->
+      <div class="window-toolbar">
+        <div class="toolbar-title" id="current-tab-title">Overview</div>
+        <div class="toolbar-status">
+          <span class="pill good" id="toolbar-pill"><span style="font-size:8px;">●</span> Watching</span>
+          <span style="font-size:11px; color:var(--muted);" id="toolbar-time">Updated 2s ago</span>
+        </div>
+      </div>
+
+      <!-- Main Scrollable Canvas -->
+      <main class="main-scroll">
+
+        <!-- ==================== 1. OVERVIEW TAB ==================== -->
+        <div class="view-container active" id="view-overview">
+          <div class="overview-view">
+            
+            <!-- 1. Header Bar -->
+            <div class="page-header">
+              <div class="page-title-box">
+                <h2>Network Overview</h2>
+                <div class="page-subtitle">
+                  <span>Current connection: <strong>MOBILIADOS 101</strong></span>
+                  <span>·</span>
+                  <span>Monitored continuously for 24h</span>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-primary" onclick="alert('Full Diagnostic Scan initiated...')">Run Full Check</button>
+              </div>
+            </div>
+
+            <!-- 2. Status Hero Banner (Always First) -->
+            <div class="status-hero" id="status-hero-banner">
+              <div class="hero-icon" id="hero-icon-el">✓</div>
+              <div class="hero-text">
+                <h3 id="hero-headline">All good — watching</h3>
+                <p id="hero-consequence">Network is responsive with zero packet loss and low jitter to your router and the internet.</p>
+              </div>
+              <div class="hero-meta" id="hero-culprit-pill">All systems nominal</div>
+            </div>
+
+            <!-- 3. Key Vitals Row (Throughput & Connection Reliability) -->
+            <div class="vitals-grid">
+              <!-- Col 1: Throughput -->
+              <div class="vitals-box">
+                <div class="vitals-box-head">
+                  <strong>⚡ Throughput & Bandwidth</strong>
+                  <button class="btn" style="padding:2px 8px; font-size:10px;" onclick="simulateSpeedTest()">Test Speed</button>
+                </div>
+                <div class="vitals-box-values">
+                  <div><span class="vitals-big-num" id="val-speed-down">245.8</span> <span class="vitals-subtext">Mbps ↓</span></div>
+                  <div><span class="vitals-big-num" id="val-speed-up">42.1</span> <span class="vitals-subtext">Mbps ↑</span></div>
+                </div>
+                <div class="vitals-subtext">Last tested 14m ago · WireGuard VPN active</div>
+              </div>
+
+              <!-- Col 2: Connection Reliability -->
+              <div class="vitals-box">
+                <div class="vitals-box-head">
+                  <strong>🛡️ Connection Reliability</strong>
+                  <span class="pill good" style="font-size:9.5px; padding:2px 7px;">99.8% Uptime</span>
+                </div>
+                <div class="vitals-box-values">
+                  <div><span class="vitals-big-num">0</span> <span class="vitals-subtext">Outages</span></div>
+                  <div><span class="vitals-big-num">0s</span> <span class="vitals-subtext">Downtime</span></div>
+                </div>
+                <div class="vitals-subtext">14,290 continuous probes · No history of drops in last 24h</div>
+              </div>
+            </div>
+
+            <!-- 4. What Should Work (Suitability Strip · 5 Rich Cards Across) -->
+            <div class="suitability-strip-panel">
+              <div class="suitability-header-row">
+                <div class="suitability-title-left">
+                  <strong>What should work</strong>
+                  <span id="suitability-subtitle">· Live real-world activity assessment</span>
+                </div>
+                <div class="suitability-live-tag">Updated continuously</div>
+              </div>
+
+              <div class="suitability-cards-grid">
+                <!-- 1. Calls -->
+                <div class="suit-card" id="card-suit-calls" title="Calls & Zoom suitability">
+                  <div class="suit-card-top">
+                    <div class="suit-icon-circle good" id="icon-suit-calls">📹</div>
+                    <span class="suit-card-title">Calls</span>
+                  </div>
+                  <div class="suit-status-row">
+                    <span class="suit-status-text good" id="status-suit-calls">HD video ready</span>
+                    <span style="color:#cbd5e1;">·</span>
+                    <span class="suit-metric-val" id="metric-suit-calls">0% · 2ms jit</span>
+                  </div>
+                  <div class="suit-consequence-text" id="desc-suit-calls">Crisp 1080p video & voice</div>
+                </div>
+
+                <!-- 2. Streaming -->
+                <div class="suit-card" id="card-suit-streaming" title="Video streaming suitability">
+                  <div class="suit-card-top">
+                    <div class="suit-icon-circle good" id="icon-suit-streaming">📺</div>
+                    <span class="suit-card-title">Streaming</span>
+                  </div>
+                  <div class="suit-status-row">
+                    <span class="suit-status-text good" id="status-suit-streaming">4K ready</span>
+                    <span style="color:#cbd5e1;">·</span>
+                    <span class="suit-metric-val" id="metric-suit-streaming">245 Mbps ↓</span>
+                  </div>
+                  <div class="suit-consequence-text" id="desc-suit-streaming">Instant buffer-free 4K Ultra HD</div>
+                </div>
+
+                <!-- 3. Gaming -->
+                <div class="suit-card" id="card-suit-gaming" title="Online multiplayer suitability">
+                  <div class="suit-card-top">
+                    <div class="suit-icon-circle good" id="icon-suit-gaming">🎮</div>
+                    <span class="suit-card-title">Gaming</span>
+                  </div>
+                  <div class="suit-status-row">
+                    <span class="suit-status-text good" id="status-suit-gaming">Responsive</span>
+                    <span style="color:#cbd5e1;">·</span>
+                    <span class="suit-metric-val" id="metric-suit-gaming">12 ms · 2ms jit</span>
+                  </div>
+                  <div class="suit-consequence-text" id="desc-suit-gaming">Ultra-low ping & zero rollbacks</div>
+                </div>
+
+                <!-- 4. VPN / Remote -->
+                <div class="suit-card" id="card-suit-vpn" title="VPN and SSH tunnel stability">
+                  <div class="suit-card-top">
+                    <div class="suit-icon-circle good" id="icon-suit-vpn">🛡️</div>
+                    <span class="suit-card-title">VPN / Remote</span>
+                  </div>
+                  <div class="suit-status-row">
+                    <span class="suit-status-text good" id="status-suit-vpn">Compatible</span>
+                    <span style="color:#cbd5e1;">·</span>
+                    <span class="suit-metric-val" id="metric-suit-vpn">Direct route</span>
+                  </div>
+                  <div class="suit-consequence-text" id="desc-suit-vpn">Single NAT, clean MTU</div>
+                </div>
+
+                <!-- 5. Browsing -->
+                <div class="suit-card" id="card-suit-browsing" title="Web browsing and SaaS apps">
+                  <div class="suit-card-top">
+                    <div class="suit-icon-circle good" id="icon-suit-browsing">🌐</div>
+                    <span class="suit-card-title">Browsing</span>
+                  </div>
+                  <div class="suit-status-row">
+                    <span class="suit-status-text good" id="status-suit-browsing">Fast lookups</span>
+                    <span style="color:#cbd5e1;">·</span>
+                    <span class="suit-metric-val" id="metric-suit-browsing">8ms DNS</span>
+                  </div>
+                  <div class="suit-consequence-text" id="desc-suit-browsing">Snappy DNS & rapid page loads</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Connection Path Panel (3-Hop Route) -->
+            <div class="route-card">
+              <div class="route-hops" id="route-hops-container">
+                <!-- Hop 1: Mac -->
+                <div class="hop-node">
+                  <div class="hop-reading-top">Wi-Fi RSSI</div>
+                  <div class="hop-reading-val good" id="hop-mac-reading">−62 <small style="font-size:12px;">dBm</small></div>
+                  <div class="hop-circle">💻</div>
+                  <div class="hop-name">This Mac</div>
+                  <div class="hop-desc">192.168.1.142</div>
+                </div>
+
+                <!-- Hop 2: Gateway Router -->
+                <div class="hop-node">
+                  <div class="hop-reading-top">Router Ping</div>
+                  <div class="hop-reading-val good" id="hop-gw-reading">4.2 <small style="font-size:12px;">ms</small></div>
+                  <div class="hop-circle" id="hop-gw-circle">📡</div>
+                  <div class="hop-name">Gateway Router</div>
+                  <div class="hop-desc">192.168.1.1</div>
+                </div>
+
+                <!-- Hop 3: Internet -->
+                <div class="hop-node">
+                  <div class="hop-reading-top">Internet Ping</div>
+                  <div class="hop-reading-val good" id="hop-inet-reading">28.4 <small style="font-size:12px;">ms</small></div>
+                  <div class="hop-circle">
+                    🌐
+                    <span class="hop-flag">🇺🇸</span>
+                  </div>
+                  <div class="hop-name">Internet</div>
+                  <div class="hop-desc">United States · Comcast Cable</div>
+                </div>
+              </div>
+
+              <!-- Route Metrics 3-Column Bar -->
+              <div class="route-metrics-bar" id="route-metrics-bar">
+                <div>Wi-Fi 6 · 5 GHz (Ch 44) · <strong>SNR 28 dB</strong></div>
+                <div id="route-gw-loss">Loss <strong>0%</strong> · Jitter <strong>1 ms</strong> · +2ms load</div>
+                <div id="route-inet-loss">Loss <strong>0%</strong> · Jitter <strong>2 ms</strong> · +14ms load</div>
+              </div>
+
+              <!-- Bottom VPN & Ping Targets Context Row -->
+              <div class="route-footer-bar">
+                <span>🛡️ <strong>VPN on</strong> · WireGuard (mullvad-us)</span>
+                <span>Public IP: <strong>198.51.100.24</strong></span>
+                <span>Ping targets: <strong>1.1.1.1 / 8.8.8.8</strong></span>
+              </div>
+            </div>
+
+            <!-- 6. Core Balanced 2-Column Grid (Zero Vertical Gaps) -->
+            <div class="balanced-grid">
+              
+              <!-- LEFT COLUMN: Live Telemetry, Findings & Recent Activity (~450px) -->
+              <div class="column-stack">
+                
+                <!-- Live Ping Chart Panel (~180px) -->
+                <div class="panel-box">
+                  <div class="card-header">
+                    <div>
+                      <span class="card-title">Ping over time</span>
+                      <div class="card-meta">Live samples · Last hour retained</div>
+                    </div>
+                    <div class="segment-picker">
+                      <button class="segment-btn active">15m</button>
+                      <button class="segment-btn">1h</button>
+                    </div>
+                  </div>
+                  <div style="display:flex; gap:14px; padding:0 15px 7px; font-size:10px; color:var(--muted);">
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2.5px; background:#2563eb; border-radius:2px;"></span> Internet</span>
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2.5px; background:#f59e0b; border-radius:2px;"></span> Router</span>
+                  </div>
+                  <div style="padding:0 15px;">
+                    <svg viewBox="0 0 450 85" style="width:100%; height:85px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                      <line x1="0" y1="25" x2="450" y2="25" stroke="#e2e8f0"/>
+                      <line x1="0" y1="58" x2="450" y2="58" stroke="#e2e8f0"/>
+                      <path id="chart-path-inet" d="M0 52 L30 49 L60 53 L90 50 L120 51 L150 48 L180 52 L210 50 L240 49 L270 53 L300 50 L330 51 L360 49 L390 51 L420 50 L450 49" fill="none" stroke="#2563eb" stroke-width="2"/>
+                      <path id="chart-path-gw" d="M0 76 L30 75 L60 76 L90 74 L120 76 L150 75 L180 77 L210 75 L240 76 L270 75 L300 76 L330 75 L360 76 L390 75 L420 76 L450 75" fill="none" stroke="#f59e0b" stroke-width="2"/>
+                    </svg>
+                  </div>
+                  <div style="padding:7px 15px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; font-size:10px;">
+                    <span id="chart-summary-stats">Internet min / avg / max: <strong>24 / 28 / 35 ms</strong></span>
+                    <button class="btn" style="padding:2px 6px; font-size:9.5px;" onclick="alert('Latency burst test started (10s)')">Burst (10s)</button>
+                  </div>
+                </div>
+
+                <!-- Actionable Findings Panel (~110px) -->
+                <div class="panel-box findings-card" id="findings-section">
+                  <div class="card-header">
+                    <span class="card-title">Findings & Next Steps</span>
+                    <span class="card-meta">Saved check · 13:22</span>
+                  </div>
+                  <div id="findings-content">
+                    <div class="finding-item" id="finding-item-quiet">
+                      <span style="font-size:14px; color:var(--green);">✓</span>
+                      <div>
+                        <div class="finding-title" style="color:var(--green);">No active network disruptions</div>
+                        <div class="finding-desc">Wi-Fi signal is strong and gateway latency is quiet. No action required.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Recent Activity Feed (~160px) -->
+                <div class="panel-box">
+                  <div class="card-header">
+                    <span class="card-title">Recent Activity</span>
+                    <button class="btn" style="padding:2px 7px; font-size:10px;" onclick="switchTab('activity')">View all in Activity →</button>
+                  </div>
+                  <div style="padding:0 15px 9px; display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; gap:8px; align-items:flex-start; padding:5px 0; border-bottom:1px solid #f1f5f9;">
+                      <span style="font-size:10px; color:#f59e0b;">●</span>
+                      <div style="flex:1;">
+                        <div style="font-size:11px; font-weight:600;">Jitter blip during video conference</div>
+                        <div style="font-size:10px; color:var(--muted);">Peak 48ms jitter · duration 1m 15s</div>
+                      </div>
+                      <span style="font-size:10px; color:var(--quiet);">14:22</span>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:flex-start; padding:5px 0;">
+                      <span style="font-size:10px; color:#2563eb;">●</span>
+                      <div style="flex:1;">
+                        <div style="font-size:11px; font-weight:600;">VPN connection established</div>
+                        <div style="font-size:10px; color:var(--muted);">Routing exit through WireGuard US</div>
+                      </div>
+                      <span style="font-size:10px; color:var(--quiet);">11:05</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- RIGHT COLUMN: Check Details Table (ALL 15 ROWS WITH GRADES & MEDIANS) (~450px) -->
+              <div class="column-stack">
+                <div class="panel-box">
+                  <div class="card-header">
+                    <div>
+                      <span class="card-title">Check Details & Evidence</span>
+                      <div class="card-meta">Saved check · Compared against usual medians</div>
+                    </div>
+                    <span class="pill" style="background:#f1f5f9; color:var(--muted); font-size:9.5px; padding:2px 7px;">Saved check</span>
+                  </div>
+
+                  <table class="evidence-table">
+                    <thead>
+                      <tr>
+                        <th style="width:38%;">Measurement</th>
+                        <th style="width:44%;">Measured & State</th>
+                        <th style="width:18%; text-align:right;">Usual</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="row-label"><span>〰️</span> Jitter</span></td>
+                        <td><span class="row-value" id="ev-jitter-val">2 ms</span> <span class="row-badge badge-good" id="ev-jitter-badge">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>📡</span> Packet loss to router</span></td>
+                        <td><span class="row-value" id="ev-gwloss-val">0%</span> <span class="row-badge badge-good" id="ev-gwloss-badge">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">0%</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>📻</span> Wi-Fi channel</span></td>
+                        <td><span class="row-value">5 GHz · Ch 44</span> <span class="row-badge badge-good">Clear</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>📶</span> Signal</span></td>
+                        <td><span class="row-value">−62 dBm</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">−62 dBm</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🔊</span> Noise</span></td>
+                        <td><span class="row-value">−90 dBm</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">−86 dBm</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🎯</span> SNR</span></td>
+                        <td><span class="row-value" id="ev-snr-val">28 dB</span> <span class="row-badge badge-good" id="ev-snr-badge">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">24 dB</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>⏱️</span> Router round-trip</span></td>
+                        <td><span class="row-value" id="ev-gwrtt-val">4.2 ms</span> <span class="row-badge badge-good" id="ev-gwrtt-badge">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">4.6 ms</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🌐</span> Internet round-trip</span></td>
+                        <td><span class="row-value">28.4 ms</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">42 ms</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>❌</span> Internet packet loss</span></td>
+                        <td><span class="row-value">0% / 0%</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">0%</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🔍</span> Name lookups (DNS)</span></td>
+                        <td><span class="row-value">3 of 3 OK</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>⏳</span> Lag under load</span></td>
+                        <td><span class="row-value">Router +2ms · Net +14ms</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">+3 ms</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>📦</span> Packet size (MTU)</span></td>
+                        <td><span class="row-value">1420 bytes</span> <span class="row-badge badge-neutral">Standard</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🔒</span> Web reachability (443)</span></td>
+                        <td><span class="row-value">Reachable</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>⏰</span> System clock (NTP)</span></td>
+                        <td><span class="row-value">Drift 12ms</span> <span class="row-badge badge-good">Good</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                      <tr>
+                        <td><span class="row-label"><span>🌐</span> IPv6 reachability</span></td>
+                        <td><span class="row-value">IPv4 only</span> <span class="row-badge badge-neutral">Unavailable</span></td>
+                        <td style="text-align:right; color:var(--muted);">—</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- 7. Bottom 2-Column Deep Configuration & Technical Telemetry Section (Zero Gaps) -->
+            <div class="deep-details-grid">
+              
+              <!-- Left: Complete Network Details (ALL 10 ATTRIBUTES) -->
+              <div class="panel-box">
+                <div class="card-header">
+                  <span class="card-title">Network Details</span>
+                  <span class="card-meta">Current connection configuration</span>
+                </div>
+                <div class="details-table-grid">
+                  <div>
+                    <div class="detail-item-title">Interface</div>
+                    <div class="detail-item-val">en0 (Wi-Fi)</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Public Country</div>
+                    <div class="detail-item-val">United States 🇺🇸</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Local IP</div>
+                    <div class="detail-item-val">192.168.1.142</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Public IP</div>
+                    <div class="detail-item-val">198.51.100.24</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Gateway IP</div>
+                    <div class="detail-item-val">192.168.1.1</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">ISP Name</div>
+                    <div class="detail-item-val">Comcast Cable</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">DNS Server</div>
+                    <div class="detail-item-val">1.1.1.1, 8.8.8.8</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">VPN Status</div>
+                    <div class="detail-item-val">WireGuard (mullvad-us)</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Wi-Fi Security</div>
+                    <div class="detail-item-val">WPA3 Personal</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Connection Cost</div>
+                    <div class="detail-item-val">Unmetered / Broadband</div>
+                  </div>
+                </div>
+                <div class="action-links-row">
+                  <a onclick="alert('Network settings inspector opened')">Configure Interface…</a>
+                  <a onclick="alert('Router admin page: http://192.168.1.1')">Open Router Admin →</a>
+                </div>
+              </div>
+
+              <!-- Right: Technical Telemetry & Deep Route Diagnostics -->
+              <div class="panel-box">
+                <div class="card-header">
+                  <span class="card-title">Technical Detail & Telemetry</span>
+                  <span class="card-meta">System diagnostics & link metrics</span>
+                </div>
+                <div class="details-table-grid">
+                  <div>
+                    <div class="detail-item-title">Traceroute Hops</div>
+                    <div class="detail-item-val">3 hops to target</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">IPv6 Reachability</div>
+                    <div class="detail-item-val">IPv4 only (No global v6)</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Double NAT Detection</div>
+                    <div class="detail-item-val">None (Clean single NAT)</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Wi-Fi Protocol & Channel</div>
+                    <div class="detail-item-val">Wi-Fi 6 (802.11ax) · Ch 44</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Signal / Noise (RSSI)</div>
+                    <div class="detail-item-val">−62 dBm / −90 dBm</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Signal-to-Noise Ratio</div>
+                    <div class="detail-item-val">28 dB (Strong link)</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">DHCP Lease Remaining</div>
+                    <div class="detail-item-val">18 hours 42 minutes</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">IP Conflicts / Neighbors</div>
+                    <div class="detail-item-val">0 duplicates · 4 neighbors</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Loaded Latency (Bufferbloat)</div>
+                    <div class="detail-item-val">Router +2ms · Internet +14ms</div>
+                  </div>
+                  <div>
+                    <div class="detail-item-title">Diagnostic Engine</div>
+                    <div class="detail-item-val">netdiag v1.4.15 (0.9s runtime)</div>
+                  </div>
+                </div>
+                <div class="action-links-row">
+                  <a onclick="alert('Raw JSON viewer sheet opened')">View Raw JSON</a>
+                  <a onclick="alert('Redacted diagnostic report copied to clipboard!')">Copy Redacted Report</a>
+                  <a onclick="alert('Markdown diagnostic report exported')">Save Markdown</a>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ==================== 2. LIVE MONITORING TAB ==================== -->
+        <div class="view-container" id="view-live">
+          <div style="display:flex; flex-direction:column; gap:14px;">
+            
+            <div style="font-size:11px; color:var(--muted); padding:0 4px;">
+              What your connection is doing right now — small probes every few seconds, kept for an hour, never saved.
+            </div>
+
+            <!-- State Card -->
+            <div class="panel-box" style="padding:12px 16px;">
+              <div style="display:flex; gap:10px; align-items:center;">
+                <span class="pill good" id="live-state-pill"><span style="font-size:8px;">●</span> Active</span>
+                <span style="font-size:12px; font-weight:600;" id="live-state-text">All good — watching</span>
+                <span style="font-size:11px; color:var(--muted); margin-left:auto;">Last transition 14m ago</span>
+              </div>
+            </div>
+
+            <!-- Live Instrument Gauges -->
+            <div class="live-gauges-grid">
+              <div class="gauge-tile">
+                <div class="gauge-tile-head"><span>📡</span> Router Ping</div>
+                <div class="gauge-tile-val" id="live-gauge-gw">4.2 ms</div>
+                <div class="gauge-tile-sub" id="live-gauge-gw-sub">Normal local link</div>
+              </div>
+              <div class="gauge-tile">
+                <div class="gauge-tile-head"><span>🌐</span> Internet (TCP)</div>
+                <div class="gauge-tile-val" id="live-gauge-inet">28.4 ms</div>
+                <div class="gauge-tile-sub" id="live-gauge-inet-sub">1.1.1.1:443 connect time</div>
+              </div>
+              <div class="gauge-tile">
+                <div class="gauge-tile-head"><span>⚡</span> Stability</div>
+                <div class="gauge-tile-val" style="color:var(--green);" id="live-gauge-stab">Stable</div>
+                <div class="gauge-tile-sub" id="live-gauge-jitter">Jitter: 1.8 ms · Low</div>
+              </div>
+              <div class="gauge-tile">
+                <div class="gauge-tile-head"><span>🛡️</span> Packet Loss</div>
+                <div class="gauge-tile-val" style="color:var(--green);" id="live-gauge-loss">0.0%</div>
+                <div class="gauge-tile-sub" id="live-gauge-loss-sub">0 of 120 probes lost</div>
+              </div>
+            </div>
+
+            <!-- Waveform Charts with Axes & Advice -->
+            <div class="panel-box" style="padding:14px 18px;">
+              <div class="card-header" style="padding:0 0 10px;">
+                <span class="card-title">Router Round-Trip (Gateway RTT)</span>
+                <span style="font-size:11px; font-weight:600; color:var(--ink);" id="live-gw-chart-stats">Avg 4.2 ms · Min 3.1 ms · Max 7.8 ms</span>
+              </div>
+              <svg viewBox="0 0 600 80" style="width:100%; height:80px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                <line x1="0" y1="20" x2="600" y2="20" stroke="#e2e8f0" />
+                <line x1="0" y1="50" x2="600" y2="50" stroke="#e2e8f0" />
+                <text x="6" y="24" font-size="8" fill="#94a3b8">20 ms</text>
+                <text x="6" y="54" font-size="8" fill="#94a3b8">10 ms</text>
+                <text x="6" y="76" font-size="8" fill="#94a3b8">0 ms</text>
+                <path id="live-gw-chart-path" d="M40 68 L80 67 L120 68 L160 66 L200 68 L240 67 L280 69 L320 66 L360 67 L400 68 L440 66 L480 68 L520 67 L560 68 L600 67" fill="none" stroke="#f59e0b" stroke-width="2"/>
+              </svg>
+              <div style="font-size:10px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;">
+                <span>Flat line near the bottom is ideal. Spikes indicate Wi-Fi noise or router load.</span>
+                <span>Last 60 minutes</span>
+              </div>
+            </div>
+
+            <div class="panel-box" style="padding:14px 18px;">
+              <div class="card-header" style="padding:0 0 10px;">
+                <span class="card-title">Internet Round-Trip (TCP Connect to 1.1.1.1)</span>
+                <span style="font-size:11px; font-weight:600; color:var(--ink);">Avg 28.4 ms · Min 24.0 ms · Max 35.1 ms</span>
+              </div>
+              <svg viewBox="0 0 600 80" style="width:100%; height:80px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                <line x1="0" y1="20" x2="600" y2="20" stroke="#e2e8f0" />
+                <line x1="0" y1="50" x2="600" y2="50" stroke="#e2e8f0" />
+                <text x="6" y="24" font-size="8" fill="#94a3b8">60 ms</text>
+                <text x="6" y="54" font-size="8" fill="#94a3b8">30 ms</text>
+                <text x="6" y="76" font-size="8" fill="#94a3b8">0 ms</text>
+                <path d="M40 48 L80 46 L120 50 L160 47 L200 45 L240 51 L280 47 L320 46 L360 49 L400 47 L440 45 L480 50 L520 46 L560 47 L600 46" fill="none" stroke="#2563eb" stroke-width="2"/>
+              </svg>
+              <div style="font-size:10px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;">
+                <span>Measures core internet targets. Spikes with a flat router line point to ISP congestion.</span>
+                <span>Last 60 minutes</span>
+              </div>
+            </div>
+
+            <div class="panel-box" style="padding:14px 18px;">
+              <div class="card-header" style="padding:0 0 10px;">
+                <span class="card-title">Router Packet Loss (%)</span>
+                <span style="font-size:11px; font-weight:600; color:var(--green);" id="live-loss-chart-stats">0.0% loss</span>
+              </div>
+              <svg viewBox="0 0 600 50" style="width:100%; height:50px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                <line id="live-loss-chart-line" x1="0" y1="45" x2="600" y2="45" stroke="#10b981" stroke-width="3"/>
+                <text x="6" y="20" font-size="8" fill="#94a3b8">10%</text>
+                <text x="6" y="42" font-size="8" fill="#94a3b8">0%</text>
+              </svg>
+              <div style="font-size:10px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;">
+                <span>0% loss is expected. Non-zero loss causes robotic audio or dropped calls.</span>
+                <span>Last 60 minutes</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== 3. ACTIVITY TAB ==================== -->
+        <div class="view-container" id="view-activity">
+          <div style="display:flex; flex-direction:column; gap:14px;">
+            
+            <!-- Summary Header Card -->
+            <div class="panel-box" style="padding:14px 18px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:20px; color:#10b981;" id="act-summary-icon">🛡️</span>
+                  <div>
+                    <h3 style="margin:0; font-size:14px; font-weight:700;" id="act-summary-title">Connection Stable & Quiet</h3>
+                    <div style="font-size:11px; color:var(--muted); margin-top:2px;" id="act-summary-sub">No packet loss, latency spikes, or disruptions observed across 3 day(s)</div>
+                  </div>
+                </div>
+
+                <div class="segment-picker" style="padding:2px;">
+                  <button class="segment-btn active" id="act-filter-all" onclick="filterActivity(false)">All Activity (14)</button>
+                  <button class="segment-btn" id="act-filter-issues" onclick="filterActivity(true)">Issues Only (1)</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Alert Section (When Degraded) -->
+            <div class="panel-box" id="act-active-now" style="display:none; border-color:#fca5a5; background:#fff5f5; padding:12px 16px;">
+              <div style="display:flex; gap:10px; align-items:flex-start;">
+                <span style="font-size:16px; color:#ef4444;">🚨</span>
+                <div>
+                  <div style="font-size:12px; font-weight:700; color:#b91c1c;">Active Alert: Wi-Fi Jitter Spike & Loss</div>
+                  <div style="font-size:10.5px; color:#991b1b; margin-top:2px;">Raised 2m ago · Rule WF-3 · 6% packet loss causing VoIP call audio cutouts</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Folded Episodes Timeline by Day -->
+            <div class="panel-box" style="padding:14px 18px;">
+              <div style="font-size:10px; font-weight:700; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px;">TODAY · SEPTEMBER 28</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                
+                <div class="act-row-item issue-item" style="display:flex; gap:10px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                  <span style="font-size:14px; color:#f59e0b;">⚠️</span>
+                  <div style="flex:1;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <strong style="font-size:11.5px;">Minor packet loss to router</strong>
+                      <span class="badge" style="background:#fef3c7; color:#92400e; font-size:9px; padding:1px 5px;">3 times · over 2m total</span>
+                    </div>
+                    <div style="font-size:10px; color:var(--muted); margin-top:2px;">Spikes up to 6% loss resolved quickly</div>
+                  </div>
+                  <span style="font-size:10px; color:var(--quiet);">14:22</span>
+                </div>
+
+                <div class="act-row-item" style="display:flex; gap:10px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                  <span style="font-size:14px; color:#2563eb;">🛡️</span>
+                  <div style="flex:1;">
+                    <strong style="font-size:11.5px;">VPN Connected · WireGuard</strong>
+                    <div style="font-size:10px; color:var(--muted); margin-top:2px;">Switched routing exit to United States server</div>
+                  </div>
+                  <span style="font-size:10px; color:var(--quiet);">11:05</span>
+                </div>
+
+                <div class="act-row-item" style="display:flex; gap:10px; padding:6px 0;">
+                  <span style="font-size:14px; color:#10b981;">📶</span>
+                  <div style="flex:1;">
+                    <strong style="font-size:11.5px;">Joined network MOBILIADOS 101</strong>
+                    <div style="font-size:10px; color:var(--muted); margin-top:2px;">Assigned local IP 192.168.1.142 via DHCP</div>
+                  </div>
+                  <span style="font-size:10px; color:var(--quiet);">09:12</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-box" style="padding:14px 18px;">
+              <div style="font-size:10px; font-weight:700; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px;">YESTERDAY · SEPTEMBER 27</div>
+              <div style="display:flex; gap:10px; padding:4px 0;">
+                <span style="font-size:14px; color:#10b981;">✓</span>
+                <div>
+                  <strong style="font-size:11.5px;">Stable throughout the day</strong>
+                  <div style="font-size:10px; color:var(--muted);">Zero link drops or alerts recorded across 8 hours of active use</div>
+                </div>
+                <span style="margin-left:auto; font-size:10px; color:var(--quiet);">All day</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ==================== 4. TRENDS TAB (ELEVATED WITH P10-P90 BANDS) ==================== -->
+        <div class="view-container" id="view-trends">
+          <div style="display:flex; flex-direction:column; gap:14px;">
+            
+            <!-- Controls Bar with Sample Counts in Dropdown -->
+            <div class="trends-controls-bar">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:11px; font-weight:600; color:var(--muted);">Network:</span>
+                <select class="trends-select" id="trends-net-select" onchange="updateTrendsChart()">
+                  <option value="current">📶 MOBILIADOS 101 (Current)</option>
+                  <option value="office">Office-Mesh-5G</option>
+                  <option value="all">All networks (Combined)</option>
+                </select>
+
+                <span style="font-size:11px; font-weight:600; color:var(--muted); margin-left:8px;">Metric:</span>
+                <select class="trends-select" id="trends-metric-select" onchange="updateTrendsChart()">
+                  <option value="gw_rtt">Router Ping (1,959)</option>
+                  <option value="inet_rtt">Internet Ping (1,959)</option>
+                  <option value="bb_gw">Bufferbloat (Router) (38)</option>
+                  <option value="bb_inet">Bufferbloat (Internet) (38)</option>
+                  <option value="speed_down">Download Speed (12)</option>
+                  <option value="speed_up">Upload Speed (12)</option>
+                </select>
+
+                <span style="font-size:11px; font-weight:600; color:var(--muted); margin-left:8px;">Window:</span>
+                <div class="segment-picker">
+                  <button class="segment-btn">7d</button>
+                  <button class="segment-btn active">30d</button>
+                  <button class="segment-btn">90d</button>
+                  <button class="segment-btn">All</button>
+                </div>
+              </div>
+
+              <button class="btn" style="padding:4px 8px; font-size:10.5px;" onclick="alert('Reloaded history store from disk')">↻ Reload Store</button>
+            </div>
+
+            <div style="font-size:11px; color:var(--muted); padding:0 4px;">
+              What this network is usually like — one point per saved check, over weeks. Live samples are not stored here.
+            </div>
+
+            <!-- Netdiag Baseline Verdict Card -->
+            <div class="trends-verdict-card" id="trends-verdict-card">
+              <span style="font-size:20px; color:#16a34a;" id="trends-verdict-icon">🏅</span>
+              <div>
+                <strong style="font-size:12px; color:#15803d;" id="trends-verdict-title">Quiet and consistent connection</strong>
+                <div style="font-size:10.5px; color:#166534; margin-top:2px;" id="trends-verdict-sub">Typical gateway latency is 4.5 ms with 0% loss. Speed tests average 240 Mbps down. Judged by netdiag baseline engine.</div>
+              </div>
+            </div>
+
+            <!-- 3 Baseline Digest Tiles -->
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;">
+              <div class="panel-box" style="padding:12px 16px;">
+                <div style="display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--muted); margin-bottom:4px;">
+                  <span style="color:#2563eb;">⚡</span> Typical Speeds
+                </div>
+                <div style="font-size:18px; font-weight:750; color:var(--ink);" id="trends-tile-speed">240 / 40 Mbps</div>
+                <div style="font-size:9.5px; color:var(--muted); margin-top:2px;">Peak: 265 Mbps · Download / Upload</div>
+              </div>
+
+              <div class="panel-box" style="padding:12px 16px;">
+                <div style="display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--muted); margin-bottom:4px;">
+                  <span style="color:#9333ea;">⏱️</span> Typical Ping
+                </div>
+                <div style="font-size:18px; font-weight:750; color:var(--ink);" id="trends-tile-ping">4.5 ms</div>
+                <div style="font-size:9.5px; color:var(--muted); margin-top:2px;">±1.2 ms jitter · Gateway baseline</div>
+              </div>
+
+              <div class="panel-box" style="padding:12px 16px;">
+                <div style="display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--muted); margin-bottom:4px;">
+                  <span style="color:#16a34a;">🛡️</span> Reliability
+                </div>
+                <div style="font-size:18px; font-weight:750; color:#16a34a;" id="trends-tile-rel">99% (Good)</div>
+                <div style="font-size:9.5px; color:var(--muted); margin-top:2px;">34 checks · 1 incident recorded</div>
+              </div>
+            </div>
+
+            <!-- Historical Scatter / Trend Plot with P10-P90 Shaded Band -->
+            <div class="panel-box" style="padding:16px 18px;">
+              <div class="card-header" style="padding:0 0 10px;">
+                <div>
+                  <span class="card-title" id="trends-chart-title">Router Ping (ms) · 1,959 samples</span>
+                  <div class="card-meta">Shaded band: this network's typical range (p10–p90) from saved checks</div>
+                </div>
+                <span style="font-size:10px; color:var(--muted);">lower is better</span>
+              </div>
+              <svg viewBox="0 0 600 130" style="width:100%; height:130px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+                <!-- Shaded typical range band (p10 to p90) -->
+                <rect x="35" y="65" width="530" height="30" fill="#e2e8f0" opacity="0.6"/>
+                <text x="500" y="62" font-size="8" fill="#64748b">Typical High (p90: 6.8 ms)</text>
+                <text x="500" y="99" font-size="8" fill="#64748b">Typical Low (p10: 3.2 ms)</text>
+
+                <!-- Median dashed line -->
+                <line x1="35" y1="80" x2="565" y2="80" stroke="#94a3b8" stroke-dasharray="4" />
+                <text x="40" y="77" font-size="8" fill="#475569">Median: 4.5 ms</text>
+
+                <!-- Warning threshold line at 15ms -->
+                <line x1="35" y1="30" x2="565" y2="30" stroke="#fca5a5" stroke-dasharray="2" />
+                <text x="40" y="27" font-size="8" fill="#ef4444">15 ms Threshold</text>
+
+                <!-- Scatter points and connecting trendline -->
+                <path d="M40 82 L90 80 L140 81 L190 83 L240 80 L290 81 L340 32 L390 81 L440 79 L490 82 L540 80" fill="none" stroke="#2563eb" stroke-width="1.75"/>
+                <circle cx="40" cy="82" r="3.5" fill="#2563eb"/>
+                <circle cx="90" cy="80" r="3.5" fill="#2563eb"/>
+                <circle cx="140" cy="81" r="3.5" fill="#2563eb"/>
+                <circle cx="190" cy="83" r="3.5" fill="#2563eb"/>
+                <circle cx="240" cy="80" r="3.5" fill="#2563eb"/>
+                <circle cx="290" cy="81" r="3.5" fill="#2563eb"/>
+                <!-- Clamped outlier mark (Pegged Triangle) -->
+                <polygon points="340,25 344,32 336,32" fill="#f59e0b"/>
+                <circle cx="390" cy="81" r="3.5" fill="#2563eb"/>
+                <circle cx="440" cy="79" r="3.5" fill="#2563eb"/>
+                <circle cx="490" cy="82" r="3.5" fill="#2563eb"/>
+                <circle cx="540" cy="80" r="3.5" fill="#2563eb"/>
+              </svg>
+              <div style="font-size:10px; color:var(--muted); margin-top:8px; display:flex; justify-content:space-between;">
+                <span>Shaded: typical range (3.2–6.8 ms) · ▲ Pegged outlier (spiked during channel shift)</span>
+                <span>34 checks over 30 days</span>
+              </div>
+            </div>
+
+            <!-- Incident Frequency Chart -->
+            <div class="panel-box" style="padding:14px 18px;">
+              <div class="card-header" style="padding:0 0 10px;">
+                <span class="card-title">Incidents per Week</span>
+                <span class="card-meta">1 total disruption observed across 30 days</span>
+              </div>
+              <div style="display:flex; align-items:flex-end; gap:20px; height:50px; padding:0 20px;">
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;"><div style="width:24px; height:6px; background:#e2e8f0; border-radius:3px;"></div><span style="font-size:9px; color:var(--muted);">W35</span></div>
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;"><div style="width:24px; height:6px; background:#e2e8f0; border-radius:3px;"></div><span style="font-size:9px; color:var(--muted);">W36</span></div>
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;"><div style="width:24px; height:24px; background:#f59e0b; border-radius:3px;"></div><span style="font-size:9px; color:var(--muted);">W37</span></div>
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;"><div style="width:24px; height:6px; background:#e2e8f0; border-radius:3px;"></div><span style="font-size:9px; color:var(--muted);">W38</span></div>
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;"><div style="width:24px; height:6px; background:#e2e8f0; border-radius:3px;"></div><span style="font-size:9px; color:var(--muted);">W39</span></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ==================== 5. NETWORKS TAB (INTERACTIVE 2-COLUMN SPLIT VIEW) ==================== -->
+        <div class="view-container" id="view-networks">
+          <div class="networks-container">
+            
+            <!-- Left Column: Searchable Networks List -->
+            <div class="networks-list-col">
+              <div class="networks-search-bar">
+                <input type="text" class="networks-search-input" id="net-search-input" placeholder="Search by name, SSID, gateway or ISP…" onkeyup="filterNetworksList()">
+              </div>
+              <div style="padding:8px 12px 4px; font-size:10px; font-weight:700; color:var(--muted);">ACTIVE CONNECTION</div>
+              
+              <div class="network-row-item active" id="net-row-mobiliados" onclick="selectNetwork('mobiliados')">
+                <span style="font-size:14px; color:#10b981;">📶</span>
+                <div style="flex:1;">
+                  <div style="display:flex; align-items:center; gap:5px;">
+                    <strong style="font-size:11.5px;">MOBILIADOS 101</strong>
+                    <span class="badge" style="background:#10b981; font-size:8px; padding:1px 4px;">Active</span>
+                  </div>
+                  <div style="font-size:10px; color:var(--muted);">240 Mbps · 99%</div>
+                </div>
+                <span style="font-size:9px; color:var(--quiet);">Now</span>
+              </div>
+
+              <div style="padding:12px 12px 4px; font-size:10px; font-weight:700; color:var(--muted);">PREVIOUS NETWORKS</div>
+
+              <div class="network-row-item" id="net-row-office" onclick="selectNetwork('office')">
+                <span style="font-size:14px; color:var(--muted);">📶</span>
+                <div style="flex:1;">
+                  <div style="font-size:11.5px; font-weight:500;">Office-Mesh-5G</div>
+                  <div style="font-size:10px; color:var(--muted);">580 Mbps · 100%</div>
+                </div>
+                <span style="font-size:9px; color:var(--quiet);">Yesterday</span>
+              </div>
+
+              <div class="network-row-item" id="net-row-ethernet" onclick="selectNetwork('ethernet')">
+                <span style="font-size:14px; color:var(--muted);">🔌</span>
+                <div style="flex:1;">
+                  <div style="font-size:11.5px; font-weight:500;">Thunderbolt Ethernet</div>
+                  <div style="font-size:10px; color:var(--muted);">940 Mbps · 100%</div>
+                </div>
+                <span style="font-size:9px; color:var(--quiet);">5d ago</span>
+              </div>
+
+              <div class="network-row-item" id="net-row-coffee" onclick="selectNetwork('coffee')">
+                <span style="font-size:14px; color:var(--muted);">📶</span>
+                <div style="flex:1;">
+                  <div style="font-size:11.5px; font-weight:500;">CoffeeShop-Guest</div>
+                  <div style="font-size:10px; color:var(--muted);">35 Mbps · 92%</div>
+                </div>
+                <span style="font-size:9px; color:var(--quiet);">2w ago</span>
+              </div>
+            </div>
+
+            <!-- Right Column: Interactive Network Detail Pane -->
+            <div class="networks-detail-col">
+              
+              <!-- Network Header with Actions -->
+              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <h2 style="margin:0; font-size:18px; font-weight:750;" id="net-detail-name">MOBILIADOS 101</h2>
+                    <span class="badge" style="background:#10b981; font-size:9px;" id="net-detail-status">Active Now</span>
+                    <span class="badge" style="background:#e2e8f0; color:var(--ink); font-size:9px;" id="net-detail-type">Wi-Fi</span>
+                  </div>
+                  <div style="font-size:11px; color:var(--muted); margin-top:4px;" id="net-detail-sub">
+                    SSID: MOBILIADOS 101 · Gateway: 192.168.1.1 · ISP: Comcast Cable · Seen Aug 12 – Sep 28
+                  </div>
+                </div>
+
+                <div style="display:flex; gap:8px;">
+                  <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="prompt('Enter new network name:', 'MOBILIADOS 101')">✏️ Rename</button>
+                  <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="alert('Merge dialog: Select network to bridge records with')">⎇ Merge…</button>
+                </div>
+              </div>
+
+              <!-- NetworkDetailCard: Performance Baseline -->
+              <div class="panel-box" style="padding:16px 18px;">
+                <div class="card-header" style="padding:0 0 12px;">
+                  <span class="card-title">Typical Performance Baseline</span>
+                  <span class="card-meta" id="net-detail-samples">Recorded across 34 checks</span>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;">
+                  <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+                    <div style="font-size:10px; color:var(--muted);">Throughput</div>
+                    <div style="font-size:16px; font-weight:700;" id="net-tile-speed">240 / 40 Mbps</div>
+                    <div style="font-size:9px; color:var(--quiet);" id="net-tile-peak">Peak 265 Mbps</div>
+                  </div>
+                  <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+                    <div style="font-size:10px; color:var(--muted);">Latency & Jitter</div>
+                    <div style="font-size:16px; font-weight:700;" id="net-tile-ping">4.5 ms</div>
+                    <div style="font-size:9px; color:var(--quiet);" id="net-tile-jitter">±1.2 ms jitter</div>
+                  </div>
+                  <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+                    <div style="font-size:10px; color:var(--muted);">Reliability</div>
+                    <div style="font-size:16px; font-weight:700; color:#10b981;" id="net-tile-rel">99% (Good)</div>
+                    <div style="font-size:9px; color:var(--quiet);" id="net-tile-count">34 checks recorded</div>
+                  </div>
+                </div>
+
+                <!-- Today vs Typical Live Delta Section -->
+                <div class="comparison-strip" id="net-comparison-strip" style="margin-top:12px;">
+                  <div>
+                    <strong>Today vs. Typical Comparison:</strong>
+                    <span style="color:var(--muted); margin-left:6px;" id="net-comparison-text">Latency is 0.3 ms faster than baseline · Packet loss matches 0% baseline</span>
+                  </div>
+                  <span class="pill good" id="net-comparison-pill" style="font-size:9.5px; padding:2px 7px;">Healthy</span>
+                </div>
+              </div>
+
+              <!-- Inline Checks Explorer with Day Grouping -->
+              <div class="panel-box">
+                <div class="card-header">
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="card-title">Recorded Checks</span>
+                    <select class="trends-select" style="font-size:10px; padding:2px 6px;">
+                      <option>All checks (34)</option>
+                      <option>Full checks only (12)</option>
+                    </select>
+                  </div>
+                  <label style="font-size:10.5px; color:var(--muted); display:flex; align-items:center; gap:4px; cursor:pointer;">
+                    <input type="checkbox" id="chk-problems-only" onchange="toggleProblemsOnly()"> Problems only
+                  </label>
+                </div>
+
+                <div style="display:flex; flex-direction:column;" id="net-checks-list">
+                  <div class="net-check-item healthy-check" style="display:flex; align-items:center; padding:9px 18px; border-top:1px solid var(--line); font-size:11px; cursor:pointer; background:#f8fafc;">
+                    <span style="color:#10b981; margin-right:8px;">●</span>
+                    <strong style="width:90px;">Today 13:22</strong>
+                    <span class="pill good" style="font-size:9px; padding:1px 6px; margin-right:12px;">Healthy</span>
+                    <span style="color:var(--muted); flex:1;">Router 4.2 ms · Internet 28.4 ms · 0% loss · 245 Mbps down</span>
+                    <span style="color:var(--blue); font-size:10.5px;">Inspect →</span>
+                  </div>
+                  <div class="net-check-item healthy-check" style="display:flex; align-items:center; padding:9px 18px; border-top:1px solid var(--line); font-size:11px; cursor:pointer;">
+                    <span style="color:#10b981; margin-right:8px;">●</span>
+                    <strong style="width:90px;">Today 09:12</strong>
+                    <span class="pill good" style="font-size:9px; padding:1px 6px; margin-right:12px;">Arrival</span>
+                    <span style="color:var(--muted); flex:1;">Router 4.6 ms · Internet 29.1 ms · 0% loss · Joined network</span>
+                    <span style="color:var(--blue); font-size:10.5px;">Inspect →</span>
+                  </div>
+                  <div class="net-check-item problem-check" style="display:flex; align-items:center; padding:9px 18px; border-top:1px solid var(--line); font-size:11px; cursor:pointer;">
+                    <span style="color:#f59e0b; margin-right:8px;">●</span>
+                    <strong style="width:90px;">Sep 27 14:22</strong>
+                    <span class="pill warn" style="font-size:9px; padding:1px 6px; margin-right:12px;">Jitter blip</span>
+                    <span style="color:var(--muted); flex:1;">Router 7.4 ms · Internet 34.0 ms · 6% loss · 24ms jitter</span>
+                    <span style="color:var(--blue); font-size:10.5px;">Inspect →</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // Tab switching logic
+    function switchTab(tabId) {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
+      
+      const navEl = document.getElementById('nav-' + tabId);
+      const viewEl = document.getElementById('view-' + tabId);
+      const titleEl = document.getElementById('current-tab-title');
+
+      if (navEl) navEl.classList.add('active');
+      if (viewEl) viewEl.classList.add('active');
+
+      const titles = {
+        'overview': 'Overview',
+        'live': 'Live Monitoring',
+        'activity': 'Network Activity',
+        'trends': 'Long-Term Trends',
+        'networks': 'Saved Networks'
+      };
+      if (titleEl) titleEl.innerText = titles[tabId] || 'Hopwatch';
+    }
+
+    // Activity Filter
+    function filterActivity(issuesOnly) {
+      const btnAll = document.getElementById('act-filter-all');
+      const btnIssues = document.getElementById('act-filter-issues');
+      const rows = document.querySelectorAll('.act-row-item');
+
+      if (issuesOnly) {
+        btnAll.classList.remove('active');
+        btnIssues.classList.add('active');
+        rows.forEach(r => {
+          if (!r.classList.contains('issue-item')) r.style.display = 'none';
+        });
+      } else {
+        btnIssues.classList.remove('active');
+        btnAll.classList.add('active');
+        rows.forEach(r => r.style.display = 'flex');
+      }
+    }
+
+    // Interactive Network Selection
+    function selectNetwork(key) {
+      document.querySelectorAll('.network-row-item').forEach(el => el.classList.remove('active'));
+      const row = document.getElementById('net-row-' + key);
+      if (row) row.classList.add('active');
+
+      const data = {
+        mobiliados: {
+          name: 'MOBILIADOS 101',
+          sub: 'SSID: MOBILIADOS 101 · Gateway: 192.168.1.1 · ISP: Comcast Cable · Seen Aug 12 – Sep 28',
+          status: 'Active Now',
+          statusClass: 'background:#10b981;',
+          speed: '240 / 40 Mbps',
+          peak: 'Peak 265 Mbps',
+          ping: '4.5 ms',
+          rel: '99% (Good)',
+          samples: 'Recorded across 34 checks'
+        },
+        office: {
+          name: 'Office-Mesh-5G',
+          sub: 'SSID: Office-Mesh-5G · Gateway: 10.0.0.1 · ISP: AT&T Fiber · Seen Jun 04 – Yesterday',
+          status: 'Saved',
+          statusClass: 'background:#64748b;',
+          speed: '580 / 520 Mbps',
+          peak: 'Peak 640 Mbps',
+          ping: '2.1 ms',
+          rel: '100% (Pristine)',
+          samples: 'Recorded across 82 checks'
+        },
+        ethernet: {
+          name: 'Thunderbolt Ethernet',
+          sub: 'Hardware: en5 · Gateway: 192.168.1.1 · ISP: Comcast Cable · Seen Jul 10 – 5d ago',
+          status: 'Wired',
+          statusClass: 'background:#64748b;',
+          speed: '940 / 880 Mbps',
+          peak: 'Peak 980 Mbps',
+          ping: '1.2 ms',
+          rel: '100% (Pristine)',
+          samples: 'Recorded across 114 checks'
+        },
+        coffee: {
+          name: 'CoffeeShop-Guest',
+          sub: 'SSID: CoffeeShop-Guest · Gateway: 172.16.0.1 · ISP: Spectrum · Seen 2w ago',
+          status: 'Public',
+          statusClass: 'background:#f59e0b;',
+          speed: '35 / 8 Mbps',
+          peak: 'Peak 42 Mbps',
+          ping: '18.4 ms',
+          rel: '92% (Fair)',
+          samples: 'Recorded across 6 checks'
+        }
+      };
+
+      const item = data[key];
+      if (!item) return;
+
+      document.getElementById('net-detail-name').innerText = item.name;
+      document.getElementById('net-detail-sub').innerText = item.sub;
+      const statusEl = document.getElementById('net-detail-status');
+      statusEl.innerText = item.status;
+      statusEl.style = item.statusClass + ' font-size:9px;';
+      document.getElementById('net-tile-speed').innerText = item.speed;
+      document.getElementById('net-tile-peak').innerText = item.peak;
+      document.getElementById('net-tile-ping').innerText = item.ping;
+      document.getElementById('net-tile-rel').innerText = item.rel;
+      document.getElementById('net-detail-samples').innerText = item.samples;
+    }
+
+    function filterNetworksList() {
+      const q = document.getElementById('net-search-input').value.toLowerCase();
+      document.querySelectorAll('.network-row-item').forEach(el => {
+        const text = el.innerText.toLowerCase();
+        el.style.display = text.includes(q) ? 'flex' : 'none';
+      });
+    }
+
+    function toggleProblemsOnly() {
+      const chk = document.getElementById('chk-problems-only');
+      const healthy = document.querySelectorAll('.healthy-check');
+      healthy.forEach(el => el.style.display = chk.checked ? 'none' : 'flex');
+    }
+
+    // Simulate Health States across ALL tabs
+    function setHealthState(state) {
+      const btnGood = document.getElementById('btn-state-good');
+      const btnDegraded = document.getElementById('btn-state-degraded');
+      
+      // Overview elements
+      const hero = document.getElementById('status-hero-banner');
+      const heroIcon = document.getElementById('hero-icon-el');
+      const heroHeadline = document.getElementById('hero-headline');
+      const heroDesc = document.getElementById('hero-consequence');
+      const heroCulpritPill = document.getElementById('hero-culprit-pill');
+      const pill = document.getElementById('toolbar-pill');
+      const hops = document.getElementById('route-hops-container');
+      const gwCircle = document.getElementById('hop-gw-circle');
+      const gwReading = document.getElementById('hop-gw-reading');
+      const gwLoss = document.getElementById('route-gw-loss');
+      const overviewBadge = document.getElementById('overview-badge');
+      const findingsContent = document.getElementById('findings-content');
+      const findingsCard = document.getElementById('findings-section');
+
+      // Suitability elements (Calls, Streaming, Gaming, VPN, Browsing)
+      const iconCalls = document.getElementById('icon-suit-calls');
+      const statusCalls = document.getElementById('status-suit-calls');
+      const metricCalls = document.getElementById('metric-suit-calls');
+      const descCalls = document.getElementById('desc-suit-calls');
+
+      const iconGaming = document.getElementById('icon-suit-gaming');
+      const statusGaming = document.getElementById('status-suit-gaming');
+      const metricGaming = document.getElementById('metric-suit-gaming');
+      const descGaming = document.getElementById('desc-suit-gaming');
+
+      const iconBrowsing = document.getElementById('icon-suit-browsing');
+      const statusBrowsing = document.getElementById('status-suit-browsing');
+      const metricBrowsing = document.getElementById('metric-suit-browsing');
+      const descBrowsing = document.getElementById('desc-suit-browsing');
+
+      // Evidence rows
+      const evJitterVal = document.getElementById('ev-jitter-val');
+      const evJitterBadge = document.getElementById('ev-jitter-badge');
+      const evGwLossVal = document.getElementById('ev-gwloss-val');
+      const evGwLossBadge = document.getElementById('ev-gwloss-badge');
+      const evSnrVal = document.getElementById('ev-snr-val');
+      const evSnrBadge = document.getElementById('ev-snr-badge');
+      const evGwRttVal = document.getElementById('ev-gwrtt-val');
+      const evGwRttBadge = document.getElementById('ev-gwrtt-badge');
+
+      // Live Gauges & Charts
+      const liveGw = document.getElementById('live-gauge-gw');
+      const liveGwSub = document.getElementById('live-gauge-gw-sub');
+      const liveStab = document.getElementById('live-gauge-stab');
+      const liveJitter = document.getElementById('live-gauge-jitter');
+      const liveLoss = document.getElementById('live-gauge-loss');
+      const liveLossSub = document.getElementById('live-gauge-loss-sub');
+      const liveStatePill = document.getElementById('live-state-pill');
+      const liveStateText = document.getElementById('live-state-text');
+      const liveGwChartStats = document.getElementById('live-gw-chart-stats');
+      const liveGwChartPath = document.getElementById('live-gw-chart-path');
+      const liveLossChartStats = document.getElementById('live-loss-chart-stats');
+      const liveLossChartLine = document.getElementById('live-loss-chart-line');
+
+      // Activity elements
+      const actActive = document.getElementById('act-active-now');
+      const actSummaryIcon = document.getElementById('act-summary-icon');
+      const actSummaryTitle = document.getElementById('act-summary-title');
+      const actSummarySub = document.getElementById('act-summary-sub');
+
+      // Trends elements
+      const trendsVerdictIcon = document.getElementById('trends-verdict-icon');
+      const trendsVerdictTitle = document.getElementById('trends-verdict-title');
+      const trendsVerdictSub = document.getElementById('trends-verdict-sub');
+
+      // Networks elements
+      const netComparisonText = document.getElementById('net-comparison-text');
+      const netComparisonPill = document.getElementById('net-comparison-pill');
+
+      if (state === 'degraded') {
+        btnGood.classList.remove('active');
+        btnDegraded.classList.add('active');
+
+        // Overview Status Hero
+        hero.classList.add('degraded');
+        heroIcon.innerText = '⚠️';
+        heroHeadline.innerText = 'Connection is degraded — Wi-Fi Interference';
+        heroDesc.innerText = 'Wi-Fi interference is causing 6.0% packet loss and 24ms jitter to your router. Real-time voice calls may experience audio dropouts.';
+        heroCulpritPill.innerText = 'Culprit: Gateway Router (WF-3)';
+
+        findingsCard.classList.add('has-issues');
+        findingsContent.innerHTML = `
+          <div class="finding-item">
+            <span style="font-size:14px; color:#f59e0b;">⚠️</span>
+            <div>
+              <div class="finding-title" style="color:#b45309;">Wi-Fi interference detected (WF-3)</div>
+              <div class="finding-desc">Signal is usable (−64 dBm), but signal-to-noise ratio is low (14 dB) with 6.0% packet loss and 24ms jitter to router.</div>
+              <div class="finding-action">👉 Move closer to the router or switch to an uncongested 5 GHz channel.</div>
+            </div>
+          </div>
+        `;
+
+        pill.className = 'pill warn';
+        pill.innerHTML = '<span style="font-size:8px;">●</span> Degraded';
+
+        // Route hops
+        hops.classList.add('has-culprit');
+        gwCircle.className = 'hop-circle warning';
+        gwReading.className = 'hop-reading-val warn';
+        gwReading.innerHTML = '7.4 <small style="font-size:12px;">ms</small>';
+        gwLoss.innerHTML = 'Loss <strong class="warn">6.0%</strong> · Jitter <strong class="warn">24 ms</strong> · +18ms load';
+
+        // Suitability Cards: Explicitly Identify WHAT is bad and WHY
+        // Calls: Degraded by packet loss and jitter
+        iconCalls.className = 'suit-icon-circle warn';
+        statusCalls.className = 'suit-status-text warn';
+        statusCalls.innerText = 'May cut out';
+        metricCalls.innerText = '6% loss · 24ms jit';
+        descCalls.innerText = '⚠️ Robotic voice & dropped speech';
+
+        // Gaming: Degraded by packet loss (rubberbanding)
+        iconGaming.className = 'suit-icon-circle bad';
+        statusGaming.className = 'suit-status-text bad';
+        statusGaming.innerText = 'May rubberband';
+        metricGaming.innerText = '14 ms · 6% loss';
+        descGaming.innerText = '⚠️ Player desync & missed inputs';
+
+        // Browsing: Degraded by packet loss causing TCP retransmissions
+        iconBrowsing.className = 'suit-icon-circle warn';
+        statusBrowsing.className = 'suit-status-text warn';
+        statusBrowsing.innerText = 'Sluggish';
+        metricBrowsing.innerText = '6% loss';
+        descBrowsing.innerText = '⚠️ Retransmissions delay web loads';
+
+        overviewBadge.style.display = 'inline-block';
+
+        // Evidence table updates
+        evJitterVal.innerText = '24 ms';
+        evJitterVal.style.color = '#f59e0b';
+        evJitterBadge.className = 'row-badge badge-warn';
+        evJitterBadge.innerText = 'Degraded';
+
+        evGwLossVal.innerText = '6.0%';
+        evGwLossVal.style.color = '#f59e0b';
+        evGwLossBadge.className = 'row-badge badge-warn';
+        evGwLossBadge.innerText = 'Degraded';
+
+        evSnrVal.innerText = '14 dB';
+        evSnrVal.style.color = '#f59e0b';
+        evSnrBadge.className = 'row-badge badge-warn';
+        evSnrBadge.innerText = 'Low SNR';
+
+        evGwRttVal.innerText = '7.4 ms';
+        evGwRttVal.style.color = '#f59e0b';
+        evGwRttBadge.className = 'row-badge badge-warn';
+        evGwRttBadge.innerText = 'Elevated';
+
+        // Live Monitoring updates
+        liveGw.innerText = '7.4 ms';
+        liveGwSub.innerText = 'Moderate latency spike';
+        liveStab.innerText = 'Degraded';
+        liveStab.style.color = '#f59e0b';
+        liveJitter.innerText = 'Jitter: 24 ms · Elevated';
+        liveLoss.innerText = '6.0%';
+        liveLoss.style.color = '#f59e0b';
+        liveLossSub.innerText = '4 of 60 probes dropped';
+        liveStatePill.className = 'pill warn';
+        liveStatePill.innerHTML = '<span style="font-size:8px;">●</span> Alert';
+        liveStateText.innerText = 'Connection degraded — Wi-Fi Interference';
+        liveGwChartStats.innerText = 'Avg 7.4 ms · Min 3.8 ms · Max 28.5 ms (Spiking)';
+        liveGwChartPath.setAttribute('d', 'M40 68 L80 66 L120 67 L160 38 L200 24 L240 42 L280 65 L320 67 L360 30 L400 22 L440 38 L480 66 L520 67 L560 26 L600 48');
+        liveLossChartStats.innerText = '6.0% loss (Unstable)';
+        liveLossChartStats.style.color = '#f59e0b';
+        liveLossChartLine.setAttribute('stroke', '#f59e0b');
+        liveLossChartLine.setAttribute('y1', '24');
+        liveLossChartLine.setAttribute('y2', '24');
+
+        // Activity updates
+        actActive.style.display = 'block';
+        actSummaryIcon.innerText = '⚠️';
+        actSummaryIcon.style.color = '#f59e0b';
+        actSummaryTitle.innerText = '1 Active Alert Now';
+        actSummarySub.innerText = 'Wi-Fi interference (Rule WF-3) causing 6.0% loss to router';
+
+        // Trends updates
+        trendsVerdictIcon.innerText = '⚠️';
+        trendsVerdictTitle.innerText = 'Intermittent latency spikes observed';
+        trendsVerdictTitle.style.color = '#b45309';
+        trendsVerdictSub.innerText = 'Recent checks showed 6% packet loss and elevated jitter to gateway router.';
+        trendsVerdictSub.style.color = '#92400e';
+
+        // Networks updates
+        netComparisonText.innerText = 'Router latency is 2.9 ms slower than usual · Packet loss is 6.0% (abnormal)';
+        netComparisonPill.className = 'pill warn';
+        netComparisonPill.innerText = 'Degraded';
+
+      } else {
+        btnDegraded.classList.remove('active');
+        btnGood.classList.add('active');
+
+        // Overview Status Hero
+        hero.classList.remove('degraded');
+        heroIcon.innerText = '✓';
+        heroHeadline.innerText = 'All good — watching';
+        heroDesc.innerText = 'Network is responsive with zero packet loss and low jitter to your router and the internet.';
+        heroCulpritPill.innerText = 'All systems nominal';
+
+        findingsCard.classList.remove('has-issues');
+        findingsContent.innerHTML = `
+          <div class="finding-item">
+            <span style="font-size:14px; color:var(--green);">✓</span>
+            <div>
+              <div class="finding-title" style="color:var(--green);">No active network disruptions</div>
+              <div class="finding-desc">Wi-Fi signal is strong and gateway latency is quiet. No immediate action required.</div>
+            </div>
+          </div>
+        `;
+
+        pill.className = 'pill good';
+        pill.innerHTML = '<span style="font-size:8px;">●</span> Watching';
+
+        // Route hops
+        hops.classList.remove('has-culprit');
+        gwCircle.className = 'hop-circle';
+        gwReading.className = 'hop-reading-val good';
+        gwReading.innerHTML = '4.2 <small style="font-size:12px;">ms</small>';
+        gwLoss.innerHTML = 'Loss <strong>0%</strong> · Jitter <strong>1 ms</strong> · +2ms load';
+
+        // Suitability Cards: Healthy state
+        iconCalls.className = 'suit-icon-circle good';
+        statusCalls.className = 'suit-status-text good';
+        statusCalls.innerText = 'HD video ready';
+        metricCalls.innerText = '0% · 2ms jit';
+        descCalls.innerText = 'Crisp 1080p video & voice';
+
+        iconGaming.className = 'suit-icon-circle good';
+        statusGaming.className = 'suit-status-text good';
+        statusGaming.innerText = 'Responsive';
+        metricGaming.innerText = '12 ms · 2ms jit';
+        descGaming.innerText = 'Ultra-low ping & zero rollbacks';
+
+        iconBrowsing.className = 'suit-icon-circle good';
+        statusBrowsing.className = 'suit-status-text good';
+        statusBrowsing.innerText = 'Fast lookups';
+        metricBrowsing.innerText = '8ms DNS';
+        descBrowsing.innerText = 'Snappy DNS & rapid page loads';
+
+        overviewBadge.style.display = 'none';
+
+        // Evidence table updates
+        evJitterVal.innerText = '2 ms';
+        evJitterVal.style.color = 'var(--ink)';
+        evJitterBadge.className = 'row-badge badge-good';
+        evJitterBadge.innerText = 'Good';
+
+        evGwLossVal.innerText = '0%';
+        evGwLossVal.style.color = 'var(--ink)';
+        evGwLossBadge.className = 'row-badge badge-good';
+        evGwLossBadge.innerText = 'Good';
+
+        evSnrVal.innerText = '28 dB';
+        evSnrVal.style.color = 'var(--ink)';
+        evSnrBadge.className = 'row-badge badge-good';
+        evSnrBadge.innerText = 'Good';
+
+        evGwRttVal.innerText = '4.2 ms';
+        evGwRttVal.style.color = 'var(--ink)';
+        evGwRttBadge.className = 'row-badge badge-good';
+        evGwRttBadge.innerText = 'Good';
+
+        // Live Monitoring updates
+        liveGw.innerText = '4.2 ms';
+        liveGwSub.innerText = 'Normal local link';
+        liveStab.innerText = 'Stable';
+        liveStab.style.color = '#10b981';
+        liveJitter.innerText = 'Jitter: 1.8 ms · Low';
+        liveLoss.innerText = '0.0%';
+        liveLoss.style.color = '#10b981';
+        liveLossSub.innerText = '0 of 120 probes lost';
+        liveStatePill.className = 'pill good';
+        liveStatePill.innerHTML = '<span style="font-size:8px;">●</span> Active';
+        liveStateText.innerText = 'All good — watching';
+        liveGwChartStats.innerText = 'Avg 4.2 ms · Min 3.1 ms · Max 7.8 ms';
+        liveGwChartPath.setAttribute('d', 'M40 68 L80 67 L120 68 L160 66 L200 68 L240 67 L280 69 L320 66 L360 67 L400 68 L440 66 L480 68 L520 67 L560 68 L600 67');
+        liveLossChartStats.innerText = '0.0% loss';
+        liveLossChartStats.style.color = 'var(--green)';
+        liveLossChartLine.setAttribute('stroke', '#10b981');
+        liveLossChartLine.setAttribute('y1', '45');
+        liveLossChartLine.setAttribute('y2', '45');
+
+        // Activity updates
+        actActive.style.display = 'none';
+        actSummaryIcon.innerText = '🛡️';
+        actSummaryIcon.style.color = '#10b981';
+        actSummaryTitle.innerText = 'Connection Stable & Quiet';
+        actSummarySub.innerText = 'No packet loss, latency spikes, or disruptions observed across 3 day(s)';
+
+        // Trends updates
+        trendsVerdictIcon.innerText = '🏅';
+        trendsVerdictTitle.innerText = 'Quiet and consistent connection';
+        trendsVerdictTitle.style.color = '#15803d';
+        trendsVerdictSub.innerText = 'Typical gateway latency is 4.5 ms with 0% loss. Speed tests average 240 Mbps down. Judged by netdiag baseline engine.';
+        trendsVerdictSub.style.color = '#166534';
+
+        // Networks updates
+        netComparisonText.innerText = 'Latency is 0.3 ms faster than baseline · Packet loss matches 0% baseline';
+        netComparisonPill.className = 'pill good';
+        netComparisonPill.innerText = 'Healthy';
+      }
+    }
+
+    // Speed test simulation
+    function simulateSpeedTest() {
+      const downEl = document.getElementById('val-speed-down');
+      const upEl = document.getElementById('val-speed-up');
+      downEl.innerText = '...';
+      upEl.innerText = '...';
+      setTimeout(() => {
+        downEl.innerText = '254.2';
+        upEl.innerText = '44.8';
+      }, 1000);
+    }
+  </script>
+</body>
+</html>

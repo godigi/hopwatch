@@ -859,6 +859,38 @@ import Testing
         #expect(degradedDual != nil)
         #expect(degradedDual?.subtitle.contains("0.3% packet loss") == true || degradedDual?.subtitle.contains("0.3% internet packet loss") == true)
     }
+
+    @Test func suitabilityItemConsequenceAndDegradedExplanation() {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 6.0, rttAvgMs: 25.0, rttJitterMs: 24.0)
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 24.0,
+            effectiveLoss: 6.0
+        )
+
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let calls = items.first { $0.id == "calls" }!
+        let gaming = items.first { $0.id == "gaming" }!
+        let streaming = items.first { $0.id == "streaming" }!
+        let browsing = items.first { $0.id == "browsing" }!
+
+        #expect(calls.verdict == .degraded)
+        #expect(!calls.consequence.isEmpty)
+        #expect(calls.consequence.contains("audio") || calls.consequence.contains("dropouts"))
+
+        #expect(gaming.verdict == .degraded)
+        #expect(!gaming.consequence.isEmpty)
+        #expect(gaming.consequence.contains("Player desync") || gaming.consequence.contains("rollbacks"))
+
+        #expect(streaming.verdict == .good)
+        #expect(!streaming.consequence.isEmpty)
+
+        #expect(browsing.verdict == .degraded)
+        #expect(!browsing.consequence.isEmpty)
+        #expect(browsing.consequence.contains("Retransmissions") || browsing.consequence.contains("delay"))
+    }
 }
 
 

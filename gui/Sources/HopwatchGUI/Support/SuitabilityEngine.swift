@@ -13,6 +13,7 @@ enum SuitabilityEngine {
         let tint: Color
         let verdict: RunSnapshot.SuitabilityRow.Verdict
         let helpText: String?
+        let consequence: String
 
         init(
             id: String,
@@ -22,7 +23,8 @@ enum SuitabilityEngine {
             metric: String,
             tint: Color,
             verdict: RunSnapshot.SuitabilityRow.Verdict,
-            helpText: String? = nil
+            helpText: String? = nil,
+            consequence: String? = nil
         ) {
             self.id = id
             self.title = title
@@ -32,6 +34,77 @@ enum SuitabilityEngine {
             self.tint = tint
             self.verdict = verdict
             self.helpText = helpText
+            self.consequence = consequence ?? Self.defaultConsequence(id: id, verdict: verdict, status: status)
+        }
+
+        static func defaultConsequence(id: String, verdict: RunSnapshot.SuitabilityRow.Verdict, status: String) -> String {
+            switch id {
+            case "calls":
+                switch verdict {
+                case .good:
+                    return status == "HD video ready" ? "Crisp 1080p video & voice" : "Clear audio for voice calls"
+                case .degraded:
+                    if status == "Audio stutter" { return "Robotic speech distortion" }
+                    if status == "Audio delay" { return "Conversational talk-over lag" }
+                    if status == "Video limited" { return "Restricted to low-res video" }
+                    return "Robotic audio & dropouts"
+                case .broken:
+                    return "Frequent call disconnections"
+                case .unknown, .unmeasured:
+                    return "Assessing call quality"
+                }
+            case "streaming":
+                switch verdict {
+                case .good:
+                    return status == "4K ready" ? "Instant 4K Ultra HD" : "Smooth 1080p Full HD"
+                case .degraded:
+                    return "Occasional buffering or 720p"
+                case .broken:
+                    return "Frequent video buffering"
+                case .unknown, .unmeasured:
+                    return "Assessing video stream"
+                }
+            case "gaming":
+                switch verdict {
+                case .good:
+                    return "Ultra-low ping, zero desync"
+                case .degraded:
+                    if status == "May rubberband" { return "Player desync & missed inputs" }
+                    if status == "Spike risk" { return "Intermittent hit registration lag" }
+                    return "Player desync & rollbacks"
+                case .broken:
+                    return "Constant rubberbanding"
+                case .unknown, .unmeasured:
+                    return "Assessing multiplayer latency"
+                }
+            case "vpn":
+                switch verdict {
+                case .good:
+                    return "Clean route & single NAT"
+                case .degraded:
+                    if status == "Double NAT" { return "VoIP / tunnel rekeys risk" }
+                    if status == "Reduced MTU" { return "Fragmentation overhead" }
+                    return "Tunnel rekeys or MTU choke"
+                case .broken:
+                    return "VPN tunnels fail to connect"
+                case .unknown, .unmeasured:
+                    return "Assessing tunnel route"
+                }
+            case "browsing":
+                switch verdict {
+                case .good:
+                    return "Fast DNS & page loads"
+                case .degraded:
+                    if status == "DNS slow" { return "Initial domain lookup delay" }
+                    return "Retransmissions delay web loads"
+                case .broken:
+                    return "Websites fail to load"
+                case .unknown, .unmeasured:
+                    return "Assessing web browsing"
+                }
+            default:
+                return status
+            }
         }
     }
 

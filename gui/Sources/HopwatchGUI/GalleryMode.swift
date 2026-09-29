@@ -138,6 +138,9 @@ enum GalleryMode {
             Screen(name: "home", size: NSSize(width: 700, height: 680)) {
                 wrap(HomeView())
             },
+            Screen(name: "home-full", size: NSSize(width: 920, height: 1900)) {
+                wrap(HomeView())
+            },
             Screen(name: "live", size: NSSize(width: 700, height: 680)) {
                 wrap(LiveView())
             },

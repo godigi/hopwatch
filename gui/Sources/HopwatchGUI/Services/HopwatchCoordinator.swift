@@ -1574,7 +1574,12 @@ final class HopwatchCoordinator {
         }
         let currentSnapshot = latestRun?.snapshot ?? currentRunResult?.snapshot
         if let cause = currentSnapshot?.mostLikelyRootCause, !cause.isEmpty {
-            return cause
+            let isLocationNotice = cause.localizedCaseInsensitiveContains("location services")
+                || cause.localizedCaseInsensitiveContains("generic name")
+                || cause.localizedCaseInsensitiveContains("not telling netdiag")
+            if !isLocationNotice {
+                return cause
+            }
         }
         if monitor.latest == nil && latestRun == nil && hydratedReport == nil { return "Starting up…" }
         return "Nothing obviously wrong — your network looks healthy."

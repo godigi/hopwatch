@@ -378,6 +378,15 @@ enum HistoryWindow: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    var shortLabel: String {
+        switch self {
+        case .day: return "24h"
+        case .week: return "7d"
+        case .month: return "30d"
+        case .all: return "All"
+        }
+    }
+
     var cutoff: Date? {
         switch self {
         case .day:   return Date().addingTimeInterval(-86_400)

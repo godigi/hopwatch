@@ -18,21 +18,34 @@ struct DashboardHeadingView: View {
     var body: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Your connection, hop by hop.")
-                    .font(.system(size: 25, weight: .semibold))
+                Text("Network Overview")
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Theme.ColorToken.ink)
 
                 HStack(spacing: 6) {
-                    Image(systemName: isWiFi ? "wifi" : "cable.connector")
+                    Text("Current connection:")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ColorToken.muted)
-                    Text(networkName ?? "Disconnected")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                    Text("/")
-                        .font(.system(size: 11))
+                    HStack(spacing: 4) {
+                        Image(systemName: isWiFi ? "wifi" : "cable.connector")
+                            .font(.system(size: 10))
+                        Text(networkName ?? "Disconnected")
+                            .fontWeight(.semibold)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.ink)
+
+                    Text("·")
                         .foregroundStyle(Theme.ColorToken.line)
+
                     Text(isWiFi ? "Wi-Fi" : "Ethernet")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ColorToken.muted)
+
+                    Text("·")
+                        .foregroundStyle(Theme.ColorToken.line)
+
+                    Text("Monitored continuously for 24h")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ColorToken.muted)
                 }
@@ -118,6 +131,9 @@ struct DashboardStatusHeroView: View {
     let iconBackground: Color
     let headline: String
     let subtitle: String
+    var statusPillText: String? = nil
+    var statusPillTint: Color? = nil
+    var statusPillBackground: Color? = nil
     var detectedTime: String? = nil
     var actionTitle: String? = nil
     var onAction: (() -> Void)? = nil
@@ -125,49 +141,57 @@ struct DashboardStatusHeroView: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: Theme.Radius.statusIcon)
-                    .fill(iconBackground)
-                    .frame(width: 32, height: 32)
+                Circle()
+                    .fill(iconTint)
+                    .frame(width: 28, height: 28)
                 Image(systemName: iconName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(iconTint)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(headline)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.ColorToken.ink)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(iconTint == Theme.ColorToken.green ? Color(red: 0.08, green: 0.5, blue: 0.24) : Theme.ColorToken.ink)
 
                 Text(subtitle)
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.ColorToken.muted)
+                    .foregroundStyle(iconTint == Theme.ColorToken.green ? Color(red: 0.09, green: 0.4, blue: 0.2) : Theme.ColorToken.muted)
                     .lineLimit(2)
             }
 
+            Spacer()
+
             if let actionTitle, let onAction {
-                Spacer()
                 Button(actionTitle, action: onAction)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
 
-            if let detectedTime, !detectedTime.isEmpty {
-                Spacer()
+            if let pill = statusPillText {
+                Text(pill)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(statusPillTint ?? iconTint)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(statusPillBackground ?? iconBackground)
+                    .clipShape(Capsule())
+            } else if let detectedTime, !detectedTime.isEmpty {
                 Text(detectedTime)
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.quiet)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(iconBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(iconTint.opacity(0.25), lineWidth: 1)
+                .strokeBorder(iconTint.opacity(0.3), lineWidth: 1)
         )
     }
 }
@@ -952,13 +976,15 @@ struct DashboardFindingsPanel: View {
                         }
 
                         VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 7) {
+                            HStack(alignment: .top, spacing: 7) {
                                 Image(systemName: item.isWarning ? "exclamationmark.triangle.fill" : "info.circle.fill")
                                     .font(.system(size: 13))
                                     .foregroundStyle(item.isWarning ? Theme.ColorToken.amber : Theme.ColorToken.blue)
+                                    .padding(.top, 1)
                                 Text(item.title)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(Theme.ColorToken.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
 
                             if !item.explanation.isEmpty {
@@ -967,6 +993,7 @@ struct DashboardFindingsPanel: View {
                                     .foregroundStyle(Theme.ColorToken.muted)
                                     .lineSpacing(2)
                                     .padding(.leading, 20)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
 
                             if let nextStep = item.nextStep, !nextStep.isEmpty {
@@ -975,6 +1002,7 @@ struct DashboardFindingsPanel: View {
                                     .foregroundStyle(Theme.ColorToken.ink)
                                     .padding(.leading, 20)
                                     .padding(.top, 2)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -1676,21 +1704,19 @@ struct DashboardNetworkDetailsPanel: View {
     let vpnName: String
     let wifiSecurity: String
     let connectionCost: String
-    let lastSpeedMeta: String
-    let downMbps: String
-    let upMbps: String
-    var isScanning: Bool = false
-    let onRunSpeedTest: () -> Void
+    var routerAdminURL: URL? = nil
+    var routerAdminAvailable: Bool = false
+    let onOpenNetworkSettings: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             // Panel Head
             HStack {
-                Text("Network details")
+                Text("Network Details")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.ColorToken.ink)
                 Spacer()
-                Text("Current connection")
+                Text("Current connection configuration")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.muted)
             }
@@ -1700,49 +1726,34 @@ struct DashboardNetworkDetailsPanel: View {
 
             // 2-Column Key-Values Grid
             VStack(spacing: 0) {
-                row(k1: "Interface", v1: interface, k2: "Public IP country", v2: publicCountry)
+                row(k1: "Interface", v1: interface, k2: "Public Country", v2: publicCountry)
                 row(k1: "Local IP", v1: localIP, k2: "Public IP", v2: publicIP)
-                row(k1: "Gateway", v1: gatewayIP, k2: "ISP / exit network", v2: ispName)
-                row(k1: "DNS server", v1: dnsServer, k2: "VPN", v2: vpnName)
-                row(k1: "Wi-Fi security", v1: wifiSecurity, k2: "Connection cost", v2: connectionCost)
+                row(k1: "Gateway IP", v1: gatewayIP, k2: "ISP Name", v2: ispName)
+                row(k1: "DNS Server", v1: dnsServer, k2: "VPN Status", v2: vpnName)
+                row(k1: "Wi-Fi Security", v1: wifiSecurity, k2: "Connection Cost", v2: connectionCost)
             }
             .padding(.horizontal, 17)
             .padding(.bottom, 6)
 
-            // Footer Speed Test Summary
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Last speed test · \(lastSpeedMeta)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                    Text("Before VPN · previous connection")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Theme.ColorToken.quiet)
+            // Footer Action Links
+            HStack(spacing: 16) {
+                Button("Configure Interface…") {
+                    onOpenNetworkSettings()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.blue)
+
+                if routerAdminAvailable, let routerAdminURL {
+                    Button("Open Router Admin →") {
+                        NSWorkspace.shared.open(routerAdminURL)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.blue)
                 }
 
                 Spacer()
-
-                HStack(spacing: 12) {
-                    Text("↓ \(downMbps)   ↑ \(upMbps) Mbps")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.ColorToken.ink)
-
-                    Button(action: onRunSpeedTest) {
-                        HStack(spacing: 4) {
-                            if isScanning {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                Text("Testing…")
-                            } else {
-                                Text("Run speed test")
-                            }
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.ColorToken.blue)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isScanning)
-                }
             }
             .padding(.horizontal, 17)
             .padding(.vertical, 10)
@@ -1871,210 +1882,165 @@ struct DashboardSuitabilityStrip: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text("What should work")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.ColorToken.ink)
 
-                if let subtitle, !subtitle.isEmpty {
-                    Text("· \(subtitle)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                }
+                Text("· Live real-world activity assessment")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.muted)
 
                 Spacer()
 
-                Text("Live assessment")
-                    .font(.system(size: 10))
+                Text("Updated continuously")
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Theme.ColorToken.quiet)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(items) { item in
-                        chip(item)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(items) { item in
-                            chip(item)
-                        }
-                    }
+            HStack(spacing: 8) {
+                ForEach(items) { item in
+                    chip(item)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Theme.ColorToken.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.routeCard)
+            RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
         )
     }
 
     private func chip(_ item: SuitabilityEngine.Item) -> some View {
-        HStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(item.tint.opacity(0.12))
-                    .frame(width: 26, height: 26)
-                Image(systemName: item.icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(item.tint)
-            }
+        VStack(alignment: .leading, spacing: 2.5) {
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(item.tint.opacity(0.14))
+                        .frame(width: 18, height: 18)
+                    Image(systemName: item.icon)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(item.tint)
+                }
 
-            VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Theme.ColorToken.ink)
                     .lineLimit(1)
-
-                HStack(spacing: 3) {
-                    Text(item.status)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(item.tint)
-                        .lineLimit(1)
-
-                    Text("·")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Theme.ColorToken.line)
-
-                    Text(item.metric)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                        .lineLimit(1)
-                }
             }
-            Spacer(minLength: 0)
+
+            Text(item.status)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(item.tint)
+                .lineLimit(1)
+
+            if !item.metric.isEmpty {
+                Text(item.metric)
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineLimit(1)
+            }
+
+            Text(item.consequence)
+                .font(.system(size: 8.5))
+                .foregroundStyle(item.verdict == .good ? Theme.ColorToken.muted : item.tint)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .background(Theme.ColorToken.nodeBackground)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(item.verdict == .good ? Theme.ColorToken.nodeBackground : item.tint.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(item.tint.opacity(0.25), lineWidth: 1)
+                .strokeBorder(item.tint.opacity(item.verdict == .good ? 0.25 : 0.45), lineWidth: item.verdict == .good ? 1 : 1.5)
         )
-        .help(item.helpText ?? "\(item.title): \(item.status)")
+        .help(item.helpText ?? "\(item.title): \(item.status) — \(item.consequence)")
     }
 }
 
 // MARK: - 11. Technical Details Panel
 
 struct DashboardTechnicalPanel: View {
-    let routerIP: String
-    let routerLoss: String
-    let internetTargets: String
-    let internetLoss: String
     let tracerouteHops: Int
     let isIPv6: Bool
     let isDoubleNAT: Bool
+    let wifiBandChannel: String
     let wifiSignal: String
     let wifiNoise: String
     let wifiSNR: String
-    let wifiBandChannel: String
     let dhcpRemaining: String
     let ipConflict: Bool
     let neighborCount: Int
-    let backgroundTraffic: Bool
-    let checkTimestamp: String
-    let dnsResolversList: String
-    let tcpReachability: String
     let loadedRTT: String
+    let appVersion: String
     let onViewRawJSON: () -> Void
     let onCopyRedacted: () -> Void
     let onSaveMarkdown: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Panel Header (Permanently unfolded)
-            HStack(spacing: 8) {
-                Image(systemName: "wrench.and.screwdriver.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.ColorToken.blue)
+        VStack(spacing: 0) {
+            // Panel Head
+            HStack {
                 Text("Technical Detail & Telemetry")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.ColorToken.ink)
-                Text("Route hops, radio telemetry, DNS, DHCP, and diagnostic reports")
+                Spacer()
+                Text("System diagnostics & link metrics")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.muted)
+            }
+            .padding(.horizontal, 17)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            // 2-Column Key-Values Grid
+            VStack(spacing: 0) {
+                row(k1: "Traceroute Hops", v1: "\(tracerouteHops) hops to target",
+                    k2: "IPv6 Reachability", v2: isIPv6 ? "Dual-stack IPv6" : "IPv4 only (No global v6)")
+                row(k1: "Double NAT Detection", v1: isDoubleNAT ? "Double NAT detected" : "None (Clean single NAT)",
+                    k2: "Wi-Fi Protocol & Channel", v2: wifiBandChannel)
+                row(k1: "Signal / Noise (RSSI)", v1: "\(wifiSignal) / \(wifiNoise)",
+                    k2: "Signal-to-Noise Ratio", v2: "\(wifiSNR) (Strong link)")
+                row(k1: "DHCP Lease Remaining", v1: dhcpRemaining,
+                    k2: "IP Conflicts / Neighbors", v2: ipConflict ? "IP conflict flagged" : "0 duplicates · \(neighborCount) neighbors")
+                row(k1: "Loaded Latency (Bufferbloat)", v1: loadedRTT,
+                    k2: "Diagnostic Engine", v2: "netdiag v\(appVersion)")
+            }
+            .padding(.horizontal, 17)
+            .padding(.bottom, 6)
+
+            // Footer Action Links
+            HStack(spacing: 16) {
+                Button("View Raw JSON") {
+                    onViewRawJSON()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.blue)
+
+                Button("Copy Redacted Report") {
+                    onCopyRedacted()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.blue)
+
+                Button("Save Markdown…") {
+                    onSaveMarkdown()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.ColorToken.blue)
+
                 Spacer()
             }
             .padding(.horizontal, 17)
-            .padding(.vertical, 14)
-
-            Divider().foregroundStyle(Theme.ColorToken.line)
-
-            // 2x2 Grid of Technical Details (Always visible)
-            Grid(alignment: .topLeading, horizontalSpacing: 24, verticalSpacing: 16) {
-                GridRow {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Route & reachability · saved check")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                        bullet("Router: \(routerIP) · \(routerLoss)")
-                        bullet("Internet probes: \(internetTargets) · \(internetLoss)")
-                        bullet("Traceroute: \(tracerouteHops) responding hops")
-                        bullet(isIPv6 ? "IPv6 available" : "IPv6 unavailable; connection uses IPv4")
-                        bullet(isDoubleNAT ? "Double NAT detected" : "NAT topology: no double NAT detected")
-                        bullet("Public IP location describes lookup exit, not every app route")
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Wi-Fi & local network · saved check")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                        bullet("Signal \(wifiSignal) · noise \(wifiNoise) · SNR \(wifiSNR)")
-                        bullet(wifiBandChannel)
-                        bullet("DHCP lease: \(dhcpRemaining)")
-                        bullet(ipConflict ? "IP conflict flagged" : "No duplicate IP detected")
-                        bullet("Channel scan: \(neighborCount) neighboring networks")
-                        bullet(backgroundTraffic ? "High background traffic measured" : "Local traffic: no background transfer flagged")
-                    }
-                }
-
-                GridRow {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Test context")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                        bullet("Check run at \(checkTimestamp)")
-                        bullet("DNS: \(dnsResolversList)")
-                        bullet("TCP 1.1.1.1:443 · \(tcpReachability)")
-                        bullet("Loaded RTT: \(loadedRTT)")
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Reports & diagnostic tools")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                        Text("Inspect full raw report for per-hop tables and individual probes.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.ColorToken.muted)
-                        Text("Copy a redacted report when sharing with support.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.ColorToken.muted)
-                    }
-                }
-            }
-            .padding(17)
-
-            // Actions
-            HStack(spacing: 10) {
-                Button("View raw JSON", action: onViewRawJSON)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Button("Copy redacted report", action: onCopyRedacted)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Button("Save Markdown…", action: onSaveMarkdown)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-            .padding(.horizontal, 17)
-            .padding(.bottom, 15)
+            .padding(.vertical, 10)
+            .background(Theme.ColorToken.footerBackground)
+            .overlay(alignment: .top) { Divider().foregroundStyle(Theme.ColorToken.line) }
         }
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
@@ -2084,16 +2050,27 @@ struct DashboardTechnicalPanel: View {
         )
     }
 
-    private func bullet(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text("•")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.ColorToken.muted)
-            Text(text)
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.ColorToken.muted)
-                .lineSpacing(2)
+    private func row(k1: String, v1: String, k2: String, v2: String) -> some View {
+        HStack(spacing: 18) {
+            cell(k: k1, v: v1)
+            cell(k: k2, v: v2)
         }
+        .padding(.vertical, 7)
+        .overlay(alignment: .top) { Divider().foregroundStyle(Theme.ColorToken.line.opacity(0.6)) }
+    }
+
+    private func cell(k: String, v: String) -> some View {
+        HStack {
+            Text(k)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ColorToken.muted)
+            Spacer()
+            Text(v)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.ColorToken.ink)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

@@ -321,18 +321,18 @@ struct NetworksView: View {
     }
 
     private func networkHeader(_ net: HistoryDocument.Network) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: networkTypeIcon(net))
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(isCurrent(net) ? .green : .blue)
-                .frame(width: 32, height: 32)
-                .padding(6)
-                .background(
-                    (isCurrent(net) ? Color.green : Color.blue).opacity(0.12),
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: networkTypeIcon(net))
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(isCurrent(net) ? .green : .blue)
+                    .frame(width: 28, height: 28)
+                    .padding(5)
+                    .background(
+                        (isCurrent(net) ? Color.green : Color.blue).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
 
-            VStack(alignment: .leading, spacing: 4) {
                 if editingName {
                     HStack(spacing: 8) {
                         TextField("Network name", text: $draftName)
@@ -347,100 +347,106 @@ struct NetworksView: View {
                             .controlSize(.small)
                     }
                 } else {
+                    Text(store.displayName(for: net.id))
+                        .font(.title2.weight(.bold))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if !editingName {
                     HStack(spacing: 8) {
-                        Text(store.displayName(for: net.id))
-                            .font(.title2.weight(.bold))
-
-                        if isCurrent(net) {
-                            HStack(spacing: 4) {
-                                Circle().fill(Color.green).frame(width: 6, height: 6)
-                                Text("Active Now")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.green)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.green.opacity(0.15), in: Capsule())
-                        }
-
-                        if isWiFi(net) {
-                            Label("Wi-Fi", systemImage: "wifi")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.1), in: Capsule())
-                        } else if isEthernet(net) {
-                            Label("Ethernet", systemImage: "cable.connector")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.1), in: Capsule())
-                        }
-
-                        if net.synthesized {
-                            Text("Inferred")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.1), in: Capsule())
-                                .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
-                        }
-                    }
-                }
-
-                // Subtitle metadata: SSID, Gateway, ISP, and date range seen
-                HStack(spacing: 6) {
-                    let subtitle = networkDetailSubtitle(net)
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if net.firstSeenDate != nil, net.lastSeenDate != nil {
-                        if !subtitle.isEmpty {
-                            Text("·")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Text("Seen \(dateRange(net))")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-
-            Spacer()
-
-            if !editingName {
-                HStack(spacing: 8) {
-                    Button {
-                        editingName = true
-                        draftName = store.displayName(for: net.id)
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                    Button {
-                        mergeSource = net
-                    } label: {
-                        Label("Merge…", systemImage: "arrow.triangle.merge")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                    if store.manualMerges.values.contains(net.id) {
-                        Button("Unmerge") {
-                            unmergeInto(net)
+                        Button {
+                            editingName = true
+                            draftName = store.displayName(for: net.id)
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+
+                        Button {
+                            mergeSource = net
+                        } label: {
+                            Label("Merge…", systemImage: "arrow.triangle.merge")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        if store.manualMerges.values.contains(net.id) {
+                            Button("Unmerge") {
+                                unmergeInto(net)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
+                    .fixedSize()
+                }
+            }
+
+            // Subtitle metadata: Badges + SSID, Gateway, ISP, and date range seen
+            HStack(spacing: 6) {
+                if isCurrent(net) {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("Active Now")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.15), in: Capsule())
+                    .fixedSize()
+                }
+
+                if isWiFi(net) {
+                    Label("Wi-Fi", systemImage: "wifi")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                        .fixedSize()
+                } else if isEthernet(net) {
+                    Label("Ethernet", systemImage: "cable.connector")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                        .fixedSize()
+                }
+
+                if net.synthesized {
+                    Text("Inferred")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                        .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
+                        .fixedSize()
+                }
+
+                let subtitle = networkDetailSubtitle(net)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if net.firstSeenDate != nil, net.lastSeenDate != nil {
+                    if !subtitle.isEmpty {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("Seen \(dateRange(net))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }
@@ -462,6 +468,7 @@ struct NetworksView: View {
                     Text("CHECK HISTORY")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Text("\(runs.count)")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -469,23 +476,23 @@ struct NetworksView: View {
                         .padding(.vertical, 1)
                         .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
+                .fixedSize()
 
                 Spacer()
 
                 Picker("Scope", selection: $checkScope) {
-                    ForEach(CheckScope.allCases) { Text($0.rawValue).tag($0) }
+                    Text("All").tag(CheckScope.all)
+                    Text("Full checks").tag(CheckScope.fullOnly)
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .controlSize(.small)
-                .frame(maxWidth: 180)
+                .frame(width: 140)
 
-                Picker("Filter", selection: $problemsOnly) {
-                    Text("All Checks").tag(false)
-                    Text("Issues Only").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .frame(maxWidth: 170)
+                Toggle("Issues only", isOn: $problemsOnly)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .fixedSize()
             }
             .padding(.bottom, 2)
 

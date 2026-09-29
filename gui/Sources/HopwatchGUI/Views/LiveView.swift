@@ -132,6 +132,13 @@ struct LiveView: View {
     /// The caption is the newest CLI-reported change this app has logged,
     /// if any; it is not a claim that nothing has happened, only what the
     /// event log knows about.
+    private var connectedHeadline: String {
+        if coordinator.currentHealth == .healthy {
+            return "All good — watching"
+        }
+        return coordinator.headline
+    }
+
     private var connectedCard: some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
@@ -139,7 +146,7 @@ struct LiveView: View {
                 .frame(width: 8, height: 8)
                 .padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {
-                Text(coordinator.headline)
+                Text(connectedHeadline)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 if let latest = coordinator.eventLog.latestNetworkEvent {
