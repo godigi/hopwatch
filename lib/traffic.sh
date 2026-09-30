@@ -84,33 +84,15 @@ traffic_run() {
     return 0
   fi
 
-  json="$(printf '%s\n' "$raw" | python3 "$HELPERS_DIR/traffic.py" "$secs" 2>/dev/null || true)"
-  if [ -z "$json" ]; then
+  # Single python invocation with --fields to extract the required variables directly,
+  # avoiding multiple subprocess invocations and JSON re-parsing.
+  local parsed
+  parsed="$(printf '%s\n' "$raw" | python3 "$HELPERS_DIR/traffic.py" --fields "$secs" 2>/dev/null || true)"
+  if [ -z "$parsed" ]; then
     info "could not parse nettop output — traffic not measured."
     traffic_persist
     return 0
   fi
-
-  # One python invocation to lift the fields out, rather than five: the
-  # helper already produced the JSON and re-parsing it per field is the
-  # kind of cost that only looks small.
-  local parsed
-  parsed="$(printf '%s' "$json" | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-if not d.get("measured"):
-    print("0")
-    raise SystemExit(0)
-top = d.get("top_processes") or []
-print("1")
-print(d.get("down_mbps", ""))
-print(d.get("up_mbps", ""))
-print(d.get("sampled_s", ""))
-print(top[0]["name"] if top else "")
-print(json.dumps(top, separators=(",", ":")))
-' 2>/dev/null || true)"
-
-  [ -n "$parsed" ] || { info "could not read the traffic sample."; traffic_persist; return 0; }
 
   {
     read -r TRAFFIC_MEASURED

@@ -28,20 +28,24 @@ import json
 import os
 import sys
 
-# A broken sibling must not take the whole stream down: without the
-# catalog we fall back to "Issue <id>" phrasing, which is worse prose
-# but a live monitor.
-try:
-    from rules_catalog import RULES
-except Exception:
-    RULES = []
-
-# Rule ID -> catalog title ("G2" -> "Router dropping packets"), so a
-# rule-fired/rule-cleared summary speaks the same plain-English name the
+# Lazily resolved rule ID -> catalog title ("G2" -> "Router dropping packets"),
+# so a rule-fired/rule-cleared summary speaks the same plain-English name the
 # GUI's report card and `--rules-catalog` already use, rather than the bare
-# rule ID a user has never seen. Built once at import time — RULES is a
-# module-level constant, so this never changes within a process lifetime.
-_RULE_TITLES: dict[str, str] = {r["id"]: r["title"] for r in RULES}
+# rule ID a user has never seen. Resolved lazily only when a rule transition
+# actually occurs, avoiding the ~35 ms overhead of compiling rules_catalog.py
+# (under PYTHONDONTWRITEBYTECODE=1) on the 99.9% of cycles where no rule changed.
+_RULE_TITLES: dict[str, str] | None = None
+
+
+def _get_rule_title(rid: str) -> str | None:
+    global _RULE_TITLES
+    if _RULE_TITLES is None:
+        try:
+            from rules_catalog import RULES
+            _RULE_TITLES = {r["id"]: r["title"] for r in RULES}
+        except Exception:
+            _RULE_TITLES = {}
+    return _RULE_TITLES.get(rid)
 
 
 def _env(name: str) -> str | None:
@@ -191,11 +195,12 @@ def _changes() -> list[dict]:
     rules_now = set((_env("RULES") or "").split())
     rules_prev = set((_env("PREV_RULES") or "").split())
     for rid in sorted(rules_now - rules_prev):
+        title = _get_rule_title(rid)
         out.append({"id": "rule-fired", "field": "status.rules",
                     "from": None, "to": rid,
-                    "summary": _RULE_TITLES.get(rid, f"Issue {rid} detected")})
+                    "summary": title if title else f"Issue {rid} detected"})
     for rid in sorted(rules_prev - rules_now):
-        title = _RULE_TITLES.get(rid)
+        title = _get_rule_title(rid)
         out.append({"id": "rule-cleared", "field": "status.rules",
                     "from": rid, "to": None,
                     "summary": (f"Resolved: {title}" if title

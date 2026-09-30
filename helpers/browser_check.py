@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -86,8 +87,11 @@ def get_disk_version(bundle_path: str, fw_name: str) -> str:
     info_plist = os.path.join(bundle_path, "Contents", "Info.plist")
     if os.path.isfile(info_plist):
         try:
-            cmd = ["defaults", "read", info_plist, "CFBundleShortVersionString"]
-            return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+            with open(info_plist, "rb") as f:
+                data = plistlib.load(f)
+                ver = data.get("CFBundleShortVersionString")
+                if ver:
+                    return str(ver).strip()
         except Exception:
             pass
     return "unknown"

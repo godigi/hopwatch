@@ -113,11 +113,17 @@ def mbps(byte_count, seconds):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("usage: traffic.py <sample_seconds>", file=sys.stderr)
+    args = sys.argv[1:]
+    emit_fields = False
+    if "--fields" in args:
+        emit_fields = True
+        args.remove("--fields")
+
+    if not args:
+        print("usage: traffic.py [--fields] <sample_seconds>", file=sys.stderr)
         return 3
     try:
-        seconds = float(sys.argv[1])
+        seconds = float(args[0])
     except ValueError:
         print("traffic.py: sample seconds must be a number", file=sys.stderr)
         return 3
@@ -125,7 +131,10 @@ def main():
     snapshots = parse_snapshots(sys.stdin.read())
     if len(snapshots) < 2:
         # No measurement, which is not the same as a measurement of zero.
-        json.dump({"measured": False}, sys.stdout, separators=(",", ":"))
+        if emit_fields:
+            print("0")
+        else:
+            json.dump({"measured": False}, sys.stdout, separators=(",", ":"))
         return 0
 
     per_process = deltas(snapshots[0], snapshots[-1])
@@ -138,21 +147,32 @@ def main():
         reverse=True,
     )
 
+    top = [
+        {
+            "name": name,
+            "down_mbps": mbps(d, seconds),
+            "up_mbps": mbps(u, seconds),
+        }
+        for name, d, u in talkers[:3]
+        if d or u
+    ]
+
+    if emit_fields:
+        print("1")
+        print(mbps(total_down, seconds))
+        print(mbps(total_up, seconds))
+        print(seconds)
+        print(top[0]["name"] if top else "")
+        print(json.dumps(top, separators=(",", ":")))
+        return 0
+
     json.dump(
         {
             "measured": True,
             "sampled_s": seconds,
             "down_mbps": mbps(total_down, seconds),
             "up_mbps": mbps(total_up, seconds),
-            "top_processes": [
-                {
-                    "name": name,
-                    "down_mbps": mbps(d, seconds),
-                    "up_mbps": mbps(u, seconds),
-                }
-                for name, d, u in talkers[:3]
-                if d or u
-            ],
+            "top_processes": top,
         },
         sys.stdout,
         separators=(",", ":"),

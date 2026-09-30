@@ -662,20 +662,20 @@ struct DashboardLiveChartPanel: View {
         return samples.filter { $0.timestamp >= cutoff }
     }
 
-    private var internetSeries: MonitorSeries.Result {
-        MonitorSeries.build(filteredSamples, tier: "fast") { sample in
+    private func buildInternetSeries(from filtered: [MonitorSample]) -> MonitorSeries.Result {
+        MonitorSeries.build(filtered, tier: "fast") { sample in
             sample.status.icmpFiltered ? nil : sample.internet.rttAvgMs
         }
     }
 
-    private var routerSeries: MonitorSeries.Result {
-        MonitorSeries.build(filteredSamples, tier: "fast") { sample in
+    private func buildRouterSeries(from filtered: [MonitorSample]) -> MonitorSeries.Result {
+        MonitorSeries.build(filtered, tier: "fast") { sample in
             sample.gateway.rttAvgMs
         }
     }
 
-    private var internetStats: (min: Double, avg: Double, max: Double)? {
-        let segments = internetSeries.segments
+    private func computeInternetStats(from series: MonitorSeries.Result) -> (min: Double, avg: Double, max: Double)? {
+        let segments = series.segments
         var minVal = Double.infinity
         var maxVal = -Double.infinity
         var sum = 0.0
@@ -694,6 +694,13 @@ struct DashboardLiveChartPanel: View {
     }
 
     var body: some View {
+        let filtered = filteredSamples
+        let internetSeries = buildInternetSeries(from: filtered)
+        let routerSeries = buildRouterSeries(from: filtered)
+        let internetStats = computeInternetStats(from: internetSeries)
+        let internetSegments = internetSeries.identifiedSegments
+        let routerSegments = routerSeries.identifiedSegments
+
         VStack(spacing: 0) {
             // Panel Head
             HStack {
@@ -764,7 +771,7 @@ struct DashboardLiveChartPanel: View {
             .padding(.bottom, 6)
 
             // The Chart
-            if filteredSamples.isEmpty {
+            if filtered.isEmpty {
                 VStack {
                     Text("No samples in this window")
                         .font(.system(size: 11))
@@ -774,7 +781,7 @@ struct DashboardLiveChartPanel: View {
                 .frame(height: 145)
             } else {
                 Chart {
-                    ForEach(internetSeries.identifiedSegments) { segment in
+                    ForEach(internetSegments) { segment in
                         ForEach(segment.points) { point in
                             LineMark(
                                 x: .value("Time", point.date),
@@ -786,7 +793,7 @@ struct DashboardLiveChartPanel: View {
                         }
                     }
 
-                    ForEach(routerSeries.identifiedSegments) { segment in
+                    ForEach(routerSegments) { segment in
                         ForEach(segment.points) { point in
                             LineMark(
                                 x: .value("Time", point.date),

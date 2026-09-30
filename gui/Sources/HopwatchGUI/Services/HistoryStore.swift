@@ -77,6 +77,7 @@ final class HistoryStore {
             // store may have grown new runs, and stale numbers under a
             // "computed once" cache are worse than the repeated scan it
             // replaces.
+            canonicalIDCache.removeAll()
             medianCache.removeAll()
             invalidateNetworkCaches()
         } catch {
@@ -144,16 +145,21 @@ final class HistoryStore {
 
     // MARK: - Manual merge
 
+    @ObservationIgnored
+    private var canonicalIDCache: [String: String] = [:]
+
     /// Follows the merge chain to the group a key ultimately belongs to.
     /// Bounded rather than recursive: a user who merges A→B and later B→A
     /// would otherwise hang the app on the next render.
     func canonicalID(_ networkID: String) -> String {
+        if let cached = canonicalIDCache[networkID] { return cached }
         var current = networkID
         var hops = 0
         while let parent = manualMerges[current], parent != current, hops < 16 {
             current = parent
             hops += 1
         }
+        canonicalIDCache[networkID] = current
         return current
     }
 
@@ -167,6 +173,7 @@ final class HistoryStore {
         // A merge changes which raw networks a canonical id stands for,
         // which is exactly what `median(metric:networkID:)` keys its cache
         // on — see its doc comment.
+        canonicalIDCache.removeAll()
         medianCache.removeAll()
         invalidateNetworkCaches()
     }
@@ -174,6 +181,7 @@ final class HistoryStore {
     func unmerge(_ networkID: String) {
         manualMerges.removeValue(forKey: networkID)
         Defaults.networkMerges = manualMerges
+        canonicalIDCache.removeAll()
         medianCache.removeAll()
         invalidateNetworkCaches()
     }

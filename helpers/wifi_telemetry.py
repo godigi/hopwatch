@@ -88,18 +88,12 @@ def get_wifi_telemetry() -> dict[str, str | int] | None:
     phy = phy_map.get(phy_mode, "")
 
     ssid_obj = objc.objc_msgSend(iface, objc.sel_registerName(b"ssid"))
-    ssid = (
-        msg_str(ssid_obj, utf8_sel).decode("utf-8", "replace")
-        if ssid_obj
-        else ""
-    )
+    raw_ssid = msg_str(ssid_obj, utf8_sel) if ssid_obj else None
+    ssid = raw_ssid.decode("utf-8", "replace") if raw_ssid else ""
 
     bssid_obj = objc.objc_msgSend(iface, objc.sel_registerName(b"bssid"))
-    bssid = (
-        msg_str(bssid_obj, utf8_sel).decode("utf-8", "replace")
-        if bssid_obj
-        else ""
-    )
+    raw_bssid = msg_str(bssid_obj, utf8_sel) if bssid_obj else None
+    bssid = raw_bssid.decode("utf-8", "replace") if raw_bssid else ""
 
     return {
         "rssi": rssi,
