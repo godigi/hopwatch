@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-30
+
+### Changes
+
+- fix: optimize monitor sample parsing, chart rendering, and fix wifi telemetry crash
+
 ## [1.10.0] - 2026-09-28
 
 ### Added
@@ -4021,7 +4027,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/godigi/hopwatch/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/godigi/hopwatch/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/godigi/hopwatch/compare/v1.8.4...v1.9.0
 [1.8.4]: https://github.com/godigi/hopwatch/compare/v1.8.3...v1.8.4
