@@ -43,7 +43,7 @@ reset_state() {
   MON_WEB_OK="" MON_MEASUREMENT_STATE="unknown"
   MON_VPN_ACTIVE=0 MON_ICMP_FILTERED=0 MON_DEGRADED=0
   MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
-  MON_TCP_HIST="" MON_TCP2_ATTEMPTS="" MON_TCP2_REFUSED_PCT=""
+  MON_TCP_HIST="" MON_TCP2_REFUSED_PCT="" MON_WEB_HIST="" MON_WEB_SUCC_PCT=""
   MON_INET_LOSS_ALT_WINDOW=""
 
   # verdict-confirmation streaks (lib/common.sh's _mon_verdict_cycle
@@ -1435,4 +1435,63 @@ assert json.load(sys.stdin)['internet']['loss_pct_alt'] == 25.0
 import json,sys
 assert json.load(sys.stdin)['internet']['loss_pct_alt'] is None
 "
+}
+
+# ── Phase 1 (reporting-accuracy): loss-window honesty ────────────────────
+# A windowed percentage is a property of the window's recent past; the
+# rules must not treat it as live news when the newest probe was clean,
+# nor fire on a window too small to have a meaning.
+
+@test "a clean newest probe does not keep the loss streak live" {
+  reset_state
+  # The window still reads in the warn band (9 lost of 40 sent), but the
+  # NEWEST probe was clean — the loss is old news.
+  MON_GW_LOSS=22 MON_GW_HIST="10:3 10:3 10:3 10:0"
+  _mon_rules; _mon_rules; _mon_rules
+  [[ "$MON_RULES" != *"G3"* ]] || return 1
+}
+
+@test "one lost probe does not keep loss live for the whole window" {
+  # The recorded fault: a window holding a single 10-packet probe with one
+  # lost packet kept the figure at 10% and G3 firing cycle after cycle
+  # until the window decayed. The streak gate ends it on the first clean
+  # probe: nine cycles of "warn-band figure, clean newest probe" fire no
+  # G3 past the gate.
+  reset_state
+  MON_GW_LOSS=10 MON_GW_HIST="10:0 10:0 10:0 10:0 10:0 10:0 10:0 10:0 10:0"
+  MON_INET_LOSS=10 MON_INET_HIST="20:0 20:0 20:0 20:0"
+  local i
+  for i in 1 2 3 4 5 6 7 8 9; do
+    _mon_rules
+    [[ "$MON_RULES" != *"G3"* ]] || { echo "G3 fired on cycle $i"; return 1; }
+    [[ "$MON_RULES" != *"L2"* ]] || { echo "L2 fired on cycle $i"; return 1; }
+  done
+}
+
+@test "a window too small to be established cannot fire a loss rule" {
+  # Post-reset single big loss on the gateway: 20 sent (< the floor), 65%
+  # windowed — no G2 past the floor.
+  reset_state
+  MON_GW_LOSS=65 MON_GW_HIST="20:13"
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" != *"G2"* ]] || return 1
+  # The same loss figure over an established window fires immediately.
+  reset_state
+  MON_GW_LOSS=65 MON_GW_HIST="10:0 10:9 10:7 10:6 10:4"
+  _mon_rules
+  [[ "$MON_RULES" == *"G2"* ]] || return 1
+}
+
+@test "an established window lets the internet leg's critical fire" {
+  reset_state
+  MON_INET_LOSS=25 MON_INET_LOSS_ALT=25
+  MON_INET_HIST="20:5 20:5"   # 40 sent < floor
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" != *"L1"* ]] || return 1
+  reset_state
+  MON_INET_LOSS=25 MON_INET_LOSS_ALT=25
+  MON_INET_HIST="10:0 10:0 20:5 20:5"   # 60 sent ≥ floor
+  _mon_rules
+  _mon_rules
+  [[ "$MON_RULES" == *"L1"* ]] || return 1
 }

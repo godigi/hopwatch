@@ -370,6 +370,41 @@ _mon_loss_reset() {
   MON_WEB_SUCC_PCT=""
 }
 
+# Whether the NEWEST probe in a loss window itself lost packets ("sent:
+# lost" pairs, newest last). This is a streak gate, not a verdict: the
+# windowed percentage is a property of the link's recent past, so a single
+# lossy probe keeps the figure warning-band for the whole window — and
+# without this gate G3's "2 consecutive cycles" counted the same one
+# probe's loss as two separate confirmations and then kept the rule live
+# for the remaining window. The streak must only advance on probes that
+# can carry it: the newest one.
+#
+# An empty window answers 1: no fold evidence either way. Production
+# always has a window once a figure exists (the fold writes pairs as it
+# writes figures); the empty case is the bats suite's synthetic figures,
+# which must keep their pre-gate meaning.
+_mon_newest_probe_lost() {
+  local hist="$1" last
+  [ -n "$hist" ] || { printf 1; return 0; }
+  last="${hist##* }"
+  [[ "$last" =~ :([0-9]+)$ ]] || { printf 1; return 0; }
+  [ "${BASH_REMATCH[1]}" -gt 0 ] && printf 1 || printf 0
+  return 0
+}
+
+# Whether a loss window's denominator is large enough to back a rule fire
+# (THRESH_MON_LOSS_MIN_PACKETS). A window emptied by a reset and refilled
+# by one losing probe makes that probe the whole denominator — the
+# 13/20 = "65% loss" screenshot that fired L1 undebounced. Returns 1 when
+# the window exists but is too small; an empty window (synthetic figures
+# again) is not floor-checked, for the same reason as above.
+_mon_window_established() {
+  local hist="$1"
+  [ -n "$hist" ] || return 0
+  _mon_loss_summarize "$hist" | awk -F'|' -v t="$THRESH_MON_LOSS_MIN_PACKETS" \
+    '{ exit !($2 + 0 >= t) }'
+}
+
 # Parse ping's -q summary into raw counts, fold it into a leg's history,
 # and report the windowed percentage. Pure: takes the current history
 # string, prints "<new history>|<loss pct>", and prints "|"" on a probe
@@ -846,7 +881,8 @@ _mon_rules() {
     # TCP-1 already described this link. Reset both streaks: filtered cycles
     # are not evidence toward a confirmed G3.
     MON_GW_LOSS_STREAK=0
-  elif loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
+  elif _mon_window_established "$MON_GW_HIST" \
+       && loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
     MON_GW_LOSS_STREAK=0
     if [ -n "$MON_WIFI_RSSI" ] && is_numeric "$MON_WIFI_RSSI" && [ "$MON_WIFI_RSSI" -le "$THRESH_WIFI_RSSI_G1_DBM" ]; then
       _mon_add_rule critical G1
@@ -854,9 +890,17 @@ _mon_rules() {
       _mon_add_rule critical G2
     fi
   elif loss_at_least "$MON_GW_LOSS" "$LOSS_WARN_PCT"; then
-    MON_GW_LOSS_STREAK=$((MON_GW_LOSS_STREAK + 1))
-    if [ "$MON_GW_LOSS_STREAK" -ge "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]; then
-      _mon_add_rule warn G3
+    # G3: the warn band AND the newest probe itself losing packets — an
+    # old window's figure must not keep loss live on probes that were
+    # clean (the streak gate above is the reason this file needs neither
+    # a second window nor a "loss live" flag; see _mon_newest_probe_lost).
+    if [ "$(_mon_newest_probe_lost "$MON_GW_HIST")" = "1" ]; then
+      MON_GW_LOSS_STREAK=$((MON_GW_LOSS_STREAK + 1))
+      if [ "$MON_GW_LOSS_STREAK" -ge "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]; then
+        _mon_add_rule warn G3
+      fi
+    else
+      MON_GW_LOSS_STREAK=0
     fi
   else
     MON_GW_LOSS_STREAK=0
@@ -989,14 +1033,23 @@ _mon_rules() {
   # where the condition could not even be evaluated is not a cycle where
   # it held.
   if [ "$_mon_icmp_filtered" -eq 0 ] && loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT"; then
-    if _mon_verdict_cycle L1 "$THRESH_MON_CRIT_CONFIRM_CYCLES" inet_crit inet_alt_crit; then
+    # L1's window figure must carry the min-packets floor as well — the
+    # "65% loss over a one-probe window" screenshot was L1 first.
+    if _mon_window_established "$MON_INET_HIST" \
+       && _mon_verdict_cycle L1 "$THRESH_MON_CRIT_CONFIRM_CYCLES" inet_crit inet_alt_crit; then
       MON_INET_LOSS_STREAK=0
       _mon_add_rule critical L1
     elif loss_at_least "$MON_INET_LOSS" "$LOSS_WARN_PCT" \
          || loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_WARN_PCT"; then
-      MON_INET_LOSS_STREAK=$((MON_INET_LOSS_STREAK + 1))
-      if [ "$MON_INET_LOSS_STREAK" -ge "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]; then
-        _mon_add_rule warn L2
+      # L2's streak advances only when the NEWEST internet probe itself
+      # lost packets — same gate as G3 (see _mon_newest_probe_lost).
+      if [ "$(_mon_newest_probe_lost "$MON_INET_HIST")" = "1" ]; then
+        MON_INET_LOSS_STREAK=$((MON_INET_LOSS_STREAK + 1))
+        if [ "$MON_INET_LOSS_STREAK" -ge "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]; then
+          _mon_add_rule warn L2
+        fi
+      else
+        MON_INET_LOSS_STREAK=0
       fi
     else
       MON_INET_LOSS_STREAK=0

@@ -113,6 +113,23 @@ MONITOR_INET_PING_COUNT=20
 # smoothly toward the thresholds, and routine noise decays out.
 MONITOR_LOSS_WINDOW_PROBES=10
 
+# The floor under any windowed loss figure: a rule may not fire on a
+# window whose denominator is smaller than this many SENT packets. After
+# a window reset (link drop, network change) a single losing probe IS the
+# whole denominator — the 13/20 = "65% loss" reading that fired L1
+# undebounced — and the confirmation streaks cannot help there because
+# the figure itself only exists after that one probe. Fifty packets is
+# about two fast-cycle probes on the internet leg and five on the
+# gateway's; a genuinely dead path fills that inside three cycles, which
+# is the same bargained delay the confirmation thresholds already accept.
+#
+# Figures without a window behind them — the synthetic values bats
+# drives the rules with — are not floor-checked: production always has
+# the window (the fold writes pairs as it writes figures; see
+# _mon_loss_fold), so a missing window is a test-fixed state, and the
+# floor's own cases are covered directly in tests/test_monitor.bats.
+THRESH_MON_LOSS_MIN_PACKETS=50
+
 # A single cycle's loss is a blip, not a condition: at MONITOR_PING_COUNT=10
 # one dropped packet reads as 10%, exactly LOSS_WARN_PCT. Requiring the same
 # band on consecutive cycles turns a lost packet into a fact about the link
