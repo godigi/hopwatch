@@ -690,9 +690,28 @@ _mon_rules() {
   # means packets are crossing the gateway, so the gateway is forwarding and
   # merely declining to answer pings itself; TCP-1's own prose still quotes
   # the loss figure, so suppressing the contradiction loses no number.
+  #
+  # Two Part-1 corrections to that inference:
+  #   * The claim needs the gateway TOTALLY silent
+  #     (THRESH_ICMP_TOTAL_LOSS_PCT) — a gateway answering two in three
+  #     pings is lossy, and calling its loss "just filtered ICMP" is the
+  #     smooth-gaming bug: a fault verdict suppressed by an inference the
+  #     link never earned. Both engines share this cutoff now; the old
+  #     filtered-specific floor (50) decided and differed only here, and is
+  #     retired with the inference it served.
+  #   * And the internet leg must be CLEAN below LOSS_WARN_PCT — loss on
+  #     BOTH legs is ordinary packet loss, not filtering. The old block
+  #     never looked past the gateway, so that state suppressed the real
+  #     loss from every verdict.
+  #
+  # TCP-2 (refused connects with clean pings) below owns the other shape a
+  # modem can wear: refusing new connections while forwarding everything
+  # else, on which the canary repeats a refusal while pings are pristine.
   local _mon_gw_filtered=0
   if [ "${MON_TCP_OK:-0}" = "1" ] \
-     && loss_at_least "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
+     && loss_at_least "$MON_GW_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+     && { [ -z "$MON_INET_LOSS" ] \
+          || loss_below "$MON_INET_LOSS" "$LOSS_WARN_PCT"; }; then
     _mon_gw_filtered=1
     MON_ICMP_FILTERED=1
     _mon_add_rule info TCP-1

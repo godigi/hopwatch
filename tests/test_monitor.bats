@@ -246,6 +246,40 @@ scanner_rules() {
   [[ "$m" != *"L1"* ]] || return 1
 }
 
+@test "TCP-1 does not fire when both ping legs are lossy" {
+  # 65% loss to the gateway AND to the internet is packet loss, not ICMP
+  # filtering — one lost burst must not read as "hotel WiFi" and hand the
+  # link a clean verdict (the smooth-gaming bug: icmp_filtered suppressed
+  # the internet loss from every verdict on ANY tcp success).
+  reset_state; MON_GW_LOSS=65 GW_LOSS=65 INET_LOSS=65
+  MON_INET_LOSS=65 MON_INET_LOSS_ALT=65
+  _mon_rules
+  [[ "$MON_RULES" != *"TCP-1"* ]] || return 1
+  # The icmp_filtered flag must not suppress the loss either.
+  [ "$MON_ICMP_FILTERED" -eq 0 ]
+}
+
+@test "TCP-1 fires only on a totally silent gateway with a clean internet leg" {
+  # The hotel case: the gateway never answers ping (100%) while real
+  # traffic crosses it (TCP up, internet ping clean).
+  reset_state; MON_GW_LOSS=100 GW_LOSS=100
+  _mon_rules
+  [[ "$MON_RULES" == *"TCP-1"* ]] || return 1
+  [ "$MON_ICMP_FILTERED" -eq 1 ]
+}
+
+@test "parity: gateway mostly silent at 65% with clean internet calls the loss, not filtering" {
+  # A gateway answering only a third of pings is a fault whether or not it
+  # forwards — both engines must call the loss (G2) rather than "ICMP is
+  # filtered, ignore it".
+  reset_state; MON_GW_LOSS=65 GW_LOSS=65
+  local m; m="$(monitor_rules)"; reset_state
+  MON_GW_LOSS=65 GW_LOSS=65
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"G2"* ]] || return 1
+  [[ "$m" != *"TCP-1"* ]] || return 1
+}
+
 @test "parity: no default route is N1 on both" {
   # LINK_UP is deliberately left at its zero default: this is the
   # "nothing joined" case. The joined-but-routeless case is N1c, which is

@@ -130,10 +130,17 @@ THRESH_MON_LOSS_CONFIRM_CYCLES=2
 THRESH_MON_CRIT_CONFIRM_CYCLES=2
 
 # TCP-1 — TCP connections succeed while ping reports heavy loss, i.e. the
-# path filters ICMP. Set well above LOSS_CRIT_PCT: below this a real lossy
-# link and a filtered one look the same, and calling a degraded network
-# "just filtered ICMP" is the more damaging mistake of the two.
-THRESH_ICMP_FILTERED_LOSS_PCT=50
+# path filters ICMP. Trigger (both engines): gateway loss at
+# THRESH_ICMP_TOTAL_LOSS_PCT AND internet ping loss below LOSS_WARN_PCT.
+# The inference needs the gateway totally silent — a gateway answering two
+# pings in three is lossy, and calling its loss "just filtered ICMP" is the
+# smooth-gaming bug, suppressing a fault verdict behind an inference the
+# link never earned. (An earlier revision used a 50% floor here,
+# THRESH_ICMP_FILTERED_LOSS_PCT, retired with the inference it served: it
+# allowed a 65%-lossy gateway with one successful TCP connect to report
+# "don't worry about the ping numbers" over real loss.) LOSS_WARN_PCT on
+# the internet leg supplies the second half: loss on both legs is ordinary
+# packet loss, not filtering.
 
 # ICMP-1 — total loss to *both* public targets while curl and TCP both
 # succeed. Real 100% loss would take curl with it, so this is a middlebox

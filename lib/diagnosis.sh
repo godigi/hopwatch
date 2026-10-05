@@ -200,11 +200,18 @@ diagnosis_run() {
   # above" in one report, let the critical one own the headline, and exited
   # 2 on every hotel and corporate network. TCP reaching 1.1.1.1:443 means
   # packets are crossing the gateway, so the gateway is forwarding and
-  # merely declining to answer pings itself — and THRESH_ICMP_FILTERED_LOSS_PCT
-  # is deliberately set well above LOSS_CRIT_PCT so that inference is safe.
-  # No figure is lost: TCP-1's own prose quotes the gateway loss.
+  # merely declining to answer pings itself.
+  #
+  # The inference now needs the gateway TOTALLY silent
+  # (THRESH_ICMP_TOTAL_LOSS_PCT) and the internet leg clean below
+  # LOSS_WARN_PCT — a gateway answering two pings in three is lossy, and
+  # loss on both legs is packet loss, not filtering: calling it "just
+  # filtered ICMP" is the smooth-gaming bug, suppressing a fault verdict
+  # behind an inference the link never earned.
   local _gw_icmp_filtered=0
-  if [ "$TCP_REACH_ANY_OK" -eq 1 ] && loss_at_least "$GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
+  if [ "$TCP_REACH_ANY_OK" -eq 1 ] \
+     && loss_at_least "$GW_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+     && { [ -z "$INET_LOSS" ] || loss_below "$INET_LOSS" "$LOSS_WARN_PCT"; }; then
     _gw_icmp_filtered=1
     add_diag info TCP-1 "Actual connections work fine, only the \"ping\" tests fail (${GW_LOSS}% loss to the gateway) — something on the path is blocking pings but not real traffic. Common on hotel WiFi, corporate networks, and some ISPs. The network is up; don't worry about the ping numbers above."
   fi
