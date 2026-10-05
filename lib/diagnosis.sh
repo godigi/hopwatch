@@ -382,6 +382,26 @@ diagnosis_run() {
     add_diag warn D4 "Your internet provider is intercepting mistyped website addresses and redirecting them to a search/advertising page ($DNS_NXDOMAIN_HIJACK_IP) instead of returning an error. Turn on Encrypted DNS (DNS-over-HTTPS) in your browser, or configure DNS at the router level, to prevent ISP tracking."
   fi
 
+  # LA-1 / LA-2 — high internet latency and jitter. The scan's mirror of
+  # the monitor's latency rules (lib/monitor.sh): the plan that added them
+  # opened with a live 266 ms average with NO rule reading it — severity
+  # "ok", green pill, on a link voicing cannot survive. Same cutoffs the
+  # monitor confirms over a couple of cycles (lib/thresholds.sh); here a
+  # single run's 20-packet probe is the whole measurement, so no
+  # confirmation applies. Skipped entirely when the ping leg never
+  # produced a summary — an unmeasured RTT must not read as a slow one.
+  if [ -n "$INET_RTT_AVG" ] && is_numeric "$INET_RTT_AVG"; then
+    if awk -v r="$INET_RTT_AVG" -v t="$THRESH_INTERNET_LATENCY_CRIT_MS" 'BEGIN{exit !(r+0 >= t)}'; then
+      add_diag critical LA-1 "Your internet connection is averaging ${INET_RTT_AVG%.*} ms of latency — every packet takes that long to reach the other side and get an answer back. At this level video calls break up or drop entirely, game servers reject you, and websites take seconds to start loading, no matter how fast a speed test claims to run. If this connection is wireless, move closer to the router or plug in by ethernet; otherwise report it to your provider — nothing on your Mac commands this."
+    elif awk -v r="$INET_RTT_AVG" -v t="$THRESH_INTERNET_LATENCY_WARN_MS" 'BEGIN{exit !(r+0 >= t)}'; then
+      add_diag warn LA-1 "Your internet connection is averaging ${INET_RTT_AVG%.*} ms of latency — voices on calls start to feel hollow, page opens pause before starting, and games register your input a moment late. The connection still works; it is just slow to answer. Moving closer to the router, switching to a different band, or plugging in by ethernet all help; on a wired link, report it to your provider if it persists."
+    fi
+  fi
+  if [ -n "$INET_RTT_JITTER" ] && is_numeric "$INET_RTT_JITTER" \
+     && awk -v j="$INET_RTT_JITTER" -v t="$THRESH_LATENCY_JITTER_WARN_MS" 'BEGIN{exit !(j+0 >= t)}'; then
+    add_diag warn LA-2 "Your connection's response time varies by ±${INET_RTT_JITTER%.*} ms ping to ping (jitter). Wi-Fi interference, a congested uplink or another device saturating the line all produce it, and it is why calls stutter even when the average latency looks fine. Pause large transfers, move away from other networks' channels, or wire the Mac directly to the router."
+  fi
+
   # B1/B2 — bufferbloat at gateway or ISP hop.
   local _is_fast_pipe=0
   if [ -n "${SPEEDTEST_DOWN_MBPS:-}" ] && is_numeric "${SPEEDTEST_DOWN_MBPS:-}" \

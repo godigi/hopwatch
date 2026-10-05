@@ -1336,6 +1336,52 @@ RULES: list[dict[str, object]] = [
         "fix_target": "nobody",
     },
     {
+        "id": "LA-1",
+        "title": "High internet latency",
+        "category": "internet",
+        "severity": "varies",
+        "scope": "both",
+        "blurb": (
+            "Every packet takes a long round trip before an answer comes "
+            "back. The connection holds, but the feel is everywhere: voices "
+            "arrive hollow and slightly late, pages pause before they start "
+            "drawing, and game servers register inputs one beat behind. "
+            "This is round-trip delay rather than bandwidth, so a fast "
+            "speed test number next to it is no contradiction — the pipe "
+            "is wide, the answer is far."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#la-1--high-internet-latency",
+        "impacts": {"calls": "degraded", "gaming": "degraded"},
+        "fix": (
+            "On Wi-Fi, move closer to the router or switch bands; on "
+            "ethernet, this is on the line to your provider — report the "
+            "figures and ask about routing or congestion on their side."
+        ),
+        "fix_target": "you",
+    },
+    {
+        "id": "LA-2",
+        "title": "Jittery internet response",
+        "category": "internet",
+        "severity": "warn",
+        "scope": "both",
+        "blurb": (
+            "The connection's response time swings from packet to packet "
+            "rather than holding steady. Averages look fine while calls "
+            "stutter and game inputs arrive unevenly — the swing is the "
+            "symptom, and it typically traces to Wi-Fi interference, a "
+            "congested uplink or another device saturating the line."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#la-2--jittery-internet-response",
+        "impacts": {"calls": "degraded", "gaming": "degraded"},
+        "fix": (
+            "Pause large transfers on anything else on the network, move "
+            "the Mac away from interference, or wire it directly to the "
+            "router — jitter disappears fastest on a cable."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "NT-1",
         "title": "System clock drifted",
         "category": "clock",

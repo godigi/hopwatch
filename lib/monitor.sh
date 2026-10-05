@@ -132,6 +132,13 @@ MON_VERDICT_L1_STREAK=0
 MON_VERDICT_TCP2_STREAK=0
 # shellcheck disable=SC2034
 MON_VERDICT_TCP2W_STREAK=0
+# LA1/LA1W are LA-1's critical and warn groups; LA2 the jitter rule's.
+# shellcheck disable=SC2034
+MON_VERDICT_LA1_STREAK=0
+# shellcheck disable=SC2034
+MON_VERDICT_LA1W_STREAK=0
+# shellcheck disable=SC2034
+MON_VERDICT_LA2_STREAK=0
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -1061,6 +1068,42 @@ _mon_rules() {
   # BR-1 — Browser may not work correctly after background update
   if [ "${MON_BROWSER_DESYNC_COUNT:-0}" -gt 0 ]; then
     _mon_add_rule warn BR-1
+  fi
+
+  # ── LA-1 / LA-2 — internet latency and jitter ─────────────────────────
+  # The monitor had NO latency or jitter rule: 266 ms average rendered
+  # severity "ok" and the pill read green "Watching" on a link nothing
+  # latency-sensitive survives (`status.severity` follows _mon_add_rule
+  # only, so a metric with no rule cannot colour a verdict). These two
+  # judge the SAMPLE's own figures.
+  #
+  # Latency needs the whole sample's rtt measured and over a cutoff;
+  # warn and crit are two groups confirmed at their own cycle counts
+  # (_mon_verdict_cycle), like every other verdict — 266 ms lands in
+  # the warn band with room before the critic's 400 (see thresholds.sh
+  # for the band geometry). Jitter reuses the presentation cutoff
+  # headline.sh already carries for the "(laggy)" phrase; the word the
+  # GUI gets is a RULE, not a phrase it re-derives.
+  local _mon_la1_warn _mon_la1_crit
+  _mon_la1_warn="$( { is_numeric "$MON_INET_RTT" \
+    && awk -v r="$MON_INET_RTT" -v t="$THRESH_INTERNET_LATENCY_WARN_MS" -v c="$THRESH_INTERNET_LATENCY_CRIT_MS" 'BEGIN{exit !(r+0 >= t && r+0 < c)}'; } && echo 1 || echo 0 )"
+  _mon_la1_crit="$( { is_numeric "$MON_INET_RTT" \
+    && awk -v r="$MON_INET_RTT" -v t="$THRESH_INTERNET_LATENCY_CRIT_MS" 'BEGIN{exit !(r+0 >= t)}'; } && echo 1 || echo 0 )"
+  # shellcheck disable=SC2034
+  sig_la1_latency_crit="$_mon_la1_crit"
+  # shellcheck disable=SC2034
+  sig_la1w_latency_warn="$_mon_la1_warn"
+  if _mon_verdict_cycle LA1 "$THRESH_MON_CRIT_CONFIRM_CYCLES" latency_crit; then
+    _mon_add_rule critical LA-1
+  elif _mon_verdict_cycle LA1W "$THRESH_MON_LOSS_CONFIRM_CYCLES" latency_warn; then
+    _mon_add_rule warn LA-1
+  fi
+
+  # shellcheck disable=SC2034
+  sig_la2_jitter_warn="$( { is_numeric "$MON_INET_JITTER" \
+    && awk -v j="$MON_INET_JITTER" -v t="$THRESH_LATENCY_JITTER_WARN_MS" 'BEGIN{exit !(j+0 >= t)}'; } && echo 1 || echo 0 )"
+  if _mon_verdict_cycle LA2 "$THRESH_MON_LOSS_CONFIRM_CYCLES" jitter_warn; then
+    _mon_add_rule warn LA-2
   fi
 
   # Cadence follows severity, not rule count: an info-level VPN notice is

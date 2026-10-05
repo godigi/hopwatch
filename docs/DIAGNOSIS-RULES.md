@@ -358,6 +358,41 @@ isolated probe showed to be clean; most of that was the `-t` truncation
 above, but the methodology is wrong regardless, and this number now
 decides a critical diagnosis. It costs ~4 s.
 
+### LA-1 — High internet latency
+
+- Trigger: measured internet ping average ≥ `THRESH_INTERNET_LATENCY_WARN_MS`
+  (warn, 150 ms) or ≥ `THRESH_INTERNET_LATENCY_CRIT_MS` (critical, 400 ms).
+  The monitor confirms both over its usual cycle counts
+  (`_mon_verdict_cycle`); a scan judges its own 20-packet probe directly.
+  Needs a *measured* RTT — an unmeasured leg never reads as slow.
+- Severity: `warn`, then `critical` past 400 ms. The monitor previously had
+  NO rule reading RTT at all: 266 ms rendered severity `ok` and the pill
+  stayed green on a connection voicing cannot survive.
+- Evidence: `internet.rtt_avg_ms` (and `gateway.rtt_avg_ms` on the full
+  run).
+- Recommendation: move closer to the router / prefer a different band /
+  wire the Mac; past the warn band on ethernet, report the figures to the
+  provider.
+- Impacts: calls and gaming degraded. Bandwidth-heavy activities are
+  deliberately absent — latency is not throughput, and a fast speed test
+  beside a high RTT is the truth, not a contradiction.
+- The band geometry: ordinary Wi-Fi plus VPN sits at 60–120 ms (quiet);
+  satellite-grade paths are 600+ ms (deep past critical). The space
+  between cutoffs is where "degraded but real" lives, so 266 ms lands
+  warn with margin in either direction.
+
+### LA-2 — Jittery internet response
+
+- Trigger: internet ping jitter
+  (the per-ping swing the `ping_parse_summary` tail carries) ≥
+  `THRESH_LATENCY_JITTER_WARN_MS` — the same cutoff the report card's
+  "(laggy)" row already showed, which is now a named rule the monitor
+  emits rather than a phrase the GUI derived.
+- Severity: `warn`.
+- Suggested fix: pause large transfers, change Wi-Fi channel, or wire the
+  Mac.
+- Impacts: calls and gaming degraded.
+
 ### D1 — Partial DNS, internet reachable
 
 - Trigger: `dns.ok == false AND public.ok == true`

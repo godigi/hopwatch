@@ -1495,3 +1495,31 @@ assert json.load(sys.stdin)['internet']['loss_pct_alt'] is None
   _mon_rules
   [[ "$MON_RULES" == *"L1"* ]] || return 1
 }
+
+# ── Phase 1 (reporting-accuracy): latency and jitter rules ───────────────
+# The snapshot that opened this plan rendered 266 ms as severity "ok" —
+# the monitor had no latency or jitter rule at all, so the green pill
+# said "Watching" over a connection nothing latency-sensitive survives.
+
+@test "266 ms internet latency is warn, not ok" {
+  reset_state; MON_INET_RTT=266 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  MON_WEB_OK=1
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" == *"LA-1"* ]] || return 1
+  [ "$MON_SEVERITY" = "warn" ]
+}
+
+@test "400+ ms internet latency is critical" {
+  reset_state; MON_INET_RTT=420 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  MON_WEB_OK=1
+  _mon_rules; _mon_rules
+  [ "$MON_SEVERITY" = "critical" ]
+}
+
+@test "high jitter is a monitor rule too" {
+  reset_state; MON_INET_JITTER=45 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  MON_WEB_OK=1
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" == *"LA-2"* ]] || return 1
+  [ "$MON_SEVERITY" = "warn" ]
+}

@@ -231,6 +231,20 @@ THRESH_WIFI_SNR_MIN_DB=20
 # Presentation cutoffs shared by the report card and section output.
 THRESH_LATENCY_JITTER_WARN_MS=30
 
+# LA-1 — sustained high internet latency, judged in the monitor
+# (mirrored on a scan in lib/diagnosis.sh). The band the live network
+# demonstrated: 266 ms average renders a call unusable and a game laggy,
+# and severity read "ok" — green pill — because no rule read the RTT.
+#
+#   warn  at 150 ms  — voicing gets noticeably hollow, page opens pause.
+#   crit  at 400 ms  — interactive use is out; the connection "works"
+#                      only in the sense that packets eventually land.
+# The distance between the bands is deliberate: satellite-grade (~600 ms)
+# is well past crit, ordinary Wi-Fi-plus-VPN (60–120 ms) is comfortably
+# below warn, and the 150↔400 gap is where "degraded but real" lives.
+THRESH_INTERNET_LATENCY_WARN_MS=150
+THRESH_INTERNET_LATENCY_CRIT_MS=400
+
 # ── IPv6 ─────────────────────────────────────────────────────────────────
 # V6-1 — ping6 loss above this counts as broken IPv6 (given IPv4 works).
 THRESH_IPV6_LOSS_PCT=20
