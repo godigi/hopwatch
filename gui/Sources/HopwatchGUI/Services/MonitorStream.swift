@@ -93,6 +93,107 @@ final class MonitorStream {
     /// Called for every decoded sample. The alert engine subscribes here.
     var onSample: ((MonitorSample) -> Void)?
 
+    // MARK: - Recording agent check
+
+    /// True when a durable journal writer is already running outside this
+    /// app: the launchd recorder agent (`com.hopwatch.recorder`, with the
+    /// legacy `com.netdiag.recorder` label before the install layout
+    /// changed). Both agents append transitions to the same
+    /// `events.jsonl` the GUI's own `--journal` would write, and the
+    /// evidence that two writers are one too many is `seq` running
+    /// backwards 212 times in a single day's journal.
+    ///
+    /// Detection is the cheap one the plan sanctions — the plist file
+    /// rather than `launchctl print`. A watcher plist lives under
+    /// `~/Library/LaunchAgents`, is loaded by `RunAtLoad`/`KeepAlive` the
+    /// moment it exists, and `uninstall_recorder_run` removes the plist
+    /// file itself, so "file exists" tracks "job loaded" through every
+    /// supported install and uninstall path. A plist unloaded by hand is
+    /// outside that model, and the price of the false positive — the
+    /// journal records transitions only while the recorder is expected to
+    /// be running — is the safe side to miss on: the alternative is two
+    /// writers interleaving appends.
+    static var recorderAgentLoaded: Bool {
+        let launchAgents = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/LaunchAgents")
+        for label in ["com.hopwatch.recorder", "com.netdiag.recorder"] {
+            if FileManager.default.fileExists(
+                atPath: launchAgents.appendingPathComponent("\(label).plist").path) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: - Launch sweep
+
+    /// Whether this launch has already swept for orphaned monitor
+    /// processes, from a previous app instance that crashed or was
+    /// force-quit with the stop path never reached. Once per launch: a
+    /// mid-session restart must not sweep whatever was born since (and a
+    /// second sweep against orphans would be redundant — the fixed
+    /// `stop()` is what keeps the current child's children orphan-free).
+    private var launchSweepDone = false
+
+    func sweepOrphanedMonitors() {
+        guard !launchSweepDone else { return }
+        launchSweepDone = true
+        Task.detached(priority: .utility) {
+            // Pass 1: the monitor shells themselves — full command line
+            // `…/bin/hopwatch --monitor … --monitor-fast-interval …`
+            // whose parent is already launchd (pid 1), i.e. re-parented
+            // leftovers. Two guards matter here. The argv one is what
+            // keeps the recorder agent's own `--monitor` child alive: the
+            // launchd plist spawns it without interval flags, so it is
+            // never matched. The parentage one is what keeps a legit
+            // terminal `hopwatch --monitor` — owned by a live shell — out
+            // of the sweep; the app's *current* child is equally safe,
+            // its parent is this app.
+            let shells = Self.pgrepPids(parentPid: 1,
+                                        pattern: "monitor .*--monitor-fast-interval")
+            for pid in shells { kill(pid, SIGTERM) }
+            // TERM is delivered to bash between commands, which can wait
+            // out a probe cycle; the interval flags' deadline is a second
+            // open prefix. Bash exit re-parents its wedged sample writer
+            // to launchd — the settle below is what makes pass 2 see it.
+            try? await Task.sleep(for: .seconds(1.0))
+            for pid in shells where kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+            // Pass 2: the wedged `monitor_sample.py` writers themselves.
+            // These are the 8 leak-report writers: blocked inside write()
+            // against a pipe whose reader is long gone, invisible to pass
+            // 1 because their argv names python, not the CLI. The ppid
+            // guard is what spares a live monitor's writer — it is
+            // parented to that monitor's bash, not to launchd.
+            let writers = Self.pgrepPids(parentPid: 1,
+                                         pattern: "monitor_sample\\.py$",
+                                         matchFull: false)
+            for pid in writers { kill(pid, SIGKILL) }
+            if !shells.isEmpty || !writers.isEmpty {
+                Logger(subsystem: "com.godigi.hopwatch", category: "monitor")
+                    .info("launch sweep reaped \(shells.count) monitor shell(s) and \(writers.count) wedged writer(s)")
+            }
+        }
+    }
+
+    /// `/usr/bin/pgrep` wrapped in a Process — the app already shells out
+    /// for every probe, and this runs once per launch. Empty output is the
+    /// normal no-orphans case, not an error.
+    private nonisolated static func pgrepPids(parentPid: Int32, pattern: String, matchFull: Bool = true) -> [pid_t] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = matchFull
+            ? ["-P", String(parentPid), "-f", pattern]
+            : ["-P", String(parentPid), pattern]
+        let pipe = Pipe()
+        pgrep.standardOutput = pipe
+        do { try pgrep.run() } catch { return [] }
+        let out = pipe.fileHandleForReading.readDataToEndOfFile()
+        pgrep.waitUntilExit()
+        return (String(data: out, encoding: .utf8) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .compactMap { pid_t($0) }
+    }
+
     // MARK: - Lifecycle
 
     func start() {

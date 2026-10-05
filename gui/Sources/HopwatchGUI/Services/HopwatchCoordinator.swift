@@ -276,6 +276,12 @@ final class HopwatchCoordinator {
         alerts.severityRank = { [weak self] ruleID in
             self?.severityRank(forRuleID: ruleID) ?? 0
         }
+        // Before a new monitor can start: reap the `--monitor` children a
+        // previous launch left behind (crash, force-quit — anything the
+        // exit path's own stop() never reached). Sweep guarded to once per
+        // launch inside MonitorStream; only launchd-parented leftovers
+        // match, so the recorder agent's own child is not touched.
+        monitor.sweepOrphanedMonitors()
         if Defaults.monitoringEnabled { monitor.start() }
 
         // Wire update notification hook
