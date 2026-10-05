@@ -261,27 +261,38 @@ final class MonitorStream {
         // opposite of what the user asked for by starting the test.
         let fast = burstInterval ?? Defaults.fastInterval
         let degraded = burstInterval ?? Defaults.degradedInterval
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        let hopwatchDir = home.appendingPathComponent("hopwatch")
-        let netdiagDir = home.appendingPathComponent("net-diag")
-        let journalDir: URL
-        if FileManager.default.fileExists(atPath: hopwatchDir.path) {
-            journalDir = hopwatchDir
-        } else if FileManager.default.fileExists(atPath: netdiagDir.path) {
-            journalDir = netdiagDir
-        } else {
-            journalDir = hopwatchDir
-        }
-        try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
-        let journalPath = journalDir.appendingPathComponent("events.jsonl").path
-        proc.arguments = [
+        var arguments = [
             "--monitor",
-            "--journal",                   journalPath,
             "--monitor-fast-interval",     String(fast),
             "--monitor-degraded-interval", String(degraded),
             "--monitor-medium-interval",   String(Defaults.mediumInterval),
             "--monitor-slow-interval",     String(Defaults.slowInterval),
         ]
+        if Self.recorderAgentLoaded {
+            // See `recorderAgentLoaded` for the whole story. This re-checks
+            // on every spawn, which is the natural place this app observes
+            // a change: monitoring respawns at launch, on every cadence
+            // change and at every burst begin/end, so an agent uninstalled
+            // (or installed) between spins of the monitor gates becomes
+            // visible at the next respawn without a filesystem watcher.
+            log.info("recorder agent present under LaunchAgents — withholding --journal (one journal writer)")
+        } else {
+            let home = URL(fileURLWithPath: NSHomeDirectory())
+            let hopwatchDir = home.appendingPathComponent("hopwatch")
+            let netdiagDir = home.appendingPathComponent("net-diag")
+            let journalDir: URL
+            if FileManager.default.fileExists(atPath: hopwatchDir.path) {
+                journalDir = hopwatchDir
+            } else if FileManager.default.fileExists(atPath: netdiagDir.path) {
+                journalDir = netdiagDir
+            } else {
+                journalDir = hopwatchDir
+            }
+            try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
+            let journalPath = journalDir.appendingPathComponent("events.jsonl").path
+            arguments.insert(contentsOf: ["--journal", journalPath], at: 1)
+        }
+        proc.arguments = arguments
         proc.environment = BinaryLocator.environment()
 
         let pipe = Pipe()
