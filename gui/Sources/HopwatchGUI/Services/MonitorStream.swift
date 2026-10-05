@@ -56,6 +56,13 @@ final class MonitorStream {
     private(set) var burstUntil: Date?
 
     private var process: Process?
+    /// The monitor's stdout pipe, held separately from `process` so `stop()`
+    /// can close the reading end on purpose. A `Process` alone keeps its
+    /// `standardOutput` pipe alive internally, and the reader task that
+    /// pulls lines from it dies with the task — but the file descriptor
+    /// under it stays open, which is how a stopped monitor's writer ends
+    /// up blocked forever. See `stop()`.
+    private var readPipe: Pipe?
     private var readTask: Task<Void, Never>?
     /// The capability-gate half of `start()`, tracked so `stop()` can
     /// cancel it. Without this a `stop()` that lands while the handshake
@@ -192,6 +199,10 @@ final class MonitorStream {
             return
         }
 
+        // Hold the pipe so `stop()` can close the read end by name; the
+        // child side of it is the one a wedged writer would block on.
+        readPipe = pipe
+
         process = proc
         isRunning = true
         lastError = nil
@@ -221,20 +232,76 @@ final class MonitorStream {
         startTask = nil
         readTask?.cancel()
         readTask = nil
-        if let process, process.isRunning {
-            // Resume first: a paused monitor handles SIGTERM promptly
-            // either way, but leaving it paused-then-terminated makes the
-            // shutdown path depend on trap ordering for no benefit.
-            kill(process.processIdentifier, SIGUSR2)
-            process.terminate()
-            // `terminate()` only sends SIGTERM; without a wait the exited
-            // child remains unreaped, and a quick restart can briefly leave
-            // two monitors probing the same link. Reap off the main actor so
-            // an in-flight ping cannot freeze the menu bar while it exits.
+        guard let proc = process else {
+            finishStop()
+            return
+        }
+        let pid = proc.processIdentifier
+
+        // ── 1. Close the read handle first ────────────────────────────
+        // The reader has just been cancelled, which leaves a pipe nobody
+        // reads. The monitor writes one sample per cycle into it, so its
+        // monitor_sample.py would block forever inside write() once the
+        // 64 KB buffer filled — the eighth wedged writers in the leak
+        // report were exactly that. Closing the read end turns that next
+        // write into EPIPE/SIGPIPE; the emit fails, and monitor_run's
+        // `_mon_emit || break` tears the monitor down from the inside. No
+        // signal ordering can do this job — a SIGTERM delivered to a bash
+        // wedged behind a python that is still holding the pipe write end
+        // leaves the python orphaned and blocked. The pipe close comes
+        // before the signals on purpose.
+        if let pipe = readPipe {
+            pipe.fileHandleForReading.closeFile()
+        }
+
+        // ── 2. SIGTERM the process group ──────────────────────────────
+        // The child is its own group leader — Darwin's NSTask spawns via
+        // posix_spawn with a fresh process group whose pgid equals the
+        // child's pid (verified live: getpgid(child) == child pid, and the
+        // probe subprocesses monitor_sample.py and the pings inherit that
+        // group, since bash scripts run without job control). A group TERM
+        // therefore reaches the whole tree — bash, the sample writer, the
+        // in-flight pings and with_timeout's killer subshells reach them
+        // too. terminate() singles out the bash and leaves the rest of the
+        // tree to the pipe close, so it is the fallback for a child that
+        // somehow ended up sharing this app's group: group-signalling that
+        // group would signal the app itself.
+        if proc.isRunning {
+            if getpgid(pid) == pid {
+                kill(-pid, SIGTERM)
+            } else {
+                proc.terminate()
+            }
+            // ── 3. Escalate to SIGKILL after 2 s, then reap ───────────
+            // `_mon_emit`'s failure break and the TERM trap land between
+            // shell commands, so the exit can cost a cycle; the ping
+            // subprocesses die on the group signal itself. Two seconds is
+            // well clear of the longest single probe. After that nothing
+            // in the tree is needed — kill the group so a zombie sample
+            // writer cannot outlive bash — then reap so the Process
+            // wrapper agrees with the OS about what died.
+            // Off the main actor: waiting on an in-flight probe must not
+            // freeze the menu bar — same reasoning as before this change,
+            // which is what waitUntilExit already did.
             Task.detached(priority: .utility) {
-                process.waitUntilExit()
+                let escalateAt = Date().addingTimeInterval(2.0)
+                while proc.isRunning, Date() < escalateAt {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                if proc.isRunning {
+                    if getpgid(pid) == pid { kill(-pid, SIGKILL) } else { kill(pid, SIGKILL) }
+                }
+                proc.waitUntilExit()
             }
         }
+
+        finishStop()
+    }
+
+    /// The bookkeeping half of `stop()`, shared by both exit paths so a
+    /// child-less stop resets exactly the same state.
+    private func finishStop() {
+        readPipe = nil
         process = nil
         isRunning = false
         isPaused = false
