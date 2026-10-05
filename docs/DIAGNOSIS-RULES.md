@@ -522,6 +522,38 @@ All of the below are implemented and can fire.
   forwards at all, TCP-1 does not fire, and G1/G2/G3 call the loss what it
   is.
 
+### TCP-2 — Connections intermittently refused while ping passes
+
+- Trigger: failed-or-refused connection attempts ≥ `THRESH_CONNECT_WARN_PCT`
+  (warn) or `THRESH_CONNECT_CRIT_PCT` (critical), while gateway and internet
+  ping loss are both measured below `LOSS_WARN_PCT`. The monitor folds the
+  ratio over a rolling window exactly like the loss figures
+  (`_mon_probe_tcp`; `MONITOR_LOSS_WINDOW_PROBES` probes, 2 attempts each);
+  a scan reads it off the five-target `tcp_reach` panel in one go.
+- Severity: `warn`, escalating to `critical` when every connection is
+  refused.
+- Evidence: refused attempts / total attempts, per-target TCP panel,
+  clean ping figures.
+- Recommendation: restart the router; if it persists, update the router
+  firmware and report the pattern to the provider — the box refusing the
+  connections is theirs, not the internet's.
+- Rationale: this fault had **no rule at all** and was being misreported as
+  an outage. Measured on the network that motivated it: outbound TCP to
+  resolver and anonymizer IPs was RST within ~10 ms — far under the ~58 ms
+  the real path takes, so the refusal comes from the local modem — at
+  50–70% of attempts, while ICMP to the same hosts sat at 0% loss and
+  ordinary websites kept loading. A canary aimed exactly there fired P2
+  ("your ISP is down") 349 times in 24 h, median episode 12 s, while the
+  user's actual complaint — new connections being slow and flaky — had no
+  name. TCP-2 is that name. It matters because the two failure shapes
+  need opposite advice: a true outage means "check your ISP's status
+  page"; locally-refused connections mean "power-cycle the modem".
+- Deliberately NOT keyed on resolver targets alone: the monitor's TCP
+  probe lists one content host (`github.com:443`) beside one resolver
+  (`8.8.8.8:443`) so a modem that only RSTs resolver/anonymizer IPs still
+  leaves one leg of evidence that the internet itself is reachable. A
+  rule that read resolvers only would cry "outage" while browsing worked.
+
 ### WS-1 — WiFi channel is congested
 
 - Trigger: `wifi_scan.current_channel_neighbors > 3`.

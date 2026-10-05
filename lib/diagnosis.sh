@@ -216,6 +216,40 @@ diagnosis_run() {
     add_diag info TCP-1 "Actual connections work fine, only the \"ping\" tests fail (${GW_LOSS}% loss to the gateway) — something on the path is blocking pings but not real traffic. Common on hotel WiFi, corporate networks, and some ISPs. The network is up; don't worry about the ping numbers above."
   fi
 
+  # TCP-2 — connections intermittently refused while ping passes. The
+  # measured fault no other rule names: a modem that RSTs outbound TCP in
+  # ~10 ms — far under the real path's RTT, so the refusal is local —
+  # while pings are pristine. Measured on the live network the rule was
+  # written for: 8.8.8.8:443 refused 10 of 16 times, 1.1.1.1:443 11 of 16,
+  # ICMP to both 0% — and no existing rule covered the shape.
+  #
+  # Same cutoffs over the same ratio the monitor folds (_mon_probe_tcp),
+  # read here off the scan's five-target tcp_reach panel in one shot:
+  # failed targets over probed targets, gated on MEASURED-clean pings on
+  # both legs (loss belongs to G3/L1/L2; this rule owns the clean-ping
+  # refusal pattern). Warn at THRESH_CONNECT_WARN_PCT, critical at
+  # THRESH_CONNECT_CRIT_PCT — two literal call sites, like every add_diag
+  # site in this file, for tests/test_rules_catalog.bats's extraction.
+  if [ -n "$TCP_REACH_LINES" ]; then
+    local _tcp2_tries=0 _tcp2_fails=0 _tcp2_state
+    while IFS= read -r _tcp2_state; do
+      [ -n "$_tcp2_state" ] || continue
+      _tcp2_tries=$((_tcp2_tries + 1))
+      case "$_tcp2_state" in *'|FAIL') _tcp2_fails=$((_tcp2_fails + 1)) ;; esac
+    done <<<"$TCP_REACH_LINES"
+    if [ "$_tcp2_tries" -gt 0 ] \
+       && loss_below "$GW_LOSS" "$LOSS_WARN_PCT" \
+       && loss_below "$INET_LOSS" "$LOSS_WARN_PCT"; then
+      local _tcp2_pct
+      _tcp2_pct="$(awk -v f="$_tcp2_fails" -v t="$_tcp2_tries" 'BEGIN{printf "%.0f", f*100/t}')"
+      if [ "$_tcp2_pct" -ge "$THRESH_CONNECT_CRIT_PCT" ]; then
+        add_diag critical TCP-2 "Every new connection this Mac tried to open was refused — all ${_tcp2_tries} of the test connections failed, instantly and locally, while pings to the same internet passed. That reads as the modem or router badly rejecting new connection attempts rather than a line outage: what is already working keeps working, but nothing new can start — new pages stall, calls fail to connect, games cannot join a server. Restart your router (unplug it for half a minute); if that clears it, you are done; if not, update the router firmware and then report the pattern to your provider — it is their box refusing, not the internet."
+      elif [ "$_tcp2_pct" -ge "$THRESH_CONNECT_WARN_PCT" ]; then
+        add_diag warn TCP-2 "Connections are being intermittently refused — ${_tcp2_fails} of ${_tcp2_tries} test connections failed quickly and locally while pings to the same internet passed. That pattern — fast, local refusals on a link whose pings are perfect — is usually the modem or router badly rejecting connection attempts, not the line being down. Browsing can still work while new connections struggle, so it is easy to miss. Restart your router (unplug for half a minute) and re-run; report it to your provider if it persists."
+      fi
+    fi
+  fi
+
   # ETH-1 / ETH-2 — the wired link negotiated badly. Decided *before*
   # G1/G2/G3 because a half-duplex link is a cause of gateway loss, and
   # G2's headline advice ("reboot the router") is wrong when it is: the

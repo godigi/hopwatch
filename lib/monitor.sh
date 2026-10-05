@@ -118,11 +118,20 @@ MON_INET_LOSS_STREAK=0
 # above are — bin/netdiag runs under set -u, and a streak read by
 # tests/test_monitor.bats before its first write must exist. Read only
 # through eval-built names in lib/common.sh, which shellcheck cannot
-# follow: each is declared under a disable directive.
+# streak read by tests/test_monitor.bats before its first write must exist.
+# Read only through eval-built names in lib/common.sh, which shellcheck
+# cannot follow: each is declared under a disable directive.
+# TCP2W is the warn-stage group of the same TCP-2 verdict, given its own
+# streak (a warn-band cycle advances it; a clear cycle resets it) so warn
+# and crit confirmations can run in both shells at once.
 # shellcheck disable=SC2034
 MON_VERDICT_P2_STREAK=0
 # shellcheck disable=SC2034
 MON_VERDICT_L1_STREAK=0
+# shellcheck disable=SC2034
+MON_VERDICT_TCP2_STREAK=0
+# shellcheck disable=SC2034
+MON_VERDICT_TCP2W_STREAK=0
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -143,6 +152,15 @@ MON_DNS_RESOLVER=""
 MON_DNS_MS=""
 MON_TCP_OK=""
 MON_TCP_LINES=""
+# TCP-2's rolling refused-connect instrument (see _mon_probe_tcp): the
+# same newest-last space-separated "attempts:refusals" pair string the
+# loss windows keep, trimmed to MONITOR_LOSS_WINDOW_PROBES entries, plus
+# the windowed totals it summarises to and the refused percentage over
+# them. Emptied on link-down and network change with the loss windows —
+# the same "a window half full of the old network measures neither".
+MON_TCP_HIST=""
+MON_TCP2_ATTEMPTS=""
+MON_TCP2_REFUSED_PCT=""
 # A small HTTPS reachability probe runs with the fast tier. It answers the
 # question users actually care about — whether ordinary internet traffic can
 # leave the Mac — rather than treating Wi-Fi association or ICMP replies as
@@ -336,6 +354,12 @@ _mon_loss_reset() {
   MON_GW_HIST=""
   MON_INET_HIST=""
   MON_INET_HIST_ALT=""
+  # The TCP-2 instrument folds into the same family of windows; a link
+  # drop or a network change invalidates its connection attempts along
+  # with the packets.
+  MON_TCP_HIST=""
+  MON_TCP2_ATTEMPTS=""
+  MON_TCP2_REFUSED_PCT=""
 }
 
 # Parse ping's -q summary into raw counts, fold it into a leg's history,
@@ -425,19 +449,48 @@ _mon_probe_tcp() {
   # reports 100% loss forever and every loss alert it can raise is a false
   # one. Two independent targets so a single unreachable host doesn't read
   # as "the internet is gone".
-  local entry host port t0 ms any=0
-  for entry in "1.1.1.1:443" "8.8.8.8:443"; do
+  #
+  # The second target is a NON-RESOLVER host name deliberately: a modem can
+  # RST connections to resolver/anonymizer IPs on sight (measured on the
+  # live network: 1.1.1.1:443 refused 11 of 16 times, in ~10 ms — far
+  # faster than the 58 ms the RTT to that host implies, so the refusal
+  # comes from the local box) while ordinary websites keep loading.
+  # Pointing both probes at resolvers would make every such modem look
+  # like an outage; one content host keeps one foot in the internet as
+  # users actually experience it. (TCP-2, below, is the rule that names
+  # the refusal pattern itself.)
+  local entry host port t0 ms any=0 oks=0 fails=0
+  for entry in "github.com:443" "8.8.8.8:443"; do
     host="${entry%:*}"; port="${entry##*:}"
     t0="$EPOCHREALTIME"
     if with_timeout 4 nc -G 3 -z "$host" "$port" >/dev/null 2>&1; then
       ms="$(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN{printf "%.0f", (b-a)*1000}')"
       MON_TCP_LINES+="${host}|${port}|1|${ms}"$'\n'
       any=1
+      oks=$((oks + 1))
     else
       MON_TCP_LINES+="${host}|${port}|0|"$'\n'
+      fails=$((fails + 1))
     fi
   done
   MON_TCP_OK="$any"
+  # TCP-2's instrument: a rolling refused-connect ratio over the same
+  # window the loss legs use (MONITOR_LOSS_WINDOW_PROBES probes — 20
+  # attempts at the defaults). Each completed probe cycle folds one
+  # "attempts:refusals" pair into MON_TCP_HIST with the same space-
+  # separated-scalar shape the loss windows keep (this file must run under
+  # both shells); _mon_loss_summarize/_mon_loss_pct are pure and leg-
+  # agnostic — counts do not care whether the packets were ICMP or
+  # connection attempts. The scan's tcp_reach panel dials five targets
+  # once; the monitor's two-target probe is smaller per cycle but slower
+  # to swing, which is exactly what a warn/critical gate should read.
+  local summary totals
+  summary="$(_mon_loss_summarize "${MON_TCP_HIST:+$MON_TCP_HIST }2:$fails")"
+  MON_TCP_HIST="${summary%%|*}"
+  totals="${summary#*|}"
+  # shellcheck disable=SC2034
+  MON_TCP2_ATTEMPTS="${totals%%|*}"
+  MON_TCP2_REFUSED_PCT="$(_mon_loss_pct "${totals%%|*}" "${totals##*|}")"
 }
 
 _mon_probe_internet() {
@@ -653,6 +706,18 @@ _mon_rules() {
     # drop interrupted is not a streak that held.
     MON_GW_LOSS_STREAK=0
     MON_INET_LOSS_STREAK=0
+    # And no probe this cycle means every figure in these globals predates
+    # the drop. The fast tier skips probing while the link is down, so
+    # without this block the next sample after recovery would carry the
+    # last-fresh numbers from the PREVIOUS link — the N1 samples that
+    # reported old loss/RTT figures in the field. The loss windows went
+    # through _mon_loss_reset in the loop when the link dropped; the
+    # scalars the rules read need the same treatment here, where the
+    # rules actually look.
+    MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
+    MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_LOSS_ALT_WINDOW=""
+    MON_INET_RTT=""; MON_INET_JITTER=""
+    MON_TCP2_ATTEMPTS=""; MON_TCP2_REFUSED_PCT=""
     return 0
   fi
 
@@ -802,6 +867,52 @@ _mon_rules() {
 
   # TCP-1 is decided above the gateway loss rules, because it decides
   # whether they fire at all.
+
+  # ── TCP-2 — connections intermittently refused while ping passes ──────
+  # The measured fault no other rule names: outbound TCP RST in ~10 ms —
+  # far under the real path's RTT, so the refusal is the local modem,
+  # not the far host — while pings are pristine and normal sites load.
+  # lib/monitor.sh cannot see WHY a connect failed (the RST vs the
+  # timeout read the same here), so the rule says "refused or
+  # unreachable" for what it measures and lets the web block's
+  # fail_kind carry the finer class.
+  #
+  # Gate on MEASURED-clean pings on both legs, not "not lossy": an
+  # unmeasured internet leg is silence, and silence is not evidence a
+  # ping passes. Without the gate this rule would double up with L2/G3
+  # on a link that is lossy AND eventually refuses connections; with it,
+  # the loss rules own the lossy state and this rule owns the clean-ping
+  # refusal pattern.
+  #
+  # Warn/crit confirmed over the same cycle counts as the loss bands
+  # (see the thresholds above for the cutoffs): the instrument is the
+  # rolling ratio, so a single cycle's two refused connects need the
+  # same consecutive-cycle agreement every other verdict gets. The
+  # instrument resets on link-down and network change (with the loss
+  # windows). It deliberately carries NO minimum-attempts floor beyond
+  # the confirmation: two cycles of two-connect evidence is exactly the
+  # resolution this fault arrives at, and demanding fifty windowed
+  # attempts would delay a real warning by half an hour for no honest
+  # gain.
+  local _mon_tcp2_ping_ok=0
+  if loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT" \
+     && loss_below "$MON_INET_LOSS" "$LOSS_WARN_PCT"; then
+    _mon_tcp2_ping_ok=1
+  fi
+  local _mon_tcp2_warn _mon_tcp2_crit
+  _mon_tcp2_warn="$( { [ "$_mon_tcp2_ping_ok" -eq 1 ] \
+    && loss_at_least "$MON_TCP2_REFUSED_PCT" "$THRESH_CONNECT_WARN_PCT"; } && echo 1 || echo 0 )"
+  _mon_tcp2_crit="$( { [ "$_mon_tcp2_ping_ok" -eq 1 ] \
+    && loss_at_least "$MON_TCP2_REFUSED_PCT" "$THRESH_CONNECT_CRIT_PCT"; } && echo 1 || echo 0 )"
+  # shellcheck disable=SC2034
+  sig_tcp2_connect_crit="$_mon_tcp2_crit"
+  # shellcheck disable=SC2034
+  sig_tcp2w_connect_warn="$_mon_tcp2_warn"
+  if _mon_verdict_cycle TCP2 "$THRESH_MON_CRIT_CONFIRM_CYCLES" connect_crit; then
+    _mon_add_rule critical TCP-2
+  elif _mon_verdict_cycle TCP2W "$THRESH_MON_LOSS_CONFIRM_CYCLES" connect_warn; then
+    _mon_add_rule warn TCP-2
+  fi
 
   # ── L1 / L2 — internet-side packet loss ────────────────────────────────
   local _mon_icmp_filtered=0

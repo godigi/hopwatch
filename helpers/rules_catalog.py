@@ -1052,7 +1052,38 @@ RULES: list[dict[str, object]] = [
         ),
         "fix_target": "nobody",
     },
-
+    {
+        "id": "TCP-2",
+        "title": "Connections intermittently refused",
+        "category": "router",
+        "severity": "varies",
+        "scope": "both",
+        "blurb": (
+            "New connections are being refused quickly and locally while "
+            "pings pass — usually the modem or router badly rejecting "
+            "connection attempts rather than the internet being down. "
+            "Browsing can keep working while new connections struggle: "
+            "links to sites you are already talking to survive, but every "
+            "page load, call setup or game join has to open a fresh one."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#tcp-2--connections-intermittently-refused-while-ping-passes",
+        "impacts": {"calls": "degraded", "streaming": "degraded",
+                    "gaming": "broken", "vpn": "degraded"},
+        "fix": (
+            "Restart the router — unplug it briefly, then plug it "
+            "back in. If the pattern comes back, update the router's "
+            "firmware, and if it still persists, report it to your internet "
+            "provider: it is their box refusing connections, not the "
+            "internet failing."
+        ),
+        "fix_away": (
+            "Ask whoever runs this network to restart or power-cycle the "
+            "router, or try a different connection (a phone hotspot is "
+            "enough) to confirm the fault sits with this network's modem "
+            "rather than with your Mac."
+        ),
+        "fix_target": "your_router",
+    },
     {
         "id": "WD-1",
         "title": "WiFi flapping / roaming",

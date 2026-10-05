@@ -147,6 +147,26 @@ THRESH_MON_CRIT_CONFIRM_CYCLES=2
 # dropping ICMP wholesale, not an outage.
 THRESH_ICMP_TOTAL_LOSS_PCT=100
 
+# TCP-2 — new connections intermittently refused while ping passes
+# (lib/monitor.sh, mirrored on the scan's tcp_reach panel in
+# lib/diagnosis.sh). The measured world this rule names: a modem that
+# RSTs outbound TCP in ~10 ms — far under the real path's RTT, so the
+# refusal is local — while ICMP to the same hosts is fine and normal
+# websites load. On the live network 8.8.8.8:443 was refused 10 of 16
+# times and the ping to it 0% of the time; no existing rule covers the
+# shape, and P2 misread it as an outage 349 times a day.
+#
+# Two cutoffs over the rolling refused-connect ratio (attempts that got a
+# connection refused or failed, as a percentage of attempts):
+#   warn at half of connections refused — one of the monitor's two
+#   targets, or three of the scan's five — every cycle at the fast
+#   cadence for the confirm window;
+#   critical at all of them refused — the modem's TCP path is unusable,
+#   and the pings passing make "check your router" the right shop, not
+#   "call your ISP".
+THRESH_CONNECT_WARN_PCT=50
+THRESH_CONNECT_CRIT_PCT=100
+
 # ── WiFi ─────────────────────────────────────────────────────────────────
 # Read by helpers/signal_scale.py (netdiag --signal-scale) as the top edge
 # of its four-band "Excellent/Good/Fair/Weak" scale — the word a GUI shows
