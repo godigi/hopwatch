@@ -59,7 +59,12 @@ final class HopwatchCoordinator {
     /// See `reportSource` for why this is a separate property rather than
     /// a second way to set `latestRun`, and `hydrateFromHistoryIfNeeded`
     /// for how it gets populated.
-    private(set) var hydratedReport: RunDetail?
+    private(set) var hydratedReport: RunDetail? {
+        didSet {
+            cachedHydratedRunResult = hydratedReport?.asRunResult
+        }
+    }
+    private var cachedHydratedRunResult: RunResult?
     /// Live SSID read from CoreWLAN — the GUI's own source, not the CLI's.
     /// The bundled CLI reads the SSID via `ipconfig getsummary`, but TCC
     /// attributes that call to `/usr/sbin/ipconfig` rather than this .app,
@@ -1143,12 +1148,12 @@ final class HopwatchCoordinator {
         // reach here — see the `!def.scanOnly` guard in `AlertEngine.step`
         // — so the five of those are absent from the timeline by design.)
         //
-        // `firingRules.sorted().first`, never `def.rules.first`: the latter
+        // `firingRules.min()`, never `def.rules.first`: the latter
         // reads an arbitrary element of an unordered Set of everything the
         // alert *listens* for, which is why one L2 condition was logged as
         // "rule=L1" and the next identical one as "rule=L2".
         eventLog.record(kind: "alert", summary: def.title,
-                        ruleID: firingRules.sorted().first,
+                        ruleID: firingRules.min(),
                         network: monitor.latest?.network.id)
         guard Defaults.scanOnAlert else { return }
         // Loop guard, two clauses. A scan started by an alert never starts
@@ -1328,11 +1333,7 @@ final class HopwatchCoordinator {
 
     /// Whichever report is currently active (live or stored), as a `RunResult`.
     var currentRunResult: RunResult? {
-        switch reportSource {
-        case .live(let run):        return run
-        case .stored(let detail):   return detail.asRunResult
-        case nil:                   return nil
-        }
+        latestRun ?? cachedHydratedRunResult
     }
 
     /// True if any monitor sample in the rolling loss window (~last 10 probes / 100s) recorded a Wi-Fi roam event.

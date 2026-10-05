@@ -141,7 +141,7 @@ def load_jsonl(p: Path) -> list[dict]:
     if not p.exists():
         return []
     out: list[dict] = []
-    with p.open() as f:
+    with p.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -259,7 +259,7 @@ def main() -> None:
     assert set(floors) == set(FLOOR_METRICS)
 
     try:
-        current = json.loads(args.current.read_text())
+        current = json.loads(args.current.read_text(encoding="utf-8", errors="replace"))
     except (FileNotFoundError, json.JSONDecodeError) as e:
         print(json.dumps({"error": f"cannot read current: {e}"}), file=sys.stderr)
         sys.exit(1)

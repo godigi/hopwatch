@@ -108,7 +108,7 @@ struct AlertStageCard: View {
     /// "rule G2 · 3m ago". Omits the rule segment cleanly for the alerts
     /// that carry none, rather than printing "rule  · 3m ago".
     private var attribution: String {
-        guard let rule = alert.rules.sorted().first else {
+        guard let rule = alert.rules.min() else {
             return RelativeTime.string(from: alert.raisedAt)
         }
         return "rule \(rule) · \(RelativeTime.string(from: alert.raisedAt))"

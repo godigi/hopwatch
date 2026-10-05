@@ -6,6 +6,15 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Changes
+
+- perf(cli): eliminate subprocess forks across monitor, ping, public reach, and WAN probes via pure Bash regex parsing.
+- perf(cli): stream suitability reporting directly into a single Python pass, eliminating intermediate process spawning and subshell buffering.
+- perf(gui): precompute route warning resolution in `HomeView` and memoize hydrated run results in coordinator, eliminating redundant per-frame recalculations.
+- perf(gui): optimize `AlertEngine.activeSorted` with fast-paths and pre-ranked mapping, and use sequence `.min()` in place of array sorting for rule attributions.
+- perf(helpers): speed up timestamp parsing via `datetime.fromisoformat` and reduce memory footprint in history records using SHA-256 digests.
+- fix(helpers): enforce explicit UTF-8 encoding across baseline, history, and summary JSONL file loaders.
+
 ## [1.10.1] - 2026-09-30
 
 ### Changes

@@ -342,7 +342,9 @@ final class HistoryStore {
     /// unscoped loop, unchanged.
     func latestSpeedTest(for networkID: String? = nil) -> (down: Double, up: Double?, date: Date)? {
         let canonicalTarget = networkID.map { canonicalID($0) }
-        let runs = document.runs.sorted { ($0.ts ?? "") > ($1.ts ?? "") }
+        // document.runs is emitted in chronological order; walk backwards to find the newest speed test
+        // without sorting the entire multi-thousand run history.
+        let runs = document.runs.reversed()
 
         if let canonicalTarget {
             for run in runs {

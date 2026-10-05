@@ -30,6 +30,7 @@ struct HomeView: View {
     @State private var shareFeedback: String?
 
     var body: some View {
+        let routeWarning = routeWarningResult
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // 1. Page Heading
@@ -104,14 +105,14 @@ struct HomeView: View {
                     macIP: macIPString,
                     routerPingText: routerPingText,
                     routerPingTint: routerPingTint,
-                    routerWarn: routerWarn,
+                    routerWarn: routeWarning.routerWarn,
                     routerIP: routerGatewayIP ?? "192.168.1.1",
                     routerLossText: routerLossText,
                     routerJitterText: routerJitterText,
                     routerLoadedDelta: currentRunResult?.snapshot.bufferbloat.gwDeltaMs.map { String(format: "+%.0f ms", $0) },
                     internetPingText: internetPingText,
                     internetPingTint: internetPingTint,
-                    internetWarn: internetWarn,
+                    internetWarn: routeWarning.internetWarn,
                     countryFlag: countryFlagEmoji,
                     countryName: countryNameString,
                     ispName: ispNameText,
@@ -124,15 +125,15 @@ struct HomeView: View {
                     publicIP: publicIPString,
                     pingTarget: pingTargetString,
                     pingTargetAlt: pingTargetAltString,
-                    culpritHop: culpritHop,
+                    culpritHop: routeWarning.culpritHop,
                     routerAdminURL: routerAdminURL,
                     routerAdminAvailable: coordinator.routerAdminAvailable,
                     internetDetailText: internetDetailText,
                     routerDetailText: routerDetailText,
                     isCritical: isStageCritical,
                     isWiFi: isConnectedToWiFi,
-                    macStatusGood: macStatusGood,
-                    isWifiLaggy: isWifiLaggy
+                    macStatusGood: routeWarning.macStatusGood,
+                    isWifiLaggy: routeWarning.isWifiLaggy
                 )
 
                 // 6. Main 2-Column Dashboard Grid (Ping Chart, Findings & Recent Activity vs Graded Check Details)

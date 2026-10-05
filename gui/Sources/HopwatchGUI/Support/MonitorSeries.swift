@@ -70,6 +70,7 @@ enum MonitorSeries {
         var result = Result()
         var current: [Point] = []
         var previous: MonitorSample?
+        var previousTime: Date?
 
         func closeSegment() {
             if !current.isEmpty { result.segments.append(current) }
@@ -79,7 +80,7 @@ enum MonitorSeries {
         for sample in samples {
             let now = sample.timestamp
 
-            if let previous {
+            if let previous, let prevTime = previousTime {
                 // If the monitor CLI explicitly emitted a discontinuity via
                 // gap_s (sleep/stall measured monotonically by lib/monitor.sh),
                 // use that directly. Otherwise fall back to measuring wall clock
@@ -90,15 +91,16 @@ enum MonitorSeries {
                     hasGap = gapS > 0
                 } else {
                     let cadence = Double(previous.status.cadenceS ?? 0)
-                    hasGap = cadence > 0 && now.timeIntervalSince(previous.timestamp) > cadence * 2
+                    hasGap = cadence > 0 && now.timeIntervalSince(prevTime) > cadence * 2
                 }
 
                 if hasGap {
-                    result.gaps.append(Gap(start: previous.timestamp, end: now))
+                    result.gaps.append(Gap(start: prevTime, end: now))
                     closeSegment()
                 }
             }
             previous = sample
+            previousTime = now
 
             // A paused sample is the monitor saying so out loud: probing is
             // suspended and every number in it is carried over from before

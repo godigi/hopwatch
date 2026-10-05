@@ -474,8 +474,7 @@ captive_portal_classify() {
 
 # True when $1 is a number we actually measured.
 loss_measured() {
-  [ -n "${1:-}" ] || return 1
-  awk -v v="$1" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/)}'
+  [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]
 }
 
 # True when $1 was measured AND is >= $2.
@@ -579,21 +578,23 @@ is_numeric() {
 # each field is intentionally empty when that part of the summary is absent.
 # An absent summary means "not measured", not 100% loss.
 ping_parse_summary() {
-  local out="${1:-}" loss avg jitter
-  loss="$(printf '%s\n' "$out" \
-    | awk -F'[ %]' '/packet loss/{for(j=1;j<=NF;j++)if($j=="packet")print $(j-2)}' | head -1)"
-  avg="$(printf '%s\n' "$out" \
-    | awk -F'[ /]' '/round-trip|rtt/{print $(NF-3); exit}')"
-  jitter="$(printf '%s\n' "$out" \
-    | awk -F'[ /]' '/round-trip|rtt/{print $(NF-1); exit}')"
+  local out="${1:-}" loss="" avg="" jitter=""
+  if [[ "$out" =~ ([0-9]+(\.[0-9]+)?)%[[:space:]]+packet[[:space:]]+loss ]]; then
+    loss="${BASH_REMATCH[1]}"
+  fi
+  if [[ "$out" =~ (round-trip|rtt)[^=]*=[[:space:]]*([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+) ]]; then
+    avg="${BASH_REMATCH[3]}"
+    jitter="${BASH_REMATCH[5]}"
+  fi
   printf '%s|%s|%s' "$loss" "$avg" "$jitter"
 }
 
 # Extracts max RTT from ping summary: round-trip min/avg/max/stddev = ...
 ping_parse_max() {
   local out="${1:-}"
-  printf '%s\n' "$out" \
-    | awk -F'[ /]' '/round-trip|rtt/{print $(NF-2); exit}'
+  if [[ "$out" =~ (round-trip|rtt)[^=]*=[[:space:]]*([0-9.]+)/([0-9.]+)/([0-9.]+)/([0-9.]+) ]]; then
+    printf '%s' "${BASH_REMATCH[4]}"
+  fi
 }
 
 # ── Bufferbloat grading ──────────────────────────────────────────────────

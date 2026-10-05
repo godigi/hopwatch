@@ -324,8 +324,7 @@ struct LiveView: View {
     }
 
     private var currentJitter: Double? {
-        if let live = monitor.latest?.liveJitterMs { return live }
-        return MonitorSeries.movingJitter(samples: monitor.recent)
+        coordinator.currentJitter
     }
 
     private var stability: ConnectionStability {

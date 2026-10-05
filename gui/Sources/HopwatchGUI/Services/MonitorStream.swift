@@ -80,6 +80,7 @@ final class MonitorStream {
     private var burstTimer: Task<Void, Never>?
 
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "monitor")
+    private let decoder = JSONDecoder()
     private static let recentCapacity = 360
 
     /// Called for every decoded sample. The alert engine subscribes here.
@@ -376,7 +377,7 @@ final class MonitorStream {
             for try await line in handle.bytes.lines {
                 if Task.isCancelled { return }
                 guard let data = line.data(using: .utf8) else { continue }
-                guard let sample = try? JSONDecoder().decode(MonitorSample.self, from: data) else {
+                guard let sample = try? decoder.decode(MonitorSample.self, from: data) else {
                     // One malformed line must not end the session. Log and
                     // keep reading: the next sample is 10 seconds away and
                     // is probably fine.

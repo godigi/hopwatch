@@ -18,17 +18,18 @@ public_run() {
   pub_out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null)"
   if [ -n "$pub_out" ]; then
     PUBLIC_OK=1
-    PUB_IP="$(printf '%s' "$pub_out"   | sed -n 's/.*"ip": *"\([^"]*\)".*/\1/p')"
-    PUB_ISP="$(printf '%s' "$pub_out"  | sed -n 's/.*"asn_org": *"\([^"]*\)".*/\1/p')"
-    PUB_ASN="$(printf '%s' "$pub_out"  | sed -n 's/.*"asn": *"\([^"]*\)".*/\1/p')"
-    PUB_CITY="$(printf '%s' "$pub_out" | sed -n 's/.*"city": *"\([^"]*\)".*/\1/p')"
-    PUB_CC="$(printf '%s' "$pub_out"   | sed -n 's/.*"country": *"\([^"]*\)".*/\1/p')"
+    PUB_IP="" PUB_ISP="" PUB_ASN="" PUB_CITY="" PUB_CC="" PUB_CC_ISO=""
+    [[ "$pub_out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && PUB_IP="${BASH_REMATCH[1]}"
+    [[ "$pub_out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && PUB_ISP="${BASH_REMATCH[1]}"
+    [[ "$pub_out" =~ \"asn\":[[:space:]]*\"([^\"]*)\" ]] && PUB_ASN="${BASH_REMATCH[1]}"
+    [[ "$pub_out" =~ \"city\":[[:space:]]*\"([^\"]*)\" ]] && PUB_CITY="${BASH_REMATCH[1]}"
+    [[ "$pub_out" =~ \"country\":[[:space:]]*\"([^\"]*)\" ]] && PUB_CC="${BASH_REMATCH[1]}"
     # ifconfig.co's "country" is the full name ("Brazil"); the ISO-3166
     # alpha-2 lives in a separate key. Both are kept because they answer
     # different questions: the name is what a report should read, the code
     # is what a consumer maps to a flag or a locale. Deriving one from the
     # other would mean shipping a country table in every consumer.
-    PUB_CC_ISO="$(printf '%s' "$pub_out" | sed -n 's/.*"country_iso": *"\([^"]*\)".*/\1/p')"
+    [[ "$pub_out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && PUB_CC_ISO="${BASH_REMATCH[1]}"
     ok "Public IP: $PUB_IP  ($PUB_ISP, $PUB_CITY ${PUB_CC_ISO:-$PUB_CC})"
   else
     bad "Could not reach ifconfig.co — no internet, captive portal, or DNS broken."

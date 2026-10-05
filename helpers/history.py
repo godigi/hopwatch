@@ -221,9 +221,16 @@ def env_threshold(name: str) -> int:
              f"lib/thresholds.sh.")
 
 
+_PATH_PARTS_CACHE: dict[str, tuple[str, ...]] = {}
+
+
 def get_nested(d: Any, path: str) -> Any:
     cur = d
-    for k in path.split("."):
+    parts = _PATH_PARTS_CACHE.get(path)
+    if parts is None:
+        parts = tuple(path.split("."))
+        _PATH_PARTS_CACHE[path] = parts
+    for k in parts:
         if not isinstance(cur, dict):
             return None
         cur = cur.get(k)
@@ -378,12 +385,12 @@ def load_records(paths: Iterable[Path]) -> tuple[list[tuple[str, dict]], dict[st
     measurements to solve a problem that never produces them.
     """
     stats = {"records_read": 0, "unparseable": 0, "duplicates": 0, "redacted": 0}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, bytes]] = set()
     out: list[tuple[str, dict]] = []
     for p in paths:
         if not p.exists():
             continue
-        with p.open(errors="replace") as f:
+        with p.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -402,12 +409,14 @@ def load_records(paths: Iterable[Path]) -> tuple[list[tuple[str, dict]], dict[st
                     continue
                 ts = str(rec.get("timestamp") or "")
                 blob = canonical(rec)
-                key = (ts, blob)
+                digest = hashlib.sha256(blob.encode("utf-8")).digest()
+                key = (ts, digest)
                 if key in seen:
                     stats["duplicates"] += 1
                     continue
                 seen.add(key)
-                out.append((run_id(ts, blob), rec))
+                rid = f"{ts}.{digest.hex()[:ID_HEX_CHARS]}"
+                out.append((rid, rec))
     out.sort(key=lambda pair: str(pair[1].get("timestamp") or ""))
     return out, stats
 

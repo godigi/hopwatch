@@ -51,7 +51,7 @@ def load_jsonl(p: Path) -> list[dict]:
     if not p.exists():
         return []
     out: list[dict] = []
-    with p.open(errors="replace") as f:
+    with p.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -72,12 +72,15 @@ def get_nested(d: dict | None, path: str) -> Any:
     return cur
 
 
+_NUM_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+
+
 def parse_ts(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
         if s.endswith("Z"):
-            return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            return datetime.fromisoformat(s[:-1] + "+00:00")
         return datetime.fromisoformat(s)
     except (ValueError, TypeError):
         return None
@@ -105,7 +108,7 @@ def _recurrence_key(diagnosis: dict) -> str:
     rule = diagnosis.get("rule")
     if isinstance(rule, str) and rule:
         return f"rule:{rule}"
-    return "text:" + re.sub(r"\d+(?:\.\d+)?", "#", diagnosis.get("summary", ""))
+    return "text:" + _NUM_PATTERN.sub("#", diagnosis.get("summary", ""))
 
 
 def plural(n: int, noun: str) -> str:

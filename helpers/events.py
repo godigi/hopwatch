@@ -70,9 +70,10 @@ def _parse_ts(value):
     if not isinstance(value, str):
         return None
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc)
-    except ValueError:
+        if value.endswith("Z"):
+            return datetime.fromisoformat(value[:-1] + "+00:00")
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
         return None
 
 

@@ -55,8 +55,13 @@ extension NetworkEvent {
     /// do not reset the headline reassurance time.
     static func timeSinceLast(_ events: [NetworkEvent],
                               now: Date) -> TimeInterval? {
-        let meaningful = events.filter { $0.kind != "monitor-started" }
-        guard let newest = meaningful.map(\.date).max() else { return nil }
+        var newest: Date?
+        for event in events where event.kind != "monitor-started" {
+            if newest == nil || event.date > newest! {
+                newest = event.date
+            }
+        }
+        guard let newest else { return nil }
         return now.timeIntervalSince(newest)
     }
 

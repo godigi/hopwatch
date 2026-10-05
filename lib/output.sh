@@ -270,17 +270,13 @@ build_suitability_json() {
 # composed in this file, only translated into the printer already in use
 # for every other section.
 suitability_run() {
-  local doc rows
-  doc="$(build_suitability_json 2>/dev/null)" || return 0
-  [ -n "$doc" ] || return 0
-
-  # label / verdict / reason, tab-separated: activity labels and rule IDs
-  # are both fixed vocabularies (LABELS / rule catalog in
-  # helpers/suitability.py) that never contain a tab, so this can't be
-  # split wrong the way a "|" or a plain space could.
-  rows="$(printf '%s' "$doc" | python3 -c '
+  local rows
+  # Stream build_json directly into python3 in a single pass: avoids spawning
+  # an intermediate python process to slice "suitability" plus buffering in bash.
+  rows="$(build_json 2>/dev/null | python3 -c '
 import json, sys
-for row in json.load(sys.stdin):
+data = json.load(sys.stdin)
+for row in data.get("suitability", []):
     reason = row.get("unmeasured_reason") or ""
     if not reason and row.get("because"):
         reason = "because " + " ".join(row["because"])

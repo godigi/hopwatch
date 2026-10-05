@@ -337,12 +337,11 @@ _mon_loss_reset() {
 # Args: history string, ping output, expected sent count.
 _mon_loss_fold() {
   local hist="$1" out="$2" expect="$3"
-  local sent recv summary totals sent_t lost_t
-  # Fields carry trailing commas ("20 packets transmitted, 20 packets
-  # received, …"), so the keyword is matched as a prefix, not exactly, and
-  # the count sits two fields before it ("20" "packets" "transmitted,").
-  sent="$(printf '%s\n' "$out" | awk '/packets transmitted/{for(i=1;i<=NF;i++)if($i ~ /^transmitted/){print $(i-2); exit}}')"
-  recv="$(printf '%s\n' "$out" | awk '/packets transmitted/{for(i=1;i<=NF;i++)if($i ~ /^received/){print $(i-2); exit}}')"
+  local sent="" recv="" summary totals sent_t lost_t
+  if [[ "$out" =~ ([0-9]+)[[:space:]]+packets?[[:space:]]+transmitted,[[:space:]]+([0-9]+)[[:space:]]+(packets?[[:space:]]+)?received ]]; then
+    sent="${BASH_REMATCH[1]}"
+    recv="${BASH_REMATCH[2]}"
+  fi
   case "$sent" in ''|*[!0-9]*) sent="" ;; esac
   case "$recv" in ''|*[!0-9]*) recv="" ;; esac
   if [ -z "$sent" ] || [ -z "$recv" ] || [ "$recv" -gt "$sent" ] \
@@ -555,7 +554,6 @@ _mon_probe_wifi_signal() {
   MON_WIFI_RSSI="$rssi"
   MON_WIFI_NOISE="$noise"
   MON_WIFI_CHAN="$chan"
-  MON_WIFI_NOISE="$noise"
   if [ -n "$rssi" ] && [ -n "$noise" ]; then
     MON_WIFI_SNR=$((rssi - noise))
   fi
@@ -584,12 +582,13 @@ _mon_probe_public() {
   out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
   if [ -n "$out" ]; then
     MON_PUBLIC_OK=1
-    MON_PUB_IP="$(printf   '%s' "$out" | sed -n 's/.*"ip": *"\([^"]*\)".*/\1/p')"
-    MON_PUB_ISP="$(printf  '%s' "$out" | sed -n 's/.*"asn_org": *"\([^"]*\)".*/\1/p')"
-    MON_PUB_ASN="$(printf  '%s' "$out" | sed -n 's/.*"asn": *"\([^"]*\)".*/\1/p')"
-    MON_PUB_CITY="$(printf '%s' "$out" | sed -n 's/.*"city": *"\([^"]*\)".*/\1/p')"
-    MON_PUB_CC="$(printf   '%s' "$out" | sed -n 's/.*"country": *"\([^"]*\)".*/\1/p')"
-    MON_PUB_CC_ISO="$(printf '%s' "$out" | sed -n 's/.*"country_iso": *"\([^"]*\)".*/\1/p')"
+    MON_PUB_IP="" MON_PUB_ISP="" MON_PUB_ASN="" MON_PUB_CITY="" MON_PUB_CC="" MON_PUB_CC_ISO=""
+    [[ "$out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_IP="${BASH_REMATCH[1]}"
+    [[ "$out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ISP="${BASH_REMATCH[1]}"
+    [[ "$out" =~ \"asn\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ASN="${BASH_REMATCH[1]}"
+    [[ "$out" =~ \"city\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CITY="${BASH_REMATCH[1]}"
+    [[ "$out" =~ \"country\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CC="${BASH_REMATCH[1]}"
+    [[ "$out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CC_ISO="${BASH_REMATCH[1]}"
   else
     MON_PUBLIC_OK=0
   fi

@@ -34,8 +34,9 @@ wan_load_balancing_run() {
   for i in 1 2 3; do
     resp="$(cat "$tmp/probe-$i.json" 2>/dev/null)"
     [ -z "$resp" ] && continue
-    asn="$(printf '%s' "$resp" | sed -n 's/.*"asn": *"\([^"]*\)".*/\1/p')"
-    ip="$(printf '%s' "$resp"  | sed -n 's/.*"ip": *"\([^"]*\)".*/\1/p')"
+    asn="" ip=""
+    [[ "$resp" =~ \"asn\":[[:space:]]*\"([^\"]*)\" ]] && asn="${BASH_REMATCH[1]}"
+    [[ "$resp" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && ip="${BASH_REMATCH[1]}"
     [ -n "$asn" ] && case " $asns " in *" $asn "*) ;; *) asns="${asns:+$asns }$asn" ;; esac
     [ -n "$ip" ]  && case " $ips "  in *" $ip "*)  ;; *) ips="${ips:+$ips }$ip"   ;; esac
   done
@@ -44,9 +45,8 @@ wan_load_balancing_run() {
   WAN_LB_ASNS="$asns"
   WAN_LB_IPS="$ips"
 
-  local n_asn n_ip
-  n_asn="$(printf '%s' "$asns" | awk '{print NF}')"
-  n_ip="$(printf '%s' "$ips"   | awk '{print NF}')"
+  local -a _w_asn=( $asns ) _w_ip=( $ips )
+  local n_asn="${#_w_asn[@]}" n_ip="${#_w_ip[@]}"
   if [ -z "$asns" ] || [ "${n_asn:-0}" -eq 0 ]; then
     info "Could not run the dual-WAN probe (no JSON response)."
   elif [ "$n_asn" -gt 1 ]; then

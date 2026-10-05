@@ -349,11 +349,14 @@ final class AlertEngine {
     /// (including the pre-catalog default rank of 0 for everything) fall
     /// back to newest first.
     var activeSorted: [ActiveAlert] {
-        active.values.sorted { a, b in
-            let rankA = a.rules.compactMap(severityRank).max() ?? 0
-            let rankB = b.rules.compactMap(severityRank).max() ?? 0
-            if rankA != rankB { return rankA > rankB }
-            return a.raisedAt > b.raisedAt
+        guard !active.isEmpty else { return [] }
+        if active.count == 1 { return Array(active.values) }
+        let ranked = active.values.map { alert in
+            (alert: alert, rank: alert.rules.compactMap(severityRank).max() ?? 0)
         }
+        return ranked.sorted { a, b in
+            if a.rank != b.rank { return a.rank > b.rank }
+            return a.alert.raisedAt > b.alert.raisedAt
+        }.map(\.alert)
     }
 }
