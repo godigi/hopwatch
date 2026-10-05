@@ -507,6 +507,72 @@ loss_below() {
   awk -v v="$1" -v t="$2" 'BEGIN{exit !(v + 0 < t + 0)}'
 }
 
+# ── Multi-signal verdict confirmation ────────────────────────────────────
+# Shared by the monitor's rule verdicts (lib/monitor.sh::_mon_rules): a
+# group of same-cycle probe conditions held together for
+# THRESH_MON_CRIT_CONFIRM_CYCLES (or THRESH_MON_LOSS_CONFIRM_CYCLES for the
+# warn bands) consecutive cycles before the rule fires. P2 fired 349 times
+# in 24 h on the live network on a single refused canary; this machinery is
+# the fence against announcing on the first bad cycle.
+#
+# Group state lives in the caller's global namespace as
+# MON_VERDICT_<GROUP>_STREAK, declared in lib/monitor.sh's state block the
+# way the loss streaks already are — bats drives _mon_rules in isolation,
+# and "state the engine mutates" must be visible in one place.
+
+# _mon_verdict_cycle GROUP THRESHOLD sig…
+#
+# One call per candidate rule per cycle, from lib/monitor.sh's _mon_rules.
+# Before calling, the caller evaluates each signal for THIS cycle into a
+# boolean scalar named sig_<group>_<signal> (1 held, 0 not). The helper
+# requires ALL the named signals to have held, advances that group's
+# streak when they do and clears it when any fails, and returns 0 (fire)
+# once the streak has reached THRESHOLD — the confirmation-cycle figure
+# from lib/thresholds.sh (THRESH_MON_CRIT_CONFIRM_CYCLES for criticals,
+# THRESH_MON_LOSS_CONFIRM_CYCLES for warn bands). Return status only —
+# the rule ID and the severity word live at the call site as literal
+# tokens, which is what tests/test_rules_catalog.bats extracts from.
+#
+# Why a generic helper instead of a per-rule streak_++: P1, P2, L1 and the
+# TCP-2/latency rules all need the same shape — "these specific conditions,
+# together, held for N consecutive cycles" — and today (Ph 1 of the
+# reporting-accuracy plan) the only confirmed rule was band loss. Growing
+# one private streak variable per rule is how the gateway side ended up
+# with hardcoded streak math, which the confirmation change then had to
+# reimplement per rule.
+#
+# The signal scalars are read by built indirect expansion (eval of a name
+# built from literal group + literal signal lists — no user data reaches
+# it) rather than passed in as sorted values, so the grep-side guard on a
+# rule implementing X still sees the names of the signals that decide it
+# at the call site. eval is safe here in both bash and zsh for this exact
+# pattern; plain ${!name} is not portable between the two for the unset
+# case this machinery must tolerate.
+_mon_verdict_cycle() {
+  local _group="$1" _threshold="$2"; shift 2
+  # Signal scalars are grouped by the rule's id lower-cased — sig_p2_* and
+  # sig_tcp2_* read as identifiers; the streak keeps the rule's own case so
+  # a reader can match it to the rule ID in the grep.
+  local _sig_group
+  _sig_group="$(printf '%s' "$_group" | tr '[:upper:]-' '[:lower:]_')"
+  local _sig _name _val _sum=0
+  for _sig in "$@"; do
+    _name="sig_${_sig_group}_${_sig}"
+    _val="$(eval "printf '%s' \"\${${_name}:-0}\"")"
+    case "$_val" in 1|0) ;; *) _val=0 ;; esac
+    _sum=$((_sum + _val))
+  done
+  local _streak_var="MON_VERDICT_${_group}_STREAK"
+  local _streak; _streak="$(eval "printf '%s' \"\${${_streak_var}:-0}\"")"
+  if [ "$_sum" -eq "$#" ]; then
+    _streak=$((_streak + 1))
+  else
+    _streak=0
+  fi
+  eval "${_streak_var}=\$_streak"
+  [ "$_streak" -ge "$_threshold" ]
+}
+
 # ── Timing instrumentation ───────────────────────────────────────────────
 # The spec promises ≤ 30 s for a full run and ≤ 8 s for --quick, and until
 # now nothing measured whether that held. Worst-case arithmetic says it

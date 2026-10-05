@@ -64,12 +64,12 @@ monitor_rules() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
+MON_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|TCP-1|TCP-2|VPN-1|L1|L2|ICMP-1)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
   diagnosis_run >/dev/null
-  printf '%s\n' "${DIAG_RULE[@]:-}" | grep -E "$MONITOR_VOCABULARY" | sort | tr '\n' ' '
+  printf '%s\n' "${DIAG_RULE[@]:-}" | grep -E "$MON_VOCABULARY" | sort | tr '\n' ' '
 }
 
 # ── Rule parity: the monitor and the scanner agree ───────────────────────
@@ -150,22 +150,35 @@ scanner_rules() {
 }
 
 @test "parity: internet down with DNS also failing is P1 on both" {
+  # The monitor's verdict needs same-cycle agreement — canary failed AND
+  # the internet leg dead-or-silent AND TCP failed — confirmed over two
+  # cycles; the modeller sets the scanner's matching inputs to the same
+  # full-outage state rather than the canary alone. (See the P2 test.)
   reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_DNS_OK=0 DNS_OK=0
+  MON_WEB_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  _mon_rules
   local m; m="$(monitor_rules)"; reset_state
   MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_DNS_OK=0 DNS_OK=0
+  MON_WEB_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  _mon_rules
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"P1"* ]] || return 1
 }
 
 @test "parity: internet down with DNS working is P2 on both" {
   reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0
-  local m; m="$(monitor_rules)"; reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0
+  MON_WEB_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  _mon_rules
+  local m; m="$(monitor_rules)"; reset_state
+  MON_PUBLIC_OK=0 PUBLIC_OK=0
+  MON_WEB_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  _mon_rules
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"P2"* ]] || return 1
 }
 
 @test "parity: DNS failing while the internet is reachable is D1 on both" {
-  reset_state; MON_DNS_OK=0 DNS_OK=0
+  reset_state; MON_DNS_OK=0 DNS_OK=0 MON_WEB_OK=1
   local m; m="$(monitor_rules)"; reset_state; MON_DNS_OK=0 DNS_OK=0
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"D1"* ]] || return 1
@@ -188,7 +201,11 @@ scanner_rules() {
 }
 
 @test "parity: severe internet loss over a clean router is L1 on both" {
+  # L1 confirms over THRESH_MON_CRIT_CONFIRM_CYCLES like P1/P2 above, so
+  # the monitor side is driven to its confirmed state — the scanner's own
+  # 20-packet probe already averaged over the same window.
   reset_state; MON_INET_LOSS=25 MON_INET_LOSS_ALT=25 INET_LOSS=25 INET_LOSS_ALT=25
+  _mon_rules
   local m; m="$(monitor_rules)"; reset_state
   MON_INET_LOSS=25 MON_INET_LOSS_ALT=25 INET_LOSS=25 INET_LOSS_ALT=25
   [ "$m" = "$(scanner_rules)" ]
@@ -215,7 +232,13 @@ scanner_rules() {
 }
 
 @test "parity: total ping loss on a working link is ICMP-1 on both, not L1" {
+  # The monitor's ICMP-1 gates on the same-cycle HTTPS canary succeeding —
+  # real 100% loss would fail it too — so the modeller sets MON_WEB_OK=1
+  # to match the scanner's PUBLIC_OK=1. Also guards the L1 range split: at
+  # exactly HALF-critical both targets the P1/P2 verdict (total-loss) must
+  # not claim this state, and here neither must L1.
   reset_state; MON_INET_LOSS=100 MON_INET_LOSS_ALT=100 INET_LOSS=100 INET_LOSS_ALT=100
+  MON_WEB_OK=1
   local m; m="$(monitor_rules)"; reset_state
   MON_INET_LOSS=100 MON_INET_LOSS_ALT=100 INET_LOSS=100 INET_LOSS_ALT=100
   [ "$m" = "$(scanner_rules)" ]
@@ -466,13 +489,16 @@ ping_summary() {
   [[ "$MON_RULES" != *"D1"* ]] || return 1
 }
 
-@test "a fast HTTPS failure is reported even when the slow public probe is stale" {
-  # The old monitor could carry a five-minute-old public success while the
-  # user's web traffic had already stopped. The fast canary is authoritative
-  # once it has produced a result.
+@test "a fast HTTPS failure alone is not an outage verdict, even confirmed" {
+  # Phase 1 of the reporting-accuracy plan demotes the canary's authority:
+  # a refused canary while the same cycle's ping and TCP still pass is the
+  # intermittent-refusal pattern (TCP-2's fault), not "your ISP is down" —
+  # which is why P2 fired 349 times in 24 h and cleared each time. Two
+  # consecutive cycles of a lone canary failure must still not fire P2.
   reset_state; MON_WEB_OK=0 MON_PUBLIC_OK=1
   _mon_rules
-  [[ "$MON_RULES" == *"P2"* ]] || return 1
+  _mon_rules
+  [[ "$MON_RULES" != *"P2"* ]] || return 1
   [ "$MON_MEASUREMENT_STATE" = "measured" ]
 }
 
@@ -1283,3 +1309,41 @@ assert data['jitter_ms'] == 3.42
 "
 }
 
+
+# ── Phase 1 (reporting-accuracy): same-cycle agreement ───────────────────
+# P1/P2 used to read the canary when it had run and fall back to the
+# slower public-IP probe (which can be five minutes old, and whose failure
+# is metadata about ifconfig.co, not the internet). On the live network a
+# refused canary fired P2 alone 349 times in 24 h. Now the canary is the
+# only verdict input, and a canary failure must agree with the same cycle's
+# other measurements before an outage is announced.
+
+@test "P1 does not fire on geo-metadata failure with clean probes" {
+  # Recordable reproduction: MON_WEB_OK="" unmeasured is not a verdict, and
+  # MON_PUBLIC_OK=0 is ifconfig.co metadata — neither may announce an outage
+  # against 0% internet loss.
+  reset_state; MON_WEB_OK="" MON_PUBLIC_OK=0 MON_DNS_OK=0
+  MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  [[ "$MON_RULES" != *"P1"* ]] || return 1
+  [[ "$MON_RULES" != *"P2"* ]] || return 1
+}
+
+@test "P1 needs THRESH_MON_CRIT_CONFIRM_CYCLES consecutive canary failures" {
+  reset_state; MON_WEB_OK=0 MON_DNS_OK=0 MON_INET_LOSS=100 MON_TCP_OK=0
+  _mon_rules
+  local first="$MON_RULES"
+  _mon_rules
+  [[ "$first" != *"P1"* ]] || return 1
+  [[ "$first" != *"P2"* ]] || return 1
+  [[ "$MON_RULES" == *"P1"* ]] || return 1
+}
+
+@test "L1 needs THRESH_MON_CRIT_CONFIRM_CYCLES consecutive critical-loss cycles" {
+  reset_state; MON_INET_LOSS=25 MON_INET_LOSS_ALT=30
+  MON_WEB_OK=1 MON_TCP_OK=1
+  _mon_rules
+  [[ "$MON_RULES" != *"L1"* ]] || return 1
+  _mon_rules
+  [[ "$MON_RULES" == *"L1"* ]] || return 1
+}

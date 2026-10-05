@@ -112,6 +112,17 @@ MON_GW_RTT=""
 # `set -u` and the very first cycle reads them before ever writing them.
 MON_GW_LOSS_STREAK=0
 MON_INET_LOSS_STREAK=0
+# One streak per _mon_verdict_cycle group (see lib/common.sh): how many
+# consecutive cycles the group's conditions have all held. Declared here
+# rather than only inside the helper for the same reason the loss streaks
+# above are — bin/netdiag runs under set -u, and a streak read by
+# tests/test_monitor.bats before its first write must exist. Read only
+# through eval-built names in lib/common.sh, which shellcheck cannot
+# follow: each is declared under a disable directive.
+# shellcheck disable=SC2034
+MON_VERDICT_P2_STREAK=0
+# shellcheck disable=SC2034
+MON_VERDICT_L1_STREAK=0
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -691,10 +702,13 @@ _mon_rules() {
   # G3 is confirmed rather than immediate: a single cycle's loss is a blip
   # (see THRESH_MON_LOSS_CONFIRM_CYCLES), so the warn band only fires once
   # it has held for THRESH_MON_LOSS_CONFIRM_CYCLES consecutive cycles.
-  # Critical never waits — a real outage must not sit behind a confirmation
-  # window — and any cycle that is not in the warn band (clean, or escalated
-  # to critical) resets the streak, so a one-off blip followed by a clean
-  # cycle can never quietly accumulate toward firing later.
+  # Every critical verdict this stream can make is confirmed too — see
+  # THRESH_MON_CRIT_CONFIRM_CYCLES: P2 fired 349 times in 24 h on the live
+  # network on first-cycle evidence the other probes never agreed with, and
+  # the cost of waiting is at most THRESH_MON_CRIT_CONFIRM_CYCLES × the
+  # fast cadence before the red card appears. Any cycle where a rule's own
+  # condition does not hold resets the verdict's streak, so a one-off blip
+  # can never quietly accumulate toward firing later.
   if [ "$_mon_gw_filtered" -eq 1 ]; then
     # TCP-1 already described this link. Reset both streaks: filtered cycles
     # are not evidence toward a confirmed G3.
@@ -715,15 +729,38 @@ _mon_rules() {
     MON_GW_LOSS_STREAK=0
   fi
 
-  # P1/P2 need a current public reach result. The fast HTTPS canary is
-  # authoritative once it has run; the slower public-IP probe remains the
-  # compatibility fallback. An unmeasured value is "" and must not read as
-  # an outage — the same distinction that JSON-SCHEMA.md draws between null
-  # and 0.
-  # Mirrors lib/diagnosis.sh: CP-1 owns the portal case on both sides, or
-  # the stream and the report disagree about what to tell the user.
-  if [ "$_mon_public_ok" = "0" ] && [ "${MON_CAPTIVE:-}" != "1" ] \
-     && loss_below "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
+  # ── P1 / P2 — the internet is unreachable ─────────────────────────────
+  # Same-cycle agreement, confirmed over THRESH_MON_CRIT_CONFIRM_CYCLES:
+  # a canary failure alone — even two cycles of it — is no longer a verdict.
+  # The verdict needs the same cycle's internet ping to be dead-or-silent
+  # AND TCP to have failed; a canary refusal alongside 0% ping loss and
+  # live TCP is refused-connection territory (TCP-2), not an outage, and
+  # that is 349 false P2 firings a day on the live network said so.
+  #
+  # The three signals' names are the rule's input list — read from
+  # "_mon_verdict_cycle P2 web_down inet_total tcp_down" below. Each is
+  # read by eval-built name in lib/common.sh, so each carries the same
+  # disable directive the dynamic-scope identifiers above do.
+  #
+  # "total" for the internet leg, not "lossy": 65% loss on both targets is
+  # an L1 situation, and unreachable verdicts must own only the truly-dead
+  # case — see L1's own sig_ pair, which is limited below TOTAL for exactly
+  # that disjointness. A missing (unparseable) internet probe counts here
+  # as dead NOW, never clean NOW: "could not measure" must not read as
+  # "measured, clean", the same reason _mon_loss_fold clears its window.
+  #
+  # "tcp_down" is the nc probe to two well-known :443 targets from the
+  # medium tier. A real outage in one cycle leaves web, ping and TCP all
+  # refusing (a real outage lightens every probe the same way), so the
+  # three-point agreement costs a real outage two cycles and a transient
+  # refusal nothing at all.
+  # shellcheck disable=SC2034
+  sig_p2_web_down="$( { [ "${MON_WEB_OK:-}" = "0" ] && [ "${MON_CAPTIVE:-}" != "1" ]; } && echo 1 || echo 0 )"
+  # shellcheck disable=SC2034
+  sig_p2_inet_total="$( { [ -z "$MON_INET_LOSS" ] || loss_at_least "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT"; } && echo 1 || echo 0 )"
+  # shellcheck disable=SC2034
+  sig_p2_tcp_down="$( [ "${MON_TCP_OK:-}" != "1" ] && echo 1 || echo 0 )"
+  if _mon_verdict_cycle P2 "$THRESH_MON_CRIT_CONFIRM_CYCLES" web_down inet_total tcp_down; then
     if [ "${MON_DNS_OK:-}" = "0" ]; then
       _mon_add_rule critical P1
     else
@@ -732,7 +769,7 @@ _mon_rules() {
   fi
 
   # D1 — resolution failing while the internet itself is reachable.
-  if [ "${MON_DNS_OK:-}" = "0" ] && [ "$_mon_public_ok" = "1" ]; then
+  if [ "${MON_DNS_OK:-}" = "0" ] && [ "${MON_WEB_OK:-}" = "1" ]; then
     _mon_add_rule warn D1
   fi
 
@@ -749,20 +786,31 @@ _mon_rules() {
 
   # ── L1 / L2 — internet-side packet loss ────────────────────────────────
   local _mon_icmp_filtered=0
-  if [ "$_mon_public_ok" = "1" ] && [ "${MON_TCP_OK:-0}" = "1" ] \
+  if [ "${MON_WEB_OK:-}" = "1" ] && [ "${MON_TCP_OK:-0}" = "1" ] \
      && loss_at_least "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
      && loss_at_least "$MON_INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
     _mon_icmp_filtered=1
     _mon_add_rule info ICMP-1
   fi
 
-  # L2 is confirmed the same way G3 is, and for the same reason; L1 stays
-  # immediate. Falling out of the gateway-is-quiet guard above also resets
-  # the streak — a cycle where the condition could not even be evaluated is
-  # not a cycle where it held.
+  # L1's group: heavy loss on BOTH independent targets, but NOT total —
+  # both at 100% is the P-group's dead-internet case, and the two ranges
+  # must stay disjoint or one outage gets two verdicts. One lossy target
+  # alone is warning (L2), not this rule.
+  # shellcheck disable=SC2034
+  sig_l1_inet_crit="$( { loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT" \
+    && loss_below "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT"; } && echo 1 || echo 0 )"
+  # shellcheck disable=SC2034
+  sig_l1_inet_alt_crit="$( { loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_CRIT_PCT" \
+    && loss_below "$MON_INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; } && echo 1 || echo 0 )"
+
+  # L2 is confirmed the same way G3 is, and for the same reason; L1 confirms
+  # over THRESH_MON_CRIT_CONFIRM_CYCLES like every other critical. Falling
+  # out of the gateway-is-quiet guard above also resets the streak — a cycle
+  # where the condition could not even be evaluated is not a cycle where
+  # it held.
   if [ "$_mon_icmp_filtered" -eq 0 ] && loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT"; then
-    if loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT" \
-       && loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_CRIT_PCT"; then
+    if _mon_verdict_cycle L1 "$THRESH_MON_CRIT_CONFIRM_CYCLES" inet_crit inet_alt_crit; then
       MON_INET_LOSS_STREAK=0
       _mon_add_rule critical L1
     elif loss_at_least "$MON_INET_LOSS" "$LOSS_WARN_PCT" \

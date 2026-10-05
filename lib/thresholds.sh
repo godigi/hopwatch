@@ -120,6 +120,15 @@ MONITOR_LOSS_WINDOW_PROBES=10
 # 20-packet probe already averages over more.
 THRESH_MON_LOSS_CONFIRM_CYCLES=2
 
+# P1/P2/L1 — the monitor's critical verdicts confirm too. A critical that
+# announces itself on the first bad cycle is exactly the flashing-red-card
+# shape the loss-confirmation threshold above exists to prevent: P2 fired
+# 349 times in 24 h on the live network, median episode 12 s, on canary
+# failures the other probes did not agree with. Two consecutive cycles at
+# the fast cadence costs at most 6 s of delay before the red card — the
+# same judgement THRESH_MON_LOSS_CONFIRM_CYCLES makes for band-loss.
+THRESH_MON_CRIT_CONFIRM_CYCLES=2
+
 # TCP-1 — TCP connections succeed while ping reports heavy loss, i.e. the
 # path filters ICMP. Set well above LOSS_CRIT_PCT: below this a real lossy
 # link and a filtered one look the same, and calling a degraded network
