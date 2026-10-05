@@ -159,8 +159,15 @@ MON_TCP_LINES=""
 # them. Emptied on link-down and network change with the loss windows —
 # the same "a window half full of the old network measures neither".
 MON_TCP_HIST=""
-MON_TCP2_ATTEMPTS=""
 MON_TCP2_REFUSED_PCT=""
+# The web canary's own instruments (see _mon_probe_web): curl's failure
+# class for the newest attempt, and the same rolling window shape as the
+# loss legs — MON_WEB_HIST folds one "attempts:failures" pair per probe,
+# the totals and the success percentage summarised from it. Emptied with
+# the loss windows on link-down and network change.
+MON_WEB_FAIL_KIND=""
+MON_WEB_HIST=""
+MON_WEB_SUCC_PCT=""
 # A small HTTPS reachability probe runs with the fast tier. It answers the
 # question users actually care about — whether ordinary internet traffic can
 # leave the Mac — rather than treating Wi-Fi association or ICMP replies as
@@ -354,12 +361,13 @@ _mon_loss_reset() {
   MON_GW_HIST=""
   MON_INET_HIST=""
   MON_INET_HIST_ALT=""
-  # The TCP-2 instrument folds into the same family of windows; a link
-  # drop or a network change invalidates its connection attempts along
-  # with the packets.
+  # The TCP-2 and web-canary instruments fold into the same family of
+  # windows; a link drop or a network change invalidates their connection
+  # attempts along with the packets.
   MON_TCP_HIST=""
-  MON_TCP2_ATTEMPTS=""
   MON_TCP2_REFUSED_PCT=""
+  MON_WEB_HIST=""
+  MON_WEB_SUCC_PCT=""
 }
 
 # Parse ping's -q summary into raw counts, fold it into a leg's history,
@@ -488,8 +496,6 @@ _mon_probe_tcp() {
   summary="$(_mon_loss_summarize "${MON_TCP_HIST:+$MON_TCP_HIST }2:$fails")"
   MON_TCP_HIST="${summary%%|*}"
   totals="${summary#*|}"
-  # shellcheck disable=SC2034
-  MON_TCP2_ATTEMPTS="${totals%%|*}"
   MON_TCP2_REFUSED_PCT="$(_mon_loss_pct "${totals%%|*}" "${totals##*|}")"
 }
 
@@ -548,17 +554,23 @@ _mon_probe_internet() {
 # reachability.
 _mon_probe_web() {
   MON_WEB_OK=""
-  [ "$MON_LINK_UP" -eq 1 ] || return 0
-  command -v curl >/dev/null 2>&1 || return 0
+  [ "$MON_LINK_UP" -eq 1 ] || { MON_WEB_FAIL_KIND=""; MON_WEB_SUCC_PCT=""; return 0; }
+  command -v curl >/dev/null 2>&1 || { MON_WEB_FAIL_KIND=""; MON_WEB_SUCC_PCT=""; return 0; }
 
   local tmp_dir code_a code_b
   netdiag_mktemp_dir monitor-web || return 0
   tmp_dir="$NETDIAG_TMP_DIR"
-  curl -4 -sS -o /dev/null -w '%{http_code}' \
+  # -w '%{exitcode}' alongside the HTTP code so a request that never
+  # completed carries its curl failure class through to the sample: 7 =
+  # connection refused (the modem's RST, the measured pattern on this
+  # network), 28 = timed out (a black hole), 6 = could not resolve. curl
+  # documents --write-out's %{exitcode} from 7.77; older builds print the
+  # literal text — treated as unmeasured rather than guessed at.
+  curl -4 -sS -o /dev/null -w '%{http_code} %{exitcode}' \
     --connect-timeout 1 --max-time 2 \
     https://cp.cloudflare.com/generate_204 >"$tmp_dir/cloudflare" 2>/dev/null &
   local pid_a=$!
-  curl -4 -sS -o /dev/null -w '%{http_code}' \
+  curl -4 -sS -o /dev/null -w '%{http_code} %{exitcode}' \
     --connect-timeout 1 --max-time 2 \
     https://www.gstatic.com/generate_204 >"$tmp_dir/google" 2>/dev/null &
   local pid_b=$!
@@ -571,6 +583,20 @@ _mon_probe_web() {
   netdiag_tmp_forget "$tmp_dir"
 
   MON_WEB_OK="$(_mon_web_verdict "$code_a" "$code_b")"
+  MON_WEB_FAIL_KIND="$(_mon_web_fail_kind "$code_a" "$code_b")"
+
+  # Rolling connect-success ratio: the window shape the loss legs keep,
+  # one 2:refusals pair per probe, summarised by the same pure helpers.
+  # Fold AFTER the verdict so a skipped probe (no link, no curl) leaves
+  # the window untouched rather than folding silence in as successes.
+  local fails summary totals
+  [ "$MON_WEB_OK" = "1" ] && fails=0 || fails=2
+  summary="$(_mon_loss_summarize "${MON_WEB_HIST:+$MON_WEB_HIST }2:$fails")"
+  MON_WEB_HIST="${summary%%|*}"
+  totals="${summary#*|}"
+  local _web_fail_rate
+  _web_fail_rate="$(_mon_loss_pct "${totals%%|*}" "${totals##*|}")"
+  MON_WEB_SUCC_PCT="$((100 - _web_fail_rate))"
 }
 
 # Turn two canary status codes into a reachability verdict: "1" reachable,
@@ -592,6 +618,29 @@ _mon_web_verdict() {
   elif [ -n "$a" ] || [ -n "$b" ]; then
     printf '0'
   fi
+}
+
+# Classify WHY the canaries failed, from the curl exit each carried (see
+# the probe above). "refused" — a fast local RST, the modem's habit on the
+# network this phase was written for; "timeout" — a silent black hole;
+# "dns" — the name never resolved (rare here: the canaries are literal
+# IPs... note cp.cloudflare.com and www.gstatic.com are NOT literals, so
+# DNS failure is a real state); "error" — anything else curl reported.
+# Empty when at least one canary answered, or when no exit code was
+# readable. Pure; testable across the same three-way space the verdict
+# helper covers.
+_mon_web_fail_kind() {
+  local a="$1" b="$2" ea eb
+  ea="${a##* }"; eb="${b##* }"
+  case "$a" in "204 "*|"204") return 0 ;; esac
+  case "$b" in "204"*) return 0 ;; esac
+  case "$ea$eb" in
+    *7*) printf 'refused' ;;
+    *28*) printf 'timeout' ;;
+    *6*) printf 'dns' ;;
+    *0*) printf 'error' ;;
+  esac
+  return 0
 }
 
 _mon_probe_wifi_signal() {
@@ -715,9 +764,9 @@ _mon_rules() {
     # scalars the rules read need the same treatment here, where the
     # rules actually look.
     MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
-    MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_LOSS_ALT_WINDOW=""
-    MON_INET_RTT=""; MON_INET_JITTER=""
-    MON_TCP2_ATTEMPTS=""; MON_TCP2_REFUSED_PCT=""
+    MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
+    MON_TCP2_REFUSED_PCT=""
+    MON_WEB_FAIL_KIND=""; MON_WEB_SUCC_PCT=""
     return 0
   fi
 
@@ -1030,6 +1079,7 @@ _mon_emit() {
   NETDIAG_MON_GW_RTT="$MON_GW_RTT" \
   NETDIAG_MON_GW_JITTER="${MON_GW_JITTER:-}" \
   NETDIAG_MON_INET_LOSS="$MON_INET_LOSS" \
+  NETDIAG_MON_INET_LOSS_ALT="${MON_INET_LOSS_ALT:-}" \
   NETDIAG_MON_INET_RTT="$MON_INET_RTT" \
   NETDIAG_MON_INET_JITTER="${MON_INET_JITTER:-}" \
   NETDIAG_MON_WIFI_RSSI="$MON_WIFI_RSSI" \
@@ -1042,6 +1092,8 @@ _mon_emit() {
   NETDIAG_MON_TCP_OK="$MON_TCP_OK" \
   NETDIAG_MON_TCP_LINES="$MON_TCP_LINES" \
   NETDIAG_MON_WEB_OK="$MON_WEB_OK" \
+  NETDIAG_MON_WEB_FAIL_KIND="${MON_WEB_FAIL_KIND:-}" \
+  NETDIAG_MON_WEB_SUCC_PCT="${MON_WEB_SUCC_PCT:-}" \
   NETDIAG_MON_PUBLIC_OK="$MON_PUBLIC_OK" \
   NETDIAG_MON_PUB_IP="$MON_PUB_IP" \
   NETDIAG_MON_PUB_ISP="$MON_PUB_ISP" \

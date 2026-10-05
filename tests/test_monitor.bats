@@ -1390,3 +1390,49 @@ assert data['jitter_ms'] == 3.42
   _mon_rules
   [[ "$MON_RULES" == *"L1"* ]] || return 1
 }
+
+# ── Phase 1 (reporting-accuracy): the web block ──────────────────────────
+# The canary verdict alone answers "did the sites answer", and a refused
+# connect reads the same as a dead link. The curl exit code (7 refused,
+# 28 timeout, 6 DNS) distinguishes a local RST from a black hole, and a
+# rolling connect-success ratio over the same window the loss legs use
+# says whether the refusal is one probe's bad luck or the modem's habit.
+
+@test "monitor_sample: the web block carries ok, fail_kind and success_pct" {
+  run emit NETDIAG_MON_WEB_OK=1 NETDIAG_MON_WEB_FAIL_KIND= NETDIAG_MON_WEB_SUCC_PCT=100
+  printf '%s' "$output" | python3 -c "
+import json,sys
+w = json.load(sys.stdin)['web']
+assert w['ok'] is True, w
+assert w['fail_kind'] is None, w
+assert w['success_pct'] == 100.0, w
+"
+  run emit NETDIAG_MON_WEB_OK=0 NETDIAG_MON_WEB_FAIL_KIND=refused NETDIAG_MON_WEB_SUCC_PCT=25
+  printf '%s' "$output" | python3 -c "
+import json,sys
+w = json.load(sys.stdin)['web']
+assert w['ok'] is False, w
+assert w['fail_kind'] == 'refused', w
+assert w['success_pct'] == 25.0, w
+"
+  # Unmeasured is null, not false — same tri-state as dns.ok.
+  run emit NETDIAG_MON_WEB_OK= NETDIAG_MON_WEB_FAIL_KIND= NETDIAG_MON_WEB_SUCC_PCT=
+  printf '%s' "$output" | python3 -c "
+import json,sys
+w = json.load(sys.stdin)['web']
+assert w['ok'] is None and w['fail_kind'] is None and w['success_pct'] is None, w
+"
+}
+
+@test "monitor_sample: internet.loss_pct_alt rides through" {
+  run emit NETDIAG_MON_INET_LOSS_ALT=25
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['internet']['loss_pct_alt'] == 25.0
+"
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['internet']['loss_pct_alt'] is None
+"
+}

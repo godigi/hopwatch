@@ -397,6 +397,11 @@ def main() -> None:
         },
         "internet": {
             "loss_pct": _f("INET_LOSS"),
+            # The second, independent target (see the full run's
+            # internet_latency block, JSON-SCHEMA.md): L1 escalates only
+            # when both targets agree, so a consumer auditing the verdict
+            # needs the other leg's number, not just the primary's.
+            "loss_pct_alt": _f("INET_LOSS_ALT"),
             "rtt_avg_ms": _f("INET_RTT"),
             "rtt_jitter_ms": _f("INET_JITTER"),
         },
@@ -415,6 +420,19 @@ def main() -> None:
         "tcp": {
             "any_ok": _tri("TCP_OK"),
             "targets": build_tcp(),
+        },
+        # The fast HTTPS canary, one level deeper than the bare ok flag:
+        # fail_kind names HOW the newest request failed (curl's exit class:
+        # refused / timeout / dns / error) when it did, and success_pct is
+        # the rolling connect-success ratio over the same window the loss
+        # legs accumulate — a single refused probe reads differently from a
+        # modem that refuses everything. ok follows the same tri-state
+        # convention as dns.ok/tcp.any_ok: null is "the canary has not run",
+        # not a failure.
+        "web": {
+            "ok": _tri("WEB_OK"),
+            "fail_kind": _env("WEB_FAIL_KIND"),
+            "success_pct": _f("WEB_SUCC_PCT"),
         },
         "public": {
             "ok": _tri("PUBLIC_OK"),
