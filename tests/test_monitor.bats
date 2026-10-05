@@ -1523,3 +1523,81 @@ assert json.load(sys.stdin)['internet']['loss_pct_alt'] is None
   [[ "$MON_RULES" == *"LA-2"* ]] || return 1
   [ "$MON_SEVERITY" = "warn" ]
 }
+
+# ── Phase 1 (reporting-accuracy): N1's route recheck ─────────────────────
+# The scan re-reads the routing table once after THRESH_ROUTE_RECHECK_DELAY_S
+# before believing "no default route" (lib/iface.sh) — DHCP renewals and WiFi
+# roams drop it for a moment, and six stored N1 runs on this developer's
+# machine were exactly that flicker. The monitor declared it every fast
+# cycle with no recheck.
+
+@test "the monitor's link probe re-reads the route after the same recheck delay" {
+  run grep -c 'THRESH_ROUTE_RECHECK_DELAY_S' "$REPO/lib/monitor.sh"
+  [ "$output" -ge 1 ]
+  # And the recheck only happens on the failing path, not every cycle.
+  run bash -c "sed -n '/_mon_probe_link()/,/^}/p' '$REPO/lib/monitor.sh' | grep -c '_mon_recheck_sleep \"\$THRESH_ROUTE_RECHECK_DELAY_S\"'"
+  [ "$output" -eq 1 ]
+  run grep -c '_mon_recheck_sleep() {' "$REPO/lib/monitor.sh"
+  [ "$output" -eq 1 ]
+}
+
+# ── Phase 1 (reporting-accuracy): freshness ──────────────────────────────
+
+@test "monitor_sample: per-tier age_s rides through" {
+  run emit NETDIAG_MON_FAST_AGE_S=0 NETDIAG_MON_MEDIUM_AGE_S=32 NETDIAG_MON_SLOW_AGE_S=127
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['age_s'] == {'fast': 0, 'medium': 32, 'slow': 127}
+"
+  # Untiered (hypothetical first cycle) is null, not zero.
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['age_s'] == {'fast': None, 'medium': None, 'slow': None}
+"
+}
+
+@test "monitor_sample: DNS/TCP/RSSI go null past the staleness factor" {
+  run emit NETDIAG_MON_MEDIUM_FRESH=0 NETDIAG_MON_LINK_UP=1 \
+           NETDIAG_MON_DNS_OK=1 NETDIAG_MON_TCP_OK=1 NETDIAG_MON_IFACE_TYPE=wifi \
+           NETDIAG_MON_WIFI_RSSI=-50 'NETDIAG_MON_TCP_LINES=1.1.1.1|443|1|30'
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['dns']['ok'] is None, d['dns']
+assert d['tcp']['any_ok'] is None and d['tcp']['targets'] == [], d['tcp']
+assert d['wifi']['rssi'] is None, d['wifi']
+"
+}
+
+@test "monitor_sample: public.stale flags last-known geo" {
+  run emit NETDIAG_MON_PUB_STALE=1 NETDIAG_MON_PUB_CC=Brazil NETDIAG_MON_PUBLIC_OK=0
+  printf '%s' "$output" | python3 -c "
+import json,sys
+p = json.load(sys.stdin)['public']
+assert p['stale'] is True, p
+assert p['country'] == 'Brazil', p
+assert p['ok'] is False, p
+"
+  run emit NETDIAG_MON_PUB_STALE=0
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['public']['stale'] is False
+"
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert json.load(sys.stdin)['public']['stale'] is None
+"
+}
+
+@test "monitor_sample: fresh medium data rides through untouched" {
+  run emit NETDIAG_MON_MEDIUM_FRESH=1 NETDIAG_MON_DNS_OK=1 NETDIAG_MON_TCP_OK=1 \
+           'NETDIAG_MON_TCP_LINES=1.1.1.1|443|1|30'
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['dns']['ok'] is True and d['tcp']['any_ok'] is True
+assert d['tcp']['targets'][0]['elapsed_ms'] == 30.0
+"
+}

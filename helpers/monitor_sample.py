@@ -338,7 +338,19 @@ def main() -> None:
     is_wifi = _env("IFACE_TYPE") == "wifi"
     link_up = os.environ.get("NETDIAG_MON_LINK_UP") == "1"
     rules = (_env("RULES") or "").split()
-
+    # Freshness (Phase 1 of the reporting-accuracy plan): the medium tier's
+    # DNS/TCP/RSSI answers are carried over between its 60 s refreshes, and
+    # past THRESH_MON_STALE_FACTOR × its interval they no longer describe
+    # "now" closely enough to present. They go NULL (the sample's
+    # convention for "not measured"), never merely old — a consumer that
+    # cannot see the age must not be handed a number it cannot age-check.
+    # The flag is computed by lib/monitor.sh every cycle in production; an
+    # unset flag (a test, or a stream from before this change) defaults
+    # fresh so the nulling is a property of the declared policy, not of a
+    # missing field.
+    medium_fresh = _tri("MEDIUM_FRESH")
+    if medium_fresh is None:
+        medium_fresh = True
     sample = {
         # Fallback exists only for standalone/test invocation; it must
         # track NETDIAG_MON_SCHEMA in lib/monitor.sh.
@@ -362,6 +374,18 @@ def main() -> None:
         # this list is carried over from an earlier sample, which a
         # consumer plotting a series needs to know before it draws a point.
         "refreshed": (_env("REFRESHED") or "").split(),
+        # Per-tier data age in seconds, for the same reason `refreshed`
+        # exists but phrased the way a consumer actually reads it: the fast
+        # tier is refreshed every cycle, so it never has an age worth
+        # reporting; medium and slow carry data between refreshes, and
+        # age_s says how far back the number a consumer is reading comes
+        # from. null until the tier's first run — age 0 is a measurement,
+        # not the absence of one.
+        "age_s": {
+            "fast": _i("FAST_AGE_S"),
+            "medium": _i("MEDIUM_AGE_S"),
+            "slow": _i("SLOW_AGE_S"),
+        },
         "link": {
             "up": link_up,
             "interface": _env("INTERFACE"),
@@ -411,16 +435,29 @@ def main() -> None:
             "noise": _i("WIFI_NOISE"),
             "snr": _i("WIFI_SNR"),
             "channel": _env("WIFI_CHAN"),
-        } if is_wifi else None),
-        "dns": {
+        } if is_wifi and medium_fresh else
+            (None if not is_wifi else {
+                "rssi": None,
+                "noise": None,
+                "snr": None,
+                "channel": None,
+            })),
+        "dns": ({
             "ok": _tri("DNS_OK"),
             "resolver": _env("DNS_RESOLVER"),
             "elapsed_ms": _f("DNS_MS"),
-        },
-        "tcp": {
+        } if medium_fresh else {
+            "ok": None,
+            "resolver": None,
+            "elapsed_ms": None,
+        }),
+        "tcp": ({
             "any_ok": _tri("TCP_OK"),
             "targets": build_tcp(),
-        },
+        } if medium_fresh else {
+            "any_ok": None,
+            "targets": [],
+        }),
         # The fast HTTPS canary, one level deeper than the bare ok flag:
         # fail_kind names HOW the newest request failed (curl's exit class:
         # refused / timeout / dns / error) when it did, and success_pct is
@@ -443,6 +480,12 @@ def main() -> None:
             "country": _env("PUB_CC"),
             "country_iso": _env("PUB_CC_ISO"),
             "captive_portal": _tri("CAPTIVE"),
+            # The geo figures are last-KNOWN when the fetch is failing
+            # (or a network change has not yet been verified by a fresh
+            # one): never blanked by a failed attempt, but labelled.
+            # False (or None on a stream older than this field) means
+            # the geo block was fetched and verified.
+            "stale": _tri("PUB_STALE"),
         },
         "status": {
             "severity": _env("SEVERITY") or "ok",

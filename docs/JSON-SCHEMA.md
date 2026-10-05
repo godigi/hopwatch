@@ -575,6 +575,8 @@ it would accumulate forever.
   "seq": 42,
   "gap_s": null,                  // seconds lost since the last sample, or null
   "refreshed": ["fast"],          // which cadence tiers ran this cycle
+  "age_s":   {"fast": 0, "medium": 32, "slow": 127},
+                                  // per-tier data age; null until that tier's first run
   "link":    {"up": true, "interface": "en0", "type": "wifi", "ip": "…",
               "gateway": "192.168.15.1", "gateway_mac": "10:98:5f:…",
               "ssid": null, "bssid": null},
@@ -582,14 +584,15 @@ it would accumulate forever.
               "group_id": "mac:10:98:5f:…"},
   "vpn":     {"active": false, "type": null, "name": null},
   "gateway": {"loss_pct": 0.0, "rtt_avg_ms": 4.1},
-  "internet": {"loss_pct": 0.0, "rtt_avg_ms": 11.8},
+  "internet": {"loss_pct": 0.0, "loss_pct_alt": 0.0, "rtt_avg_ms": 11.8},
   "wifi":    {"rssi": null, "noise": null, "snr": null, "channel": null},
   "dns":     {"ok": true, "resolver": "192.168.15.1", "elapsed_ms": 12},
-  "tcp":     {"any_ok": true, "targets": [{"host": "1.1.1.1", "port": 443,
+  "tcp":     {"any_ok": true, "targets": [{"host": "github.com", "port": 443,
                                            "ok": true, "elapsed_ms": 30}]},
+  "web":     {"ok": true, "fail_kind": null, "success_pct": 100.0},
   "public":  {"ok": true, "ip": "…", "isp": "…", "asn": "AS10429",
               "city": "…", "country": "Brazil", "country_iso": "BR",
-              "captive_portal": false},
+              "captive_portal": false, "stale": false},
   "status":  {"severity": "ok", "rules": [], "measurement": "measured",
               "icmp_filtered": false,
               "degraded": false, "paused": false, "cadence_s": 10},
@@ -603,6 +606,29 @@ it would accumulate forever.
 ```
 
 ## Conventions specific to the stream
+
+- **`age_s` is per-tier data age in seconds**: how far back the number
+  the medium and slow tiers are presenting comes from. `refreshed` says
+  which tiers RAN this cycle; `age_s` says how old the answer each
+  consumer is reading is — the same need phrased the way a chart reads
+  it. null until the tier's first run; age 0 is a measurement. The fast
+  tier is refreshed every cycle, so its entry is present but never
+  crosses a second's worth of interest.
+- **The medium tier's answers are nulled, not aged, at
+  `THRESH_MON_STALE_FACTOR` × its interval** (2 × 60 s): `dns`, `tcp` and
+  `wifi` members read as `null`/[] past that, exactly as if the tier had
+  not yet run. `dns.ok` going `null` is emphatically not "the resolver
+  failed"; it is "too old to present, and the consumer may not
+  age-check it, so here is nobody's answer instead". `status.measurement`
+  is unaffected — staleness is presentation, not availability.
+- **`public.stale`** — the geo fields (`ip`, `isp`, `city`, `country`,
+  `country_iso`) are LAST-KNOWN values: a failed slow-tier fetch does not
+  blank them, it sets `stale: true`; the next successful fetch clears it.
+  A network change sets the flag immediately (see `monitor_run`), because
+  the previous network's country is the *prior* network's fact until a
+  fresh fetch verifies the new one. Non-JSON bodies are treated as
+  failed fetches (a portal's login page answers 200 and is not a
+  verdict), and the fetch retries once before reporting failure.
 
 - **`gateway.loss_pct` is a rolling-window figure**, not one probe's
   reading: lost×100÷sent accumulated over the last
@@ -658,15 +684,32 @@ it would accumulate forever.
   `unknown` must never be rendered as an all-clear.
 - **`status.icmp_filtered`** is TCP-1 holding: real connections work,
   only ping is being dropped. Common on hotel and corporate networks.
-  The gateway loss rules (`G1`, `G2`, `G3`) do **not** fire alongside it —
-  TCP-1 is evaluated first and suppresses them in `lib/diagnosis.sh` and
+  The claim now requires the gateway *totally* silent
+  (`THRESH_ICMP_TOTAL_LOSS_PCT`) and the internet leg clean below
+  `LOSS_WARN_PCT` — a gateway answering two pings in three is lossy, and
+  loss on both legs is packet loss, not filtering; an earlier revision
+  that set the flag on ANY tcp success made the GUI report Gaming
+  "Smooth" over a 65%-lossy link. The gateway loss rules (`G1`, `G2`,
+  `G3`) do **not** fire alongside it whenever it holds — TCP-1 is
+  evaluated first and suppresses them in `lib/diagnosis.sh` and
   `lib/monitor.sh` alike, so the two engines still name the same rules for
-  the same link. (Until v0.10.1 both fired, which put "reboot the router"
-  and "the network is up; don't worry" in one report.) The flag remains what
+  the same link. The flag remains what
   an alert engine reads to suppress a loss notification, and it is also the
   signal a UI should use to stop presenting `gateway.loss_pct` and the
   latency figures as meaningful: on such a network they are an artefact of
   the probe, not a property of the link.
+- **The critical verdicts confirm over `THRESH_MON_CRIT_CONFIRM_CYCLES`**
+  (2 consecutive cycles) before `P1`, `P2` and `L1` appear in
+  `status.rules`. A canary failure alone — two cycles of it even — is NOT
+  a verdict: P2 needs the canary failed AND the same cycle's internet
+  ping total-or-unmeasured AND the same cycle's TCP failed, so the
+  text's "unreachable" names a state all three probes agreed on. The
+  monitor's oldest comment said criticals "never wait"; that reversed
+  when the journal showed 349 P2 episodes a day at a median 12 s each,
+  all first-cycle false alarms. N1 (no default route) waits for its
+  single route recheck (`THRESH_ROUTE_RECHECK_DELAY_S`) instead of a
+  streak, exactly as the scan does — that flicker is seconds long and
+  the recheck already covers it.
 - **`status.paused`** means `SIGUSR1` suspended probing. Every measurement
   in such a sample is stale by definition; do not plot or alert on it.
 - **`changes`** (schema 2+) lists field-level differences from the
@@ -701,13 +744,24 @@ it would accumulate forever.
 
 | Tier | Probes | Default | Flag |
 |---|---|---|---|
-| fast | gateway ping ×10, VPN state, link/SSID, identity | 10 s (5 s when degraded) | `--monitor-fast-interval`, `--monitor-degraded-interval` |
-| medium | DNS resolve, TCP/443 ×2, RSSI/SNR | 60 s | `--monitor-medium-interval` |
+| fast | link/route identity, gateway ping ×10, internet ping ×20 ×2 targets, HTTPS canaries ×2, VPN state | 10 s (5 s when degraded) | `--monitor-fast-interval`, `--monitor-degraded-interval` |
+| medium | DNS resolve, TCP/443 ×2 (`github.com`, `8.8.8.8`), RSSI/SNR, browser-check | 60 s | `--monitor-medium-interval` |
 | slow | public IP, ISP, ASN, country, captive portal | 300 s, **plus immediately on network change** | `--monitor-slow-interval` |
 
-The slow tier is the only one making an external call, which is why it is
-slow and why a network change overrides its timer — that is exactly when
-its answer has certainly gone stale.
+The fast tier carries the whole reachability decision (identity, both
+loss legs, the HTTPS canaries), which is why a network change is judged
+within seconds of joining. The medium tier's TCP probe deliberately
+lists one content host (`github.com:443`) beside one resolver
+(`8.8.8.8:443`) — a modem that RSTs resolver traffic on sight (measured:
+a refusal inside ~10 ms,well under the path's real RTT, so it comes from
+the local box) still leaves one leg of evidence the internet itself is
+reachable; TCP-2 owns that pattern and P2 no longer mistakes it for an
+outage. The slow tier is the only tier making an external call whose
+content is rate-limited (the geo fetch), which is why it is slow and why
+a network change overrides its timer — that is exactly when its answer
+has certainly gone stale — and why it retries once, keeps last-known
+values on failure behind `public.stale`, and treats a non-JSON body as a
+failure.
 
 The gateway probe sends **ten** packets rather than the three a liveness
 check suggests, for quantisation rather than accuracy: at 3 packets the

@@ -187,7 +187,20 @@ MON_PUB_CC=""
 MON_PUB_CC_ISO=""
 MON_PUB_CITY=""
 MON_PUBLIC_OK=""
+# public.stale: the geo block describes a fetch that did not succeed this
+# (or recently) — set by a failed slow-tier attempt and on a network
+# change, cleared by the next successful fetch. Last-known figures ride
+# with it; a consumer shows the country labelled "as of last check"
+# rather than blanking the flag.
+MON_PUB_STALE=0
 MON_CAPTIVE=""
+# Per-tier data clocks (see _mon_emit_tier_clocks): ages the sample
+# reports as age_s, plus the flag that decides whether the medium tier's
+# DNS/TCP/RSSI figures may still be presented or must read null.
+MON_FAST_AGE_S=""
+MON_MEDIUM_AGE_S=""
+MON_SLOW_AGE_S=""
+MON_MEDIUM_FRESH=""
 MON_RULES=""
 MON_SEVERITY="ok"
 # `ok` severity means no diagnosis rule fired. It does not mean the probes
@@ -236,6 +249,21 @@ _mon_probe_link() {
   route_out="$(route -n get default 2>/dev/null || true)"
   MON_INTERFACE="$(printf '%s\n' "$route_out" | awk '/interface:/{print $2; exit}')"
   MON_GATEWAY="$(printf '%s\n' "$route_out"  | awk '/gateway:/{print $2; exit}')"
+  # The scan's own discipline (lib/iface.sh): a missing default route is
+  # the single most alarming thing a monitor can observe, and the one most
+  # likely to be a transient. DHCP renewals, WiFi roams and macOS
+  # re-evaluating a network service all drop the route for a moment. Six
+  # stored N1 runs existed only inside such a flicker. Re-read once, after
+  # THRESH_ROUTE_RECHECK_DELAY_S, before believing it — the monitor's fast
+  # tier runs this probe every cycle, so a real absence keeps being seen
+  # (N1's verdict is not lost to the wait, just delayed by the delay on
+  # the failing path; a healthy route costs nothing).
+  if [ -z "$MON_GATEWAY" ]; then
+    _mon_recheck_sleep "$THRESH_ROUTE_RECHECK_DELAY_S"
+    route_out="$(route -n get default 2>/dev/null || true)"
+    MON_INTERFACE="$(printf '%s\n' "$route_out" | awk '/interface:/{print $2; exit}')"
+    MON_GATEWAY="$(printf '%s\n' "$route_out"  | awk '/gateway:/{print $2; exit}')"
+  fi
   if [ -n "$MON_INTERFACE" ] && [ -n "$MON_GATEWAY" ]; then
     MON_LINK_UP=1
   else
@@ -730,13 +758,37 @@ _mon_probe_browser() {
 
 # ── Slow tier ────────────────────────────────────────────────────────────
 
+# ── The geo fetch, retried and stale-flagged ─────────────────────────────
+# Three corrections to the single-shot shape it replaces, per the
+# reporting-accuracy plan:
+#   * retry once — a 4 s window on a busy resolver missed the fetch
+#     regularly enough that the app's flag blinked;
+#   * a non-JSON body is FAILURE, not a verdict with null fields — a
+#     portal's login page rendered 200-with-empty-fields, public.ok=1,
+#     and a blank flag over a caption nobody could name;
+#   * on failure, the LAST KNOWN geo for THIS network is kept (never
+#     cleared by a failed fetch) with public.stale:true — a network
+#     whose country was known three minutes ago still shows the country,
+#     labelled as what it is.
+# MON_PUB_STALE is set on a failed attempt and cleared by the next
+# success; the loop ALSO sets it on a network change, where any
+# last-known figures describe the OLD network until a fresh fetch
+# verifies the new one.
 _mon_probe_public() {
   MON_PUBLIC_OK=""; MON_CAPTIVE=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
-  local out
-  out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
+  local out attempt
+  out=""
+  for attempt in 1 2; do
+    out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null \
+      || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
+    [[ "$out" =~ \"ip\":[[:space:]]*\" ]] && break
+    out=""
+    [ "$attempt" -eq 1 ] || break
+  done
   if [ -n "$out" ]; then
     MON_PUBLIC_OK=1
+    MON_PUB_STALE=0
     MON_PUB_IP="" MON_PUB_ISP="" MON_PUB_ASN="" MON_PUB_CITY="" MON_PUB_CC="" MON_PUB_CC_ISO=""
     [[ "$out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_IP="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ISP="${BASH_REMATCH[1]}"
@@ -746,6 +798,7 @@ _mon_probe_public() {
     [[ "$out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CC_ISO="${BASH_REMATCH[1]}"
   else
     MON_PUBLIC_OK=0
+    MON_PUB_STALE=1
   fi
   # Body captured for the same reason lib/public.sh captures it: a portal
   # that answers 200 with its login page is invisible in the status alone.
@@ -1191,6 +1244,11 @@ _mon_emit() {
   NETDIAG_MON_WEB_FAIL_KIND="${MON_WEB_FAIL_KIND:-}" \
   NETDIAG_MON_WEB_SUCC_PCT="${MON_WEB_SUCC_PCT:-}" \
   NETDIAG_MON_PUBLIC_OK="$MON_PUBLIC_OK" \
+  NETDIAG_MON_PUB_STALE="${MON_PUB_STALE:-}" \
+  NETDIAG_MON_FAST_AGE_S="${MON_FAST_AGE_S:-}" \
+  NETDIAG_MON_MEDIUM_AGE_S="${MON_MEDIUM_AGE_S:-}" \
+  NETDIAG_MON_SLOW_AGE_S="${MON_SLOW_AGE_S:-}" \
+  NETDIAG_MON_MEDIUM_FRESH="${MON_MEDIUM_FRESH:-}" \
   NETDIAG_MON_PUB_IP="$MON_PUB_IP" \
   NETDIAG_MON_PUB_ISP="$MON_PUB_ISP" \
   NETDIAG_MON_PUB_ASN="$MON_PUB_ASN" \
@@ -1260,6 +1318,41 @@ _mon_sleep() {
   wait $! 2>/dev/null || true
 }
 
+# The route recheck's wait: same _mon_sleep semantics without the
+# refresh-request early return (a SIGALRM that lands mid-recheck must not
+# cancel the wait — the probe after it wants the re-read to have happened;
+# the requested refresh runs right after this probe finishes).
+_mon_recheck_sleep() {
+  sleep "$1" &
+  wait $! 2>/dev/null || true
+}
+
+# Computes the tier clocks from monitor_run's last_*_ts stamps into the
+# MON_* namespace (state, not env — _mon_emit forwards them like every
+# other field). The "2× the interval" rule (THRESH_MON_STALE_FACTOR,
+# lib/thresholds.sh) that decides whether the medium tier's figures may
+# still be presented is computed here: the sample gets a plain flag,
+# because a schema-level null rule should be one grep from its constant.
+#
+# Ages are "" (→ null in the sample) until the tier has run once; age 0
+# (just refreshed) is a measurement, and distinct from null.
+_mon_emit_tier_clocks() {
+  MON_FAST_AGE_S="$((EPOCHSECONDS - last_fast_ts))"
+  if [ -n "$last_medium_ts" ]; then
+    MON_MEDIUM_AGE_S="$((EPOCHSECONDS - last_medium_ts))"
+    MON_MEDIUM_FRESH="$([ "$MON_MEDIUM_AGE_S" -le $((MONITOR_MEDIUM_INTERVAL * THRESH_MON_STALE_FACTOR)) ] && echo 1 || echo 0)"
+  else
+    MON_MEDIUM_AGE_S=""
+    MON_MEDIUM_FRESH=0
+  fi
+  if [ -n "$last_slow_ts" ]; then
+    MON_SLOW_AGE_S="$((EPOCHSECONDS - last_slow_ts))"
+  else
+    MON_SLOW_AGE_S=""
+  fi
+  return 0
+}
+
 # All three are reached via trap, an indirect dispatch static analysis
 # can't follow.
 # shellcheck disable=SC2317,SC2329
@@ -1274,6 +1367,13 @@ _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
 monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
   local prev_network_id="" network_changed announced_pause=0
+  # Per-tier last-run timestamps, for the sample's age_s object: a
+  # consumer plotting the stream needs to know how old each tier's
+  # figure is, because the medium and slow tiers carry their answers
+  # over between refreshes. Abyssal epoch (0) = "this tier has never
+  # run" → age unset → emitted null (the same not-measured convention
+  # as every other null in the stream).
+  local last_fast_ts=0 last_medium_ts=0 last_slow_ts=0
   MON_BROWSER_DESYNC_COUNT=0
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
@@ -1316,6 +1416,7 @@ monitor_run() {
         announced_pause=1
         MON_REFRESHED=""
         MON_SEQ=$((MON_SEQ + 1))
+        _mon_emit_tier_clocks
         _mon_emit "$MONITOR_FAST_INTERVAL" || break
         _mon_snapshot_prev
       fi
@@ -1353,6 +1454,7 @@ monitor_run() {
         # No link, no valid window: every packet in it predates the drop.
         _mon_loss_reset
       fi
+      last_fast_ts="$now"
     fi
 
     network_changed=0
@@ -1364,6 +1466,13 @@ monitor_run() {
       # network because the window's whole point is describing *this*
       # link's recent past — there is no "come back to it later" case.
       [ -n "$MON_NETWORK_ID" ] && _mon_loss_reset
+      # And the geo block's last-known figures describe the OLD network
+      # until the slow tier's fetch verifies this one: flag them stale
+      # now, so a network joined seconds ago cannot inherit the
+      # previous network's country for an unflagged minute.
+      if [ -n "$MON_NETWORK_ID" ]; then
+        MON_PUB_STALE=1
+      fi
     fi
 
     # A dead link means nothing to probe. Skipping the other tiers here is
@@ -1378,6 +1487,7 @@ monitor_run() {
         _mon_probe_wifi_signal
         _mon_probe_browser
         next_medium=$((now + MONITOR_MEDIUM_INTERVAL))
+        last_medium_ts="$now"
       fi
       # The slow tier is the only external call, so it is the only one
       # where being polite matters — but a network change is exactly when
@@ -1386,6 +1496,7 @@ monitor_run() {
         MON_REFRESHED+="slow "
         _mon_probe_public
         next_slow=$((now + MONITOR_SLOW_INTERVAL))
+        last_slow_ts="$now"
       fi
     fi
 
@@ -1436,6 +1547,7 @@ monitor_run() {
     MON_PREV_CADENCE="$cadence"
     # A failed emit means stdout is gone — the GUI exited, or a `| head -5`
     # closed the pipe. Either way there is no one left to talk to.
+    _mon_emit_tier_clocks
     _mon_emit "$cadence" || break
     _mon_snapshot_prev
 

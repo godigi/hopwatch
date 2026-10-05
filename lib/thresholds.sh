@@ -414,6 +414,21 @@ THRESH_WIFI_EVENTS_STORED=50
 # and every sleep/wake exceeds by orders of magnitude.
 THRESH_MON_GAP_FACTOR=3
 
+# ── Monitor: data staleness by tier ──────────────────────────────────────
+# How many multiples of a tier's own interval a tier's answers may be
+# carried before a sample must present them as null rather than old.
+#
+# The medium tier (DNS, TCP, RSSI — default 60 s) refreshes six times a
+# sample's fastest potential attention span, so its carried-over answer
+# is almost always close; but the monitor pauses (SIGUSR1) and machines
+# stall, and after 2 minutes the number a popover is reading is not a
+# description of the link, it is an artefact of when it was measured.
+# 2 — rather than the gap detector's 3 — because this decides what may
+# still be DISPLAYED: a UI can pad a chart across a stall, but a verdict
+# cell reading old data as current is the exact staleness bug the
+# sampling epochs were introduced to close.
+THRESH_MON_STALE_FACTOR=2
+
 # ── Bufferbloat grading ──────────────────────────────────────────────────
 # Waveform/DSLReports cutoffs for added latency under load, in ms:
 # A < 5, B < 30, C < 60, D < 200, F ≥ 200. B1/B2 warn at grade C and go
