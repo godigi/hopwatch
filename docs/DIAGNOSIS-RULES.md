@@ -392,6 +392,21 @@ decides a critical diagnosis. It costs ~4 s.
 - Suggested fix: pause large transfers, change Wi-Fi channel, or wire the
   Mac.
 - Impacts: calls and gaming degraded.
+- Attribution: the internet round trip crosses the gateway, so a swinging
+  Wi-Fi hop reads as swinging internet jitter. When, in the sample that
+  held the rule's condition, the gateway's own jitter reaches
+  `THRESH_LATENCY_JITTER_WARN_MS` or its RTT reaches
+  `THRESH_GW_RTT_ELEVATED_MS` (15 ms; a healthy Wi-Fi gateway is 2–6 ms),
+  the monitor attributes the swing to the Wi-Fi/router leg
+  (`la2_leg = router`): the router hop card carries it, the rule-fired
+  line reads "Jittery Wi-Fi/router response", and the recently-unstable
+  sentence says "Wi-Fi response times swung …". No new rule id: it is the
+  same rule saying where the swing starts.
+- Clearing (monitor): held for `THRESH_MON_CLEAR_HOLD_S` after its
+  condition last held, then "recently unstable" until
+  `THRESH_MON_UNSTABLE_WINDOW_S` of clean time. The two-stage clearing
+  applies to every warn/critical monitor rule, not just this one; see
+  `lib/stability.sh` and `status.stability` in `docs/JSON-SCHEMA.md`.
 
 ### D1 — Partial DNS, internet reachable
 

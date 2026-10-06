@@ -176,9 +176,26 @@ dedupes on `(t, seq, kind, to)`.
      "duration_s": 265, "ongoing": false, "unobserved_s": 0,
      "ended_by": "cleared"}
   ],
+  "periods": [
+    {"rule": "LA-2", "summary": "Jittery internet response",
+     "network": "wifi:mac=…", "network_label": "Home",
+     "started": "2026-10-06T10:00:00Z", "ended": "2026-10-06T10:04:10Z",
+     "ongoing": false, "spikes": 3, "observed_s": 70, "span_s": 250,
+     "unobserved_s": 0, "duration_is_lower_bound": false}
+  ],
   "events": [ … ]
 }
 ```
+
+**`periods` fold flapping into one line per stretch of trouble.** Episodes
+of one rule on one network whose gap (previous end to next start) is under
+the join distance are one period: `spikes` is how many episodes joined,
+`observed_s` the time the rule was actually seen firing, `span_s` first
+start to last end. The join distance is `--join-s`, which `bin/hopwatch`
+fills from `THRESH_MON_UNSTABLE_WINDOW_S` — the same figure after which
+the live monitor stops calling a link "recently unstable". It is grouping,
+not judging; with no `--join-s` the array is empty rather than guessing a
+distance. Episodes with no observed start are never merged.
 
 **It reports; it does not judge.** There is no "your uptime was bad" here,
 no outage classification and no threshold — whether four minutes of
@@ -596,7 +613,11 @@ it would accumulate forever.
               "captive_portal": false, "stale": false},
   "status":  {"severity": "ok", "rules": [], "measurement": "measured",
               "icmp_filtered": false,
-              "degraded": false, "paused": false, "cadence_s": 10},
+              "degraded": false, "paused": false, "cadence_s": 10,
+              "burst": null,
+              "stability": {"state": "stable", "window_s": 300,
+                            "last_ago_s": null, "rules": [], "summary": null}},
+  "last_speed": null,             // additive; see below
   "changes": [                    // schema 2+; ABSENT when nothing changed
     {"id": "vpn-disconnected", "field": "vpn.active",
      "from": "1", "to": "0", "summary": "VPN disconnected (Mullvad)"},
@@ -672,6 +693,54 @@ cutoffs, and the menu-bar app contradicted the report it links to):
   `broken` — and `status.severity` is required to be `critical` or
   `warn` whenever any row is broken (asserted by the invariant tests in
   `tests/test_monitor.bats`).
+
+## `status.burst`, `status.stability`, `last_speed` — the monitor's own stability (monitor stream, additive within schema 2)
+
+These three exist because the app used to restart the monitor process to
+change its cadence, and a restart discards every rolling window,
+confirmation streak and fired rule — the warning it had just raised
+vanished four seconds later and the journal episode never ended.
+
+* **`status.burst`** — `null`, or the burst the *process* is running:
+  `{"active": true, "kind": "investigation"|"latency-test",
+  "interval_s": 2, "until": "<ISO-8601>", "remaining_s": 41}`. The monitor
+  starts an `investigation` burst on its own ok→warn/critical edge and a
+  `latency-test` burst on `SIGURG`; both sample every
+  `THRESH_MON_BURST_INTERVAL_S` for `THRESH_MON_BURST_DURATION_S`, then
+  fall back to the normal cadence. The consumer renders "testing latency,
+  until …" from this and owns no timer.
+* **`status.stability`** — the two-stage clearing (`lib/stability.sh`).
+  `status.rules` and `status.severity` are the *held* view: a fired
+  warn/critical rule stays fired until its condition has been clean for
+  `THRESH_MON_CLEAR_HOLD_S` of wall-clock time (stage 1, "still
+  happening"; onset is never delayed). `state` then says: `stable`;
+  `unstable` (a rule is firing or being held); or `recovering` (stage 2:
+  every rule has cleared but the link has not been clean for
+  `THRESH_MON_UNSTABLE_WINDOW_S`). During `recovering` `status.severity`
+  is `ok`, **but the consumer must not render a plain all-clear**:
+  `summary` is the CLI's sentence ("Unstable 2 min ago — response times
+  swung 3 times in the last 5 min"), `rules[]` is
+  `{rule, severity, active, last_ago_s, spikes, summary}`, `window_s` is
+  the window, `last_ago_s` the most recent rule's age. The `headline`
+  block carries the same text with `recovering: true`, and the activity
+  rows the recovering rule impacts are held at `degraded` with
+  `metric` = "Unstable 2 min ago", `because` = the rule ids and
+  `recent: true`. A re-fire during `recovering` is stage 1 again.
+  N1 (no link) clears the cycle the link returns but is still remembered
+  for stage 2; info rules are never held.
+* **`last_speed`** — `null`, or the newest stored full-check speed test
+  **for the current network**, read from the run store on the slow tier:
+  `{down_mbps, up_mbps, age_s, stale, summary}`. `stale` is
+  `age_s > THRESH_MON_SPEED_STALE_S`. While fresh, the Streaming row's
+  `metric` is `"65 Mbps · measured 29m ago"`; once stale it is
+  `unmeasured` ("Speed unknown") and `unmeasured_reason` says the last
+  test was too old and to run a full check.
+* **`hops.router`** gains `jitter_warn` / `jitter_note`: when LA-2's swing
+  starts at the Wi-Fi/router leg (gateway jitter ≥
+  `THRESH_LATENCY_JITTER_WARN_MS` or gateway RTT ≥
+  `THRESH_GW_RTT_ELEVATED_MS` in the same sample) the router hop carries
+  it and the internet hop's `jitter_note` says "Swing starts at the
+  Wi-Fi/router leg" with `jitter_warn: false`.
 
 When the thresholds are missing from the environment the blocks are
 omitted (one stderr warning); consumers must cope with absent blocks by
@@ -849,6 +918,9 @@ shape the scanner's 20-packet probe produces.
 |---|---|
 | `SIGUSR1` | pause — stop probing, stay alive, emit one `status.paused` sample |
 | `SIGUSR2` | resume |
+| `SIGALRM` | sample now (network-transition nudge) |
+| `SIGURG` | begin a latency test: sample every `THRESH_MON_BURST_INTERVAL_S` for `THRESH_MON_BURST_DURATION_S`, inside the running process (`status.burst`) |
+| `SIGWINCH` | end the burst early |
 | `SIGTERM` / `SIGINT` | exit cleanly (immediately, even mid-probe) |
 
 Pausing is handled **in-process** rather than by the caller sending

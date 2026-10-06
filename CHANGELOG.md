@@ -6,6 +6,53 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Changes
+
+- fix: the investigation burst no longer restarts the monitor. The 2 s /
+  60 s burst on the ok→warn/critical edge now runs inside the process
+  (`status.burst`; `SIGURG` begins a manual latency test, `SIGWINCH` ends
+  one), so the rolling windows, fired rules and journal episode survive it.
+  Measured on the live journal: `rule-fired LA-2` → `monitor-started` 8 s
+  later → `monitor-started` again, never a `rule-cleared`, because every
+  burst restarted the CLI. The GUI's restart-on-burst, its burst timer and
+  its duplicate `Defaults.latencyTestInterval/Duration` are removed; a
+  cadence *settings* change still restarts (the intervals are command-line
+  arguments). New thresholds `THRESH_MON_BURST_INTERVAL_S` (2) and
+  `THRESH_MON_BURST_DURATION_S` (60); capability `monitor-burst`.
+- feat: two-stage clearing for every monitor rule (`lib/stability.sh`).
+  Stage 1: a fired warn/critical rule stays fired until its condition has
+  been clean `THRESH_MON_CLEAR_HOLD_S` (30 s, wall-clock, correct at every
+  cadence); onset is untouched and alerts do not re-fire per flap. Stage 2:
+  after it clears, `status.stability.state` is `recovering` until
+  `THRESH_MON_UNSTABLE_WINDOW_S` (300 s) of clean time — the headline says
+  "Unstable 2 min ago — response times swung 3 times in the last 5 min",
+  the impacted activities stay degraded with that provenance, and the
+  menu-bar dot is not green. Measured: LA-2 warned in 5 of 69 samples over
+  three episodes of 1, 3 and 1 samples, cleared by the first clean cycle.
+- feat: `--events` reports `periods` — episodes of one rule on one network
+  under `THRESH_MON_UNSTABLE_WINDOW_S` apart join into one line — and the
+  app's Activity rows are one per unstable period, with the spike count,
+  the span and "just now" while the rule is still firing. The dropdown
+  showed "5m ago" seconds after a new firing because `EventStore`
+  dropped a second `rule-fired` of the same rule inside 10 minutes as a
+  repeat; rule transitions are no longer coalesced.
+- feat: Streaming folds in the last full check's speed for the current
+  network — "65 Mbps · measured 29m ago" — read from the run store on the
+  slow tier (`helpers/last_speed.py`, `last_speed` in the sample). Older
+  than `THRESH_MON_SPEED_STALE_S` (24 h) it says so and stays unmeasured.
+- fix: LA-2 names the right leg. When the gateway carries the swing
+  (gateway jitter ≥ `THRESH_LATENCY_JITTER_WARN_MS` or RTT ≥ the new
+  `THRESH_GW_RTT_ELEVATED_MS`, 15 ms) the router hop card and the rule's
+  wording point at the Wi-Fi/router leg, not the internet.
+- fix: a normal cycle is no longer a journal `gap`. The tolerance is the
+  larger of `THRESH_MON_GAP_FACTOR` × cadence and the new
+  `THRESH_MON_GAP_FLOOR_S` (30 s); at the 2 s burst cadence 3 × 2 = 6 s was
+  shorter than an ordinary cycle (158 `gap` lines in 6 h, "Not observed for
+  8s").
+- fix: the hop cards' ping values rendered "—" always:
+  `MonitorSample.Hops.WarnedHop/InternetHop`'s lenient decoder never read
+  `value`. The router hop also decodes `jitter_warn`/`jitter_note`.
+
 ## [1.12.0] - 2026-10-06
 
 ### Changes
