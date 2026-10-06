@@ -10,12 +10,25 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ### Changes
 
-- feat: monitor stream emits per-sample suitability, hops and headline
-
-## [1.11.1] - 2026-10-05
-
-### Changes
-
+- feat: the monitor stream emits per-sample `suitability`, `hops` and
+  `headline`: helpers/inference.py (new) authors every per-sample
+  judgement — per-activity rows, per-hop states and reasons, the degraded
+  hero's copy — from lib/thresholds.sh values exported into the
+  environment, reusing helpers/suitability.py's rule→activity projection.
+  tests/test_monitor.invariants hold the plan's two contracts: label
+  agrees with metric line; no broken row while severity is below warn.
+- feat: the GUI renders those blocks and judges nothing.
+  Support/SuitabilityEngine.swift keeps only verdict→icon/tint lookups and
+  verbatim ride-through (its Inputs/evaluate* engines and their private
+  cutoffs are deleted); Support/RouteWarningResolver.swift passes the
+  CLI's hop flags, reasons and value phrases through (blame order is the
+  one composition it still owns); Models/MonitorSample.swift's `health`
+  reads only severity and measurement availability; Views/DropdownView.swift's
+  wifi "(laggy)" phrase, ping-cell "no reply" cutoffs, jitter warning and
+  hop detail lines all come from the sample now, and band classification
+  moved to SignalScale.bandName. A new GUI verdict audit in
+  tests/test_thresholds.bats fails the build on any numeric cutoff or
+  verdict phrase in those four files.
 - fix: the app no longer headlines "Web traffic blocked (port 443)". That
   verdict was composed in Swift from one monitor sample's `tcp.any_ok` —
   both of a cycle's two test connections failing. Measured on a live link
