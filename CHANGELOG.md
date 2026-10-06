@@ -6,6 +6,15 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.7] - 2026-10-06
+
+### Changes
+
+- docs: plan for moving live suitability verdicts out of Swift
+- fix(wan): split ASN/IP lists with read -a to clear SC2206
+- test: make the full-check speed fixture bash-3.2 safe
+- fix: show the real internet ping and alert on the leg that is not filtered
+
 ## [1.10.6] - 2026-10-06
 
 ### Fixed
@@ -4080,7 +4089,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.6...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.7...HEAD
+[1.10.7]: https://github.com/godigi/hopwatch/compare/v1.10.6...v1.10.7
 [1.10.6]: https://github.com/godigi/hopwatch/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/godigi/hopwatch/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/godigi/hopwatch/compare/v1.10.3...v1.10.4

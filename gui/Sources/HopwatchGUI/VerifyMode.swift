@@ -1136,7 +1136,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.10.6",
+                version: "1.10.7",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,

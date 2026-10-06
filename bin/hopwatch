@@ -120,8 +120,8 @@ LIB_DIR="${SCRIPT_DIR}/../lib"
 unset NETDIAG_RUN_ID
 unset HOPWATCH_RUN_ID
 
-HOPWATCH_VERSION="1.10.6"
-NETDIAG_VERSION="1.10.6"
+HOPWATCH_VERSION="1.10.7"
+NETDIAG_VERSION="1.10.7"
 
 _require_python3() {
   if ! command -v python3 >/dev/null 2>&1; then
