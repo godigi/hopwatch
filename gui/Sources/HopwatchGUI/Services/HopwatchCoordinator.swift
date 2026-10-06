@@ -213,7 +213,7 @@ final class HopwatchCoordinator {
             events?.withinGracePeriod() ?? false
         }
         alerts.onAlertFired = { [weak self] def, firingRules in
-            self?.handleAlertFired(def, firingRules: firingRules)
+            self?.handleAlertFired(def, firingRules: firingRules) ?? false
         }
         monitor.onSample = { [weak self] sample in
             self?.handleSample(sample)
@@ -275,6 +275,14 @@ final class HopwatchCoordinator {
         // call, instead of two copies of the same switch drifting apart.
         alerts.severityRank = { [weak self] ruleID in
             self?.severityRank(forRuleID: ruleID) ?? 0
+        }
+        // The settled text of an alert whose scan never produced a sentence
+        // of its own: the catalog's blurb for the rule that fired, verbatim.
+        // Read live for the same reason as `severityRank` — an alert settled
+        // before the catalog loads is upgraded on the next sample.
+        alerts.ruleText = { [weak self] ruleID in
+            guard let blurb = self?.rulesCatalog.catalog?[ruleID]?.blurb, !blurb.isEmpty else { return nil }
+            return blurb
         }
         if Defaults.monitoringEnabled { monitor.start() }
 
@@ -1079,6 +1087,11 @@ final class HopwatchCoordinator {
                 self.scanStartedAt = nil
                 self.scanWasAlertTriggered = false
                 self.alerts.scanInProgress = false
+                // After `evaluate(run:)` had its chance (the success path
+                // above ran it already), so this only reaches an alert whose
+                // scan failed, was cancelled, or never landed — the banner
+                // must not go on saying it is checking once the child is gone.
+                self.alerts.scanEnded()
                 self.monitor.resume(reason: "a check is running")
                 // Whatever happened — a clean exit, a crash, Cancel — the
                 // child is gone, so no phase can report again. Without this
@@ -1141,7 +1154,14 @@ final class HopwatchCoordinator {
     /// An alert fired. Run a scan so the notification can be replaced with
     /// the CLI's own explanation — that in-place update is the entire point
     /// of the trigger.
-    private func handleAlertFired(_ def: AlertDefinition, firingRules: Set<String>) {
+    ///
+    /// Returns whether a scan was actually started, because the answer is
+    /// what decides whether the alert's banner may say it is checking: every
+    /// early `return false` below is a path where nothing is running, and
+    /// `AlertEngine` settles the banner's text on it rather than leaving the
+    /// holding line up for a check that does not exist.
+    @discardableResult
+    private func handleAlertFired(_ def: AlertDefinition, firingRules: Set<String>) -> Bool {
         // Recorded regardless of scanOnAlert: the timeline's job is to
         // show every *live* alert that fired, not just the ones the
         // auto-scan preference happened to act on. (Scan-only alerts never
@@ -1155,20 +1175,20 @@ final class HopwatchCoordinator {
         eventLog.record(kind: "alert", summary: def.title,
                         ruleID: firingRules.min(),
                         network: monitor.latest?.network.id)
-        guard Defaults.scanOnAlert else { return }
+        guard Defaults.scanOnAlert else { return false }
         // Loop guard, two clauses. A scan started by an alert never starts
         // another, and no scan starts while one is running. Between them
         // there is no path from "alert fires" back to "alert fires".
         guard !scanWasAlertTriggered, !isScanning else {
             log.debug("loop guard: not scanning for \(def.id, privacy: .public)")
-            return
+            return false
         }
         scanWasAlertTriggered = true
         // .alertTriggered skips bufferbloat and the speed test. Both
         // deliberately saturate the link, and running a load test on a
         // connection that is *already* failing makes the user's situation
         // worse in the middle of whatever broke.
-        runScan(depth: .alertTriggered, reason: "checking \(def.title.lowercased())")
+        return runScan(depth: .alertTriggered, reason: "checking \(def.title.lowercased())")
     }
 
     // MARK: - Power

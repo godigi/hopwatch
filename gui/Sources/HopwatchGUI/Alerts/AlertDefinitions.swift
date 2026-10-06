@@ -22,6 +22,12 @@ import Foundation
 /// itself is misbehaving. Try rebooting it…"). Nothing in this target
 /// composes a sentence about what is wrong with a network or what to do
 /// about it. If a future edit adds one, it belongs in lib/diagnosis.sh.
+///
+/// The holding line is a claim that a check is under way, so `AlertEngine`
+/// shows it only while one is, and replaces it with the rules catalog's
+/// blurb for the rule that fired the moment that stops being true. Its two
+/// last-resort lines, for a catalog that has not loaded, say only whether a
+/// check ran.
 struct AlertDefinition: Identifiable, Sendable {
     let id: String
     /// Category label shown as the notification title.

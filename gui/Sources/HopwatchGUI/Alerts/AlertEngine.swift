@@ -27,9 +27,40 @@ final class AlertEngine {
         let title: String
         var body: String
         var raisedAt: Date
+        /// Where `body` came from, and so whether it may still change.
+        ///
+        /// The holding line is a promise that a check is under way, so it
+        /// is only ever the body in `.awaitingScan` — a state the engine
+        /// leaves the instant the scan lands, fails, is cancelled, or turns
+        /// out never to have been started. What replaces it is always the
+        /// CLI's text (`ruleText` or a scan's `diagnosis[].summary`), with
+        /// two mechanism-only fallbacks for when the catalog has nothing.
+        enum BodyState: Sendable, Equatable {
+            /// `interimBody`, shown because a scan that could enrich this
+            /// alert is pending or running right now.
+            case awaitingScan
+            /// No scan was started for this alert — auto-scan is off, the
+            /// loop guard declined, or it was raised inside its cooldown.
+            case settledNoScan
+            /// The scan this alert was waiting on has ended without a
+            /// sentence for it: landed with no matching rule, failed, or
+            /// was cancelled.
+            case settledScanEnded
+            /// `diagnosis[].summary`, verbatim. Terminal.
+            case enriched
+            /// An event-driven alert (no rules): its body is the
+            /// definition's own line and no scan can improve on it.
+            case fixed
+        }
+        var bodyState: BodyState = .awaitingScan
         /// Set once a triggered scan lands and replaces the holding text
         /// with the CLI's own prose.
-        var enrichedByScan: Bool = false
+        var enrichedByScan: Bool { bodyState == .enriched }
+        /// A settled body is the catalog's blurb when there is one and a
+        /// mechanism-only fallback when there is not (the catalog loads
+        /// asynchronously). Only the latter is worth revisiting.
+        var settledFromCatalog = false
+        var isSettled: Bool { bodyState == .settledNoScan || bodyState == .settledScanEnded }
         /// The rule IDs that **actually fired**, not the whole set this
         /// alert listens for — empty for the four event-driven alerts (VPN
         /// dropped, public IP changed, ...) that have no rule at all.
@@ -81,7 +112,18 @@ final class AlertEngine {
     /// Carries the *firing* rule IDs alongside the definition, so the
     /// timeline entry the app writes names the rule the CLI reported rather
     /// than an arbitrary member of the listen-set. See `ActiveAlert.rules`.
-    var onAlertFired: ((AlertDefinition, Set<String>) -> Void)?
+    var onAlertFired: ((AlertDefinition, Set<String>) -> Bool)?
+
+    /// Rule ID in, the rules catalog's plain-language blurb out. Injected by
+    /// `NetdiagCoordinator` like `severityRank`, and read live for the same
+    /// reason: before the catalog loads this answers nil and the engine
+    /// falls back to a mechanism-only line (see `AlertDefinition`'s header),
+    /// then upgrades the body the first sample after the catalog arrives.
+    @ObservationIgnored var ruleText: (String) -> String? = { _ in nil }
+
+    /// The clock, injectable so `--verify` can walk an alert through its
+    /// dwell and cooldown without waiting minutes for them.
+    @ObservationIgnored var now: () -> Date = { Date() }
 
     private var conditionSince: [String: Date] = [:]
     private var lastNotifiedAt: [String: Date] = [:]
@@ -136,8 +178,13 @@ final class AlertEngine {
 
     func evaluate(sample: MonitorSample) {
         defer { previousSample = sample }
-        let now = Date()
+        let now = self.now()
         let networkKey = sample.network.id ?? "unknown"
+
+        // The catalog loads after the first alerts can fire; this is the
+        // cheapest place to notice it has, and a sample arrives every few
+        // seconds.
+        refreshSettledBodies()
 
         let firing = Set(sample.status.rules)
         for def in AlertDefinition.liveAlerts {
@@ -189,7 +236,7 @@ final class AlertEngine {
     /// Scan-only alerts, plus the enrichment pass that replaces a live
     /// alert's holding text with the CLI's own prose.
     func evaluate(run: RunSnapshot) {
-        let now = Date()
+        let now = self.now()
         let networkKey = run.network.id ?? "unknown"
         let firedRules = Set(run.diagnosis.compactMap(\.rule))
 
@@ -210,11 +257,89 @@ final class AlertEngine {
             guard let def = AlertDefinition.byID(id),
                   let summary = bestSummary(for: def, in: run) else { continue }
             alert.body = summary
-            alert.enrichedByScan = true
+            alert.bodyState = .enriched
             active[id] = alert
             deliver(id: id, title: alert.title, body: summary, isOutage: def.isOutage, replacing: true)
         }
+
+        // A scan has landed, so no alert is still waiting on it. Whatever
+        // the loop above did not enrich — this scan saw a different fault,
+        // or none, which is routine for an intermittent one the monitor
+        // caught — settles now. A settled alert stays eligible for the loop
+        // above, so a *later* scan that does carry a matching sentence
+        // still upgrades it.
+        settleAwaiting(as: .settledScanEnded)
     }
+
+    /// The scan an alert was waiting on has ended without landing — it
+    /// failed, was cancelled, or its result was discarded. Called by the
+    /// coordinator when any scan's task finishes, after `evaluate(run:)` has
+    /// had its chance, so on the success path this finds nothing left to do.
+    func scanEnded() {
+        settleAwaiting(as: .settledScanEnded)
+    }
+
+    // MARK: - Settling
+
+    /// Replaces the holding line of every alert still showing it. Updates
+    /// the dropdown's body only and never notifies: the notification for
+    /// this alert was delivered when it fired and said what was true then,
+    /// and a second one for "the check is over" would be the engine
+    /// narrating its own plumbing. Only a real scan summary re-delivers.
+    private func settleAwaiting(as state: ActiveAlert.BodyState) {
+        for id in active.keys where active[id]?.bodyState == .awaitingScan {
+            settle(id, as: state)
+        }
+    }
+
+    private func settle(_ id: String, as state: ActiveAlert.BodyState) {
+        guard var alert = active[id], alert.bodyState == .awaitingScan else { return }
+        alert.bodyState = state
+        if let text = catalogText(for: alert.rules) {
+            alert.body = text
+            alert.settledFromCatalog = true
+        } else {
+            alert.body = state == .settledNoScan ? Self.noScanBody : Self.scanEndedBody
+            alert.settledFromCatalog = false
+        }
+        active[id] = alert
+    }
+
+    /// Re-resolves settled alerts that had to use a fallback because the
+    /// catalog had not loaded when they settled.
+    private func refreshSettledBodies() {
+        for (id, var alert) in active where alert.isSettled && !alert.settledFromCatalog {
+            guard let text = catalogText(for: alert.rules) else { continue }
+            alert.body = text
+            alert.settledFromCatalog = true
+            active[id] = alert
+        }
+    }
+
+    /// The catalog's blurb for the rule that actually fired. When several
+    /// did, the most severe by the CLI's own ranking (the one `activeSorted`
+    /// uses) wins, with the rule ID as a tiebreak so the same alert never
+    /// reads differently from one run to the next — `Set` iteration order is
+    /// not stable. Verbatim, never edited.
+    private func catalogText(for rules: Set<String>) -> String? {
+        let ranked = rules.sorted { a, b in
+            let (ra, rb) = (severityRank(a), severityRank(b))
+            return ra != rb ? ra > rb : a < b
+        }
+        for rule in ranked {
+            if let text = ruleText(rule), !text.isEmpty { return text }
+        }
+        return nil
+    }
+
+    // These two are the only sentences Swift writes into a settled banner,
+    // and only when the catalog has nothing for the rule (not loaded yet,
+    // or a rule it does not name). Mechanism only, per `AlertDefinition`'s
+    // header: they say whether a check ran, never why the network is
+    // misbehaving or what to do about it. Two rather than one because
+    // "a check ended" would be untrue of an alert for which none ever ran.
+    private static let noScanBody = "No follow-up check was run for this alert."
+    private static let scanEndedBody = "The follow-up check has ended."
 
     /// The CLI's own sentence for this alert: the highest-severity
     /// diagnosis whose rule the alert listens for. Verbatim, never edited.
@@ -293,15 +418,22 @@ final class AlertEngine {
                   now.timeIntervalSince(last) < def.cooldown {
             // Still inside the cooldown: track it as active so the
             // dropdown shows it, but do not interrupt again.
+            //
+            // No scan runs for this raise (the handler below is skipped),
+            // so there is nothing a holding line could be waiting for: it
+            // is settled on the spot rather than left up indefinitely.
             active[def.id] = ActiveAlert(id: def.id, title: def.title,
                                          body: bodyOverride ?? def.interimBody, raisedAt: now,
+                                         bodyState: initialBodyState(def, bodyOverride: bodyOverride),
                                          rules: firingRules)
+            settle(def.id, as: .settledNoScan)
             return
         }
 
         let body = bodyOverride ?? def.interimBody
         active[def.id] = ActiveAlert(id: def.id, title: def.title, body: body,
-                                     raisedAt: now, enrichedByScan: bodyOverride != nil,
+                                     raisedAt: now,
+                                     bodyState: initialBodyState(def, bodyOverride: bodyOverride),
                                      rules: firingRules)
         lastNotifiedAt[def.id] = now
         deliver(id: def.id, title: def.title, body: body, isOutage: def.isOutage, replacing: false)
@@ -310,7 +442,25 @@ final class AlertEngine {
         // Only live alerts trigger a scan. A scan-only alert was produced
         // *by* a scan, and scanning again to explain it is the loop the
         // guard in NetdiagCoordinator exists to prevent.
-        if !def.scanOnly { onAlertFired?(def, firingRules) }
+        //
+        // The handler says whether a scan actually started, because that is
+        // what the holding line's claim rests on. Declined — auto-scan off,
+        // loop guard, a scan already in flight — means no check is coming,
+        // and the banner settles now. A handler that was never wired counts
+        // as declined for the same reason: no scan, no "checking".
+        let scanStarted = def.scanOnly ? false : (onAlertFired?(def, firingRules) ?? false)
+        if !scanStarted { settle(def.id, as: .settledNoScan) }
+    }
+
+    /// `.awaitingScan` is only the *starting* state for an alert a scan
+    /// could still improve: one with rules to look up and no sentence yet.
+    /// A scan-sourced body is already final, and an event-driven alert has
+    /// no rule any diagnosis could match — its line is its own and is never
+    /// a promise of a check.
+    private func initialBodyState(_ def: AlertDefinition,
+                                  bodyOverride: String?) -> ActiveAlert.BodyState {
+        if bodyOverride != nil { return .enriched }
+        return def.rules.isEmpty ? .fixed : .awaitingScan
     }
 
     // MARK: - Delivery

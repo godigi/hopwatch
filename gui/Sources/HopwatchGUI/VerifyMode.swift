@@ -65,6 +65,7 @@ private enum VerifyHarness {
         runStageTests()
         runHealthResolverTests()
         runAlertAttributionTests()
+        runAlertSettleTests()
         runCaptivePortalActionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
@@ -178,6 +179,163 @@ private enum VerifyHarness {
         // also what the stage card renders.
         equal(degraded.title, snapshot.title,
               "the alert event's summary is the very string the stage card shows")
+        print("")
+    }
+
+    // MARK: - Alert body settling
+
+    /// Test double for what `NetdiagCoordinator` is to the engine: a clock,
+    /// a scan that either starts or does not, and a record of both.
+    @MainActor
+    private final class AlertRig {
+        let engine: AlertEngine
+        var t = Date(timeIntervalSince1970: 1_700_000_000)
+        var scanStarts: Bool
+        var scansRequested = 0
+        var posts: [String] = []
+        var catalog: RulesCatalog?
+
+        init(catalog: RulesCatalog?, scanStarts: Bool) {
+            self.catalog = catalog
+            self.scanStarts = scanStarts
+            let manager = NotificationManager()
+            manager.setAuthorizedForTesting(true)
+            engine = AlertEngine(notificationManager: manager)
+            manager.onPostNotification = { [unowned self] id, _, _, _ in posts.append(id) }
+            manager.onRemoveNotification = { _ in }
+            engine.now = { [unowned self] in t }
+            engine.severityRank = { [unowned self] id in
+                NetdiagCoordinator.severityRank(self.catalog?[id]?.severity)
+            }
+            engine.ruleText = { [unowned self] id in self.catalog?[id]?.blurb }
+            engine.onAlertFired = { [unowned self] _, _ in
+                scansRequested += 1
+                return scanStarts
+            }
+        }
+
+        /// Hold `rules` on the monitor long enough to clear the alert's
+        /// dwell (the longest of the live alerts' is 30 s).
+        func raise(_ rules: [String]) {
+            var s = MonitorSample()
+            s.status.rules = rules
+            engine.evaluate(sample: s)
+            t = t.addingTimeInterval(40)
+            engine.evaluate(sample: s)
+        }
+
+        func clear() {
+            engine.evaluate(sample: MonitorSample())
+            t = t.addingTimeInterval(40)
+        }
+
+        func land(_ diagnosis: [(rule: String, severity: String, summary: String)]) {
+            var run = RunSnapshot()
+            run.diagnosis = diagnosis.map {
+                RunSnapshot.Diagnosis(severity: $0.severity, rule: $0.rule, summary: $0.summary)
+            }
+            engine.evaluate(run: run)
+        }
+
+        func body(_ id: String = "wifi-unstable") -> String? { engine.active[id]?.body }
+    }
+
+    /// A banner may say it is checking only while a check is. Every path by
+    /// which the check stops being pending — landing without a matching
+    /// rule, never starting, failing — must replace the holding line with
+    /// the CLI's own text for the rule that fired, and a later scan that
+    /// does carry a matching sentence must still beat it.
+    static func runAlertSettleTests() {
+        print("Alert banner settling")
+        guard let def = AlertDefinition.byID("wifi-unstable") else {
+            check(false, "wifi-unstable definition exists"); return
+        }
+        let interim = def.interimBody
+        let catalog = stubCatalog([
+            ("G1", "critical", "BLURB-G1"), ("G2", "warn", "BLURB-G2"),
+            ("G3", "info", "BLURB-G3"), ("W5", "warn", "BLURB-W5"),
+        ])
+
+        // (e) A scan that is genuinely pending keeps the holding line.
+        let pending = AlertRig(catalog: catalog, scanStarts: true)
+        pending.raise(["G2"])
+        equal(pending.scansRequested, 1, "a live alert asks for a scan once")
+        equal(pending.body(), interim, "while its scan is pending the banner says it is checking")
+        pending.t = pending.t.addingTimeInterval(600)
+        pending.engine.evaluate(sample: { var s = MonitorSample(); s.status.rules = ["G2"]; return s }())
+        equal(pending.body(), interim, "and a fresh sample alone does not settle it")
+
+        // (a) The scan lands and reports a rule this alert does not
+        // listen for — the observed W5-instead-of-G2 case.
+        pending.land([("W5", "warn", "SUMMARY-W5")])
+        equal(pending.body(), "BLURB-G2",
+              "a scan landing with no matching rule settles to the catalog's text for the rule that fired")
+        check(pending.body() != interim, "the holding line is gone once the scan has landed")
+
+        // (d) A later scan that carries a matching sentence still upgrades it.
+        pending.land([("G2", "warn", "SUMMARY-G2")])
+        equal(pending.body(), "SUMMARY-G2", "a later matching scan upgrades the settled alert to the CLI's summary")
+        pending.land([("G2", "warn", "SUMMARY-G2-AGAIN")])
+        equal(pending.body(), "SUMMARY-G2", "an already-enriched alert is not rewritten by every later scan")
+
+        // Several rules fired: the worst by the catalog's severity wins,
+        // whatever order the Set happens to iterate in.
+        let multi = AlertRig(catalog: catalog, scanStarts: true)
+        multi.raise(["G3", "G1"])
+        multi.land([("W5", "warn", "SUMMARY-W5")])
+        equal(multi.body(), "BLURB-G1", "with several rules fired the most severe one's text is used")
+
+        // (c) The scan never started (auto-scan off, loop guard).
+        let declined = AlertRig(catalog: catalog, scanStarts: false)
+        declined.raise(["G2"])
+        equal(declined.body(), "BLURB-G2", "a declined scan never shows the holding line")
+
+        // (c) The scan started and then failed or was cancelled.
+        let failed = AlertRig(catalog: catalog, scanStarts: true)
+        failed.raise(["G2"])
+        equal(failed.body(), interim, "before the failure the banner is still checking")
+        failed.engine.scanEnded()
+        equal(failed.body(), "BLURB-G2", "a failed or cancelled scan settles the banner")
+        failed.land([("G2", "warn", "SUMMARY-G2")])
+        equal(failed.body(), "SUMMARY-G2", "and a later matching scan still upgrades it")
+
+        // (b) Raised again inside the cooldown: no notification, no scan —
+        // and so nothing for a holding line to wait for.
+        let cooled = AlertRig(catalog: catalog, scanStarts: true)
+        cooled.raise(["G2"])
+        cooled.land([("W5", "warn", "SUMMARY-W5")])
+        cooled.clear()
+        cooled.raise(["G2"])
+        check(cooled.engine.active["wifi-unstable"] != nil, "the alert is raised again inside its cooldown")
+        equal(cooled.scansRequested, 1, "the cooldown raise starts no scan")
+        equal(cooled.body(), "BLURB-G2", "a cooldown raise never shows the holding line")
+
+        // The catalog not having loaded yet: settle on something that is
+        // not the holding line, then take the catalog's text once it lands.
+        let early = AlertRig(catalog: nil, scanStarts: false)
+        early.raise(["G2"])
+        check(early.body() != interim && early.body()?.isEmpty == false,
+              "with no catalog yet the settled banner is neither the holding line nor empty")
+        early.catalog = catalog
+        early.engine.evaluate(sample: { var s = MonitorSample(); s.status.rules = ["G2"]; return s }())
+        equal(early.body(), "BLURB-G2", "the catalog arriving upgrades a settled banner on the next sample")
+
+        // Event-driven alerts have no rule to look up, and their text was
+        // never a promise of a check: settling must leave it alone.
+        guard let captive = AlertDefinition.byID("captive-portal") else {
+            check(false, "captive-portal definition exists"); return
+        }
+        let event = AlertRig(catalog: catalog, scanStarts: true)
+        var portal = MonitorSample()
+        portal.publicInfo.captivePortal = true
+        event.engine.evaluate(sample: portal)
+        event.t = event.t.addingTimeInterval(40)
+        event.engine.evaluate(sample: portal)
+        equal(event.body("captive-portal"), captive.interimBody, "an event-driven alert shows its own line")
+        event.engine.scanEnded()
+        event.land([("W5", "warn", "SUMMARY-W5")])
+        equal(event.body("captive-portal"), captive.interimBody,
+              "and neither a landed nor an ended scan rewrites it")
         print("")
     }
 
