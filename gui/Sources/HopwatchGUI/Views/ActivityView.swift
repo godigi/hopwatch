@@ -39,7 +39,7 @@ struct ActivityView: View {
     @State private var issuesOnly = false
 
     var body: some View {
-        let allEntries = ActivityEntry.fold(coordinator.eventLog.events)
+        let allEntries = ActivityEntry.fold(coordinator.eventLog.events, live: coordinator.monitor.latest)
         let filteredEntries = issuesOnly ? allEntries.filter(isIssue) : allEntries
         let days = days(of: filteredEntries)
 

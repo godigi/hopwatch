@@ -59,7 +59,17 @@ final class EventStore {
         // A monitor restart is an observation boundary, never a repeat.
         // It must not be coalesced by isRepeat, or a restart within the
         // 10-minute window would lose its restart signal.
-        if kind != "monitor-started" {
+        //
+        // Rule transitions are not repeats either. A fired/cleared pair is
+        // one half of an episode `ActivityEntry.fold` pairs by order, and
+        // dropping the second `rule-fired` of the same rule inside the
+        // window is how a warning that re-fired seconds ago kept showing
+        // "5m ago": the new firing was discarded as a copy of the old one,
+        // and its `cleared` after it. Flaps are bounded upstream now (the
+        // CLI holds a rule until it has been clean), and the fold joins
+        // them into one period, so there is nothing left to coalesce here.
+        let isRuleTransition = kind == "rule-fired" || kind == "rule-cleared"
+        if kind != "monitor-started" && !isRuleTransition {
             guard !NetworkEvent.isRepeat(kind: kind, summary: summary,
                                          network: network,
                                          date: date, in: events) else {

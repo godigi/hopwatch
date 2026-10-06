@@ -144,6 +144,7 @@ struct HomeView: View {
                             selectedWindowMinutes: $chartWindowMinutes,
                             isBursting: coordinator.monitor.isBursting,
                             burstUntil: coordinator.monitor.burstUntil,
+                            burstIntervalS: coordinator.monitor.burstIntervalS,
                             onToggleBurst: {
                                 if coordinator.monitor.isBursting {
                                     coordinator.monitor.endBurst()
@@ -151,10 +152,7 @@ struct HomeView: View {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         chartWindowMinutes = 15
                                     }
-                                    coordinator.monitor.beginBurst(
-                                        interval: Defaults.latencyTestInterval,
-                                        duration: Defaults.latencyTestDuration
-                                    )
+                                    coordinator.monitor.beginBurst()
                                 }
                             }
                         )
@@ -165,7 +163,7 @@ struct HomeView: View {
                         )
 
                         DashboardRecentActivityPanel(
-                            events: ActivityEntry.fold(coordinator.eventLog.events),
+                            events: ActivityEntry.fold(coordinator.eventLog.events, live: coordinator.monitor.latest),
                             onOpenActivity: { openActivity() }
                         )
                     }

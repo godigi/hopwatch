@@ -571,7 +571,7 @@ struct DropdownView: View {
     }
 
     private var recentActivityEvent: ActivityEntry? {
-        ActivityEntry.fold(timelineEvents).first
+        ActivityEntry.fold(timelineEvents, live: coordinator.monitor.latest).first
     }
 
     // MARK: - 8. Actions Section

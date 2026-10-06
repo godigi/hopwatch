@@ -63,6 +63,10 @@ struct ActivityEntry: Identifiable, Equatable {
     /// notified. Folded in from the alert's own event rather than left as a
     /// separate row — see `absorbAlerts`.
     var notified: Bool = false
+    /// True when this row is one unstable PERIOD (episodes joined by gap)
+    /// rather than one calendar day's worth of a rule. Only then does the
+    /// second line say how long the period spans.
+    var isPeriod: Bool = false
 }
 
 extension ActivityEntry {
@@ -98,6 +102,14 @@ extension ActivityEntry {
         var isLowerBound: Bool
     }
 
+    /// The fold the views use: the live sample supplies the CLI's own join
+    /// window and which rules are firing now, so no figure is chosen here.
+    static func fold(_ events: [NetworkEvent], live sample: MonitorSample?) -> [ActivityEntry] {
+        fold(events,
+             joinWindow: sample?.status.stability.windowS.map(TimeInterval.init),
+             stillFiring: Set(sample?.status.rules ?? []))
+    }
+
     /// Fold a transition log into episodes, then group same-rule episodes
     /// per calendar day.
     ///
@@ -105,7 +117,21 @@ extension ActivityEntry {
     /// walked oldest-first, because pairing is only meaningful forwards.
     /// Pure — no clock, no environment — so `--verify` can drive it with
     /// constructed input.
+    ///
+    /// `joinWindow` is the CLI's own figure (`status.stability.window_s`,
+    /// THRESH_MON_UNSTABLE_WINDOW_S): with it, episodes of one rule on one
+    /// network separated by less than that join into ONE unstable period
+    /// and one row, however many times the link flapped — the same
+    /// grouping `helpers/events.py` reports as `periods`. Without it (an
+    /// older CLI, no sample yet) rows group per calendar day as before; no
+    /// distance is invented here. `stillFiring` names the rules the live
+    /// sample says are firing right now: an open episode of one of them was
+    /// observed at `now`, which is what makes a row read "just now" rather
+    /// than dated by the moment it began.
     static func fold(_ events: [NetworkEvent],
+                     joinWindow: TimeInterval? = nil,
+                     stillFiring: Set<String> = [],
+                     now: Date = Date(),
                      calendar: Calendar = .current) -> [ActivityEntry] {
         let chronological = events.sorted { $0.date < $1.date }
 
@@ -185,12 +211,39 @@ extension ActivityEntry {
             }
         }
         // Whatever is still firing.
-        for episode in open.values { episodes.append(episode) }
+        for var episode in open.values {
+            if stillFiring.contains(episode.ruleID) { episode.lastSeen = max(episode.lastSeen, now) }
+            episodes.append(episode)
+        }
 
-        return group(episodes: episodes, loose: loose, calendar: calendar)
+        return group(episodes: episodes, loose: loose, joinWindow: joinWindow,
+                     calendar: calendar)
+    }
+
+    /// Period key per episode: episodes of one (network, rule), taken in
+    /// start order, belong to the same period while each starts less than
+    /// `joinWindow` after the previous one's last sighting or end.
+    private static func periodKeys(_ episodes: [Episode],
+                                   joinWindow: TimeInterval) -> [Int: String] {
+        var keys: [Int: String] = [:]
+        let order = episodes.indices.sorted { episodes[$0].start < episodes[$1].start }
+        var current: [Key: (start: Date, end: Date)] = [:]
+        for i in order {
+            let e = episodes[i]
+            let k = Key(network: e.network, ruleID: e.ruleID)
+            let seen = e.end ?? e.lastSeen
+            if let c = current[k], e.start.timeIntervalSince(c.end) < joinWindow {
+                current[k] = (c.start, max(c.end, seen))
+            } else {
+                current[k] = (e.start, seen)
+            }
+            keys[i] = "rule|\(e.ruleID)|\(e.network ?? "")|period|\(current[k]!.start.timeIntervalSince1970)"
+        }
+        return keys
     }
 
     private static func group(episodes: [Episode], loose: [NetworkEvent],
+                              joinWindow: TimeInterval?,
                               calendar: Calendar) -> [ActivityEntry] {
         var entries: [String: ActivityEntry] = [:]
 
@@ -207,6 +260,7 @@ extension ActivityEntry {
                 existing.kind = candidate.kind
                 existing.summary = candidate.summary
             }
+            existing.isPeriod = existing.isPeriod || candidate.isPeriod
             existing.occurrences += candidate.occurrences
             existing.latest = max(existing.latest, candidate.latest)
             existing.earliest = min(existing.earliest, candidate.earliest)
@@ -221,13 +275,15 @@ extension ActivityEntry {
             entries[key] = existing
         }
 
-        for episode in episodes {
+        let periods = joinWindow.map { periodKeys(episodes, joinWindow: $0) }
+
+        for (index, episode) in episodes.enumerated() {
             // Keyed on the day the episode *began*. `byDay` sections on the
             // same field via `earliest`; if one of the two ever moves, the
             // other has to move with it or a row can be filed under a day
             // its key does not name.
             let day = calendar.startOfDay(for: episode.start)
-            let key = "rule|\(episode.ruleID)|\(day.timeIntervalSince1970)"
+            let key = periods?[index] ?? "rule|\(episode.ruleID)|\(day.timeIntervalSince1970)"
             // Measured to the observed end where there is one, and otherwise
             // to the last sighting — which for an episode nothing has
             // re-observed is its own start, so an ordinary open episode still
@@ -248,7 +304,8 @@ extension ActivityEntry {
                 // worth printing; it still counts as an occurrence.
                 totalDuration: duration >= 1 ? duration : nil,
                 isOngoing: episode.end == nil,
-                durationIsLowerBound: episode.isLowerBound))
+                durationIsLowerBound: episode.isLowerBound,
+                isPeriod: periods != nil))
         }
 
         for event in loose {
@@ -261,7 +318,8 @@ extension ActivityEntry {
                 durationIsLowerBound: false))
         }
 
-        return absorbAlerts(entries).values.sorted { $0.latest > $1.latest }
+        return absorbAlerts(entries, byPeriod: periods != nil)
+            .values.sorted { $0.latest > $1.latest }
     }
 
     /// Fold each alert row into the rule row it is about.
@@ -281,12 +339,23 @@ extension ActivityEntry {
     /// events rather than rules — has no row to merge into and keeps its
     /// own, which is correct: nothing else is reporting it.
     private static func absorbAlerts(
-        _ entries: [String: ActivityEntry]) -> [String: ActivityEntry] {
+        _ entries: [String: ActivityEntry],
+        byPeriod: Bool = false) -> [String: ActivityEntry] {
         var result = entries
         for (key, entry) in entries where entry.kind == "alert" {
             guard let ruleID = entry.ruleID else { continue }
-            let day = key.split(separator: "|").last.map(String.init) ?? ""
-            let ruleKey = "rule|\(ruleID)|\(day)"
+            let ruleKey: String
+            if byPeriod {
+                // The period the alert belongs to is the newest one of its
+                // rule that began at or before the alert.
+                guard let match = result.values
+                    .filter({ $0.ruleID == ruleID && $0.isPeriod && $0.earliest <= entry.latest })
+                    .max(by: { $0.earliest < $1.earliest }) else { continue }
+                ruleKey = match.id
+            } else {
+                let day = key.split(separator: "|").last.map(String.init) ?? ""
+                ruleKey = "rule|\(ruleID)|\(day)"
+            }
             guard var target = result[ruleKey] else { continue }
             target.notified = true
             // The alert lands after the rule's dwell, so it can be the
@@ -359,7 +428,14 @@ extension ActivityEntry {
     /// only honest part of it: this is a floor, not a measurement.
     var detail: String? {
         var parts: [String] = []
-        if occurrences > 1 { parts.append("\(occurrences) times") }
+        if occurrences > 1 {
+            // A period says how long it has gone on, since its separate
+            // spikes are no longer separate lines.
+            let span = latest.timeIntervalSince(earliest)
+            parts.append(isPeriod && span >= 60
+                         ? "\(occurrences) times over \(Self.duration(span))"
+                         : "\(occurrences) times")
+        }
         if let total = totalDuration, total >= 1 {
             let formatted = Self.duration(total) + (durationIsLowerBound ? "+" : "")
             parts.append(occurrences > 1 ? "\(formatted) total" : "lasted \(formatted)")

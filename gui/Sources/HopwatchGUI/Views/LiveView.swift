@@ -106,7 +106,7 @@ struct LiveView: View {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Latency test — sampling every \(appSettings.latencyTestInterval)s")
+                    Text("Latency test — sampling \(monitor.burstIntervalS.map { "every \($0)s" } ?? "fast")")
                         .font(.callout)
                     Text("Back to the usual cadence at \(until.formatted(date: .omitted, time: .standard)).")
                         .font(.caption).foregroundStyle(.secondary)

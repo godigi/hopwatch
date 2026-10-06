@@ -138,12 +138,6 @@ final class HopwatchCoordinator {
     private var pendingArrivalNetworkID: String?
     private var pendingArrivalDepth: ArrivalDepth?
     private var pendingArrivalDecline: DeclineReason?
-    /// The severity seen on the previous sample, used by `handleSample` to
-    /// detect the ok/info → warn/critical edge that auto-starts an
-    /// investigation burst. Stored on the coordinator rather than read back
-    /// from the monitor so the transition is exact even when a burst
-    /// restart resets the monitor's own sample window.
-    private var lastSeverity: String = "ok"
 
     // MARK: - Remediation Resolution Feedback (TASK-027)
 
@@ -507,7 +501,6 @@ final class HopwatchCoordinator {
             )
         }
         evaluateResolutions(sample: sample)
-        considerInvestigationBurst(sample)
 
         // The first cycle of a monitor process records monitor-started, matching
         // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
@@ -869,16 +862,6 @@ final class HopwatchCoordinator {
         pendingArrivalDecline = nil
     }
 
-    /// Auto-start a short, fast-cadence "investigation" burst the moment
-    /// the CLI's verdict turns from ok/info to warn/critical — before an
-    /// alert's dwell has elapsed and before any triggered scan lands. The
-    /// user's mental model is that the app starts pinging constantly and
-    /// fast the instant something looks wrong, and this is what delivers
-    /// it: the monitor restarts at the 2 s latency-test floor for 60 s, so
-    /// gateway and internet ping arrive every 2 s rather than every 5 s
-    /// while the problem is being confirmed. After the burst, sustained
-    /// degraded (3 s) takes over for as long as severity stays warn/
-    /// critical — `MON_DEGRADED` follows severity in `lib/monitor.sh`'s
     private func evaluateResolutions(sample: MonitorSample) {
         // If an active resolution exists, verify it remains valid under the new sample.
         // If packet loss has returned or new alerts/faults appeared, dismiss it immediately.
@@ -890,7 +873,8 @@ final class HopwatchCoordinator {
         }
 
         // Only evaluate resolutions if the link is up and the connection is currently healthy
-        guard sample.link.up, sample.status.severity == "ok", alerts.active.isEmpty else {
+        guard sample.link.up, sample.status.severity == "ok", alerts.active.isEmpty,
+              !sample.status.stability.isRecovering else {
             if sample.status.severity == "critical" || sample.status.severity == "warn" || sample.publicInfo.captivePortal == true || !alerts.active.isEmpty {
                 lastUnhealthySample = sample
             }
@@ -961,28 +945,9 @@ final class HopwatchCoordinator {
         lastSample = sample
     }
 
-    /// `_mon_rules`. Fires only on the genuine ok/info → warn/critical
-    /// edge, not on every warn/critical sample, so a sustained outage
-    /// gets one surge at onset and a steady 3 s after, not a restart
-    /// every minute. A burst already running is not re-triggered; a scan
-    /// in progress blocks it (a scan pauses the monitor and saturates the
-    /// link, and a burst's 2 s samples would be measuring the scan's own
-    /// traffic); a paused or stopped monitor has nothing to burst.
-    private func considerInvestigationBurst(_ sample: MonitorSample) {
-        let sev = sample.status.severity
-        defer { lastSeverity = sev }
-        let turnedBad = (sev == "warn" || sev == "critical")
-            && lastSeverity != "warn" && lastSeverity != "critical"
-        guard turnedBad,
-              !sample.status.paused,
-              monitor.isRunning, !monitor.isPaused,
-              !isScanning,
-              !monitor.isBursting,
-              Defaults.monitoringEnabled else { return }
-        monitor.beginBurst(interval: Defaults.latencyTestInterval,
-                           duration: Defaults.latencyTestDuration)
-        log.info("severity turned \(sev, privacy: .public) — started 2s investigation burst")
-    }
+    // The investigation burst on the ok→bad edge is the monitor's own now
+    // (lib/monitor.sh, status.burst): it keeps its rolling state, fired
+    // rules and journal episode, which a restart from here discarded.
 
     private func handleNetworkEvent(_ event: NetworkEventWatcher.Event) {
         // CoreWLAN and NWPathMonitor are near-instant where the monitor

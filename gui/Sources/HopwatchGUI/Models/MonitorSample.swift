@@ -327,7 +327,15 @@ struct MonitorSample: Decodable, Sendable {
             /// The ping cell's value phrasing (the figure, "no reply",
             /// "TCP ok") — judged CLI-side, `""` meaning "render —".
             var value: String = ""
-            enum CodingKeys: String, CodingKey { case warn, detail, value }
+            /// LA-2's swing is on this leg (the Wi-Fi/router side), not the
+            /// internet's — see `swing_leg` in helpers/inference.py.
+            var jitterWarn: Bool = false
+            var jitterNote: String?
+            enum CodingKeys: String, CodingKey {
+                case warn, detail, value
+                case jitterWarn = "jitter_warn"
+                case jitterNote = "jitter_note"
+            }
         }
 
         struct InternetHop: Decodable, Sendable, Equatable {
@@ -352,7 +360,42 @@ struct MonitorSample: Decodable, Sendable {
         var text: String = ""
         var subtitle: String = ""
         var critical: Bool = false
-        enum CodingKeys: String, CodingKey { case text, subtitle, critical }
+        /// Stage 2 of the monitor's two-stage clearing: nothing is failing
+        /// now, but the link was unstable inside the stability window.
+        var recovering: Bool = false
+        enum CodingKeys: String, CodingKey { case text, subtitle, critical, recovering }
+    }
+
+    /// The monitor's own investigation / latency-test burst, run inside
+    /// the process (no restart). `nil` in `Status.burst` when none is
+    /// running; the GUI owns no timer for it.
+    struct Burst: Decodable, Sendable, Equatable {
+        var kind: String = "investigation"
+        var intervalS: Int = 0
+        /// ISO-8601 deadline; `remainingS` is the CLI's own countdown.
+        var until: String = ""
+        var remainingS: Int = 0
+        enum CodingKeys: String, CodingKey {
+            case kind, until
+            case intervalS = "interval_s"
+            case remainingS = "remaining_s"
+        }
+    }
+
+    /// Two-stage clearing (lib/stability.sh), with the CLI's sentences.
+    /// `state` is `stable`, `unstable` (a rule is firing or being held) or
+    /// `recovering` (cleared, but not yet quiet for `windowS`).
+    struct Stability: Decodable, Sendable, Equatable {
+        var state: String = "stable"
+        var windowS: Int?
+        var lastAgoS: Int?
+        var summary: String?
+        var isRecovering: Bool { state == "recovering" }
+        enum CodingKeys: String, CodingKey {
+            case state, summary
+            case windowS = "window_s"
+            case lastAgoS = "last_ago_s"
+        }
     }
 
     struct Status: Decodable, Sendable {
@@ -375,9 +418,11 @@ struct MonitorSample: Decodable, Sendable {
         /// and an alert must not fire on it.
         var paused: Bool = false
         var cadenceS: Int?
+        var burst: Burst?
+        var stability: Stability = .init()
 
         enum CodingKeys: String, CodingKey {
-            case severity, rules, measurement, degraded, paused
+            case severity, rules, measurement, degraded, paused, burst, stability
             case icmpFiltered = "icmp_filtered"
             case cadenceS = "cadence_s"
         }
@@ -403,6 +448,9 @@ struct MonitorSample: Decodable, Sendable {
         case "warn":     return .warning
         default:
             if status.degraded { return .warning }
+            // Cleared, but not yet quiet for the stability window: the dot
+            // must not read as an all-clear the link has not earned.
+            if status.stability.isRecovering { return .warning }
             return .healthy
         }
     }
@@ -599,6 +647,28 @@ extension MonitorSample.Status {
         degraded = c.lenient(.degraded, false)
         paused = c.lenient(.paused, false)
         cadenceS = c.lenient(.cadenceS)
+        burst = c.lenient(.burst)
+        stability = c.lenient(.stability, MonitorSample.Stability())
+    }
+}
+
+extension MonitorSample.Burst {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = c.lenient(.kind, "investigation")
+        intervalS = c.lenient(.intervalS, 0)
+        until = c.lenient(.until, "")
+        remainingS = c.lenient(.remainingS, 0)
+    }
+}
+
+extension MonitorSample.Stability {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = c.lenient(.state, "stable")
+        windowS = c.lenient(.windowS)
+        lastAgoS = c.lenient(.lastAgoS)
+        summary = c.lenient(.summary)
     }
 }
 
@@ -616,6 +686,9 @@ extension MonitorSample.Hops.WarnedHop {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         warn = c.lenient(.warn, false)
         detail = c.lenient(.detail, "")
+        value = c.lenient(.value, "")
+        jitterWarn = c.lenient(.jitterWarn, false)
+        jitterNote = c.lenient(.jitterNote)
     }
 }
 
@@ -624,6 +697,7 @@ extension MonitorSample.Hops.InternetHop {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         warn = c.lenient(.warn, false)
         detail = c.lenient(.detail, "")
+        value = c.lenient(.value, "")
         jitterWarn = c.lenient(.jitterWarn, false)
         jitterNote = c.lenient(.jitterNote)
     }
@@ -635,6 +709,7 @@ extension MonitorSample.Headline {
         text = c.lenient(.text, "")
         subtitle = c.lenient(.subtitle, "")
         critical = c.lenient(.critical, false)
+        recovering = c.lenient(.recovering, false)
     }
 }
 

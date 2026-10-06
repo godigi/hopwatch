@@ -655,6 +655,9 @@ struct DashboardLiveChartPanel: View {
     @Binding var selectedWindowMinutes: Int
     let isBursting: Bool
     var burstUntil: Date? = nil
+    /// The monitor's own burst interval (`status.burst.interval_s`); the
+    /// copy says "fast" while it is not known rather than guess a number.
+    var burstIntervalS: Int? = nil
     let onToggleBurst: () -> Void
 
     private var filteredSamples: [MonitorSample] {
@@ -714,11 +717,11 @@ struct DashboardLiveChartPanel: View {
                                 .fill(Theme.ColorToken.blue)
                                 .frame(width: 6, height: 6)
                             if let until = burstUntil {
-                                Text("Testing latency · 2s interval until \(until.formatted(date: .omitted, time: .standard))")
+                                Text("Testing latency · \(burstIntervalS.map { "\($0)s interval" } ?? "fast sampling") until \(until.formatted(date: .omitted, time: .standard))")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(Theme.ColorToken.blue)
                             } else {
-                                Text("Testing latency · sampling every \(Defaults.latencyTestInterval)s")
+                                Text("Testing latency · sampling \(burstIntervalS.map { "every \($0)s" } ?? "fast")")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(Theme.ColorToken.blue)
                             }
@@ -857,7 +860,7 @@ struct DashboardLiveChartPanel: View {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.mini)
-                        Text("Sampling fast cadence (every \(Defaults.latencyTestInterval)s)")
+                        Text("Sampling fast cadence\(burstIntervalS.map { " (every \($0)s)" } ?? "")")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Theme.ColorToken.blue)
                     }

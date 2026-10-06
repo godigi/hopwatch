@@ -94,6 +94,7 @@ private enum VerifyHarness {
         runNotificationManagerTests()
         runConnectionStabilityTests()
         runResolutionFeedbackTests()
+        runMonitorStabilityTests()
         runSnapshots()
         renderArrivalCards()
         print("")
@@ -209,6 +210,145 @@ private enum VerifyHarness {
         let rendered = renderImage(card.frame(width: 340).padding(4), size: NSSize(width: 348, height: 110))
         check(rendered != nil, "AlertStageCard with captive portal renders successfully")
         print("")
+    }
+
+
+    // MARK: - Monitor stability (burst, two-stage clearing, one period)
+
+    /// What the app renders of the CLI's stability work, and that it renders
+    /// it rather than deciding it: the burst and its deadline come from
+    /// `status.burst`, "recently unstable" from `status.stability` and the
+    /// `headline` block, and one unstable period is one Activity row.
+    private static func runMonitorStabilityTests() {
+        print("\nMonitor stability (status.burst / status.stability / periods)")
+        func decode(_ json: String) -> MonitorSample? {
+            try? JSONDecoder().decode(MonitorSample.self, from: Data(json.utf8))
+        }
+
+        // Hop ping values and the router's jitter note are decoded, not
+        // dropped: the lenient inits once skipped `value`, so both ping
+        // cards read "—" whatever the CLI sent.
+        let hops = decode("""
+        {"hops": {"router": {"warn": true, "detail": "±40 ms jitter", "value": "27 ms",
+                             "jitter_warn": true, "jitter_note": "Response times swing here"},
+                  "internet": {"warn": false, "detail": "", "value": "86 ms",
+                               "jitter_warn": false, "jitter_note": "Swing starts at the Wi-Fi/router leg"}}}
+        """)
+        equal(hops?.hops?.router.value, "27 ms", "hops.router.value decodes")
+        equal(hops?.hops?.internet.value, "86 ms", "hops.internet.value decodes")
+        equal(hops?.hops?.router.jitterWarn, true, "the router hop carries the jitter swing")
+        equal(hops?.hops?.router.jitterNote, "Response times swing here", "…with the CLI's own note")
+        equal(hops?.hops?.internet.jitterWarn, false, "the internet hop does not")
+
+        // status.burst / status.stability ride through; an old CLI without
+        // them decodes as no burst and a stable link.
+        let live = decode("""
+        {"status": {"severity": "ok", "measurement": "measured", "rules": [],
+          "burst": {"active": true, "kind": "investigation", "interval_s": 2,
+                    "until": "2099-01-01T00:00:00Z", "remaining_s": 41},
+          "stability": {"state": "recovering", "window_s": 300, "last_ago_s": 120,
+                        "summary": "Unstable 2 min ago — response times swung 3 times in the last 5 min"}}}
+        """)
+        equal(live?.status.burst?.intervalS, 2, "status.burst.interval_s decodes")
+        equal(live?.status.burst?.kind, "investigation", "status.burst.kind decodes")
+        equal(live?.status.stability.state, "recovering", "status.stability.state decodes")
+        equal(live?.status.stability.windowS, 300, "status.stability.window_s decodes")
+        let old = decode("{\"status\": {\"severity\": \"ok\", \"measurement\": \"measured\"}}")
+        check(old?.status.burst == nil, "a CLI without status.burst decodes as no burst")
+        equal(old?.status.stability.state, "stable", "a CLI without status.stability decodes as stable")
+
+        // Stage 2 must not read as an all-clear: severity is ok, the dot is not green.
+        let linkUp = "\"link\": {\"up\": true},"
+        let calm = decode("{\(linkUp) \"status\": {\"severity\": \"ok\", \"measurement\": \"measured\"}}")
+        let recovering = decode("{\(linkUp) \"status\": {\"severity\": \"ok\", \"measurement\": \"measured\", \"stability\": {\"state\": \"recovering\"}}}")
+        check(calm?.health == .healthy, "a stable ok sample is healthy")
+        check(recovering?.health == .warning, "a recovering ok sample is not green")
+
+        // The headline's recovering flag renders the degraded card verbatim.
+        let head = decode("""
+        {"headline": {"text": "Unstable 2 min ago", "subtitle": "Response times swung 3 times in the last 5 min",
+                      "critical": false, "recovering": true}}
+        """)
+        equal(head?.headline?.recovering, true, "headline.recovering decodes")
+        let stage = StageResolver.resolve(inputs(
+            severity: "ok", degradedExperience: SuitabilityEngine.degradedExperience(head)))
+        if case .degraded(let snap) = stage {
+            equal(snap.headline, "Unstable 2 min ago", "the recovering card says what happened, verbatim")
+        } else {
+            check(false, "a recovering link resolves to a degraded card, not .healthy")
+        }
+
+        // The burst the app shows is the sample's, not a timer of its own:
+        // a monitor with no sample has none, and one reporting it does.
+        let stream = MonitorStream()
+        check(!stream.isBursting, "a monitor with no sample is not bursting")
+        stream.adoptGallerySample(live ?? MonitorSample())
+        check(stream.isBursting, "a running monitor whose sample reports a burst is bursting")
+        equal(stream.burstIntervalS, 2, "…at the interval the CLI reported")
+        stream.adoptGallerySample(old ?? MonitorSample())
+        check(!stream.isBursting, "…and not once the sample says the burst ended")
+
+        // One unstable period is one row. Three flaps four minutes apart at
+        // most are joined by the CLI's 300 s window; a calm longer than it splits.
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        func ev(_ kind: String, _ offset: TimeInterval, _ rule: String = "LA-2",
+                _ summary: String = "Jittery connection") -> NetworkEvent {
+            NetworkEvent(date: t0.addingTimeInterval(offset), kind: kind, summary: summary,
+                         ruleID: rule, network: "mac:aa")
+        }
+        let flapping = [ev("rule-fired", 0), ev("rule-cleared", 20),
+                        ev("rule-fired", 120), ev("rule-cleared", 160),
+                        ev("rule-fired", 240), ev("rule-cleared", 250)]
+        let joined = ActivityEntry.fold(flapping, joinWindow: 300)
+        equal(joined.count, 1, "flaps inside the join window are ONE row")
+        equal(joined.first?.occurrences, 3, "…counting each spike")
+        equal(joined.first?.totalDuration, 70, "…summing the observed time")
+        equal(joined.first?.detail, "3 times over 4m 10s · 1m 10s total", "…and saying how long it went on")
+        let split = ActivityEntry.fold(flapping + [ev("rule-fired", 1_000), ev("rule-cleared", 1_030)],
+                                       joinWindow: 300)
+        equal(split.count, 2, "a calm longer than the window starts a new period")
+        let noWindow = ActivityEntry.fold(flapping)
+        equal(noWindow.count, 1, "without the CLI's window rows still group per day")
+
+        // Restarts and re-fires inside the window are one period too — the
+        // journal shape the restart-based burst left behind.
+        let restarted = ActivityEntry.fold([
+            ev("rule-fired", 0), NetworkEvent(date: t0.addingTimeInterval(8), kind: "monitor-started",
+                                              summary: "Monitoring started", ruleID: nil, network: "mac:aa"),
+            ev("rule-fired", 70)], joinWindow: 300)
+        equal(restarted.count, 1, "fire, restart, fire is one period")
+
+        // An open period whose rule is firing now was seen now.
+        let now = t0.addingTimeInterval(5)
+        let openNow = ActivityEntry.fold([ev("rule-fired", 0)], stillFiring: ["LA-2"], now: now)
+        equal(openNow.first?.latest, now, "a rule still firing reads as latest = now")
+        let openOld = ActivityEntry.fold([ev("rule-fired", 0)], now: now)
+        equal(openOld.first?.latest, t0, "an open rule the live sample no longer fires keeps its own date")
+
+        // The store keeps a re-fire seconds after the first: the second
+        // `rule-fired` of the same rule used to be dropped as a repeat.
+        // A scratch directory: EventStore() alone would load and rewrite
+        // the user's real events.json.
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hopwatch-verify-\(UUID().uuidString)", isDirectory: true)
+        let store = EventStore(directory: scratch)
+        store.record(kind: "rule-fired", summary: "Jittery connection", ruleID: "LA-2",
+                     network: "mac:aa", date: t0)
+        store.record(kind: "rule-cleared", summary: "Resolved: Jittery connection", ruleID: "LA-2",
+                     network: "mac:aa", date: t0.addingTimeInterval(20))
+        store.record(kind: "rule-fired", summary: "Jittery connection", ruleID: "LA-2",
+                     network: "mac:aa", date: t0.addingTimeInterval(60))
+        // (The scratch store may start with migrated legacy events; count only ours.)
+        func ours(_ kind: String? = nil) -> Int {
+            store.events.filter { $0.ruleID == "LA-2" && $0.network == "mac:aa"
+                && $0.date >= t0 && (kind == nil || $0.kind == kind) }.count
+        }
+        equal(ours(), 3, "a re-fire of a rule inside 10 minutes is recorded")
+        store.record(kind: "alert", summary: "Connection degraded", ruleID: "LA-2",
+                     network: "mac:aa", date: t0.addingTimeInterval(70))
+        store.record(kind: "alert", summary: "Connection degraded", ruleID: "LA-2",
+                     network: "mac:aa", date: t0.addingTimeInterval(80))
+        equal(ours("alert"), 1, "repeated alerts are still coalesced")
     }
 
     // MARK: - Activity fold

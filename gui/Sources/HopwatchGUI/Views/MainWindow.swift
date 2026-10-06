@@ -288,7 +288,7 @@ struct MainWindow: View {
 
     private var monitoringLabel: String {
         if coordinator.monitor.isBursting {
-            return "Latency test · every \(appSettings.latencyTestInterval)s"
+            return "Latency test" + (coordinator.monitor.burstIntervalS.map { " · every \($0)s" } ?? "")
         }
         if let reason = coordinator.monitor.pauseReason { return "Paused — \(reason)" }
         guard appSettings.monitoringEnabled else { return "Monitoring is off" }

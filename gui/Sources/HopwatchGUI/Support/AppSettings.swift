@@ -112,13 +112,6 @@ final class AppSettings {
         }
     }
 
-    /// Pass-through, not a preference: the on-demand latency test's own
-    /// sampling window. See `Defaults.latencyTestInterval` for why it
-    /// isn't persisted. Exposed here too so a view never has to reach past
-    /// `AppSettings` back into `Defaults` for anything.
-    let latencyTestInterval = Defaults.latencyTestInterval
-    let latencyTestDuration = Defaults.latencyTestDuration
-
     // Every property above must be hydrated here and must NOT carry an
     // inline default. The compiler's definite-initialization check is the
     // only thing that catches "added a preference, forgot to hydrate it" —
