@@ -623,8 +623,11 @@ it would accumulate forever.
   at all, and absent from a CLI older than the field — consumers fall
   back to `network.id` there and simply re-derive grouping themselves.
 - **`gap_s`** is the seconds lost between this sample and the previous
-  one, when that exceeded the scheduled cadence by
-  `THRESH_MON_GAP_FACTOR`; `null` on an ordinary cycle. `null` rather
+  one, when that exceeded the larger of the scheduled cadence times
+  `THRESH_MON_GAP_FACTOR` and the floor `THRESH_MON_GAP_MIN_S` (60 s: a
+  cycle's own probes can take most of a minute however short the cadence,
+  and the time is measured start to start); `null` on an ordinary cycle.
+  The pause marker is never a gap. `null` rather
   than `0`, because `0` would mean "no time passed" — a measurement —
   where this means "no discontinuity".
 

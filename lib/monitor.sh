@@ -1030,7 +1030,11 @@ _mon_gap_seconds() {
   local elapsed="${1:-}" cadence="${2:-}"
   case "$elapsed" in ''|*[!0-9]*) return 0 ;; esac
   case "$cadence" in ''|*[!0-9]*|0) return 0 ;; esac
-  [ "$elapsed" -gt $((cadence * THRESH_MON_GAP_FACTOR)) ] || return 0
+  local tolerance=$((cadence * THRESH_MON_GAP_FACTOR))
+  # A short cadence must not shrink the tolerance below a legitimate cycle:
+  # the probes take as long at a 2 s cadence as at a 10 s one.
+  [ "$tolerance" -ge "$THRESH_MON_GAP_MIN_S" ] || tolerance="$THRESH_MON_GAP_MIN_S"
+  [ "$elapsed" -gt "$tolerance" ] || return 0
   printf '%s' "$elapsed"
 }
 
@@ -1101,6 +1105,10 @@ monitor_run() {
       if [ "$announced_pause" -eq 0 ]; then
         announced_pause=1
         MON_REFRESHED=""
+        # Nothing was measured, so there is no gap to report. Left alone
+        # this re-emitted the previous cycle's gap_s, already reported once
+        # by the cycle that saw it.
+        MON_GAP_S=""
         MON_SEQ=$((MON_SEQ + 1))
         _mon_emit "$MONITOR_FAST_INTERVAL" || break
         _mon_snapshot_prev
@@ -1116,8 +1124,11 @@ monitor_run() {
     now="$EPOCHSECONDS"
     # How long since the previous cycle began, against what that cycle was
     # scheduled for. Computed here rather than after the probes so it
-    # measures the gap the consumer experienced — the silence between two
-    # samples — not the time this cycle's own work took.
+    # excludes the time *this* cycle's own work is about to take. It does
+    # include the previous cycle's work (it is start-to-start), which is why
+    # _mon_gap_seconds has a floor rather than a pure multiple of the
+    # cadence: measuring from the end of the previous cycle instead would
+    # miss a sleep that began mid-probe.
     MON_GAP_S=""
     if [ -n "$MON_PREV_CYCLE_TS" ] && [ -n "$MON_PREV_CADENCE" ]; then
       MON_GAP_S="$(_mon_gap_seconds \

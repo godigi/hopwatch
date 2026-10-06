@@ -82,7 +82,7 @@ enum MonitorSeries {
 
             if let previous, let prevTime = previousTime {
                 // If the monitor CLI explicitly emitted a discontinuity via
-                // gap_s (sleep/stall measured monotonically by lib/monitor.sh),
+                // gap_s (sleep/stall measured on the wall clock by lib/monitor.sh),
                 // use that directly. Otherwise fall back to measuring wall clock
                 // against the cadence tolerance (two cadences, accounting for probe
                 // time on healthy samples).
