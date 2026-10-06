@@ -78,6 +78,7 @@ private enum VerifyHarness {
         runPhaseWeightsTests()
         runActivityFoldTests()
         runSuitabilityAndFixFieldTests()
+        runRefusedVerdictTests()
         runSuitabilityPanelTests()
         runReportProvenanceTests()
         runTrendsClampTests()
@@ -976,7 +977,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.11.0",
+                version: "1.12.0",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -1889,6 +1890,101 @@ private enum VerifyHarness {
         row.unmeasuredReason = ""
         check(SuitabilityPanel.detail(row) == nil,
               "an empty reason string is treated as absent, not printed blank")
+    }
+
+    // MARK: - Refused-connect verdict (TCP-2)
+
+    /// The app used to headline "Web traffic blocked (port 443)" from one
+    /// sample's `tcp.anyOk == false` — both of that cycle's connects failing,
+    /// which at a ~2-in-3 refusal rate is ~40% of samples while browsing
+    /// mostly works. The verdict is now the CLI's `tcp.refused` (confirmed
+    /// TCP-2 state + sentence), rendered verbatim.
+    private static func runRefusedVerdictTests() {
+        print("\nRefused-connect verdict (tcp.refused)")
+
+        func sample(_ json: String) -> MonitorSample? {
+            guard let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(MonitorSample.self, from: data)
+        }
+        let withVerdict = sample("""
+        {"tcp": {"any_ok": false, "targets": [],
+                 "refused": {"pct": 67, "attempts": 20, "state": "warn",
+                             "summary": "Most new connections are being refused"}}}
+        """)
+        equal(withVerdict?.tcp.refused.state, "warn", "tcp.refused.state decodes")
+        equal(withVerdict?.tcp.refused.summary,
+              "Most new connections are being refused", "tcp.refused.summary decodes")
+        let oldCLI = sample("{\"tcp\": {\"any_ok\": true, \"targets\": []}}")
+        equal(oldCLI?.tcp.refused, MonitorSample.TCP.Refused(),
+              "a CLI without tcp.refused decodes as all-nil, not a failure")
+
+        // Phase 3: the sample's own presentation blocks — the GUI renders
+        // them and re-derives nothing. A rows/headline/hops fixture plus
+        // the refusal state must decode into verdicts, labels and metric
+        // lines verbatim, and drive the render-only adapter.
+        let inferenceSample = sample("""
+        {"suitability": [
+           {"activity": "gaming", "label": "Unplayable", "verdict": "broken",
+            "metric": "66 ms · 67% loss", "because": ["TCP-2"],
+            "unmeasured_reason": null,
+            "detail": "Multiplayer games disconnect or rubberband constantly."},
+           {"activity": "browsing", "label": "Slow", "verdict": "degraded",
+            "metric": "12 ms DNS", "because": [], "unmeasured_reason": null,
+            "detail": "Pages load slower than usual."}],
+         "hops": {
+           "mac": {"good": true, "laggy": false, "detail": "Excellent"},
+           "router": {"warn": false, "detail": ""},
+           "internet": {"warn": true, "detail": "60% connect success",
+                        "jitter_warn": false, "jitter_note": "Stable response times"}},
+         "headline": {"text": "Unusable for Gaming",
+                      "subtitle": "Gaming: 66 ms, 67% loss",
+                      "critical": true}}
+        """)
+        check(inferenceSample != nil, "the presented sample decodes")
+        let items = SuitabilityEngine.items(sample: inferenceSample, snapshot: nil)
+        let gaming = items.first { $0.id == "gaming" }
+        equal(gaming?.verdict, .broken, "the CLI's verdict rides through")
+        equal(gaming?.status, "Unplayable", "the CLI's label rides through verbatim")
+        equal(gaming?.metric, "66 ms · 67% loss", "the CLI's metric line rides through verbatim")
+        equal(gaming?.helpText,
+              "Multiplayer games disconnect or rubberband constantly.",
+              "the CLI's row detail is the item's help text")
+        let browsing = items.first { $0.id == "browsing" }
+        equal(browsing?.verdict, .degraded, "a degraded row rides through")
+        // What the CLI never judged is rendered, not guessed: (no rows at all)
+        let empty = SuitabilityEngine.items(sample: nil, snapshot: nil)
+        check(empty.count == 5, "an absent block renders five neutral rows")
+        check(empty.allSatisfy { $0.verdict == .unmeasured },
+              "...every one of them unmeasured, never a guessed verdict")
+
+        let route = RouteWarningResolver.resolve(inferenceSample)
+        equal(route.internetWarn, true, "hop warns ride through")
+        equal(route.internetDetail, "60% connect success",
+              "the CLI's hop reason rides through verbatim")
+        equal(route.culpritHop, "internet", "culprit order renders mac→router→internet")
+        equal(route.macDetail, "Excellent", "the Mac hop's radio word rides through")
+        equal(RouteWarningResolver.resolve(nil).culpritHop, nil,
+              "a sample without the hops block renders all-clear-empty, no invented verdict")
+
+        let head = SuitabilityEngine.degradedExperience(inferenceSample)
+        equal(head?.headline, "Unusable for Gaming",
+              "the headline block is the hero's copy, verbatim")
+        equal(head?.isCritical, true, "critical rides through")
+        check(SuitabilityEngine.degradedExperience(nil) == nil,
+              "no block, no degraded state")
+
+        // tcp.refused remains the TCP-2 instrument; the rules block carries
+        // the verdict. A warn-criticality alert drives the same isCritical
+        // path the pill and hero read.
+        var alertSnap = StageResolver.AlertSnapshot(
+            title: "Connections intermittently refused",
+            body: "Most new connections are being refused", raisedAt: Date(),
+            rules: ["TCP-2"], severityRank: 2, id: "tcp-refused")
+        check(!alertSnap.isCritical, "a warn rank reads non-critical")
+        alertSnap = StageResolver.AlertSnapshot(
+            title: "Down", body: "Unreachable", raisedAt: Date(),
+            rules: ["P2"], severityRank: 3, id: "p2")
+        check(alertSnap.isCritical, "a critical rank reads critical")
     }
 
     private static func runSuitabilityAndFixFieldTests() {

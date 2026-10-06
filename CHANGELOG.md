@@ -6,6 +6,38 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-06
+
+### Changes
+
+- feat: monitor stream emits per-sample suitability, hops and headline
+
+## [1.11.1] - 2026-10-05
+
+### Changes
+
+- fix: the app no longer headlines "Web traffic blocked (port 443)". That
+  verdict was composed in Swift from one monitor sample's `tcp.any_ok` —
+  both of a cycle's two test connections failing. Measured on a live link
+  refusing about two in three new connections (181 of 273 over 15 minutes,
+  each in ~25 ms, with 0 of 182 pings lost), that is roughly 40% of
+  samples, so the headline flapped between "blocked" and fine while
+  browsing mostly worked. The monitor now emits `tcp.refused` (`pct`,
+  `attempts`, `state`, `summary`); the sentence is written by the CLI only
+  once TCP-2 is confirmed, and the GUI renders it verbatim.
+- fix: TCP-2 warns at 10% of new connections refused, down from 50%. At
+  50% a link refusing 45% of connections read as "ok".
+- fix: TCP-2's sentence uses three steps ("Some", "About half of", "Most")
+  instead of nine spoken fractions, which rewrote the headline on nearly
+  every cycle. The exact figure stays in `tcp.refused.pct`.
+- fix: TCP-2 no longer asserts the router is at fault. The refusals come
+  from near the user — the router or the provider's equipment — and which
+  one was not confirmed (on the measured link an ISP hop answered
+  traceroute with "administratively prohibited"). Restarting the router is
+  now framed as the test that tells the two apart.
+- docs: TCP-2 states that the same fault can drop new UDP traffic (calls,
+  games, direct DNS); the rule itself still measures TCP only.
+
 ## [1.11.0] - 2026-10-05
 
 ### Changes
@@ -4055,7 +4087,9 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
+[1.11.1]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/godigi/hopwatch/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/godigi/hopwatch/compare/v1.10.0...v1.10.1
