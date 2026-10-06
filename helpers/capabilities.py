@@ -67,6 +67,9 @@ FEATURES = [
     "version",
     "progress",
     "monitor",
+    # SIGURG/SIGWINCH begin and end a burst inside the running monitor,
+    # and status.burst / status.stability appear in its samples.
+    "monitor-burst",
     "history",
     "show",
     "redact",

@@ -78,6 +78,7 @@ REQUIRED_THRESHOLDS: tuple[str, ...] = (
     "THRESH_WIFI_RSSI_EXCELLENT_DBM",
     "THRESH_WIFI_RSSI_G1_DBM",
     "THRESH_WIFI_RSSI_WEAK_DBM",
+    "THRESH_MON_UNSTABLE_WINDOW_S",
 )
 
 
@@ -121,6 +122,7 @@ def _resolve_thresholds():
     _T_new.rssi_excellent = _threshold("THRESH_WIFI_RSSI_EXCELLENT_DBM")
     _T_new.rssi_good = _threshold("THRESH_WIFI_RSSI_G1_DBM")
     _T_new.rssi_weak = _threshold("THRESH_WIFI_RSSI_WEAK_DBM")
+    _T_new.unstable_window = _threshold("THRESH_MON_UNSTABLE_WINDOW_S")
     _T = _T_new
 
 
@@ -385,6 +387,147 @@ def _suitability(fired, m) -> list:
     return rows
 
 
+# ── Stability: stage 2 of the monitor's two-stage clearing ───────────────
+# lib/stability.sh decides WHEN: a rule that has cleared is "recovering"
+# until its condition has been absent for the stability window, and the
+# sample carries which rules, how long ago they last held and how many
+# separate times they came back inside the window. This block decides
+# what that SAYS, because every sentence a user reads is authored CLI-side.
+#
+# The user's question while recovering is "is it safe to start a video
+# call?", and thirty quiet seconds must not answer yes: the activities the
+# recovering rule's catalog impacts name stay degraded, with the
+# provenance in the row — never broken (nothing is failing now), never
+# good (the link has not earned it).
+
+# One noun phrase per rule, written to follow "…in the last N min": the
+# rule's own failure as a user would describe it, with {times} filled by
+# the spike count. Rules without an entry fall back to the catalog title.
+RECENT_PHRASES: dict[str, str] = {
+    "LA-2": "response times swung {times}",
+    "LA-1": "response times ran slow {times}",
+    "L1": "heavy packet loss hit {times}",
+    "L2": "packet loss hit {times}",
+    "G1": "the router dropped packets {times}",
+    "G2": "the router dropped packets {times}",
+    "G3": "the router dropped packets {times}",
+    "P1": "the internet dropped out {times}",
+    "P2": "the internet dropped out {times}",
+    "TCP-2": "connections were refused {times}",
+    "D1": "name lookups failed {times}",
+    "N1": "the connection dropped {times}",
+    "CP-1": "a sign-in page blocked traffic {times}",
+}
+
+# LA-2's catalog title says "internet"; when the swing starts at the
+# Wi-Fi/router leg (see swing_leg) the rule-fired summary says so.
+LA2_ROUTER_TITLE = "Jittery Wi-Fi/router response"
+
+# The Wi-Fi/router variant of LA-2's phrase (see swing_leg).
+RECENT_PHRASES_ROUTER_LEG: dict[str, str] = {
+    "LA-2": "Wi-Fi response times swung {times}",
+}
+
+
+def _times(n: int) -> str:
+    return {1: "once", 2: "twice"}.get(n, f"{n} times")
+
+
+def _minutes(seconds) -> int:
+    return max(1, int(round(seconds / 60.0)))
+
+
+def _ago(seconds) -> str:
+    """How long ago, in the units a person says it in."""
+    if seconds < 60:
+        return "under a minute ago"
+    return f"{_minutes(seconds)} min ago"
+
+
+def _window_phrase(window_s) -> str:
+    return f"the last {_minutes(window_s)} min"
+
+
+def _stability_rule(entry: dict, la2_leg) -> dict:
+    """One stability-rule entry plus the sentence that describes it."""
+    rule = entry["rule"]
+    table = (RECENT_PHRASES_ROUTER_LEG if (rule == "LA-2" and la2_leg == "router")
+             else RECENT_PHRASES)
+    template = table.get(rule) or RECENT_PHRASES.get(rule)
+    n = max(1, int(entry.get("spikes") or 1))
+    if template:
+        phrase = template.format(times=_times(n))
+    else:
+        phrase = f"{_rule_title(rule)[:1].lower()}{_rule_title(rule)[1:]} ({_times(n)})"
+    sentence = f"{phrase[:1].upper()}{phrase[1:]} in {_window_phrase(_T.unstable_window)}"
+    return dict(entry, summary=sentence)
+
+
+def _stability(state) -> dict:
+    """The status.stability block. `state` carries the monitor's own
+    stage bookkeeping: {"state", "rules": [{rule, severity, active,
+    last_ago_s, spikes}]}; absent (an older monitor, a test) means a
+    stable link with nothing to report."""
+    raw = state.get("stability") or {}
+    st = raw.get("state") or "stable"
+    la2_leg = state.get("la2_leg")
+    rules = [_stability_rule(e, la2_leg) for e in (raw.get("rules") or [])]
+    out = {
+        "state": st,
+        "window_s": int(_T.unstable_window),
+        "rules": rules,
+        "last_ago_s": min((r["last_ago_s"] for r in rules), default=None),
+        "summary": None,
+    }
+    if st != "stable" and rules:
+        # Most recent first reads naturally: "Unstable 40 s ago — …".
+        ordered = sorted(rules, key=lambda r: r["last_ago_s"])
+        body = "; ".join(r["summary"][:1].lower() + r["summary"][1:]
+                         if i else r["summary"]
+                         for i, r in enumerate(ordered))
+        if st == "unstable":
+            out["summary"] = f"Unstable now — {body[:1].lower()}{body[1:]}"
+        else:
+            out["summary"] = (f"Unstable {_ago(out['last_ago_s'])} — "
+                              f"{body[:1].lower()}{body[1:]}")
+    return out
+
+
+def _apply_recent(rows, stab) -> None:
+    """Hold the activities a recovering rule impacts at "degraded", with
+    the provenance in the row. Only lifts a measured "good": a verdict the
+    live rules already made (degraded/broken) is more current than this,
+    and an unmeasured row has no verdict to hold."""
+    if stab["state"] != "recovering":
+        return
+    for activity_row in rows:
+        activity = activity_row["activity"]
+        if activity_row["verdict"] != "good":
+            continue
+        touched = []
+        for r in stab["rules"]:
+            if r.get("active"):
+                continue
+            impacts = IMPACTS_BY_RULE.get(r["rule"])
+            if isinstance(impacts, dict) and activity in impacts:
+                touched.append(r)
+        if not touched:
+            continue
+        newest = min(touched, key=lambda r: r["last_ago_s"])
+        provenance = f"Unstable {_ago(newest['last_ago_s'])}"
+        activity_row.update({
+            "label": LABELS_BY_LEVEL[(activity, "degraded")],
+            "verdict": "degraded",
+            "metric": provenance,
+            "because": [r["rule"] for r in touched],
+            "unmeasured_reason": None,
+            "detail": (f"{provenance} — {newest['summary'][:1].lower()}"
+                       f"{newest['summary'][1:]}. Not yet steady for "
+                       f"{_minutes(_T.unstable_window)} min."),
+            "recent": True,
+        })
+
+
 # ── Hops ──────────────────────────────────────────────────────────────────
 # Three hops, each a state and a one-sentence reason. The cross-checks are
 # the pair RouteWarningResolver.swift used to carry as inline literals; the
@@ -415,7 +558,30 @@ def _router_hop(m) -> dict:
 
     router = _router_warn(m, fired, gw_rtt, gw_jit, inet_rtt, inet_jit)
     hop.update(router)
+    # The ping cell's sub-verdict, for the router too: the swing is HERE
+    # when LA-2 was attributed to this leg. Otherwise the router leg says
+    # nothing about stability (it has no jitter cutoff of its own).
+    leg_here = swing_leg(m) == "router"
+    hop["jitter_warn"] = leg_here
+    hop["jitter_note"] = "Response times swing here" if leg_here else None
     return hop
+
+
+def swing_leg(m):
+    """Which leg carries a firing LA-2 swing: "router" (the Wi-Fi/gateway
+    leg), "internet", or None when LA-2 is not firing.
+
+    Decided by lib/monitor.sh when the rule's own condition last held —
+    from gateway jitter or gateway RTT in the SAME sample against
+    THRESH_LATENCY_JITTER_WARN_MS / THRESH_GW_RTT_ELEVATED_MS — and carried
+    with the rule, so a held rule keeps the attribution of the cycle that
+    earned it instead of flipping with each calm sample. The live case it
+    exists for: gateway RTT 21–58 ms against a usual 6 (Wi-Fi at −75 dBm)
+    while the hop card blamed the internet.
+    """
+    if "LA-2" not in (m.get("rules") or []):
+        return None
+    return "router" if m.get("la2_leg") == "router" else "internet"
 
 
 def _router_warn(m, fired, gw_rtt, gw_jit, inet_rtt, inet_jit) -> dict:
@@ -424,6 +590,13 @@ def _router_warn(m, fired, gw_rtt, gw_jit, inet_rtt, inet_jit) -> dict:
     if rule_warns:
         return {"warn": True,
                 "detail": ", ".join(_rule_title(r) for r in rule_warns)}
+
+    # LA-2's swing is on the gateway leg: the router hop carries it.
+    if swing_leg(m) == "router":
+        detail = (f"±{gw_jit:.0f} ms jitter" if gw_jit is not None
+                  else f"{gw_rtt:.0f} ms latency to router" if gw_rtt is not None
+                  else "Response times swing here")
+        return {"warn": True, "detail": detail}
 
     # A router that answers slower than the whole round trip to the
     # internet is CPU reply delay, not link latency — so the claim needs
@@ -444,6 +617,11 @@ def _internet_hop(m) -> dict:
     rule_warns = [rid for rid in fired
                   if _rule_category(rid) in ("internet", "dns")
                   and rid != "ICMP-1"]
+    # A swing that starts at the Wi-Fi/router leg is not the internet's:
+    # LA-2 is blamed on the router hop instead (see swing_leg).
+    leg = swing_leg(m)
+    if leg == "router":
+        rule_warns = [rid for rid in rule_warns if rid != "LA-2"]
     link_up = m.get("link_up", True)
     measured = _measured_families(m)
     loss = _num(m.get("inet_loss"))
@@ -466,12 +644,12 @@ def _internet_hop(m) -> dict:
 
     if not link_up:
         hop.update({"warn": True, "detail": "No internet"})
-        return _with_jitter_verdict(hop, jit)
+        return _with_jitter_verdict(hop, jit, leg)
 
     if not rule_warns and m.get("icmp_filtered"):
         # TCP-1 holds: pings are being filtered, connections are fine.
         hop.update({"warn": False, "detail": "Ping blocked · TCP ok"})
-        return _with_jitter_verdict(hop, jit)
+        return _with_jitter_verdict(hop, jit, leg)
 
     if rule_warns:
         # One figure-phrase per rule where a rule maps one-to-one onto a
@@ -499,11 +677,11 @@ def _internet_hop(m) -> dict:
             else:
                 phrases.append(_rule_title(rid))
         hop.update({"warn": True, "detail": " · ".join(phrases)})
-        return _with_jitter_verdict(hop, jit)
+        return _with_jitter_verdict(hop, jit, leg)
 
     if "loss" not in measured and "web" not in measured:
         hop.update({"warn": False, "detail": "Not measured yet"})
-        return _with_jitter_verdict(hop, jit)
+        return _with_jitter_verdict(hop, jit, leg)
 
     detail = []
     if loss is not None:
@@ -511,10 +689,10 @@ def _internet_hop(m) -> dict:
     elif rtt is not None:
         detail.append(_fmt_ms(rtt))
     hop["detail"] = _join(*detail)
-    return _with_jitter_verdict(hop, jit)
+    return _with_jitter_verdict(hop, jit, leg)
 
 
-def _with_jitter_verdict(hop: dict, jit) -> dict:
+def _with_jitter_verdict(hop: dict, jit, leg=None) -> dict:
     """The jitter sub-verdict the ping cell renders: stability judged
     against the shared THRESH_LATENCY_JITTER_WARN_MS — the same threshold
     LA-2 fires on — with the phrase it shows next to the cell. Unmeasured
@@ -522,6 +700,12 @@ def _with_jitter_verdict(hop: dict, jit) -> dict:
     if jit is None:
         hop["jitter_warn"] = False
         hop["jitter_note"] = None
+    elif leg == "router":
+        # The measured swing is real, but it starts at the gateway leg:
+        # saying "uneven" next to the internet cell would blame the wrong
+        # hop.
+        hop["jitter_warn"] = False
+        hop["jitter_note"] = "Swing starts at the Wi-Fi/router leg"
     else:
         jitter_warn = jit >= _T.jitter_warn
         hop["jitter_warn"] = jitter_warn
@@ -582,12 +766,23 @@ def _mac_hop(m) -> dict:
 GRID_ACTIVITIES: tuple[str, ...] = ("calls", "gaming", "streaming", "browsing")
 
 
-def _headline(rows) -> dict | None:
+def _headline(rows, stab=None) -> dict | None:
     by_activity = {r["activity"]: r for r in rows}
     broken = [a for a in GRID_ACTIVITIES
               if by_activity.get(a, {}).get("verdict") == "broken"]
     degraded = [a for a in GRID_ACTIVITIES
                 if by_activity.get(a, {}).get("verdict") == "degraded"]
+    if stab and stab["state"] == "recovering" and stab["rules"]:
+        # Stage 2: nothing is failing now, and the hero must not say
+        # everything is fine. What happened and how long ago, in the CLI's
+        # words.
+        ordered = sorted(stab["rules"], key=lambda r: r["last_ago_s"])
+        return {
+            "text": f"Unstable {_ago(ordered[0]['last_ago_s'])}",
+            "subtitle": "; ".join(r["summary"] for r in ordered),
+            "critical": False,
+            "recovering": True,
+        }
     if not broken and not degraded:
         return None
 
@@ -624,12 +819,15 @@ def build(state: dict) -> dict:
     if _T is None:
         _resolve_thresholds()
     rows = _suitability(state.get("rules") or [], state)
+    stab = _stability(state)
+    _apply_recent(rows, stab)
     return {
+        "stability": stab,
         "suitability": rows,
         "hops": {
             "mac": _mac_hop(state),
             "router": _router_hop(state),
             "internet": _internet_hop(state),
         },
-        "headline": _headline(rows),
+        "headline": _headline(rows, stab),
     }

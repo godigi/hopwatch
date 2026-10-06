@@ -27,6 +27,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+from datetime import datetime, timezone
 
 # The block that turns rules and figures into per-activity, per-hop and
 # headline judgements. Loaded lazily inside main(): the module resolves
@@ -175,6 +177,42 @@ def build_tcp() -> list[dict]:
     return out
 
 
+def _stability_state() -> dict:
+    """lib/stability.sh's stage bookkeeping, decoded from the environment:
+    {"state": stable|unstable|recovering, "rules": [{rule, severity,
+    active, last_ago_s, spikes}]}. Sentences are inference.py's job."""
+    rules = []
+    for token in (_env("STABILITY_RULES") or "").split():
+        parts = token.split(":")
+        if len(parts) != 5:
+            continue
+        try:
+            rules.append({"rule": parts[0], "severity": parts[1],
+                          "active": parts[2] == "1",
+                          "last_ago_s": int(parts[3]),
+                          "spikes": int(parts[4])})
+        except ValueError:
+            continue
+    return {"state": _env("STABILITY_STATE") or "stable", "rules": rules}
+
+
+def _burst_block() -> dict | None:
+    """status.burst — the investigation/latency-test burst the monitor is
+    running inside this process, or null. The consumer renders "testing
+    latency, 2 s until …" from this and owns no timer of its own."""
+    until = _i("BURST_UNTIL")
+    if not until:
+        return None
+    return {
+        "active": True,
+        "kind": _env("BURST_KIND") or "investigation",
+        "interval_s": _i("BURST_INTERVAL_S"),
+        "until": datetime.fromtimestamp(until, timezone.utc)
+                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "remaining_s": max(0, until - int(time.time())),
+    }
+
+
 def _changes() -> list[dict]:
     """Field-level diff against the previous sample (NETDIAG_MON_PREV_*).
 
@@ -251,6 +289,9 @@ def _changes() -> list[dict]:
     rules_prev = set((_env("PREV_RULES") or "").split())
     for rid in sorted(rules_now - rules_prev):
         title = _get_rule_title(rid)
+        if rid == "LA-2" and _env("LA2_LEG") == "router" and inference is not None:
+            # The same rule, said where the swing starts.
+            title = inference.LA2_ROUTER_TITLE
         out.append({"id": "rule-fired", "field": "status.rules",
                     "from": None, "to": rid,
                     "summary": title if title else f"Issue {rid} detected"})
@@ -562,6 +603,18 @@ def main() -> None:
             # consumer must not plot it or alert on it.
             "paused": os.environ.get("NETDIAG_MON_PAUSED") == "1",
             "cadence_s": _i("CADENCE_S"),
+            # The burst this process is running, or null (see
+            # _burst_block). Owned here, not by the consumer: a restart
+            # to change cadence discarded the rolling state the warning
+            # it was investigating lived in.
+            "burst": _burst_block(),
+            # Two-stage clearing (lib/stability.sh). `severity` and
+            # `rules` are the HELD view; this says whether the link is
+            # stable, unstable now, or recovering from a rule that has
+            # cleared but has not yet been quiet for the stability window.
+            # Overwritten with the CLI's sentences when inference runs.
+            "stability": dict(_stability_state(), window_s=None,
+                              last_ago_s=None, summary=None),
         },
     }
 
@@ -602,6 +655,8 @@ def main() -> None:
             "web_ok": _tri("WEB_OK"),
             "web_fail_kind": _env("WEB_FAIL_KIND"),
             "web_succ_pct": _f("WEB_SUCC_PCT"),
+            "stability": _stability_state(),
+            "la2_leg": _env("LA2_LEG"),
             "vpn_active": sample["vpn"]["active"],
             "vpn_name": _env("VPN_NAME"),
             "icmp_filtered": sample["status"]["icmp_filtered"],
@@ -620,6 +675,7 @@ def main() -> None:
             print(f"monitor_sample.py: inference failed ({exc}) — omitting "
                   "suitability/hops/headline", file=sys.stderr)
         else:
+            sample["status"]["stability"] = blocks["stability"]
             sample["suitability"] = blocks["suitability"]
             sample["hops"] = blocks["hops"]
             sample["headline"] = blocks["headline"]

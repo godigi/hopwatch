@@ -247,6 +247,17 @@ THRESH_LATENCY_JITTER_WARN_MS=30
 THRESH_INTERNET_LATENCY_WARN_MS=150
 THRESH_INTERNET_LATENCY_CRIT_MS=400
 
+# LA-2's attribution, not a verdict: when the jitter rule fires, which leg
+# carries the swing? The internet probe's round trip crosses the gateway,
+# so a swinging Wi-Fi hop shows up as swinging internet jitter and the
+# hop card used to blame the internet. The swing is attributed to the
+# Wi-Fi/router leg when, in the same sample, the gateway's own jitter
+# reaches THRESH_LATENCY_JITTER_WARN_MS or its RTT reaches this. 15 ms is
+# well above a healthy Wi-Fi gateway (2–6 ms, 6 ms measured on the live
+# network) and below THRESH_GW_RTT_WARN_MS, which says the router itself
+# is slow; the live fault ran 21–58 ms at −75 dBm.
+THRESH_GW_RTT_ELEVATED_MS=15
+
 # ── IPv6 ─────────────────────────────────────────────────────────────────
 # V6-1 — ping6 loss above this counts as broken IPv6 (given IPv4 works).
 THRESH_IPV6_LOSS_PCT=20
@@ -415,6 +426,41 @@ THRESH_WIFI_EVENTS_STORED=50
 # before it calls anything a gap, which no ordinary slow cycle reaches
 # and every sleep/wake exceeds by orders of magnitude.
 THRESH_MON_GAP_FACTOR=3
+
+# The gap detector's floor, in seconds. THRESH_MON_GAP_FACTOR × cadence is
+# right for a 10 s cadence and wrong for the 2 s investigation burst: 3 × 2
+# = 6 s, shorter than an ordinary cycle's own probe time (the live journal
+# showed a `gap` on most cycles — 158 in six hours — each "Not observed for
+# 8s"). A gap has to mean the monitor genuinely was not observing, so the
+# tolerance is the larger of the factored cadence and this floor, which is
+# comfortably above the slowest ordinary cycle (probes are capped at 6–8 s
+# each) and far below any sleep/wake.
+THRESH_MON_GAP_FLOOR_S=30
+
+# ── Monitor: two-stage clearing (lib/stability.sh) ───────────────────────
+# Stage 1 — "still happening". A fired warn/critical rule stays fired until
+# its own condition has been absent this long. Wall-clock seconds rather
+# than cycles so it is correct at every cadence (10 s, the 5 s degraded
+# tier, the 2 s burst). Measured: LA-2 fired in three episodes of 1, 3 and 1
+# samples inside 9.5 minutes, each cleared by the first clean cycle.
+THRESH_MON_CLEAR_HOLD_S=30
+
+# Stage 2 — "recently unstable". After a rule clears, the link is
+# "recovering" until its condition has been absent this long (measured from
+# the last cycle it held, so it includes the stage-1 hold). Five minutes is
+# also the join distance for activity: episodes of one rule on one network
+# separated by less than this are ONE unstable period (helpers/events.py
+# reads this same figure), so the dropdown shows one line, not fourteen.
+THRESH_MON_UNSTABLE_WINDOW_S=300
+
+# ── Monitor: investigation burst ─────────────────────────────────────────
+# On the ok→warn/critical edge (and on a manual latency test) the monitor
+# samples at this interval for this long, inside the running process, then
+# falls back to its degraded cadence. It used to be the GUI restarting the
+# process, which discarded every rolling window, confirmation streak and
+# fired rule — and with them the warning it had just raised.
+THRESH_MON_BURST_INTERVAL_S=2
+THRESH_MON_BURST_DURATION_S=60
 
 # ── Monitor: data staleness by tier ──────────────────────────────────────
 # How many multiples of a tier's own interval a tier's answers may be

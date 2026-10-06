@@ -41,7 +41,21 @@
 #
 #   SIGUSR1  pause  — stop probing, keep the process alive
 #   SIGUSR2  resume
+#   SIGALRM  sample now (a network transition nudge from the app)
+#   SIGURG   begin a latency test: sample at the burst interval for the
+#            burst duration (THRESH_MON_BURST_*), inside this process
+#   SIGWINCH end the burst early and fall back to the normal cadence
 #   SIGTERM / SIGINT  exit cleanly
+#
+# The last two are the no-restart path for cadence changes. Intervals are
+# command-line arguments, so the app used to restart the process to change
+# them — and a restart throws away every rolling loss window, confirmation
+# streak and fired rule, which is how the warning the burst was started to
+# investigate vanished four seconds after it appeared. SIGURG and SIGWINCH
+# are both default-ignore signals, so an older monitor receiving them just
+# carries on. The same burst starts by itself on this process's own
+# ok→warn/critical edge (the investigation burst the three-depths doctrine
+# promises); either way the sample says so under status.burst.
 #
 # Pausing is a signal handler here rather than SIGSTOP from the caller,
 # and that is not a stylistic choice — SIGSTOP is actively unsafe for this
@@ -83,6 +97,9 @@
 # format means a macOS release that moves a label is fixed once.
 # shellcheck source=lib/wifi_common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/wifi_common.sh"
+# Two-stage clearing sits between _mon_rules and the emitted sample.
+# shellcheck source=lib/stability.sh
+. "$(dirname "${BASH_SOURCE[0]}")/stability.sh"
 
 # ── Sample state ─────────────────────────────────────────────────────────
 # All MON_* — a distinct namespace from the scanner's globals so that
@@ -221,6 +238,19 @@ MON_REFRESHED=""
 MON_STOP=0
 MON_PAUSED=0
 MON_REFRESH_REQUESTED=0
+# The burst: when it ends (epoch seconds, empty when none), why it began
+# ("investigation" on the ok→bad edge, "latency-test" when requested by
+# signal), and the two flags the signal handlers set for the loop to act
+# on between cycles — never mid-probe, the same discipline as refresh.
+MON_BURST_UNTIL=""
+MON_BURST_KIND=""
+MON_BURST_REQUESTED=0
+MON_BURST_END_REQUESTED=0
+# Severity of the previous cycle, for the ok→bad edge the burst keys on.
+MON_PREV_SEVERITY="ok"
+# Which leg LA-2's swing was attributed to when its condition last held
+# ("router" or "internet"); empty until it first fires.
+MON_LA2_LEG=""
 MON_HW_PORTS=""
 # launchd's pid. Named rather than written as a bare 1 so the orphan check
 # below reads as the sentinel it is, and so tests/test_thresholds.bats's
@@ -846,6 +876,10 @@ _mon_probe_public() {
 _mon_add_rule() {
   local sev="$1" rule="$2"
   MON_RULES+="${rule} "
+  # The severity word, kept beside the id: lib/stability.sh needs to know
+  # which fired rules are faults (warn/critical) and which merely describe
+  # the link (info), and MON_RULES alone has lost that by now.
+  MON_RAW_SEVS+="${rule}:${sev} "
   case "$sev" in
     critical) MON_SEVERITY="critical" ;;
     warn)     [ "$MON_SEVERITY" = "critical" ] || MON_SEVERITY="warn" ;;
@@ -856,6 +890,7 @@ _mon_add_rule() {
 
 _mon_rules() {
   MON_RULES=""
+  MON_RAW_SEVS=""
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
@@ -1191,6 +1226,19 @@ _mon_rules() {
     && awk -v j="$MON_INET_JITTER" -v t="$THRESH_LATENCY_JITTER_WARN_MS" 'BEGIN{exit !(j+0 >= t)}'; } && echo 1 || echo 0 )"
   if _mon_verdict_cycle LA2 "$THRESH_MON_LOSS_CONFIRM_CYCLES" jitter_warn; then
     _mon_add_rule warn LA-2
+    # Which leg carries the swing? The internet round trip crosses the
+    # gateway, so a swinging Wi-Fi hop reads as swinging internet jitter;
+    # the gateway's own jitter or RTT in the SAME sample says where it
+    # starts. Decided here, against lib/thresholds.sh, and kept with the
+    # rule while it is held (lib/stability.sh does not touch it) so the
+    # attribution cannot flip with each calm sample.
+    MON_LA2_LEG="internet"
+    if { is_numeric "${MON_GW_JITTER:-}" \
+         && awk -v j="$MON_GW_JITTER" -v t="$THRESH_LATENCY_JITTER_WARN_MS" 'BEGIN{exit !(j+0 >= t)}'; } \
+       || { is_numeric "${MON_GW_RTT:-}" \
+         && awk -v r="$MON_GW_RTT" -v t="$THRESH_GW_RTT_ELEVATED_MS" 'BEGIN{exit !(r+0 >= t)}'; }; then
+      MON_LA2_LEG="router"
+    fi
   fi
 
   # Cadence follows severity, not rule count: an info-level VPN notice is
@@ -1300,6 +1348,13 @@ _mon_emit() {
   NETDIAG_MON_DEGRADED="$MON_DEGRADED" \
   NETDIAG_MON_PAUSED="$MON_PAUSED" \
   NETDIAG_MON_CADENCE_S="$1" \
+  NETDIAG_MON_BURST_KIND="$MON_BURST_KIND" \
+  NETDIAG_MON_BURST_UNTIL="$MON_BURST_UNTIL" \
+  NETDIAG_MON_BURST_INTERVAL_S="$THRESH_MON_BURST_INTERVAL_S" \
+  NETDIAG_MON_LA2_LEG="$MON_LA2_LEG" \
+  NETDIAG_MON_STABILITY_STATE="$MON_STAB_STATE" \
+  NETDIAG_MON_STABILITY_RULES="$MON_STAB_RULES" \
+  THRESH_MON_UNSTABLE_WINDOW_S="$THRESH_MON_UNSTABLE_WINDOW_S" \
   NETDIAG_MON_HAVE_PREV="$MON_HAVE_PREV" \
   LOSS_WARN_PCT="$LOSS_WARN_PCT" \
   LOSS_CRIT_PCT="$LOSS_CRIT_PCT" \
@@ -1357,7 +1412,12 @@ _mon_gap_seconds() {
   local elapsed="${1:-}" cadence="${2:-}"
   case "$elapsed" in ''|*[!0-9]*) return 0 ;; esac
   case "$cadence" in ''|*[!0-9]*|0) return 0 ;; esac
-  [ "$elapsed" -gt $((cadence * THRESH_MON_GAP_FACTOR)) ] || return 0
+  # The larger of the factored cadence and the floor: at the 2 s burst
+  # cadence 3 × 2 = 6 s is shorter than an ordinary cycle's own probe time,
+  # and every cycle read as "not observed".
+  local tolerance=$((cadence * THRESH_MON_GAP_FACTOR))
+  [ "$tolerance" -ge "$THRESH_MON_GAP_FLOOR_S" ] || tolerance="$THRESH_MON_GAP_FLOOR_S"
+  [ "$elapsed" -gt "$tolerance" ] || return 0
   printf '%s' "$elapsed"
 }
 
@@ -1418,6 +1478,56 @@ _mon_on_pause()  { MON_PAUSED=1; }
 _mon_on_resume() { MON_PAUSED=0; }
 # shellcheck disable=SC2317,SC2329
 _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
+# shellcheck disable=SC2317,SC2329
+_mon_on_burst() { MON_BURST_REQUESTED=1; }
+# shellcheck disable=SC2317,SC2329
+_mon_on_burst_end() { MON_BURST_END_REQUESTED=1; }
+
+# Burst bookkeeping, kept as functions so the loop reads as policy and the
+# bats suite can drive the state machine without a clock or a signal.
+#
+# _mon_burst_begin KIND NOW — start (or extend) a burst. A manual test
+# arriving mid-investigation takes over the label and restarts the window:
+# the user asked for it, and the investigation's own deadline would
+# otherwise cut their test short.
+_mon_burst_begin() {
+  MON_BURST_KIND="$1"
+  MON_BURST_UNTIL=$(($2 + THRESH_MON_BURST_DURATION_S))
+  return 0
+}
+
+# _mon_burst_end — drop the burst. Idempotent.
+_mon_burst_end() {
+  MON_BURST_UNTIL=""
+  MON_BURST_KIND=""
+  return 0
+}
+
+# _mon_burst_active NOW — true while a burst is running at NOW. Expiry is
+# applied here, so a burst that outlived its window (the monitor was
+# paused, the machine slept) ends on the first cycle that looks.
+_mon_burst_active() {
+  [ -n "$MON_BURST_UNTIL" ] || return 1
+  if [ "$1" -ge "$MON_BURST_UNTIL" ]; then
+    _mon_burst_end
+    return 1
+  fi
+  return 0
+}
+
+# _mon_burst_consider NOW — start the investigation burst on the genuine
+# ok/info → warn/critical edge, not on every bad cycle: a sustained fault
+# gets one surge at onset and the degraded cadence after, not a restart
+# every minute. A burst already running is not re-triggered.
+_mon_burst_consider() {
+  local bad=0 was_bad=0
+  case "$MON_SEVERITY" in warn|critical) bad=1 ;; esac
+  case "$MON_PREV_SEVERITY" in warn|critical) was_bad=1 ;; esac
+  if [ "$bad" -eq 1 ] && [ "$was_bad" -eq 0 ] && ! _mon_burst_active "$1"; then
+    _mon_burst_begin investigation "$1"
+  fi
+  return 0
+}
 
 monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
@@ -1440,6 +1550,11 @@ monitor_run() {
   # transition. Bash's default action is to terminate the monitor, so this
   # must stay an explicit, harmless flag rather than an untrapped signal.
   trap _mon_on_refresh ALRM
+  # The no-restart cadence path (see the header). Both are default-ignore
+  # signals, so trapping them changes nothing for a sender that never uses
+  # them.
+  trap _mon_on_burst URG
+  trap _mon_on_burst_end WINCH
 
   while :; do
     [ "$MON_STOP" -eq 0 ] || break
@@ -1452,6 +1567,18 @@ monitor_run() {
       next_fast=0
       next_medium=0
       next_slow=0
+    fi
+    # Burst requests are acted on here, between cycles, for the same
+    # reason: a probe in flight finishes and is emitted coherent.
+    if [ "$MON_BURST_END_REQUESTED" -eq 1 ]; then
+      MON_BURST_END_REQUESTED=0
+      _mon_burst_end
+      next_fast=0
+    fi
+    if [ "$MON_BURST_REQUESTED" -eq 1 ]; then
+      MON_BURST_REQUESTED=0
+      _mon_burst_begin latency-test "$EPOCHSECONDS"
+      next_fast=0
     fi
     # Checked even while paused — a paused monitor whose consumer died is
     # exactly as orphaned as a running one, and rather harder to notice.
@@ -1529,6 +1656,9 @@ monitor_run() {
         MON_PUB_STALE=1
       fi
     fi
+    # "Recently unstable" belongs to a network: the hotel's jitter says
+    # nothing about the flat. An empty id (link down) is not a change.
+    _mon_stability_network "$MON_NETWORK_ID"
 
     # A dead link means nothing to probe. Skipping the other tiers here is
     # the monitor's only power decision, and it is about pointlessness
@@ -1592,9 +1722,18 @@ monitor_run() {
     fi
 
     _mon_rules
+    # Stage 1/2 clearing: hold fired rules until they have been clean for
+    # THRESH_MON_CLEAR_HOLD_S, and remember them for the stability window.
+    # Onset is untouched.
+    _mon_stability_apply "$now"
+    _mon_burst_consider "$now"
 
     cadence="$MONITOR_FAST_INTERVAL"
     [ "$MON_DEGRADED" -eq 1 ] && cadence="$MONITOR_DEGRADED_INTERVAL"
+    # A burst overrides both tiers — leaving the degraded one at its own
+    # setting would make a struggling link sample SLOWER during a test than
+    # a healthy one, the opposite of what a burst is for.
+    _mon_burst_active "$now" && cadence="$THRESH_MON_BURST_INTERVAL_S"
     next_fast=$((now + cadence))
 
     MON_SEQ=$((MON_SEQ + 1))
@@ -1603,6 +1742,7 @@ monitor_run() {
     # A failed emit means stdout is gone — the GUI exited, or a `| head -5`
     # closed the pipe. Either way there is no one left to talk to.
     _mon_emit_tier_clocks
+    MON_PREV_SEVERITY="$MON_SEVERITY"
     _mon_emit "$cadence" || break
     _mon_snapshot_prev
 
