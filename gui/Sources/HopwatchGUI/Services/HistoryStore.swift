@@ -324,41 +324,25 @@ final class HistoryStore {
 
     /// Returns the most recent speed test measurement from history.
     ///
-    /// A `networkID` scopes the search to that network only. That scoped
-    /// loop used to fall through into the unscoped one below when it found
-    /// nothing, so a cafe network with no speed test of its own silently
-    /// returned home fibre's numbers instead of "no data" — `DropdownView`
-    /// captions the result with only an age ("speeds from test 3 weeks
-    /// ago"), never a network name, so the wrong network's numbers looked
-    /// like the right network's stale ones. `return nil` below is the fix:
-    /// once a `networkID` was given, "not found for that network" must stay
-    /// "not found", not silently broaden the search.
-    ///
-    /// `NetdiagCoordinator.hydrateFromHistoryIfNeeded` calls this with no
-    /// argument at all, precisely because it wants the opposite: "any
-    /// network's most recent speed test", for a cold launch that has not
-    /// yet identified which network it's on. That case takes the `nil`
-    /// branch of `canonicalTarget` below and always falls through to the
-    /// unscoped loop, unchanged.
-    func latestSpeedTest(for networkID: String? = nil) -> (down: Double, up: Double?, date: Date)? {
-        let canonicalTarget = networkID.map { canonicalID($0) }
+    /// A `networkID` scopes the search to that network only, and the
+    /// scoping is the point: "not found for that network" must stay
+    /// "not found". The scoped loop used to fall through into an unscoped
+    /// one when it found nothing, so a cafe network with no speed test of
+    /// its own silently returned home fibre's numbers instead of "no
+    /// data" — `DropdownView` captions the result with only an age
+    /// ("speeds from test 3 weeks ago"), never a network name, so the
+    /// wrong network's numbers looked like the right network's stale
+    /// ones. There is no fallback branch any more: every caller that used
+    /// to ask "any network's newest test" instead asks the current one's,
+    /// which is the only question a speed row is allowed to answer.
+    func latestSpeedTest(for networkID: String) -> (down: Double, up: Double?, date: Date)? {
+        let canonicalTarget = canonicalID(networkID)
         // document.runs is emitted in chronological order; walk backwards to find the newest speed test
         // without sorting the entire multi-thousand run history.
         let runs = document.runs.reversed()
 
-        if let canonicalTarget {
-            for run in runs {
-                guard canonicalID(run.networkID) == canonicalTarget || run.networkID == networkID else { continue }
-                let down = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"]
-                if let down {
-                    let up = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
-                    return (down, up, run.date)
-                }
-            }
-            return nil
-        }
-
         for run in runs {
+            if canonicalID(run.networkID) != canonicalTarget { continue }
             let down = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"]
             if let down {
                 let up = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
