@@ -71,7 +71,7 @@ setup() {
            THRESH_DHCP_LEASE_WARN_S \
            THRESH_BUFFERBLOAT_FAST_MBPS THRESH_BUFFERBLOAT_CONSTRAINED_MBPS \
            THRESH_AWDL_BASE_RTT_MAX_MS THRESH_AWDL_SPIKE_RTT_MIN_MS \
-           THRESH_AWDL_JITTER_MIN_MS; do
+           THRESH_AWDL_JITTER_MIN_MS THRESH_GW_RTT_WARN_MS; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }
@@ -287,5 +287,58 @@ setup() {
   cp "$REPO/helpers/summary.py" "$BATS_TEST_TMPDIR/planted_summary.py"
   printf '\nif False:\n    pass  # if loss >= 20:\n' >> "$BATS_TEST_TMPDIR/planted_summary.py"
   run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$BATS_TEST_TMPDIR/planted_summary.py"
+  [ "$status" -eq 0 ]
+}
+
+# ── The GUI's verdict-audit (reporting-accuracy plan Phase 3) ─────────────
+# helpers/inference.py authors every per-sample judgement — per-activity
+# rows, per-hop states, the degraded hero's headline — from the threshold
+# set above, exported by environment. The start of the plan was a menu-bar
+# app disagreeing with the report it linked to, and the cause was exactly
+# this: verdict code in Swift, with its own private cutoffs (calls broken
+# at a file-only 8% loss where the CLI fires at 10/20) and its own verdict
+# phrase tables. The four files that used to judge render, and nothing
+# else; a cutoff or a verdict phrase creeping back in anywhere in them
+# fails the build.
+GUI_VERDICT_FILES="Sources/HopwatchGUI/Support/SuitabilityEngine.swift Sources/HopwatchGUI/Support/RouteWarningResolver.swift Sources/HopwatchGUI/Models/MonitorSample.swift Sources/HopwatchGUI/Views/DropdownView.swift"
+
+@test "the GUI's verdict files carry no numeric cutoff" {
+  # Same shape as the helpers/history.py guard: a comparison against a
+  # bare number in the four files that render the CLI's verdicts. A line
+  # carrying `AuditExempt (…)` is a documented non-verdict number (time
+  # formatting and the like), and is the ONLY allowance.
+  run grep -nE '(<=|>=|<|>) *-?[0-9]' "$REPO"/gui/"$GUI_VERDICT_FILES"
+  if [ "$status" -eq 0 ]; then
+    output="$(printf '%s\n' "$output" | grep -v '(AuditExempt)' || true)"
+    [ -z "$output" ] || { echo "GUI cutoff(s):"; echo "$output"; return 1; }
+  fi
+}
+
+@test "the guard would actually catch a cutoff planted in the GUI" {
+  cp "$REPO/gui/Sources/HopwatchGUI/Support/SuitabilityEngine.swift" \
+     "$BATS_TEST_TMPDIR/planted_swift.swift"
+  printf '\nif loss >= 8.0 { status = "broken" }\n' >> "$BATS_TEST_TMPDIR/planted_swift.swift"
+  run grep -nE '(<=|>=|<|>) *-?[0-9]' "$BATS_TEST_TMPDIR/planted_swift.swift"
+  [ "$status" -eq 0 ] || { echo "pattern missed the planted cutoff"; return 1; }
+}
+
+@test "no verdict phrases are authored in the GUI's verdict files" {
+  # helpers/inference.py owns the vocabulary (its LABELS_BY_LEVEL, its
+  # LABELS_BY_LEVEL tables and hop phrases). Any of them quoted in Swift
+  # means a phrase table has grown back — the thing that produced
+  # "Smooth" gaming on a broken link the last time. The consequence
+  # prose' longer sentences (e.g. "Clear audio for voice calls") are not
+  # these tokens and are intentionally permitted.
+  run grep -nE '"(Clear audio|May cut out|Breaking up|SD quality|Responsive|Lag likely|Unplayable|Speed unknown|Pages fail|Not fully probed|Unusable for|Limited for|needs a full check|Needs a full check|Uneven response times)"' \
+    "$REPO"/gui/"$GUI_VERDICT_FILES"
+  [ "$status" -ne 0 ] || { echo "verdict phrase(s) in Swift:"; echo "$output"; return 1; }
+}
+
+@test "the phrase guard would actually catch a planted verdict string" {
+  cp "$REPO/gui/Sources/HopwatchGUI/Views/DropdownView.swift" \
+     "$BATS_TEST_TMPDIR/planted_view.swift"
+  printf '\nlet s = "Smooth"\n' >> "$BATS_TEST_TMPDIR/planted_view.swift"
+  printf '\nlet s = "Lag likely"\n' >> "$BATS_TEST_TMPDIR/planted_view.swift"
+  run grep -nE '"(Clear audio|May cut out|Lag likely)"' "$BATS_TEST_TMPDIR/planted_view.swift"
   [ "$status" -eq 0 ]
 }

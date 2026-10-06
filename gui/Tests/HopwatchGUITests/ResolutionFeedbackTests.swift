@@ -208,20 +208,37 @@ import Testing
         #expect(HealthResolver.resolve(fallbackInputs) == .warning)
     }
 
-    @Test func monitorSampleHealthDetectsElevatedLoss() {
+    @Test func monitorSampleHealthReadsSeverityAndMeasurementOnly() {
+        // The menu-bar dot judges ONLY severity and measurement availability:
+        // every number comparison (its old private cutoffs — a loss warning
+        // the CLI's rules had declined to make) moved CLI-side. The
+        // sample's figures may say anything; the dot stays green while
+        // severity stays "ok".
         var sample = MonitorSample()
         sample.link.up = true
         sample.status.measurement = "measured"
         sample.status.severity = "ok"
-
-        // 1. Elevated internet loss triggers warning
-        sample.gateway.lossPct = 0.0
-        sample.internet.lossPct = 3.0
-        #expect(sample.health == .warning)
-
-        // 2. Isolated router ping loss with clean internet stays healthy (harmless ICMP rate limiting)
-        sample.gateway.lossPct = 3.0
-        sample.internet.lossPct = 0.0
         #expect(sample.health == .healthy)
+
+        sample.gateway.lossPct = 3.0
+        sample.internet.lossPct = 3.0
+        #expect(sample.health == .healthy, "figures alone must not move the dot")
+
+        sample.status.severity = "warn"
+        #expect(sample.health == .warning)
+        sample.status.severity = "critical"
+        #expect(sample.health == .critical)
+        sample.status.severity = "ok"
+        sample.status.degraded = true
+        #expect(sample.health == .warning, "status.degraded is the CLI's own flag")
+
+        // No evidence of a check: not green.
+        sample.status.degraded = false
+        sample.status.measurement = "unknown"
+        #expect(sample.health == .warning)
+        // Link down: critical.
+        sample.status.measurement = "measured"
+        sample.link.up = false
+        #expect(sample.health == .critical)
     }
 }
