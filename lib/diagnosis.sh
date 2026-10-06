@@ -213,8 +213,16 @@ diagnosis_run() {
   # merely declining to answer pings itself — and THRESH_ICMP_FILTERED_LOSS_PCT
   # is deliberately set well above LOSS_CRIT_PCT so that inference is safe.
   # No figure is lost: TCP-1's own prose quotes the gateway loss.
+  #
+  # The inference holds only while nothing but the gateway's own replies is
+  # missing. TCP connects through 60% loss because it retransmits, so when
+  # the internet-side pings are lossy too the loss is on the forwarded path
+  # and TCP-1 must stay silent (G1/G2/G3 then judge it) — see
+  # loss_corroborates_gateway in lib/common.sh. Unmeasured internet loss
+  # (--quick) leaves the inference as it was.
   local _gw_icmp_filtered=0
-  if [ "$TCP_REACH_ANY_OK" -eq 1 ] && loss_at_least "$GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
+  if [ "$TCP_REACH_ANY_OK" -eq 1 ] && loss_at_least "$GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT" \
+     && ! loss_corroborates_gateway "$INET_LOSS" "$INET_LOSS_ALT"; then
     _gw_icmp_filtered=1
     add_diag info TCP-1 "Actual connections work fine, only the \"ping\" tests fail (${GW_LOSS}% loss to the gateway) — something on the path is blocking pings but not real traffic. Common on hotel WiFi, corporate networks, and some ISPs. The network is up; don't worry about the ping numbers above."
   fi

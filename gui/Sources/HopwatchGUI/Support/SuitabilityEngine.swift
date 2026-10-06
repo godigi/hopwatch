@@ -121,6 +121,10 @@ enum SuitabilityEngine {
         var vpnName: String?
         var currentJitter: Double?
         var effectiveLoss: Double?
+        /// Which loss legs ping cannot measure (see `EffectiveLoss`). `nil`
+        /// derives it from the sample's `icmp_filtered` flag and rule IDs plus
+        /// `firedRules`, so every call site agrees even if it forgets to pass it.
+        var lossFiltering: EffectiveLoss.Filtering?
 
         init(
             monitorSample: MonitorSample? = nil,
@@ -134,8 +138,10 @@ enum SuitabilityEngine {
             vpnActive: Bool = false,
             vpnName: String? = nil,
             currentJitter: Double? = nil,
-            effectiveLoss: Double? = nil
+            effectiveLoss: Double? = nil,
+            lossFiltering: EffectiveLoss.Filtering? = nil
         ) {
+            self.lossFiltering = lossFiltering
             self.monitorSample = monitorSample
             self.speedTest = speedTest
             self.savedSuitability = savedSuitability
@@ -148,6 +154,21 @@ enum SuitabilityEngine {
             self.vpnName = vpnName
             self.currentJitter = currentJitter
             self.effectiveLoss = effectiveLoss
+        }
+
+        /// The legs a filter makes unmeasurable, resolved once for all evaluators.
+        var filtering: EffectiveLoss.Filtering {
+            lossFiltering ?? EffectiveLoss.filtering(sample: monitorSample, extraRuleIDs: firedRules)
+        }
+
+        /// Loss the evaluators judge. `effectiveLoss` when the coordinator
+        /// supplied one; otherwise the sample's internet figure, unless that
+        /// leg is filtered — a filtered figure is unknown, not its raw value,
+        /// and unknown is judged as "no loss evidence" rather than 100%.
+        var resolvedLoss: Double {
+            if let effectiveLoss { return effectiveLoss }
+            if filtering.internetLeg { return 0.0 }
+            return monitorSample?.internet.lossPct ?? 0.0
         }
     }
 
@@ -177,7 +198,7 @@ enum SuitabilityEngine {
             )
         }
 
-        let loss = inputs.effectiveLoss ?? inputs.monitorSample?.internet.lossPct ?? 0.0
+        let loss = inputs.resolvedLoss
         let jitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs ?? 2.0
         let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
         let upMbps = inputs.speedTest?.upMbps
@@ -314,7 +335,7 @@ enum SuitabilityEngine {
             )
         }
 
-        let loss = inputs.effectiveLoss ?? inputs.monitorSample?.internet.lossPct ?? 0.0
+        let loss = inputs.resolvedLoss
         let downMbps = inputs.speedTest?.downMbps
 
         if let mbps = downMbps {
@@ -434,37 +455,19 @@ enum SuitabilityEngine {
             )
         }
 
-        let isIcmpFiltered = inputs.monitorSample?.status.icmpFiltered == true
         let rtt = inputs.monitorSample?.internet.rttAvgMs
         let jitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs ?? 2.0
-        let loss = inputs.effectiveLoss ?? inputs.monitorSample?.internet.lossPct ?? 0.0
+        let loss = inputs.resolvedLoss
 
         let impacts = catalogImpacts(for: "gaming", in: inputs)
 
-        if isIcmpFiltered {
-            let isBroken = impacts.contains("broken")
-            let isDegraded = impacts.contains("degraded")
-            let status = isBroken ? "Severe lag" : (isDegraded ? "Lag likely" : "Smooth")
-            let tint = isBroken ? Theme.ColorToken.red : (isDegraded ? Theme.ColorToken.amber : Theme.ColorToken.green)
-            let verdict: RunSnapshot.SuitabilityRow.Verdict = isBroken ? .broken : (isDegraded ? .degraded : .good)
-            let help = isBroken
-                ? "ICMP ping blocked; diagnosis rules report broken gaming conditions"
-                : (isDegraded
-                    ? "ICMP ping blocked; diagnosis rules report degraded gaming conditions"
-                    : "ICMP ping blocked by network, but TCP 443 connection is healthy")
-            return Item(
-                id: "gaming",
-                title: "Gaming",
-                icon: "gamecontroller",
-                status: status,
-                metric: "TCP 443 ok",
-                tint: tint,
-                verdict: verdict,
-                helpText: help
-            )
-        }
+        // Ping-derived numbers are genuinely unavailable only when a filter is
+        // declared AND no usable RTT came back. Loss, jitter and catalog
+        // impacts still judge below; only the "all clear" is reworded, because
+        // without RTT the most that can be said is that TCP connects.
+        let pingFiltered = rtt == nil && inputs.filtering.any
 
-        guard let ping = rtt else {
+        guard rtt != nil || pingFiltered else {
             return Item(
                 id: "gaming",
                 title: "Gaming",
@@ -476,11 +479,14 @@ enum SuitabilityEngine {
                 helpText: "Measuring latency, jitter, and packet loss…"
             )
         }
+        let ping = rtt ?? 0.0
 
         // For gaming, packet loss causes rubberbanding and input drops, which takes priority
         // over raw jitter when reporting the compact metric.
         let metric: String
-        if loss > 0 {
+        if pingFiltered {
+            metric = loss > 0 ? LossFormatter.formatLoss(loss) : "TCP 443 ok"
+        } else if loss > 0 {
             metric = String(format: "%.0f ms · %@", ping, LossFormatter.formatLoss(loss))
         } else {
             metric = String(format: "%.0f ms · %.0fms jit", ping, jitter)
@@ -547,6 +553,19 @@ enum SuitabilityEngine {
         // Good conditions:
         // Ping <= 35ms with jitter < 8ms and loss < 1%: competitive tier ("Responsive")
         // Ping 35-80ms with jitter < 20ms: smooth multiplayer ("Smooth")
+        if pingFiltered {
+            return Item(
+                id: "gaming",
+                title: "Gaming",
+                icon: "gamecontroller",
+                status: "Smooth",
+                metric: metric,
+                tint: Theme.ColorToken.green,
+                verdict: .good,
+                helpText: "ICMP ping blocked by network, but TCP 443 connection is healthy"
+            )
+        }
+
         if ping <= 35.0 && jitter < 8.0 && loss < 1.0 {
             return Item(
                 id: "gaming",
@@ -683,7 +702,7 @@ enum SuitabilityEngine {
             )
         }
 
-        let loss = inputs.effectiveLoss ?? inputs.monitorSample?.internet.lossPct ?? 0.0
+        let loss = inputs.resolvedLoss
         let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
         let dnsOk = inputs.monitorSample?.dns.ok
         let dnsElapsed = inputs.monitorSample?.dns.elapsedMs
@@ -802,7 +821,8 @@ enum SuitabilityEngine {
         items: [Item],
         monitorSample: MonitorSample?,
         currentJitter: Double? = nil,
-        effectiveLoss: Double? = nil
+        effectiveLoss: Double? = nil,
+        lossFiltering: EffectiveLoss.Filtering? = nil
     ) -> StageResolver.DegradedSnapshot? {
         let calls = items.first { $0.id == "calls" }
         let gaming = items.first { $0.id == "gaming" }
@@ -823,8 +843,10 @@ enum SuitabilityEngine {
 
         guard anyBroken || anyDegraded else { return nil }
 
-        let gwLoss = monitorSample?.gateway.lossPct ?? 0.0
-        let inetLoss = effectiveLoss ?? monitorSample?.internet.lossPct ?? 0.0
+        // A leg the CLI says ping cannot measure is unknown, not its raw figure.
+        let filtering = lossFiltering ?? EffectiveLoss.filtering(sample: monitorSample)
+        let gwLoss = filtering.gatewayLeg ? 0.0 : (monitorSample?.gateway.lossPct ?? 0.0)
+        let inetLoss = effectiveLoss ?? (filtering.internetLeg ? 0.0 : (monitorSample?.internet.lossPct ?? 0.0))
         // Downstream validation: if internet loss is clean (< 2.0%), isolated router loss (< 20%)
         // is control-plane rate limiting and does not indicate data-plane link drops.
         let effectiveGWLoss = (inetLoss < 2.0 && gwLoss < 20.0) ? min(gwLoss, inetLoss) : gwLoss
@@ -845,8 +867,7 @@ enum SuitabilityEngine {
 
         if (callsBroken || callsDegraded) && (gamingBroken || gamingDegraded) {
             headline = (callsBroken || gamingBroken) ? "Unstable for calls & gaming" : "Calls & gaming may lag"
-            let streamingOk = streaming?.verdict == .good
-            let streamNote = streamingOk ? " · 4K streaming is fine" : ""
+            let streamNote = streaming?.verdict == .good ? " · 4K streaming is fine" : ""
             if loss > 0 && jitter >= 5.0 {
                 if inetLoss > 0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0 {
                     let jitLabel = isWiFi ? "Wi-Fi jitter" : "jitter to router"
@@ -897,7 +918,7 @@ enum SuitabilityEngine {
                     headline = "Voice & video calls may cut out"
                 }
             }
-            subtitle = "\(calls?.metric ?? "")\(targetSuffix) · Browsing & streaming fine"
+            subtitle = "\(calls?.metric ?? "")\(targetSuffix)" + fineSuffix([("Browsing", browsing), ("streaming", streaming)])
         } else if gamingBroken || gamingDegraded {
             let ping = monitorSample?.internet.rttAvgMs ?? 0.0
             if gamingBroken {
@@ -921,7 +942,7 @@ enum SuitabilityEngine {
                     headline = "Moderate lag in games"
                 }
             }
-            subtitle = "\(gaming?.metric ?? "") · Web browsing & streaming fine"
+            subtitle = "\(gaming?.metric ?? "")" + fineSuffix([("Web browsing", browsing), ("streaming", streaming)])
         } else if streamingBroken || streamingDegraded {
             if streamingBroken {
                 if loss >= 15.0 {
@@ -940,7 +961,7 @@ enum SuitabilityEngine {
                     headline = "Video streaming quality reduced"
                 }
             }
-            subtitle = "\(streaming?.metric ?? "")\(targetSuffix) · Calls & web browsing fine"
+            subtitle = "\(streaming?.metric ?? "")\(targetSuffix)" + fineSuffix([("Calls", calls), ("web browsing", browsing)])
         } else if browsingBroken || browsingDegraded {
             let dnsElapsed = monitorSample?.dns.elapsedMs
             let ping = monitorSample?.internet.rttAvgMs ?? 0.0
@@ -968,7 +989,7 @@ enum SuitabilityEngine {
                     headline = "Web browsing is slow"
                 }
             }
-            subtitle = "\(browsing?.metric ?? "")\(targetSuffix) · Video streaming fine"
+            subtitle = "\(browsing?.metric ?? "")\(targetSuffix)" + fineSuffix([("Video streaming", streaming)])
         } else {
             headline = "Connection is degraded"
             subtitle = "Some services may experience intermittent slowdowns."
@@ -983,6 +1004,19 @@ enum SuitabilityEngine {
     }
 
     // MARK: - Helper
+
+    /// " · A & b fine" naming only the activities whose tile verdict is `.good`;
+    /// empty when none qualify, so a headline never reassures about a tile that
+    /// is red or still unmeasured. The first label is capitalised, later ones
+    /// are joined as written ("Browsing & streaming fine").
+    private static func fineSuffix(_ activities: [(label: String, item: Item?)]) -> String {
+        let good = activities.filter { $0.item?.verdict == .good }.map(\.label)
+        guard let first = good.first else { return "" }
+        let head = first.prefix(1).uppercased() + first.dropFirst()
+        let named = ([head] + good.dropFirst()).joined(separator: " & ")
+        return " · \(named) fine"
+    }
+
     private static func catalogImpacts(for activity: String, in inputs: Inputs) -> [String] {
         guard let catalog = inputs.catalog else { return [] }
         return inputs.firedRules.compactMap { ruleID in

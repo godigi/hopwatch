@@ -507,6 +507,51 @@ loss_below() {
   awk -v v="$1" -v t="$2" 'BEGIN{exit !(v + 0 < t + 0)}'
 }
 
+# True when the internet-side ping legs ($1 and $2: the two public targets'
+# loss) show the loss is on the forwarded path, not just at the gateway.
+#
+# This is what stops TCP-1 ("only ping is filtered, the network is fine")
+# from firing over a link that is really losing packets. TCP connects through
+# 60% loss because it retransmits, so "a connect succeeded" proves nothing
+# about a link that is dropping most of what it carries; and a gateway that
+# only rate-limits its own replies does not also drop 60% of the pings it
+# forwards to 1.1.1.1. Shared by lib/diagnosis.sh and lib/monitor.sh so the
+# two engines cannot decide TCP-1 differently.
+#
+# Corroborated means every leg that was measured is at least LOSS_WARN_PCT,
+# at least one leg was measured, and the legs are not both at
+# THRESH_ICMP_TOTAL_LOSS_PCT. Total loss on both targets is ICMP blocked
+# wholesale (ICMP-1) — the one internet-side picture that is consistent with
+# a healthy forwarding path — so it does not corroborate.
+#
+# Nothing measured (--quick skips the internet probe) is "no": the inference
+# then stays exactly as it was. When only one leg was measured the verdict
+# rests on that leg; a single leg at total loss is not corroboration (we
+# cannot tell it from ICMP-1), a single partial one is. The monitor probes
+# both targets every fast cycle, so a missing leg there means one ping
+# produced no summary at all, and ignoring the other leg's evidence for that
+# would hide a real lossy link.
+loss_corroborates_gateway() {
+  local a="${1:-}" b="${2:-}" measured=0
+  if loss_measured "$a"; then
+    loss_at_least "$a" "$LOSS_WARN_PCT" || return 1
+    measured=$((measured + 1))
+  fi
+  if loss_measured "$b"; then
+    loss_at_least "$b" "$LOSS_WARN_PCT" || return 1
+    measured=$((measured + 1))
+  fi
+  [ "$measured" -ge 1 ] || return 1
+  if [ "$measured" -eq 1 ]; then
+    # A lone leg at total loss reads the same as ICMP being blocked.
+    loss_below "${a:-$b}" "$THRESH_ICMP_TOTAL_LOSS_PCT" || return 1
+    return 0
+  fi
+  # Both measured and both >= warn: only wholesale total loss is not evidence.
+  ! { loss_at_least "$a" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+      && loss_at_least "$b" "$THRESH_ICMP_TOTAL_LOSS_PCT"; }
+}
+
 # ── Timing instrumentation ───────────────────────────────────────────────
 # The spec promises ≤ 30 s for a full run and ≤ 8 s for --quick, and until
 # now nothing measured whether that held. Worst-case arithmetic says it

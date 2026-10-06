@@ -662,6 +662,12 @@ it would accumulate forever.
   `unknown` must never be rendered as an all-clear.
 - **`status.icmp_filtered`** is TCP-1 holding: real connections work,
   only ping is being dropped. Common on hotel and corporate networks.
+  It is **false** when the internet-side loss corroborates the gateway loss
+  (both public targets `>= LOSS_WARN_PCT` and not both 100%): a link losing
+  60% of the pings it forwards is lossy, not filtered, however readily TCP
+  connects through it by retransmitting. Where it is true, `gateway.loss_pct`
+  is the unmeasurable figure; the internet legs are the ones that can be
+  trusted.
   The gateway loss rules (`G1`, `G2`, `G3`) do **not** fire alongside it —
   TCP-1 is evaluated first and suppresses them in `lib/diagnosis.sh` and
   `lib/monitor.sh` alike, so the two engines still name the same rules for

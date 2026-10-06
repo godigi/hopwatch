@@ -124,6 +124,15 @@ THRESH_MON_LOSS_CONFIRM_CYCLES=2
 # path filters ICMP. Set well above LOSS_CRIT_PCT: below this a real lossy
 # link and a filtered one look the same, and calling a degraded network
 # "just filtered ICMP" is the more damaging mistake of the two.
+#
+# This cutoff is necessary, not sufficient. TCP connects through 60% loss
+# because it retransmits, so a successful connect does not show the path is
+# healthy. TCP-1 additionally requires that the internet-side pings do not
+# corroborate the gateway loss (loss_corroborates_gateway in lib/common.sh):
+# if both public targets are also at >= LOSS_WARN_PCT, and not both at
+# THRESH_ICMP_TOTAL_LOSS_PCT, the loss is on the forwarded path and G1/G2/G3
+# judge it instead. No separate cutoff: it reuses LOSS_WARN_PCT and
+# THRESH_ICMP_TOTAL_LOSS_PCT.
 THRESH_ICMP_FILTERED_LOSS_PCT=50
 
 # ICMP-1 — total loss to *both* public targets while curl and TCP both

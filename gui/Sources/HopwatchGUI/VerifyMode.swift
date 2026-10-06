@@ -79,6 +79,7 @@ private enum VerifyHarness {
         runActivityFoldTests()
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
+        runLossFilteringTests()
         runReportProvenanceTests()
         runTrendsClampTests()
         runRunGroupTests()
@@ -976,7 +977,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.10.3",
+                version: "1.10.4",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -1821,6 +1822,120 @@ private enum VerifyHarness {
         // mean of those plus 395 (228) the wrapper would have produced.
         equal(fallbackSnapshot.fraction, 518.0 / 691.0,
               "an overlapping phase's samples stay out of the fallback estimate")
+    }
+
+    // MARK: - Filtered-ping loss and tile agreement
+
+    /// Regression for the dropdown that said "Frequent cutouts" over a green
+    /// Gaming "Smooth" tile because `icmp_filtered` was set on a link that
+    /// really was losing packets.
+    private static func runLossFilteringTests() {
+        print("\nFiltered-ping loss and tile agreement")
+
+        func sample(gw: Double?, inet: Double?, rtt: Double?, jitter: Double?, filtered: Bool, rules: [String]) -> MonitorSample {
+            var s = MonitorSample()
+            s.gateway.lossPct = gw
+            s.internet.lossPct = inet
+            s.internet.rttAvgMs = rtt
+            s.internet.rttJitterMs = jitter
+            s.tcp.anyOk = true
+            s.status.icmpFiltered = filtered
+            s.status.rules = rules
+            return s
+        }
+        /// Exactly what the coordinator does: derive the filtering, compute the
+        /// one effective loss, hand both to the engine.
+        func effective(_ s: MonitorSample, roam: Bool = false) -> Double? {
+            EffectiveLoss.compute(
+                internetLoss: s.internet.lossPct, gatewayLoss: s.gateway.lossPct,
+                filtering: EffectiveLoss.filtering(sample: s), hasRecentRoam: roam)
+        }
+        func tiles(_ s: MonitorSample) -> [SuitabilityEngine.Item] {
+            SuitabilityEngine.evaluateAll(.init(
+                monitorSample: s, firedRules: s.status.rules,
+                currentJitter: s.internet.rttJitterMs, effectiveLoss: effective(s),
+                lossFiltering: EffectiveLoss.filtering(sample: s)))
+        }
+        func tile(_ items: [SuitabilityEngine.Item], _ id: String) -> SuitabilityEngine.Item? {
+            items.first { $0.id == id }
+        }
+        func subtitle(_ s: MonitorSample, _ items: [SuitabilityEngine.Item]) -> String {
+            SuitabilityEngine.synthesizeDegradedExperience(
+                items: items, monitorSample: s, currentJitter: s.internet.rttJitterMs,
+                effectiveLoss: effective(s), lossFiltering: EffectiveLoss.filtering(sample: s))?.subtitle ?? ""
+        }
+
+        // Screenshot case: 58% gateway, 61% internet, 116 ms jitter, flag set.
+        let bad = sample(gw: 58, inet: 61, rtt: 40, jitter: 116, filtered: true, rules: ["TCP-1"])
+        let badItems = tiles(bad)
+        let gaming = tile(badItems, "gaming")
+        check(gaming?.verdict != .good, "screenshot case: Gaming is not good with 61% loss and the flag set")
+        check(gaming?.status != "Smooth", "screenshot case: Gaming does not say Smooth")
+        for id in ["calls", "streaming", "browsing", "gaming"] {
+            let v = tile(badItems, id)?.verdict
+            check(v == .broken || v == .degraded, "screenshot case: \(id) tile agrees the link is bad")
+        }
+        let badSub = subtitle(bad, badItems)
+        check(!badSub.contains("fine"), "screenshot case: subtitle claims nothing is fine (\(badSub))")
+
+        // Genuinely filtered gateway: gateway ping 100% lost, internet clean.
+        let hotel = sample(gw: 100, inet: 0, rtt: 25, jitter: 3, filtered: true, rules: ["TCP-1"])
+        check(effective(hotel) == 0, "filtered gateway: effective loss ignores the gateway's 100%")
+        check(tiles(hotel).allSatisfy { $0.verdict == .good || $0.verdict == .unknown || $0.verdict == .unmeasured },
+              "filtered gateway: no tile reports a loss-driven broken/degraded")
+        check(tile(tiles(hotel), "gaming")?.verdict == .good, "filtered gateway: Gaming is good off real RTT")
+        // Gateway filtered, internet not yet measured: unknown, never the raw 100.
+        let hotelNoInet = sample(gw: 100, inet: nil, rtt: nil, jitter: nil, filtered: true, rules: ["TCP-1"])
+        check(effective(hotelNoInet) == nil, "filtered gateway + no internet figure: effective loss is unknown (nil)")
+        check(tile(tiles(hotelNoInet), "gaming")?.metric == "TCP 443 ok",
+              "filtered gateway + no RTT: Gaming shows the TCP 443 ok item")
+
+        // ICMP-1: internet pings blocked wholesale, TCP fine. Internet loss is unmeasurable.
+        let blocked = sample(gw: 0, inet: 100, rtt: nil, jitter: nil, filtered: false, rules: ["ICMP-1"])
+        check(effective(blocked) == 0, "ICMP-1: effective loss ignores the internet's 100%, keeps the gateway's 0")
+        let blockedItems = tiles(blocked)
+        check(tile(blockedItems, "gaming")?.status != "Rubberbanding",
+              "ICMP-1: Gaming is not Rubberbanding off the unmeasurable 100%")
+        check(tile(blockedItems, "gaming")?.metric == "TCP 443 ok",
+              "ICMP-1: Gaming shows the TCP 443 ok item")
+        check(tile(blockedItems, "browsing")?.verdict == .good && tile(blockedItems, "streaming")?.verdict == .good,
+              "ICMP-1: Browsing and Streaming do not read the unmeasurable 100% either")
+        // Engine falls back safely even if a caller passes no effective loss.
+        let blockedRaw = SuitabilityEngine.evaluateAll(.init(monitorSample: blocked, firedRules: ["ICMP-1"]))
+        check(blockedRaw.allSatisfy { $0.verdict != .broken }, "ICMP-1: no raw-figure fallback when effectiveLoss is nil")
+        // Both legs filtered: unknown, not 0 and not the raw figure.
+        let both = sample(gw: 100, inet: 100, rtt: nil, jitter: nil, filtered: true, rules: ["TCP-1", "ICMP-1"])
+        check(effective(both) == nil, "both legs filtered: effective loss is unknown (nil)")
+
+        // Unfiltered sanity.
+        let healthy = sample(gw: 0, inet: 0, rtt: 12, jitter: 2, filtered: false, rules: [])
+        check(effective(healthy) == 0, "unfiltered: zero loss stays zero")
+        check(tile(tiles(healthy), "gaming")?.verdict == .good, "unfiltered: Gaming good with 0% loss and low ping")
+        check(tile(tiles(healthy), "gaming")?.status == "Responsive", "unfiltered: Gaming keeps the Responsive wording")
+        let lossy = sample(gw: 0, inet: 30, rtt: 12, jitter: 2, filtered: false, rules: [])
+        check(effective(lossy) == 30, "unfiltered: real internet loss is still reported")
+        check(tile(tiles(lossy), "gaming")?.verdict == .broken, "unfiltered: real loss still breaks Gaming")
+        // Existing behaviours kept: roam blip and clean-internet control-plane loss.
+        let roamBlip = sample(gw: 6, inet: nil, rtt: 12, jitter: 2, filtered: false, rules: [])
+        check(effective(roamBlip, roam: true) == 0, "roam blip on the gateway is not attributed as loss")
+        let cpRate = sample(gw: 40, inet: 0, rtt: 12, jitter: 2, filtered: false, rules: [])
+        check(effective(cpRate) == 0, "clean internet: gateway loss is control-plane rate limiting")
+
+        // Subtitle suffix names only activities that are actually good.
+        func item(_ id: String, _ v: RunSnapshot.SuitabilityRow.Verdict) -> SuitabilityEngine.Item {
+            .init(id: id, title: id, icon: "x", status: "s", metric: "m", tint: Theme.ColorToken.muted, verdict: v)
+        }
+        func callsOnlySub(streaming: RunSnapshot.SuitabilityRow.Verdict, browsing: RunSnapshot.SuitabilityRow.Verdict) -> String {
+            SuitabilityEngine.synthesizeDegradedExperience(
+                items: [item("calls", .broken), item("gaming", .good), item("streaming", streaming), item("browsing", browsing)],
+                monitorSample: healthy)?.subtitle ?? ""
+        }
+        check(callsOnlySub(streaming: .good, browsing: .good).hasSuffix(" · Browsing & streaming fine"),
+              "headline suffix keeps its wording when browsing and streaming are good")
+        check(callsOnlySub(streaming: .unknown, browsing: .good).hasSuffix(" · Browsing fine"),
+              "headline suffix drops an activity whose tile is not good")
+        check(!callsOnlySub(streaming: .degraded, browsing: .broken).contains("fine"),
+              "headline suffix is omitted when no named activity is good")
     }
 
     // MARK: - Suitability rows and rules-catalog fix fields

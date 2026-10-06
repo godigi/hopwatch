@@ -499,7 +499,8 @@ All of the below are implemented and can fire.
   bottleneck. Surfacing this up-front saves the support volley.
 ### TCP-1 — TCP works, ICMP is filtered
 
-- Trigger: `tcp_reach.any_ok == true AND gateway.loss_pct >= 50`.
+- Trigger: `tcp_reach.any_ok == true AND gateway.loss_pct >= 50 AND` the
+  internet-side loss does **not** corroborate the gateway loss (below).
 - Severity: `info` (the network is fine; ICMP is misleading).
 - Evidence: which TCP probes succeeded, gateway loss%.
 - Recommendation: ignore the ping-based failures — connectivity is up.
@@ -521,6 +522,26 @@ All of the below are implemented and can fire.
   If TCP is *not* reaching anything, there is no evidence the gateway
   forwards at all, TCP-1 does not fire, and G1/G2/G3 call the loss what it
   is.
+- **Corroboration: TCP-1 does not fire when the internet-side pings are
+  lossy too.** TCP "succeeds" through 60% loss because it retransmits, so a
+  connect that lands does not show the path is healthy — and a gateway that
+  only rate-limits its *own* replies does not also drop 60% of the pings it
+  forwards to 1.1.1.1. The predicate is `loss_corroborates_gateway` in
+  `lib/common.sh`, called by both engines: every measured internet leg
+  (`internet.loss_pct`, `internet.loss_pct_alt`) is `>= LOSS_WARN_PCT`, at
+  least one leg was measured, and the two are not both at
+  `THRESH_ICMP_TOTAL_LOSS_PCT` (that is ICMP blocked wholesale, which is
+  ICMP-1's job and still yields TCP-1). In that case TCP-1 stays silent,
+  `status.icmp_filtered` is false, and G1/G2/G3 evaluate normally. Where
+  TCP-1 still holds: gateway loss high with clean internet loss (the
+  gateway forwards, only its own replies are missing), gateway and both
+  internet targets at 100% (ICMP-1 territory), and internet loss not
+  measured (`--quick`, or a monitor cycle with no ping summary), which
+  leaves the inference exactly as it was. If only one internet leg was
+  measured, that leg decides; a lone leg at total loss does not corroborate.
+  The observed failure: gateway 58%, internet 61%/60%, TCP ok was reported
+  as healthy (`TCP-1`, severity `info`) and the app showed "Gaming: Smooth"
+  over a link losing more than half its packets.
 
 ### WS-1 — WiFi channel is congested
 

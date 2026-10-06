@@ -1349,36 +1349,33 @@ final class HopwatchCoordinator {
 
     /// Unified effective packet loss across internet and gateway probes.
     /// Evaluates whichever is worse so loss on either leg is visible and accounted for.
+    ///
+    /// A leg the CLI says ping cannot measure (TCP-1 / `icmp_filtered` for the
+    /// gateway, ICMP-1 for the internet) is excluded — see `EffectiveLoss`.
     var effectiveLoss: Double? {
-        let isIcmpFiltered = (monitor.latest?.status.icmpFiltered == true)
-            || (latestRun?.snapshot.diagnosis.contains(where: { $0.rule == "TCP-1" || $0.rule == "ICMP-1" }) == true)
-            || (currentRunResult?.snapshot.diagnosis.contains(where: { $0.rule == "TCP-1" || $0.rule == "ICMP-1" }) == true)
+        EffectiveLoss.compute(
+            internetLoss: monitor.latest?.internet.lossPct
+                ?? latestRun?.snapshot.internetLatency.lossPct
+                ?? currentRunResult?.snapshot.internetLatency.lossPct,
+            gatewayLoss: monitor.latest?.gateway.lossPct
+                ?? latestRun?.snapshot.gateway.lossPct
+                ?? currentRunResult?.snapshot.gateway.lossPct,
+            filtering: lossFiltering,
+            hasRecentRoam: hasRecentRoam
+        )
+    }
 
-        let inetLoss: Double? = isIcmpFiltered ? nil : (monitor.latest?.internet.lossPct
-            ?? latestRun?.snapshot.internetLatency.lossPct
-            ?? currentRunResult?.snapshot.internetLatency.lossPct)
-
-        let gwLoss = monitor.latest?.gateway.lossPct
-            ?? latestRun?.snapshot.gateway.lossPct
-            ?? currentRunResult?.snapshot.gateway.lossPct
-
-        var candidateGW = gwLoss
-        if hasRecentRoam, let gw = candidateGW, gw < 10.0 {
-            // Handover blip: suppress attributing to persistent connection loss if internet is intact
-            candidateGW = inetLoss ?? 0.0
-        }
-
-        if let inetLoss, let candidateGW {
-            // Downstream validation: Packets to the internet must traverse the local gateway.
-            // If internet through-traffic is clean (loss < 2%), any isolated router ping loss
-            // is harmless ICMP control-plane rate-limiting by the router's CPU, NOT physical
-            // link loss. Only propagate gateway loss when internet also shows loss or is unmeasured.
-            if inetLoss < 2.0 && candidateGW > inetLoss {
-                return inetLoss
-            }
-            return max(inetLoss, candidateGW)
-        }
-        return inetLoss ?? candidateGW
+    /// Which loss legs are unmeasurable by ping, from the live sample and any
+    /// run diagnosis in view. Pass this to `SuitabilityEngine` alongside
+    /// `effectiveLoss` so "filtered, unknown" is not mistaken for "not yet
+    /// measured".
+    var lossFiltering: EffectiveLoss.Filtering {
+        EffectiveLoss.filtering(
+            icmpFilteredFlag: monitor.latest?.status.icmpFiltered == true,
+            ruleIDs: (monitor.latest?.status.rules ?? [])
+                + (latestRun?.snapshot.diagnosis.compactMap(\.rule) ?? [])
+                + (currentRunResult?.snapshot.diagnosis.compactMap(\.rule) ?? [])
+        )
     }
 
     /// Effective instantaneous or moving RFC 3550 jitter.
@@ -1562,13 +1559,15 @@ final class HopwatchCoordinator {
                 vpnActive: sample.vpn.active,
                 vpnName: sample.vpn.name,
                 currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss
+                effectiveLoss: effectiveLoss,
+                lossFiltering: lossFiltering
             ))
             if let degraded = SuitabilityEngine.synthesizeDegradedExperience(
                 items: items,
                 monitorSample: sample,
                 currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss
+                effectiveLoss: effectiveLoss,
+                lossFiltering: lossFiltering
             ) {
                 return "\(degraded.headline) — \(degraded.subtitle)"
             }

@@ -62,6 +62,14 @@ monitor_rules() {
   printf '%s' "$MON_RULES" | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' '
 }
 
+# Same as monitor_rules, but runs in the current shell so the caller can also
+# read MON_SEVERITY and MON_ICMP_FILTERED afterwards — $(monitor_rules) is a
+# subshell and would leave them at their reset values.
+monitor_rules_here() {
+  _mon_rules
+  MON_RULES_SORTED="$(printf '%s' "$MON_RULES" | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
+}
+
 # The scanner's rules, narrowed to the vocabulary a between-scans probe can
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
@@ -122,6 +130,121 @@ scanner_rules() {
   [[ "$m" != *"G1"* ]] || return 1
   [[ "$m" != *"G2"* ]] || return 1
   [[ "$m" != *"G3"* ]] || return 1
+}
+
+# TCP-1 is sound only when nothing but the gateway's own replies is missing.
+# TCP "succeeds" through 60% loss because TCP retransmits, so a connect that
+# eventually lands says nothing about a link that is shedding most of its
+# packets. The corroboration test is loss_corroborates_gateway
+# (lib/common.sh), shared by both engines.
+@test "parity: gateway loss corroborated by partial internet loss is not TCP-1 on either side" {
+  # Live capture that shipped as "healthy": gateway 58, internet 61/60, TCP
+  # ok. A gateway that merely rate-limits its own replies does not drop 60%
+  # of the pings it forwards to 1.1.1.1, so this is a lossy link.
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=61 MON_INET_LOSS_ALT=60 INET_LOSS=61 INET_LOSS_ALT=60
+  monitor_rules_here; local m="$MON_RULES_SORTED"
+  [ "$MON_ICMP_FILTERED" -eq 0 ]
+  [ "$MON_SEVERITY" != "ok" ] && [ "$MON_SEVERITY" != "info" ]
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=61 MON_INET_LOSS_ALT=60 INET_LOSS=61 INET_LOSS_ALT=60
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" != *"TCP-1"* ]] || return 1
+  [[ "$m" == *"G2"* ]] || return 1
+}
+
+@test "parity: corroborated gateway loss keeps the monitor severity critical, not info" {
+  reset_state
+  MON_GW_LOSS=58 MON_INET_LOSS=61 MON_INET_LOSS_ALT=60
+  _mon_rules
+  [ "$MON_SEVERITY" = "critical" ]
+  [ "$MON_ICMP_FILTERED" -eq 0 ]
+}
+
+@test "parity: gateway loss with clean internet loss is still TCP-1 on both" {
+  # Sound case 1: pings forwarded through the gateway come back, so the
+  # gateway is forwarding and only declining to answer for itself.
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0 INET_LOSS=0 INET_LOSS_ALT=0
+  monitor_rules_here; local m="$MON_RULES_SORTED"
+  [ "$MON_ICMP_FILTERED" -eq 1 ]
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0 INET_LOSS=0 INET_LOSS_ALT=0
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"TCP-1"* ]] || return 1
+  [[ "$m" != *"G2"* ]] || return 1
+}
+
+@test "parity: gateway and both internet targets at 100% with TCP ok is TCP-1 plus ICMP-1 on both" {
+  # Sound case 2: ICMP is blocked wholesale, which is ICMP-1 territory.
+  reset_state
+  MON_GW_LOSS=100 GW_LOSS=100 MON_INET_LOSS=100 MON_INET_LOSS_ALT=100 INET_LOSS=100 INET_LOSS_ALT=100
+  monitor_rules_here; local m="$MON_RULES_SORTED"
+  [ "$MON_ICMP_FILTERED" -eq 1 ]
+  reset_state
+  MON_GW_LOSS=100 GW_LOSS=100 MON_INET_LOSS=100 MON_INET_LOSS_ALT=100 INET_LOSS=100 INET_LOSS_ALT=100
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"TCP-1"* ]] || return 1
+  [[ "$m" == *"ICMP-1"* ]] || return 1
+  [[ "$m" != *"G2"* ]] || return 1
+}
+
+@test "parity: gateway loss with internet loss unmeasured is TCP-1 on both (as before)" {
+  # --quick skips the internet loss probe; with nothing to corroborate the
+  # inference stays exactly what it was.
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58
+  monitor_rules_here; local m="$MON_RULES_SORTED"
+  [ "$MON_ICMP_FILTERED" -eq 1 ]
+  reset_state; MON_GW_LOSS=58 GW_LOSS=58
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"TCP-1"* ]] || return 1
+}
+
+@test "parity: gateway loss with one internet target lossy and one clean is still TCP-1 on both" {
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=60 MON_INET_LOSS_ALT=0 INET_LOSS=60 INET_LOSS_ALT=0
+  monitor_rules_here; local m="$MON_RULES_SORTED"
+  reset_state
+  MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=60 MON_INET_LOSS_ALT=0 INET_LOSS=60 INET_LOSS_ALT=0
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"TCP-1"* ]] || return 1
+}
+
+@test "loss_corroborates_gateway: the predicate's edges" {
+  # both partial -> yes
+  loss_corroborates_gateway 61 60
+  # clean, mixed, below the warn floor -> no
+  ! loss_corroborates_gateway 0 0
+  ! loss_corroborates_gateway 60 0
+  ! loss_corroborates_gateway 9 60
+  # unmeasured on both -> no (behaviour as before)
+  ! loss_corroborates_gateway "" ""
+  # both at total loss is ICMP-1, not corroboration
+  ! loss_corroborates_gateway 100 100
+  # 100 on one and partial on the other is not wholesale ICMP blocking
+  loss_corroborates_gateway 100 60
+  # one leg missing: judge by the one that was measured
+  loss_corroborates_gateway 60 ""
+  loss_corroborates_gateway "" 60
+  ! loss_corroborates_gateway 100 ""
+  ! loss_corroborates_gateway 0 ""
+}
+
+@test "a stale TCP-1 clears on a cycle where corroboration, not TCP, decided it" {
+  # Gateway loss is still >= 50 and the medium tier did not refresh, so the
+  # old clearability rule would have left TCP-1 pinned forever.
+  reset_state
+  MON_GW_LOSS=58 MON_INET_LOSS=61 MON_INET_LOSS_ALT=60 MON_REFRESHED="fast "
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " == *" TCP-1 "* ]]
+}
+
+@test "TCP-1 stays unclearable at gateway loss >= 50 when nothing corroborates and TCP was not refreshed" {
+  reset_state
+  MON_GW_LOSS=58 MON_REFRESHED="fast "
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " != *" TCP-1 "* ]]
 }
 
 @test "parity: heavy gateway loss with TCP also failing still names G2 on both" {

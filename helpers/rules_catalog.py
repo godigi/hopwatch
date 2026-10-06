@@ -1041,7 +1041,9 @@ RULES: list[dict[str, object]] = [
             "specifically while letting actual traffic through. Common on "
             "hotel WiFi, corporate networks, and some ISPs; the network "
             "is up, and the ping-based loss this check reports can be "
-            "ignored."
+            "ignored. It is only reported when pings to the wider "
+            "internet are not lossy too — if they are, the loss is real "
+            "and the gateway-loss diagnosis applies instead."
         ),
         "doc": "DIAGNOSIS-RULES.md#tcp-1--tcp-works-icmp-is-filtered",
         "fix": (

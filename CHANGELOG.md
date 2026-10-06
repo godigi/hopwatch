@@ -6,6 +6,15 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.4] - 2026-10-06
+
+### Fixed
+
+- Stop TCP-1 ("only ping is filtered, the network is fine") from reporting a link that is losing most of its packets as healthy. It fired whenever TCP 443 connected and gateway ping loss was >= 50%, without looking at the forwarded path; TCP connects through heavy loss because it retransmits (a live sample of gateway 58%, internet 61%/60%, TCP ok came out as severity `info`, rule `TCP-1`, `icmp_filtered: true`). Both engines now share one predicate, `loss_corroborates_gateway` in `lib/common.sh`: when every measured internet-side ping leg is >= `LOSS_WARN_PCT` and the two are not both at total loss, TCP-1 stays silent, `status.icmp_filtered` is false, and G1/G2/G3 evaluate normally. TCP-1 still fires for a high gateway loss with clean internet pings, for gateway and both internet targets at 100% (alongside ICMP-1), and when internet loss was not measured (`--quick`), exactly as before. In the monitor, a stale TCP-1 now clears on such a cycle.
+- Fix the app's Gaming tile, which returned "Smooth · TCP 443 ok" whenever `icmp_filtered` was set without consulting loss, while Calls, Streaming and Browsing used the loss figure.
+- Fix the app's effective-loss figure, which dropped the internet leg and kept the gateway leg under TCP-1. That was backwards: the gateway figure is the unmeasurable one under TCP-1, so the internet leg is the one to keep.
+- Fix the degraded headline, which hard-coded "Browsing & streaming fine" regardless of those tiles' own verdicts.
+
 ## [1.10.3] - 2026-10-06
 
 ### Fixed
@@ -4053,7 +4062,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.3...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.4...HEAD
+[1.10.4]: https://github.com/godigi/hopwatch/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/godigi/hopwatch/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/godigi/hopwatch/compare/v1.10.0...v1.10.1

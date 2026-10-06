@@ -181,7 +181,8 @@ struct DropdownView: View {
             items: suitabilityItems,
             monitorSample: coordinator.monitor.latest,
             currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+            effectiveLoss: coordinator.effectiveLoss,
+            lossFiltering: coordinator.lossFiltering
         )
     }
 
@@ -608,7 +609,8 @@ struct DropdownView: View {
             vpnActive: coordinator.monitor.latest?.vpn.active ?? snap?.vpn.active ?? false,
             vpnName: coordinator.monitor.latest?.vpn.name ?? snap?.vpn.name,
             currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+            effectiveLoss: coordinator.effectiveLoss,
+            lossFiltering: coordinator.lossFiltering
         )
         return SuitabilityEngine.evaluateAll(inputs)
     }

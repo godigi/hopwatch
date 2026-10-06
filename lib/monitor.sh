@@ -698,8 +698,16 @@ _mon_rules() {
   # means packets are crossing the gateway, so the gateway is forwarding and
   # merely declining to answer pings itself; TCP-1's own prose still quotes
   # the loss figure, so suppressing the contradiction loses no number.
-  local _mon_gw_filtered=0
+  #
+  # That inference holds only while nothing but the gateway's own replies is
+  # missing. TCP connects through 60% loss because it retransmits, so when
+  # the internet-side pings are lossy too the loss is on the forwarded path
+  # and TCP-1 must stay silent — see loss_corroborates_gateway (lib/common.sh).
+  local _mon_gw_filtered=0 _mon_gw_corroborated=0
+  loss_corroborates_gateway "$MON_INET_LOSS" "$MON_INET_LOSS_ALT" \
+    && _mon_gw_corroborated=1
   if [ "${MON_TCP_OK:-0}" = "1" ] \
+     && [ "$_mon_gw_corroborated" -eq 0 ] \
      && loss_at_least "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
     _mon_gw_filtered=1
     MON_ICMP_FILTERED=1
@@ -812,7 +820,10 @@ _mon_rules() {
        || loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
       MON_CLEARABLE_RULES+="G3 "
     fi
-    if loss_below "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
+    # Corroborated loss decides TCP-1 absent without consulting TCP, so it
+    # can clear even at gateway loss >= 50 on a cycle the medium tier skipped.
+    if loss_below "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT" \
+       || [ "$_mon_gw_corroborated" -eq 1 ]; then
       MON_CLEARABLE_RULES+="TCP-1 "
     else
       case " $MON_REFRESHED " in

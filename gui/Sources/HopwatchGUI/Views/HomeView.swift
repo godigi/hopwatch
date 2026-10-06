@@ -255,7 +255,8 @@ struct HomeView: View {
             items: suitabilityItems,
             monitorSample: coordinator.monitor.latest,
             currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+            effectiveLoss: coordinator.effectiveLoss,
+            lossFiltering: coordinator.lossFiltering
         )
         return StageResolver.resolve(.init(
             isScanning: coordinator.isScanning,
@@ -526,7 +527,8 @@ struct HomeView: View {
             vpnActive: vpnActive,
             vpnName: vpnProviderName,
             currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+            effectiveLoss: coordinator.effectiveLoss,
+            lossFiltering: coordinator.lossFiltering
         )
         return SuitabilityEngine.evaluateAll(inputs)
     }
