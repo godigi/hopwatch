@@ -83,6 +83,22 @@ REQUIRED_THRESHOLDS: tuple[str, ...] = (
 )
 
 
+def _lc_first(text: str) -> str:
+    """Lower-case a sentence's first letter so it can follow "— " or "; ".
+
+    Only when the first word is an ordinary capitalised word: "Response
+    times…" becomes "response times…", while "Wi-Fi…", "DNS…" and "TCP…"
+    keep their spelling ("wi-Fi response times swung" shipped to a live
+    sample before this existed).
+    """
+    if not text:
+        return text
+    first = text.split(None, 1)[0]
+    if first[1:].isalpha() and first[1:].islower():
+        return text[:1].lower() + text[1:]
+    return text
+
+
 def _fail(message: str):
     print(f"inference.py: {message}", file=sys.stderr)
     print("inference.py: thresholds come from lib/thresholds.sh via the "
@@ -538,7 +554,7 @@ def _stability_rule(entry: dict, la2_leg) -> dict:
     if template:
         phrase = template.format(times=_times(n))
     else:
-        phrase = f"{_rule_title(rule)[:1].lower()}{_rule_title(rule)[1:]} ({_times(n)})"
+        phrase = f"{_lc_first(_rule_title(rule))} ({_times(n)})"
     sentence = f"{phrase[:1].upper()}{phrase[1:]} in {_window_phrase(_T.unstable_window)}"
     return dict(entry, summary=sentence)
 
@@ -562,14 +578,14 @@ def _stability(state) -> dict:
     if st != "stable" and rules:
         # Most recent first reads naturally: "Unstable 40 s ago — …".
         ordered = sorted(rules, key=lambda r: r["last_ago_s"])
-        body = "; ".join(r["summary"][:1].lower() + r["summary"][1:]
+        body = "; ".join(_lc_first(r["summary"])
                          if i else r["summary"]
                          for i, r in enumerate(ordered))
         if st == "unstable":
-            out["summary"] = f"Unstable now — {body[:1].lower()}{body[1:]}"
+            out["summary"] = f"Unstable now — {_lc_first(body)}"
         else:
             out["summary"] = (f"Unstable {_ago(out['last_ago_s'])} — "
-                              f"{body[:1].lower()}{body[1:]}")
+                              f"{_lc_first(body)}")
     return out
 
 
@@ -601,7 +617,7 @@ def _apply_recent(rows, stab) -> None:
             "metric": provenance,
             "because": [r["rule"] for r in touched],
             "unmeasured_reason": None,
-            "detail": (f"{provenance} — {newest['summary'][:1].lower()}"
+            "detail": (f"{provenance} — {_lc_first(newest['summary'])[:1]}"
                        f"{newest['summary'][1:]}. Not yet steady for "
                        f"{_minutes(_T.unstable_window)} min."),
             "recent": True,

@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-06
+
 ### Changes
 
 - fix: the investigation burst no longer restarts the monitor. The 2 s /
@@ -4147,7 +4149,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/godigi/hopwatch/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
 [1.11.1]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.11.0
