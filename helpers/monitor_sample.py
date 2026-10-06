@@ -196,6 +196,17 @@ def _stability_state() -> dict:
     return {"state": _env("STABILITY_STATE") or "stable", "rules": rules}
 
 
+def _speed_state() -> dict | None:
+    """The last stored full-check speed for this network, with its age at
+    THIS sample (lib/monitor.sh reads the store on the slow tier; the age is
+    worked out here so it advances every cycle without another read)."""
+    down, at = _f("SPEED_DOWN"), _i("SPEED_AT")
+    if down is None or not at:
+        return None
+    return {"down_mbps": down, "up_mbps": _f("SPEED_UP"),
+            "age_s": max(0, int(time.time()) - at)}
+
+
 def _burst_block() -> dict | None:
     """status.burst — the investigation/latency-test burst the monitor is
     running inside this process, or null. The consumer renders "testing
@@ -657,6 +668,7 @@ def main() -> None:
             "web_succ_pct": _f("WEB_SUCC_PCT"),
             "stability": _stability_state(),
             "la2_leg": _env("LA2_LEG"),
+            "speed": _speed_state(),
             "vpn_active": sample["vpn"]["active"],
             "vpn_name": _env("VPN_NAME"),
             "icmp_filtered": sample["status"]["icmp_filtered"],
@@ -676,6 +688,7 @@ def main() -> None:
                   "suitability/hops/headline", file=sys.stderr)
         else:
             sample["status"]["stability"] = blocks["stability"]
+            sample["last_speed"] = blocks["last_speed"]
             sample["suitability"] = blocks["suitability"]
             sample["hops"] = blocks["hops"]
             sample["headline"] = blocks["headline"]

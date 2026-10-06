@@ -620,7 +620,7 @@ emit() {
              THRESH_INTERNET_LATENCY_CRIT_MS THRESH_DNS_LATENCY_WARN_MS \
              THRESH_GW_RTT_WARN_MS THRESH_WIFI_RSSI_EXCELLENT_DBM \
              THRESH_WIFI_RSSI_G1_DBM THRESH_WIFI_RSSI_WEAK_DBM \
-             THRESH_MON_UNSTABLE_WINDOW_S; do
+             THRESH_MON_UNSTABLE_WINDOW_S THRESH_MON_SPEED_STALE_S; do
     __inference_env+=("$__t=${!__t}")
   done
   env -i "${__inference_env[@]}" "$@" python3 "$HELPERS/monitor_sample.py"

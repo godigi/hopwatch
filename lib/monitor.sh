@@ -251,6 +251,13 @@ MON_PREV_SEVERITY="ok"
 # Which leg LA-2's swing was attributed to when its condition last held
 # ("router" or "internet"); empty until it first fires.
 MON_LA2_LEG=""
+# The newest stored full-check speed test for THIS network (see
+# _mon_probe_last_speed): Mbps down, Mbps up, epoch seconds. Empty when the
+# network has none. The monitor never measures speed itself.
+MON_SPEED_DOWN=""
+MON_SPEED_UP=""
+MON_SPEED_AT=""
+MON_SPEED_NETWORK=""
 MON_HW_PORTS=""
 # launchd's pid. Named rather than written as a bare 1 so the orphan check
 # below reads as the sentinel it is, and so tests/test_thresholds.bats's
@@ -823,6 +830,29 @@ _mon_geo_body_json() {
   local body="$1"
   [ -n "$body" ] && [[ "$body" =~ \"ip\":[[:space:]]*\" ]]
 }
+# Read-only: the run store the full check appends to. Runs on the slow tier
+# (and on a network change, which forces it), never every cycle — the answer
+# only changes when a full check completes, and a full check pauses the
+# monitor anyway. Failure leaves the previous figure, which the sample
+# builder ages and expires against THRESH_MON_SPEED_STALE_S; a different
+# network clears it first, because a speed measured elsewhere is not an
+# answer about this link.
+_mon_probe_last_speed() {
+  local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/last_speed.py"
+  local store="${LOG_DIR:+$LOG_DIR/baseline.jsonl}"
+  local line="" down up at
+  if [ -n "$MON_SPEED_NETWORK" ] && [ "$MON_SPEED_NETWORK" != "$MON_NETWORK_ID" ]; then
+    MON_SPEED_DOWN=""; MON_SPEED_UP=""; MON_SPEED_AT=""
+  fi
+  MON_SPEED_NETWORK="$MON_NETWORK_ID"
+  [ -n "$store" ] && [ -n "$MON_NETWORK_ID" ] && [ -r "$helper" ] || return 0
+  line="$(python3 "$helper" --history "$store" --network "$MON_NETWORK_ID" 2>/dev/null)" || return 0
+  [ -n "$line" ] || return 0
+  IFS=$'\t' read -r down up at <<<"$line"
+  MON_SPEED_DOWN="$down"; MON_SPEED_UP="$up"; MON_SPEED_AT="$at"
+  return 0
+}
+
 _mon_probe_public() {
   MON_PUBLIC_OK=""; MON_CAPTIVE=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
@@ -1352,6 +1382,10 @@ _mon_emit() {
   NETDIAG_MON_BURST_UNTIL="$MON_BURST_UNTIL" \
   NETDIAG_MON_BURST_INTERVAL_S="$THRESH_MON_BURST_INTERVAL_S" \
   NETDIAG_MON_LA2_LEG="$MON_LA2_LEG" \
+  NETDIAG_MON_SPEED_DOWN="$MON_SPEED_DOWN" \
+  NETDIAG_MON_SPEED_UP="$MON_SPEED_UP" \
+  NETDIAG_MON_SPEED_AT="$MON_SPEED_AT" \
+  THRESH_MON_SPEED_STALE_S="$THRESH_MON_SPEED_STALE_S" \
   NETDIAG_MON_STABILITY_STATE="$MON_STAB_STATE" \
   NETDIAG_MON_STABILITY_RULES="$MON_STAB_RULES" \
   THRESH_MON_UNSTABLE_WINDOW_S="$THRESH_MON_UNSTABLE_WINDOW_S" \
@@ -1680,6 +1714,7 @@ monitor_run() {
       if [ "$now" -ge "$next_slow" ] || [ "$network_changed" -eq 1 ]; then
         MON_REFRESHED+="slow "
         _mon_probe_public
+        _mon_probe_last_speed
         next_slow=$((now + MONITOR_SLOW_INTERVAL))
         last_slow_ts="$now"
       fi

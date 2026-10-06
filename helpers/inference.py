@@ -79,6 +79,7 @@ REQUIRED_THRESHOLDS: tuple[str, ...] = (
     "THRESH_WIFI_RSSI_G1_DBM",
     "THRESH_WIFI_RSSI_WEAK_DBM",
     "THRESH_MON_UNSTABLE_WINDOW_S",
+    "THRESH_MON_SPEED_STALE_S",
 )
 
 
@@ -123,6 +124,7 @@ def _resolve_thresholds():
     _T_new.rssi_good = _threshold("THRESH_WIFI_RSSI_G1_DBM")
     _T_new.rssi_weak = _threshold("THRESH_WIFI_RSSI_WEAK_DBM")
     _T_new.unstable_window = _threshold("THRESH_MON_UNSTABLE_WINDOW_S")
+    _T_new.speed_stale = _threshold("THRESH_MON_SPEED_STALE_S")
     _T = _T_new
 
 
@@ -245,6 +247,64 @@ MONITOR_FAMILY_LABELS: dict[str, str] = {
 }
 
 
+# ── The last full check's speed, folded into Streaming ───────────────────
+# The monitor never runs a speed test, so "Speed unknown" was the Streaming
+# row's answer minutes after a full check had measured one. lib/monitor.sh
+# reads the newest stored test for THIS network and hands it over as
+# m["speed"] = {down_mbps, up_mbps, age_s}. Whether it is too old to quote
+# is decided here against THRESH_MON_SPEED_STALE_S, and the sentence that
+# says so is written here, so the GUI renders both verbatim.
+
+def _speed_age(seconds) -> str:
+    """Compact age, the way the metric line says it: 29m ago, 3h ago."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return "under a minute ago"
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    return f"{seconds // 86400}d ago"
+
+
+def _speed_fresh(m):
+    """The stored speed when it is recent enough to quote, else None."""
+    speed = m.get("speed")
+    if not isinstance(speed, dict):
+        return None
+    down, age = _num(speed.get("down_mbps")), _num(speed.get("age_s"))
+    if down is None or age is None or age > _T.speed_stale:
+        return None
+    return speed
+
+
+def _speed_figures(speed) -> str:
+    down = _num(speed.get("down_mbps"))
+    return f"{down:.0f} Mbps"
+
+
+def speed_block(m):
+    """The sample's `last_speed` block, or None when this network has no
+    stored speed test."""
+    speed = m.get("speed")
+    if not isinstance(speed, dict):
+        return None
+    down = _num(speed.get("down_mbps"))
+    age = _num(speed.get("age_s"))
+    if down is None or age is None:
+        return None
+    stale = age > _T.speed_stale
+    return {
+        "down_mbps": down,
+        "up_mbps": _num(speed.get("up_mbps")),
+        "age_s": int(age),
+        "stale": stale,
+        "summary": (f"{_speed_figures(speed)} · measured {_speed_age(age)}"
+                    if not stale else
+                    f"Last speed test on this network was {_speed_age(age)} — too old to rely on."),
+    }
+
+
 def _measured_families(m) -> set:
     """Which families this sample actually produced readings for.
 
@@ -263,6 +323,8 @@ def _measured_families(m) -> set:
         fams.add("tcp")
     if m.get("web_ok") is not None:
         fams.add("web")
+    if _speed_fresh(m) is not None:
+        fams.add("speed")
     return fams
 
 
@@ -303,10 +365,16 @@ def _metric_line(activity: str, m) -> str:
         return _join(rtt_part, loss_part)
 
     if activity == "streaming":
-        # No speed test travels with a monitor sample; loss is what the
-        # stream can honestly say about video right now.
+        # The monitor runs no speed test of its own: the figure, when there
+        # is one, is the last full check's on this network, with its age.
+        # Loss is what the stream can honestly say about video right now.
+        speed = _speed_fresh(m)
+        speed_part = (f"{_speed_figures(speed)} · measured "
+                      f"{_speed_age(speed['age_s'])}" if speed else None)
         if loss is not None and loss != 0:
-            return _fmt_pct(loss) + " loss"
+            return _join(speed_part, _fmt_pct(loss) + " loss")
+        if speed_part:
+            return speed_part
         return "Clean link" if loss is not None else ""
 
     if activity == "vpn":
@@ -362,6 +430,12 @@ def _suitability(fired, m) -> list:
                 verdict = "unmeasured"
                 missing_prose = _english_list(MONITOR_FAMILY_LABELS[f] for f in missing)
                 reason = f"The live monitor doesn't run {missing_prose}."
+                stored = m.get("speed")
+                if activity == "streaming" and "speed" in missing and isinstance(stored, dict) \
+                        and _num(stored.get("age_s")) is not None:
+                    reason = ("The last speed test on this network was "
+                              f"{_speed_age(stored['age_s'])} — too old to rely on. "
+                              "Run a full check for a current figure.")
             else:
                 verdict = "good"
                 reason = None
@@ -384,6 +458,12 @@ def _suitability(fired, m) -> list:
             # The one sentence behind the level (the row's help text).
             "detail": (DETAILS_BY_LEVEL.get((activity, verdict)) or reason or ""),
         })
+        if activity == "streaming" and verdict == "good" and _speed_fresh(m):
+            speed = _speed_fresh(m)
+            up = _num(speed.get("up_mbps"))
+            both = f"{_speed_figures(speed)} down" + (f" and {up:.0f} Mbps up" if up is not None else "")
+            rows[-1]["detail"] = (f"The last full check measured {both}, "
+                                  f"{_speed_age(speed['age_s'])}; the live link has no loss.")
     return rows
 
 
@@ -823,6 +903,7 @@ def build(state: dict) -> dict:
     _apply_recent(rows, stab)
     return {
         "stability": stab,
+        "last_speed": speed_block(state),
         "suitability": rows,
         "hops": {
             "mac": _mac_hop(state),

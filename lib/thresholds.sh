@@ -453,6 +453,16 @@ THRESH_MON_CLEAR_HOLD_S=30
 # reads this same figure), so the dropdown shows one line, not fourteen.
 THRESH_MON_UNSTABLE_WINDOW_S=300
 
+# ── Monitor: the last full check's speed ─────────────────────────────────
+# The monitor never runs a speed test, so the Streaming row folds in the
+# newest one the full check stored for THIS network, with its age. Past this
+# age the figure is presented as unknown rather than quoted: a speed
+# measured last week describes last week's line, and a plan change, a
+# congested evening or a different router makes it no answer to "will
+# video play now". A day keeps one morning's test good for the evening and
+# not for the next day.
+THRESH_MON_SPEED_STALE_S=86400
+
 # ── Monitor: investigation burst ─────────────────────────────────────────
 # On the ok→warn/critical edge (and on a manual latency test) the monitor
 # samples at this interval for this long, inside the running process, then

@@ -19,7 +19,7 @@ emit() {
            THRESH_INTERNET_LATENCY_CRIT_MS THRESH_DNS_LATENCY_WARN_MS \
            THRESH_GW_RTT_WARN_MS THRESH_WIFI_RSSI_EXCELLENT_DBM \
            THRESH_WIFI_RSSI_G1_DBM THRESH_WIFI_RSSI_WEAK_DBM \
-           THRESH_MON_UNSTABLE_WINDOW_S; do
+           THRESH_MON_UNSTABLE_WINDOW_S THRESH_MON_SPEED_STALE_S; do
     env+=("$t=${!t}")
   done
   env -i "${env[@]}" "$@" python3 "$HELPERS/monitor_sample.py"
@@ -197,4 +197,76 @@ assert c["summary"] == "Jittery internet response", c
   printf '%s' "$output" | jq_py '
 assert d["headline"]["subtitle"] == "Wi-Fi response times swung twice in the last 5 min", d["headline"]
 '
+}
+
+# ── the last full check's speed, folded into Streaming ───────────────────
+
+@test "streaming quotes the last full check's speed with its age" {
+  at=$(( $(date +%s) - 29 * 60 ))
+  run emit "${HEALTHY[@]}" NETDIAG_MON_SPEED_DOWN=65.1 NETDIAG_MON_SPEED_UP=51.9 \
+           NETDIAG_MON_SPEED_AT="$at"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq_py '
+rows = {r["activity"]: r for r in d["suitability"]}
+r = rows["streaming"]
+assert r["verdict"] == "good", r
+assert r["metric"] == "65 Mbps · measured 29m ago", r
+assert r["unmeasured_reason"] is None, r
+assert "65 Mbps down and 52 Mbps up" in r["detail"], r
+ls = d["last_speed"]
+assert ls["stale"] is False and ls["down_mbps"] == 65.1 and ls["age_s"] in (1740, 1741, 1742), ls
+assert ls["summary"] == "65 Mbps · measured 29m ago", ls
+'
+}
+
+@test "streaming keeps a loss reading beside the stored speed" {
+  at=$(( $(date +%s) - 120 ))
+  run emit "${HEALTHY[@]}" NETDIAG_MON_INET_LOSS=2 NETDIAG_MON_SPEED_DOWN=65 \
+           NETDIAG_MON_SPEED_AT="$at"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq_py '
+r = {r["activity"]: r for r in d["suitability"]}["streaming"]
+assert r["metric"].startswith("65 Mbps · measured 2m ago · "), r
+assert "loss" in r["metric"], r
+'
+}
+
+@test "a speed older than THRESH_MON_SPEED_STALE_S is not quoted and says why" {
+  at=$(( $(date +%s) - THRESH_MON_SPEED_STALE_S - 3 * 86400 ))
+  run emit "${HEALTHY[@]}" NETDIAG_MON_SPEED_DOWN=65 NETDIAG_MON_SPEED_AT="$at"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq_py '
+r = {r["activity"]: r for r in d["suitability"]}["streaming"]
+assert r["verdict"] == "unmeasured" and r["label"] == "Speed unknown", r
+assert r["metric"] == "", r
+assert "too old to rely on" in r["unmeasured_reason"] and "4d ago" in r["unmeasured_reason"], r
+assert d["last_speed"]["stale"] is True, d["last_speed"]
+'
+}
+
+@test "no stored speed: streaming stays unmeasured and last_speed is null" {
+  run emit "${HEALTHY[@]}"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq_py '
+r = {r["activity"]: r for r in d["suitability"]}["streaming"]
+assert r["verdict"] == "unmeasured", r
+assert d["last_speed"] is None
+'
+}
+
+@test "last_speed.py: newest stored speed for THIS network only" {
+  store="$BATS_TEST_TMPDIR/baseline.jsonl"
+  {
+    printf '%s\n' '{"timestamp":"2026-10-06T10:00:00Z","network":{"id":"mac:aa:bb:cc:dd:ee:01"},"speedtest":{"down_mbps":100,"up_mbps":20}}'
+    printf '%s\n' '{"timestamp":"2026-10-06T11:00:00Z","network":{"id":"mac:aa:bb:cc:dd:ee:02"},"speedtest":{"down_mbps":7,"up_mbps":1}}'
+    printf '%s\n' '{"timestamp":"2026-10-06T09:00:00Z","network":{"id":"mac:aa:bb:cc:dd:ee:01"},"speedtest":{"down_mbps":50,"up_mbps":10}}'
+    printf '%s\n' '{"timestamp":"2026-10-06T12:00:00Z","network":{"id":"mac:aa:bb:cc:dd:ee:01"},"speedtest":null}'
+  } > "$store"
+  run python3 "$HELPERS/last_speed.py" --history "$store" --network "mac:aa:bb:cc:dd:ee:01"
+  [ "$status" -eq 0 ]
+  [ "${output%%$'\t'*}" = "100" ]
+  [ "$(printf '%s' "$output" | cut -f3)" = "$(python3 -c 'from datetime import datetime,timezone;print(int(datetime(2026,10,6,10,tzinfo=timezone.utc).timestamp()))')" ]
+  run python3 "$HELPERS/last_speed.py" --history "$store" --network "mac:aa:bb:cc:dd:ee:99"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
