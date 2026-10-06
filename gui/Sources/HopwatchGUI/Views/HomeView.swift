@@ -251,12 +251,7 @@ struct HomeView: View {
     // MARK: - Status Hero Section
 
     private var stage: StageResolver.Stage {
-        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
-            items: suitabilityItems,
-            monitorSample: coordinator.monitor.latest,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
-        )
+        let degraded = SuitabilityEngine.degradedExperience(coordinator.monitor.latest)
         return StageResolver.resolve(.init(
             isScanning: coordinator.isScanning,
             isArrivalCheck: coordinator.isArrivalCheck,
@@ -509,26 +504,14 @@ struct HomeView: View {
         )
     }
 
+    // The five activity rows, judged CLI-side (sample first, then the
+    // stored run's own block). "Not measured" rows for absence — never a
+    // locally re-derived verdict.
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = currentRunResult?.snapshot
-        let fired = coordinator.monitor.latest?.status.rules
-            ?? snap?.diagnosis.compactMap(\.rule)
-            ?? []
-        let inputs = SuitabilityEngine.Inputs(
-            monitorSample: coordinator.monitor.latest,
-            speedTest: snap?.speedtest ?? coordinator.latestSpeedTest,
-            savedSuitability: snap?.suitability,
-            catalog: coordinator.rulesCatalog.catalog,
-            firedRules: fired,
-            isLinkUp: coordinator.monitor.latest?.link.up ?? true,
-            isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
-            vpnActive: vpnActive,
-            vpnName: vpnProviderName,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+        SuitabilityEngine.items(
+            sample: coordinator.monitor.latest,
+            snapshot: currentRunResult?.snapshot
         )
-        return SuitabilityEngine.evaluateAll(inputs)
     }
 
     // MARK: - Findings Computation
@@ -857,17 +840,31 @@ struct HomeView: View {
             isGood: ipv6Avail
         ))
 
-        // 14. Web connections
-        let webOk = snap?.tcpReach.first?.ok ?? true
-        let webBadge = DashboardCheckTable.GradeBadge(
-            label: webOk ? "Good" : "Blocked",
-            tone: webOk ? .good : .critical
-        )
+        // 14. Web connections. The verdict is the CLI's TCP-2 diagnosis
+        // (rule ID from the run's own diagnosis list); this row only counts
+        // the panel it measured. One failed target among several is not a
+        // block, and a single target is never read as the whole web.
+        let reach = snap?.tcpReach ?? []
+        let reachFailed = reach.filter { !$0.ok }.count
+        let refusedDiag = snap?.diagnosis.first { $0.rule == "TCP-2" }
+        let webOk = refusedDiag == nil
+        // Failures with no TCP-2 are not judged here: the loss rules own
+        // that shape, and their verdict is in the diagnosis list above.
+        let webBadge: DashboardCheckTable.GradeBadge = {
+            if let d = refusedDiag {
+                return .init(label: "Refused", tone: d.severity == "critical" ? .critical : .warn)
+            }
+            return reachFailed > 0 ? .init(label: "See diagnosis", tone: .neutral)
+                                   : .init(label: "Good", tone: .good)
+        }()
+        let webMeasured = reachFailed > 0
+            ? "\(reachFailed) of \(reach.count) test connections failed"
+            : "TCP 443 reachable"
         rows.append(.init(
             id: "web",
             icon: webOk ? "checkmark" : "exclamationmark.triangle.fill",
             label: "Web connections",
-            measured: webOk ? "TCP 443 reachable" : "TCP 443 blocked",
+            measured: webMeasured,
             subvalue: nil,
             usual: "—",
             badge: webBadge,
@@ -1007,7 +1004,7 @@ struct HomeView: View {
         case .degraded(let deg):
             return deg.isCritical
         case .alerted(let alert):
-            return alert.severityRank >= 3
+            return alert.isCritical
         default:
             return false
         }
@@ -1024,35 +1021,9 @@ struct HomeView: View {
         Set(coordinator.monitor.latest?.status.rules ?? coordinator.latestRun?.snapshot.diagnosis.compactMap(\.rule) ?? [])
     }
 
-    private var firedCategories: Set<String> {
-        guard let catalog = coordinator.rulesCatalog.catalog else { return [] }
-        return Set(firedRules.compactMap { catalog[$0]?.category })
-    }
-
     private var routeWarningResult: RouteWarningResolver.Result {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let linkUp = coordinator.monitor.latest?.link.up ?? true
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? coordinator.latestRun?.snapshot.gateway.lossPct ?? 0
-        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs ?? 0
-        let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs ?? 0
-        let inetJitter = coordinator.monitor.latest?.internet.rttJitterMs ?? coordinator.latestRun?.snapshot.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
-        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs ?? 0
-
-        return RouteWarningResolver.resolve(
-            linkUp: linkUp,
-            isWiFi: isWiFi,
-            stage: stage,
-            firedCategories: firedCategories,
-            gwLoss: gwLoss,
-            gwPing: gwPing,
-            gwJitter: gwJitter,
-            inetLoss: inetLoss,
-            inetPing: inetPing,
-            inetJitter: inetJitter,
-            hasRecentRoam: coordinator.hasRecentRoam,
-            wifiRuleTint: wifiRuleTint
-        )
+        // The hop flags and reasons are the CLI's; this view renders them.
+        RouteWarningResolver.resolve(coordinator.monitor.latest)
     }
 
     private var routerWarn: Bool {

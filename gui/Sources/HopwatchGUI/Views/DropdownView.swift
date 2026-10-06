@@ -177,12 +177,11 @@ struct DropdownView: View {
     // MARK: - 3. Status Hero Section
 
     private var degradedExperience: StageResolver.DegradedSnapshot? {
-        SuitabilityEngine.synthesizeDegradedExperience(
-            items: suitabilityItems,
-            monitorSample: coordinator.monitor.latest,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
-        )
+        // The hero's degraded copy is judged CLI-side (helpers/inference.py
+        // against lib/thresholds.sh) and rides the sample's `headline`
+        // block. This used to re-derive headlines from the suitability
+        // engine's own cutoffs — the "three answers for one sample" bug.
+        SuitabilityEngine.degradedExperience(coordinator.monitor.latest)
     }
 
     private var stage: StageResolver.Stage {
@@ -250,7 +249,10 @@ struct DropdownView: View {
                     : coordinator.headline
             )
         case .alerted(let alert):
-            let isCritical = alert.severityRank >= 3
+            // The severity word comes once from the catalog mapping
+            // (StageResolver.AlertSnapshot.isCritical); the literal rank
+            // comparison lives there alone.
+            let isCritical = alert.isCritical
             let isCaptive = isCaptivePortalAlert(alert)
             let isRouter = isRouterAlert(alert)
 
@@ -328,11 +330,14 @@ struct DropdownView: View {
     private var quietLine: String {
         var parts: [String] = []
         if let since = NetworkEvent.timeSinceLast(coordinator.eventLog.events, now: .now) {
-            if since < 60 {
+            // AuditExempt (time composition): this splits the "nothing has
+            // changed" phrase at a minute boundary — how long ago, not how
+            // bad. No verdict rides on it.
+            if since < 60 {  // AuditExempt (time composition)
                 parts.append("Nothing has changed in under a minute")
             } else {
                 let f = DateComponentsFormatter()
-                f.allowedUnits = since >= 3600 ? [.hour, .minute] : [.minute]
+                f.allowedUnits = since >= 3600 ? [.hour, .minute] : [.minute]  // AuditExempt (time composition)
                 f.unitsStyle = .abbreviated
                 if let s = f.string(from: since) {
                     parts.append("Nothing has changed in \(s)")
@@ -347,30 +352,10 @@ struct DropdownView: View {
 
     // MARK: - 4. Connection Route Section
 
+    // The hop flags and reasons are the CLI's (helpers/inference.py against
+    // lib/thresholds.sh); this view renders them and composes nothing.
     private var routeWarningResult: RouteWarningResolver.Result {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let linkUp = coordinator.monitor.latest?.link.up ?? true
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
-        let inetJitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
-        let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
-        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
-
-        return RouteWarningResolver.resolve(
-            linkUp: linkUp,
-            isWiFi: isWiFi,
-            stage: stage,
-            firedCategories: firedCategories,
-            gwLoss: gwLoss,
-            gwPing: gwPing,
-            gwJitter: gwJitter,
-            inetLoss: inetLoss,
-            inetPing: inetPing,
-            inetJitter: inetJitter,
-            hasRecentRoam: coordinator.hasRecentRoam,
-            wifiRuleTint: wifiRuleTint
-        )
+        RouteWarningResolver.resolve(coordinator.monitor.latest)
     }
 
     private var isWifiLaggy: Bool {
@@ -381,21 +366,10 @@ struct DropdownView: View {
         routeWarningResult.macStatusGood
     }
 
+    /// The band name for the wifi cell — the one formatter, in SignalScale.
     private var resolvedBand: String? {
-        if let band = coordinator.latestRun?.snapshot.wifiScan?.currentBand {
-            return band
-        }
-        if let chStr = coordinator.monitor.latest?.wifi?.channel {
-            if chStr.contains("2.4") { return "2.4 GHz" }
-            if chStr.contains("5 GHz") || chStr.contains("5GHz") { return "5 GHz" }
-            if chStr.contains("6 GHz") || chStr.contains("6GHz") { return "6 GHz" }
-            let firstDigits = chStr.components(separatedBy: CharacterSet.decimalDigits.inverted).first { !$0.isEmpty }
-            if let firstDigits, let ch = Int(firstDigits) {
-                if ch <= 14 { return "2.4 GHz" }
-                if ch >= 32 { return "5 GHz" }
-            }
-        }
-        return nil
+        coordinator.latestRun?.snapshot.wifiScan?.currentBand
+            ?? SignalScale.bandName(forChannel: coordinator.monitor.latest?.wifi?.channel)
     }
 
     private var macDetailText: String {
@@ -412,13 +386,14 @@ struct DropdownView: View {
         return coordinator.monitor.latest?.link.ip ?? "Wi-Fi link"
     }
 
-    private var isGatewayJitterDominant: Bool {
-        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
-        return gwJitter >= 20.0
+    private var hops: MonitorSample.Hops {
+        coordinator.monitor.latest?.hops ?? .init()
     }
 
-    private var jitterLabel: String {
-        "Jitter"
+    /// The CLI's jitter sub-verdict and its one-line note. Unmeasured hands
+    /// back "Checking…"; judgement never arrives twice computed.
+    private var jitterDescriptionText: String {
+        hops.internet.jitterNote ?? "Checking…"
     }
 
     private var connectionRouteSection: some View {
@@ -452,9 +427,8 @@ struct DropdownView: View {
             isWifiLaggy: isWiFi && isWifiLaggy,
             routerAdminURL: routerAdminURL,
             routerAdminAvailable: coordinator.routerAdminAvailable,
-            jitterLabel: jitterLabel,
             jitterMs: currentJitter,
-            jitterWarn: (currentJitter ?? 0) >= 30.0 || (isGatewayJitterDominant && (currentJitter ?? 0) >= 20.0),
+            jitterWarn: hops.internet.jitterWarn,
             jitterDescription: jitterDescriptionText,
             vpnActive: vpnActive,
             vpnName: vpnName,
@@ -467,17 +441,12 @@ struct DropdownView: View {
 
     private var routerPingText: String {
         guard !coordinator.monitor.isPaused, !coordinator.isScanning,
-              let sample = coordinator.monitor.latest else { return "—" }
-        guard let rtt = sample.gateway.rttAvgMs else {
-            if let loss = sample.gateway.lossPct, loss >= 100 { return "no reply" }
-            return "—"
-        }
-        return "\(Int(rtt.rounded())) ms"
+              coordinator.monitor.latest != nil else { return "—" }
+        return hops.router.value.isEmpty ? "—" : hops.router.value
     }
 
     private var routerPingTint: Color {
-        let rtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
-        if routerWarn || rtt >= 25.0 {
+        if routerWarn {
             return Theme.ColorToken.amber
         }
         return Theme.ColorToken.ink
@@ -485,12 +454,8 @@ struct DropdownView: View {
 
     private var internetPingText: String {
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
-        if icmpFiltered { return "TCP ok" }
-        guard let rtt = coordinator.monitor.latest?.internet.rttAvgMs else {
-            if let loss = coordinator.monitor.latest?.internet.lossPct, loss >= 100 { return "no reply" }
-            return "—"
-        }
-        return "\(Int(rtt.rounded())) ms"
+        let value = hops.internet.value
+        return value.isEmpty ? "—" : value
     }
 
     private var internetPingTint: Color {
@@ -508,61 +473,21 @@ struct DropdownView: View {
         routeWarningResult.internetWarn
     }
 
+    /// The router hop's reason line, rendered verbatim from the sample;
+    /// the fallback composes only facts (the gateway's address), no
+    /// verdict. A live roam is a fact about which readings are old.
     private var routerDetailText: String {
-        if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
+        if coordinator.hasRecentRoam, hops.router.detail.isEmpty {
             return "Wi-Fi roamed"
         }
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        if let loss = coordinator.monitor.latest?.gateway.lossPct, loss > 0 {
-            if inetLoss <= 1.0 && loss < 20.0 {
-                return routerGatewayIP ?? "default gateway"
-            }
-            return LossFormatter.formatPacketLoss(loss)
-        }
-        if routerWarn {
-            let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
-            let gwRtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
-            if gwJitter >= 20.0 {
-                return String(format: "±%.0f ms jitter", gwJitter)
-            }
-            if gwRtt >= 30.0 {
-                return String(format: "%.0f ms latency", gwRtt)
-            }
-            return "Router latency"
-        }
-        return routerGatewayIP ?? "default gateway"
+        return hops.router.detail
+            ?? routerGatewayIP
+            ?? "default gateway"
     }
 
+    /// The internet hop's reason line, rendered verbatim from the sample.
     private var internetDetailText: String {
-        let loss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
-        let ping = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
-
-        if loss > 0 && jitter >= 30.0 {
-            return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
-        }
-        if loss > 0 {
-            return LossFormatter.formatPacketLoss(loss)
-        }
-        if jitter >= 30.0 && !isGatewayJitterDominant {
-            return String(format: "%.0f ms jitter", jitter)
-        }
-        if icmpFiltered {
-            return "Ping blocked"
-        }
-        if internetWarn {
-            if ping >= 120.0 {
-                return String(format: "%.0f ms latency", ping)
-            }
-            if jitter >= 20.0 {
-                return String(format: "%.0f ms jitter", jitter)
-            }
-            if let degHeadline = degradedExperience?.headline {
-                return degHeadline
-            }
-            return "Connection degraded"
-        }
-        return "0% packet loss"
+        hops.internet.detail ?? "Not measured yet"
     }
 
     private var countryFlagEmoji: String? {
@@ -573,14 +498,6 @@ struct DropdownView: View {
         coordinator.monitor.latest?.publicInfo.country
             ?? coordinator.latestRun?.snapshot.publicInfo.country
             ?? coordinator.hydratedReport?.run.publicInfo.country
-    }
-
-    private var jitterDescriptionText: String {
-        guard let j = currentJitter else { return "Checking…" }
-        if j >= 30.0 {
-            return "Uneven response times"
-        }
-        return "Stable response times"
     }
 
     // MARK: - 5. Experience Grid Section
@@ -594,51 +511,37 @@ struct DropdownView: View {
         )
     }
 
+    // The five activity rows, judged CLI-side. Falls back to "Not
+    // measured" rows (no judgement) for an older CLI — never a guessed
+    // verdict.
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = coordinator.latestRun?.snapshot
-        let inputs = SuitabilityEngine.Inputs(
-            monitorSample: coordinator.monitor.latest,
-            speedTest: snap?.speedtest ?? coordinator.latestSpeedTest,
-            savedSuitability: snap?.suitability,
-            catalog: coordinator.rulesCatalog.catalog,
-            firedRules: Array(firedRules),
-            isLinkUp: coordinator.monitor.latest?.link.up ?? true,
-            isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
-            vpnActive: coordinator.monitor.latest?.vpn.active ?? snap?.vpn.active ?? false,
-            vpnName: coordinator.monitor.latest?.vpn.name ?? snap?.vpn.name,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss
+        SuitabilityEngine.items(
+            sample: coordinator.monitor.latest,
+            snapshot: coordinator.latestRun?.snapshot ?? coordinator.currentRunResult?.snapshot
         )
-        return SuitabilityEngine.evaluateAll(inputs)
     }
 
+    // One row per grid activity, all guaranteed present by `items(_:_:)`
+    // — so no hard-coded fallback verdict can drift from the CLI's copy.
     private var callsExperience: ExperienceGridView.ExperienceStatus {
-        if let item = suitabilityItems.first(where: { $0.id == "calls" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
-        }
-        return .init(label: "Clear audio", tint: Theme.ColorToken.green, metric: "0% loss", helpText: "Clear audio for voice & video calls")
+        item("calls")
     }
 
     private var gamingExperience: ExperienceGridView.ExperienceStatus {
-        if let item = suitabilityItems.first(where: { $0.id == "gaming" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
-        }
-        return .init(label: "Smooth", tint: Theme.ColorToken.green, metric: "Low ping", helpText: "Stable latency and jitter for online multiplayer gaming")
+        item("gaming")
     }
 
     private var streamingExperience: ExperienceGridView.ExperienceStatus {
-        if let item = suitabilityItems.first(where: { $0.id == "streaming" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
-        }
-        return .init(label: "HD ready", tint: Theme.ColorToken.green, metric: "Clean link", helpText: "Sufficient bandwidth for smooth streaming")
+        item("streaming")
     }
 
     private var browsingExperience: ExperienceGridView.ExperienceStatus {
-        if let item = suitabilityItems.first(where: { $0.id == "browsing" }) {
-            return .init(label: item.status, tint: item.tint, metric: item.metric, helpText: item.helpText)
-        }
-        return .init(label: "Fast", tint: Theme.ColorToken.green, metric: "TCP 443 ok", helpText: "Fast DNS resolution and reliable HTTPS connectivity")
+        item("browsing")
+    }
+
+    private func item(_ id: String) -> ExperienceGridView.ExperienceStatus {
+        let it = suitabilityItems.first { $0.id == id } ?? SuitabilityEngine.Item.unmeasured(activity: id)
+        return .init(label: it.status, tint: it.tint, metric: it.metric, helpText: it.helpText)
     }
 
     // MARK: - 6. Speed Test Section
@@ -732,11 +635,8 @@ struct DropdownView: View {
 
     // MARK: - Helpers & Models
 
-    private var firedCategories: Set<String> {
-        guard let catalog = coordinator.rulesCatalog.catalog else { return [] }
-        return Set(firedRules.compactMap { catalog[$0]?.category })
-    }
-
+    // The fired rule IDs, for the wifi rule tint. The categories were last
+    // used by the resolver's own attribution, which is the CLI's job now.
     private var firedRules: Set<String> {
         Set(coordinator.monitor.latest?.status.rules ?? [])
     }
@@ -758,6 +658,9 @@ struct DropdownView: View {
         coordinator.monitor.latest?.wifi?.rssi ?? coreWLANRSSI
     }
 
+    /// The Wi-Fi cell: the radio-scale word (from `--signal-scale`, the
+    /// CLI's scale document) tinted by this sample itself. The laggy
+    /// suffix and its cutoffs are the CLI's `hops.mac.detail` judgment.
     private var wifiCell: (value: String, unit: String?, tint: Color) {
         if coordinator.monitor.latest?.link.up == false {
             return ("disconnected", nil, .red)
@@ -766,11 +669,8 @@ struct DropdownView: View {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-        if isWifiLaggy {
-            let label = (content.value.lowercased() == "good" || content.value.lowercased() == "excellent")
-                ? "Good (laggy)"
-                : "\(content.value) (laggy)"
-            return (label, content.unit, Theme.ColorToken.amber)
+        if let macDetail = routeWarningResult.macDetail {
+            return (macDetail, content.unit, macStatusGood ? content.tint : Theme.ColorToken.amber)
         }
         return (content.value, content.unit, wifiRuleTint ?? content.tint)
     }

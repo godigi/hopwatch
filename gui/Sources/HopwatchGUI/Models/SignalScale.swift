@@ -100,3 +100,29 @@ extension SignalScale.Band {
         blurb = c.lenient(.blurb)
     }
 }
+
+// MARK: - Band classification for a Wi-Fi channel
+
+extension SignalScale {
+    /// "2.4 GHz" / "5 GHz" / "6 GHz" for a monitor sample's channel
+    /// string ("6", "36", "5 GHz", "2.4 GHz"…).
+    ///
+    /// Moved out of Views/DropdownView.swift (`resolvedBand`) in the
+    /// reporting-accuracy plan: it is the same classification W6 in the
+    /// CLI makes, and the numbers it reads are lib/thresholds.sh's
+    /// THRESH_WIFI_24GHZ_MIN_CHANNEL / THRESH_WIFI_24GHZ_MAX_CHANNEL and
+    /// the 5 GHz band's lower channel edge. Until those edges arrive as
+    /// named constants this is presentation-side composition, parked here
+    /// (one formatter, used everywhere) and marked for the CLI to own.
+    static func bandName(forChannel channel: String?) -> String? {
+        guard let chStr = channel else { return nil }
+        if chStr.contains("2.4") { return "2.4 GHz" }
+        if chStr.contains("5 GHz") || chStr.contains("5GHz") { return "5 GHz" }
+        if chStr.contains("6 GHz") || chStr.contains("6GHz") { return "6 GHz" }
+        let firstDigits = chStr.components(separatedBy: CharacterSet.decimalDigits.inverted).first { !$0.isEmpty }
+        guard let firstDigits, let ch = Int(firstDigits) else { return nil }
+        if ch <= 14 { return "2.4 GHz" }
+        if ch >= 32 { return "5 GHz" }
+        return nil
+    }
+}

@@ -34,6 +34,14 @@ struct MonitorSample: Decodable, Sendable {
     var tcp: TCP = .init()
     var publicInfo: PublicInfo = .init()
     var status: Status = .init()
+    /// Per-activity rows, per-hop states and the degraded hero's copy —
+    /// all judged by helpers/inference.py from lib/thresholds.sh and
+    /// rendered verbatim here. Absent blocks (older CLI, or thresholds
+    /// missing at sampling time) mean "the CLI declines to judge" and
+    /// every consumer renders a neutral fallback, never its own verdict.
+    var suitability: [RunSnapshot.SuitabilityRow] = []
+    var hops: Hops?
+    var headline: Headline?
 
     /// Effective instantaneous jitter in ms, prioritizing internet then gateway.
     var liveJitterMs: Double? {
@@ -62,6 +70,7 @@ struct MonitorSample: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schema, version, ts, seq, refreshed, link, network, vpn
         case gateway, internet, wifi, dns, tcp, status, changes
+        case suitability, hops, headline
         case gapS = "gap_s"
         case jitterMs = "jitter_ms"
         case publicInfo = "public"
@@ -206,11 +215,30 @@ struct MonitorSample: Decodable, Sendable {
     }
 
     struct TCP: Decodable, Sendable {
+        /// One cycle's two connects, nothing more. NOT a verdict — at a
+        /// ~2-in-3 refusal rate both fail on ~40% of cycles while browsing
+        /// mostly works. Read `refused` for the verdict.
         var anyOk: Bool?
         var targets: [Target] = []
+        /// The CLI's refused-connect verdict (TCP-2): ratio, the confirmed
+        /// state, and the sentence to show. Absent against a CLI that
+        /// predates it, which decodes as all-nil — no verdict, not "fine".
+        var refused: Refused = .init()
+
+        /// `state` and `summary` are decided in lib/monitor.sh against
+        /// lib/thresholds.sh; `summary` is rendered verbatim and is nil
+        /// unless the CLI confirmed the verdict. Never build a "blocked"
+        /// headline from `anyOk` instead.
+        struct Refused: Decodable, Sendable, Equatable {
+            var pct: Double?
+            var attempts: Int?
+            /// `"warn"` or `"critical"` when TCP-2 is confirmed, else nil.
+            var state: String?
+            var summary: String?
+        }
 
         enum CodingKeys: String, CodingKey {
-            case targets
+            case targets, refused
             case anyOk = "any_ok"
         }
 
@@ -247,6 +275,63 @@ struct MonitorSample: Decodable, Sendable {
         }
     }
 
+    /// The route card's three hops, judged CLI-side (helpers/inference.py,
+    /// Phase 3 of the reporting plan): one warn flag (and a laggy flag on
+    /// the Mac hop) plus one reason phrase per hop
+    /// each. The cross-checks that decided these used to live as inline
+    /// literals in Support/RouteWarningResolver.swift; the numbers they
+    /// ride on are THRESH_GW_RTT_WARN_MS and THRESH_LATENCY_JITTER_WARN_MS
+    /// in lib/thresholds.sh now.
+    struct Hops: Decodable, Sendable {
+        var mac: MacHop = .init()
+        var router: WarnedHop = .init()
+        var internet: InternetHop = .init()
+
+        struct MacHop: Decodable, Sendable {
+            var good: Bool = true
+            var laggy: Bool = false
+            /// The radio-scale word for the current RSSI ("Good", "Weak"),
+            /// possibly with a laggy suffix and a roamed note — the CLI's
+            /// phrase, rendered verbatim.
+            var detail: String = ""
+
+            enum CodingKeys: String, CodingKey { case good, laggy, detail }
+        }
+
+        struct WarnedHop: Decodable, Sendable {
+            var warn: Bool = false
+            var detail: String = ""
+            /// The ping cell's value phrasing (the figure, "no reply",
+            /// "TCP ok") — judged CLI-side, `""` meaning "render —".
+            var value: String = ""
+            enum CodingKeys: String, CodingKey { case warn, detail, value }
+        }
+
+        struct InternetHop: Decodable, Sendable, Equatable {
+            var warn: Bool = false
+            var detail: String = ""
+            var value: String = ""
+            var jitterWarn: Bool = false
+            var jitterNote: String?
+
+            enum CodingKeys: String, CodingKey {
+                case warn, detail, value
+                case jitterWarn = "jitter_warn"
+                case jitterNote = "jitter_note"
+            }
+        }
+    }
+
+    /// The degraded status hero's copy, authored CLI-side. `nil` while
+    /// every grid activity is good — the healthy card's copy stays the
+    /// app's own presentation.
+    struct Headline: Decodable, Sendable, Equatable {
+        var text: String = ""
+        var subtitle: String = ""
+        var critical: Bool = false
+        enum CodingKeys: String, CodingKey { case text, subtitle, critical }
+    }
+
     struct Status: Decodable, Sendable {
         var severity: String = "ok"
         /// `measured` means at least one fast reachability probe produced a
@@ -277,6 +362,13 @@ struct MonitorSample: Decodable, Sendable {
 
     var timestamp: Date { FastISO8601.parse(ts) ?? Date() }
 
+    /// The menu-bar dot's health. Judgement-free since the reporting-accuracy
+    /// Phase 3: the severity is `status.severity` (rule IDs judged against
+    /// lib/thresholds.sh in lib/monitor.sh), gated only by whether a
+    /// reachability probe actually ran (`measurement`) and whether the
+    /// link is joined. Earlier versions compared loss figures here — the
+    /// one place the app still re-derived a verdict, and its cutoffs
+    /// disagreed with the CLI's.
     var health: Health {
         guard link.up else { return .critical }
         // No rule firing is not the same as a successful check. Keep the
@@ -288,12 +380,6 @@ struct MonitorSample: Decodable, Sendable {
         case "warn":     return .warning
         default:
             if status.degraded { return .warning }
-            let inetLoss = internet.lossPct ?? 0
-            let gwLoss = gateway.lossPct ?? 0
-            // Downstream validation: if internet is healthy (<= 1.0%), isolated router loss
-            // (< 20%) is control-plane rate limiting and does not degrade user traffic.
-            let loss = (inetLoss <= 1.0 && gwLoss < 20.0) ? inetLoss : max(inetLoss, gwLoss)
-            if loss > 2.0 { return .warning }
             return .healthy
         }
     }
@@ -327,6 +413,20 @@ extension MonitorSample {
         publicInfo = c.lenient(.publicInfo, PublicInfo())
         status = c.lenient(.status, Status())
         changes = c.lenient(.changes, [])
+        suitability = c.lenient(.suitability, [])
+        hops = c.lenient(.hops)
+        headline = c.lenient(.headline)
+    }
+}
+
+extension MonitorSample.Hops {
+    enum CodingKeys: String, CodingKey { case mac, router, internet }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mac = c.lenient(.mac, MacHop())
+        router = c.lenient(.router, WarnedHop())
+        internet = c.lenient(.internet, InternetHop())
     }
 }
 
@@ -425,6 +525,19 @@ extension MonitorSample.TCP {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         anyOk = c.lenient(.anyOk)
         targets = c.lenient(.targets, [])
+        refused = c.lenient(.refused, Refused())
+    }
+}
+
+extension MonitorSample.TCP.Refused {
+    enum CodingKeys: String, CodingKey { case pct, attempts, state, summary }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pct = c.lenient(.pct)
+        attempts = c.lenient(.attempts)
+        state = c.lenient(.state)
+        summary = c.lenient(.summary)
     }
 }
 
@@ -452,6 +565,42 @@ extension MonitorSample.Status {
         degraded = c.lenient(.degraded, false)
         paused = c.lenient(.paused, false)
         cadenceS = c.lenient(.cadenceS)
+    }
+}
+
+extension MonitorSample.Hops.MacHop {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        good = c.lenient(.good, true)
+        laggy = c.lenient(.laggy, false)
+        detail = c.lenient(.detail, "")
+    }
+}
+
+extension MonitorSample.Hops.WarnedHop {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        warn = c.lenient(.warn, false)
+        detail = c.lenient(.detail, "")
+    }
+}
+
+extension MonitorSample.Hops.InternetHop {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        warn = c.lenient(.warn, false)
+        detail = c.lenient(.detail, "")
+        jitterWarn = c.lenient(.jitterWarn, false)
+        jitterNote = c.lenient(.jitterNote)
+    }
+}
+
+extension MonitorSample.Headline {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = c.lenient(.text, "")
+        subtitle = c.lenient(.subtitle, "")
+        critical = c.lenient(.critical, false)
     }
 }
 

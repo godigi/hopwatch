@@ -1555,27 +1555,9 @@ final class HopwatchCoordinator {
             return res.message.isEmpty ? res.title : "\(res.title) — \(res.message)"
         }
         if let sample = monitor.latest {
-            let snap = latestRun?.snapshot ?? currentRunResult?.snapshot
-            let items = SuitabilityEngine.evaluateAll(.init(
-                monitorSample: sample,
-                speedTest: snap?.speedtest ?? latestSpeedTest,
-                savedSuitability: snap?.suitability,
-                catalog: rulesCatalog.catalog,
-                firedRules: sample.status.rules,
-                isLinkUp: sample.link.up,
-                isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-                mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
-                vpnActive: sample.vpn.active,
-                vpnName: sample.vpn.name,
-                currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss
-            ))
-            if let degraded = SuitabilityEngine.synthesizeDegradedExperience(
-                items: items,
-                monitorSample: sample,
-                currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss
-            ) {
+            // The degraded hero's copy is judged CLI-side (Phase 3); the
+            // GUI re-derives nothing.
+            if let degraded = SuitabilityEngine.degradedExperience(sample) {
                 return "\(degraded.headline) — \(degraded.subtitle)"
             }
         }

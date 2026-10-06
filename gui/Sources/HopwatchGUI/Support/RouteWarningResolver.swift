@@ -1,120 +1,90 @@
 import SwiftUI
 import Foundation
 
-/// Resolves warning and culprit states for the 3-hop connection route:
+/// Renders the CLI's hop judgements for the 3-hop connection route:
 /// Hop 1: This Mac (Local Wi-Fi link)
 /// Hop 2: Router (Local Gateway)
 /// Hop 3: Internet (Broadband WAN & Upstream ISP)
 ///
-/// Ensures consistent attribution across both the Menu Bar Dropdown
-/// and the Dashboard HomeView, avoiding false positive Wi-Fi warnings
-/// and properly surfacing upstream Internet instability (such as jitter and loss).
+/// Since the reporting-accuracy plan's Phase 3 it decides nothing: every
+/// warning flag and reason sentence is judged in helpers/inference.py
+/// against lib/thresholds.sh (the same cutoffs the CLI's own rules fire
+/// on) and carried by the sample's `hops` block. This file used to keep
+/// its own private cutoffs over raw figures — 20% here, 35 ms there,
+/// all six a drift risk against the CLI's tables and several provably at
+/// odds with them (its 3% internet-loss warning sat under the CLI's 10%
+/// warn band, coloring a hop the rules had not named). What remains is
+/// the passthrough plus one composition rule of presentation's own: the
+/// order of blame (Wi-Fi before router before internet).
+///
+/// When the `hops` block is absent — an older CLI, or thresholds missing
+/// at sampling time — the sample says nothing and every flag renders as
+/// all-clear-with-detail-empty rather than being re-derived here.
 enum RouteWarningResolver {
 
     struct Result: Equatable, Sendable {
         let isWifiLaggy: Bool
         let macStatusGood: Bool
+        let macDetail: String?
         let routerWarn: Bool
+        let routerDetail: String?
         let internetWarn: Bool
+        let internetDetail: String?
+        /// The hop to blame for a degraded experience, in fix-it order:
+        /// wifi → router → internet. `nil` when nothing is wrong.
         let culpritHop: String?
 
         init(
-            isWifiLaggy: Bool,
-            macStatusGood: Bool,
-            routerWarn: Bool,
-            internetWarn: Bool,
+            isWifiLaggy: Bool = false,
+            macStatusGood: Bool = true,
+            macDetail: String? = nil,
+            routerWarn: Bool = false,
+            routerDetail: String? = nil,
+            internetWarn: Bool = false,
+            internetDetail: String? = nil,
             culpritHop: String? = nil
         ) {
             self.isWifiLaggy = isWifiLaggy
             self.macStatusGood = macStatusGood
+            self.macDetail = macDetail
             self.routerWarn = routerWarn
+            self.routerDetail = routerDetail
             self.internetWarn = internetWarn
+            self.internetDetail = internetDetail
             self.culpritHop = culpritHop
         }
     }
 
-    static func resolve(
-        linkUp: Bool,
-        isWiFi: Bool,
-        stage: StageResolver.Stage,
-        firedCategories: Set<String>,
-        gwLoss: Double,
-        gwPing: Double,
-        gwJitter: Double,
-        inetLoss: Double,
-        inetPing: Double,
-        inetJitter: Double,
-        hasRecentRoam: Bool,
-        wifiRuleTint: Color? = nil
-    ) -> Result {
-        // Downstream validation: Packets to the internet must traverse the local gateway.
-        // If internet through-traffic is clean (loss <= 1.0%), isolated router ping loss (< 20%)
-        // is harmless ICMP control-plane rate limiting by the router's CPU, NOT physical data loss.
-        let isIsolatedGWLoss = (inetLoss <= 1.0 && gwLoss < 20.0)
-        let realGWLoss = !isIsolatedGWLoss && gwLoss >= 5.0
+    /// The sample's hop judgements, rendered. A `nil` sample renders the
+    /// neutral result.
+    static func resolve(_ sample: MonitorSample?) -> Result {
+        guard let hops = sample?.hops else { return Result() }
 
-        // If the full round-trip to the internet has lower latency or jitter than the router,
-        // any delay/jitter to the router IP itself is router CPU reply delay, not local Wi-Fi latency.
-        let realGWPing = gwPing >= 35.0 && (inetPing >= 35.0 || inetPing == 0)
-        let realGWJitter = gwJitter >= 25.0 && (inetJitter >= 20.0 || inetJitter == 0)
+        let macGood = hops.mac.good
+        let macLaggy = hops.mac.laggy
+        let routerWarn = hops.router.warn
+        let internetWarn = hops.internet.warn
 
-        // 1. Wi-Fi Laggy evaluation
-        // Wi-Fi is laggy when wireless latency/jitter is elevated or Wi-Fi rules indicate degradation.
-        // Isolated gateway packet loss without Wi-Fi degradation is a Router issue, not Wi-Fi.
-        let isWifiLaggy: Bool
-        if !isWiFi || stage == .healthy {
-            isWifiLaggy = false
-        } else {
-            isWifiLaggy = (wifiRuleTint != nil && wifiRuleTint != .green) || realGWPing || realGWJitter
-        }
-
-        // 2. Mac / Local Link status
-        let macStatusGood = linkUp && !isWifiLaggy && (wifiRuleTint == nil || wifiRuleTint == .green)
-
-        // 3. Router status
-        let routerWarn: Bool
-        if hasRecentRoam && gwLoss < 10.0 {
-            routerWarn = false
-        } else {
-            routerWarn = firedCategories.contains("router")
-                || realGWLoss
-                || (gwPing > 30.0 && (inetPing >= 30.0 || inetPing == 0))
-        }
-
-        // 4. Internet / Broadband status
-        var internetWarn = false
-        if firedCategories.contains("internet") {
-            internetWarn = true
-        } else if inetLoss >= 3.0 && inetLoss > gwLoss {
-            internetWarn = true
-        } else if inetJitter >= 30.0 && gwJitter < 20.0 {
-            internetWarn = true
-        } else if inetPing >= 120.0 && gwPing < 30.0 {
-            internetWarn = true
-        } else if case .degraded = stage, !routerWarn, !isWifiLaggy {
-            // When user experiences degradation for calls/gaming/streaming/browsing
-            // and local hops (Wi-Fi and Router) are verified clean, the culprit is the Internet/ISP.
-            internetWarn = true
-        }
-
-        // 5. Culprit Hop
-        let culpritHop: String?
-        if !macStatusGood || isWifiLaggy {
-            culpritHop = "wifi"
+        let culprit: String?
+        if !macGood || macLaggy {
+            culprit = "wifi"
         } else if routerWarn {
-            culpritHop = "router"
+            culprit = "router"
         } else if internetWarn {
-            culpritHop = "internet"
+            culprit = "internet"
         } else {
-            culpritHop = nil
+            culprit = nil
         }
 
         return Result(
-            isWifiLaggy: isWifiLaggy,
-            macStatusGood: macStatusGood,
+            isWifiLaggy: macLaggy,
+            macStatusGood: macGood,
+            macDetail: hops.mac.detail.isEmpty ? nil : hops.mac.detail,
             routerWarn: routerWarn,
+            routerDetail: hops.router.detail.isEmpty ? nil : hops.router.detail,
             internetWarn: internetWarn,
-            culpritHop: culpritHop
+            internetDetail: hops.internet.detail.isEmpty ? nil : hops.internet.detail,
+            culpritHop: culprit
         )
     }
 }

@@ -1950,7 +1950,7 @@ struct DashboardSuitabilityStrip: View {
                     .lineLimit(1)
             }
 
-            Text(item.consequence)
+            Text(item.consequenceText)
                 .font(.system(size: 8.5))
                 .foregroundStyle(item.verdict == .good ? Theme.ColorToken.muted : item.tint)
                 .lineLimit(1)

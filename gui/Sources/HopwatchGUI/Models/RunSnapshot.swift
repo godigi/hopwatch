@@ -495,10 +495,18 @@ struct RunSnapshot: Decodable, Sendable {
         /// (e.g. `--quick` skipping the speed test); `nil` otherwise. An
         /// unmeasured row is a verdict, not a gap — see docs/JSON-SCHEMA.md.
         var unmeasuredReason: String?
+        /// The figure line backing this row's label ("3% loss · 9 ms
+        /// jitter"), authored CLI-side (helpers/inference.py on the
+        /// monitor stream). `nil` when the documents predate the key.
+        var metric: String?
+        /// The one sentence behind the level — the CLI's row help text
+        /// ("Low loss and low jitter for clear voice and video."), or the
+        /// `unmeasured_reason` for unmeasured rows.
+        var detail: String?
         var id: String { activity ?? "?" }
 
         enum CodingKeys: String, CodingKey {
-            case activity, label, verdict, because
+            case activity, label, verdict, because, metric, detail
             case unmeasuredReason = "unmeasured_reason"
         }
 
@@ -700,6 +708,8 @@ extension RunSnapshot.SuitabilityRow {
         verdict = RunSnapshot.SuitabilityRow.Verdict(rawValue: c.lenient(.verdict, "")) ?? .unknown
         because = c.lenient(.because, [])
         unmeasuredReason = c.lenient(.unmeasuredReason)
+        metric = c.lenient(.metric)
+        detail = c.lenient(.detail)
     }
 }
 

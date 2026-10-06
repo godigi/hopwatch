@@ -88,6 +88,16 @@ enum StageResolver {
         /// the identical warn condition in amber.
         let severityRank: Int
         let id: String?
+
+        /// The severity *word* the UI reads, derived once from the same
+        /// rank `NetdiagCoordinator.severityRank(_:)` maps "critical" to.
+        /// Views asked the number directly (`>= 3`); a rank comparison
+        /// repeated in N places is N chances to disagree with the map.
+        var isCritical: Bool { severityRank >= Self.criticalRank }
+
+        /// The critical end of `NetdiagCoordinator.severityRank(_:)'s
+        /// scale (critical = 3).
+        static let criticalRank = 3
         init(title: String, body: String, raisedAt: Date, rules: Set<String>,
              severityRank: Int = 0, id: String? = nil) {
             self.title = title; self.body = body
