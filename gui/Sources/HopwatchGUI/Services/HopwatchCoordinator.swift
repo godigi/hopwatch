@@ -87,12 +87,6 @@ final class HopwatchCoordinator {
     var isSpeedTesting: Bool {
         isSpeedTestOnly || progress.isSpeedTesting
     }
-    /// The last `--speed-only` result, kept apart from `latestRun`. A speed
-    /// test measures one thing and diagnoses nothing, so letting it become
-    /// the current report would replace a full diagnosis with a card that
-    /// has no verdict on it — Part B of the spec, in the app's own terms.
-    private(set) var latestSpeedTest: RunSnapshot.Speedtest?
-    private(set) var latestSpeedTestAt: Date?
     /// A section (or a stored run) another surface has asked the main
     /// window to show. Consumed by `MainWindow`, which may not exist yet at
     /// the moment of asking — see `consumeRequestedDestination()`.
@@ -130,6 +124,15 @@ final class HopwatchCoordinator {
     /// attempt starts.
     private(set) var routerAdminAvailable = false
     private var lastProbedRouterIP: String?
+    /// Last-KNOWN geo figures per network, keyed by the canonical history
+    /// id, updated only when the slow tier's own fetch succeeded
+    /// (`public.ok == true`). A failed fetch must not blank the country
+    /// flag: the CLI keeps last-known figures with `public.stale: true`
+    /// (Phase 1), and this cache covers the cases that value cannot — a
+    /// monitor restarted mid-fault, or a fetch that never succeeded at all
+    /// this session. Keyed per network, exactly as the figures are: the
+    /// previous network's country is never this one's.
+    private var lastKnownPublic: [String: MonitorSample.PublicInfo] = [:]
     private var arrivalAttempts = 0
     private var nextArrivalAttemptAt: Date?
     /// Carried from `attemptArrival` to the scan's completion, which is
@@ -448,15 +451,6 @@ final class HopwatchCoordinator {
                 }
             }
         }
-        if latestSpeedTest == nil {
-            if let st = hydratedReport?.run.speedtest, st.downMbps != nil {
-                latestSpeedTest = st
-                latestSpeedTestAt = hydratedReport?.run.timestamp.flatMap { FastISO8601.parse($0) }
-            } else if let speed = history.latestSpeedTest() {
-                latestSpeedTest = RunSnapshot.Speedtest(downMbps: speed.down, upMbps: speed.up)
-                latestSpeedTestAt = speed.date
-            }
-        }
     }
 
     /// The newest run on one network that counts as a check and carries an
@@ -545,6 +539,13 @@ final class HopwatchCoordinator {
         // id. Decide nothing: `nil` here has never meant "a new network".
         guard let id = sample.network.historyJoinID else { return }
 
+        // A verified fetch is the only thing that may write a network's
+        // geo. Last-known figures ride in the sample itself (public.stale),
+        // so the cache is a second witness, not a first.
+        if sample.publicInfo.ok == true, sample.publicInfo.ip?.isEmpty == false {
+            lastKnownPublic[id] = sample.publicInfo
+        }
+
         // The sample that finally names a network is also the first moment
         // cold-launch hydration can be scoped to one — `start()` runs it
         // well before this, when there is nothing to scope to. See
@@ -557,6 +558,19 @@ final class HopwatchCoordinator {
             lastNetworkID = id
             alerts.networkChanged(to: id)
             log.info("now on network \(id, privacy: .public)")
+            // A different network is a different question. The report, the
+            // alert list and the state the cold-launch hydration left
+            // behind all belong to the network they measured, so leaving
+            // them on screen is re-reading the old network's answers as
+            // this one's — the same scoping failure the speed row's
+            // global fallback had. `latestRun` and the hydrated report
+            // clear; `didHydrateForNetwork` un-latches so the next sample
+            // re-hydrates *this* network's newest check into their place.
+            latestRun = nil
+            hydratedReport = nil
+            cachedHydratedRunResult = nil
+            didHydrateForNetwork = false
+            lastKnownPublic.removeValue(forKey: id)
             // A different network's backoff is meaningless.
             arrivalAttempts = 0
             nextArrivalAttemptAt = nil
@@ -1039,8 +1053,10 @@ final class HopwatchCoordinator {
     }
 
     /// Runs a focused speed test (--speed-only) to measure download, upload,
-    /// latency and jitter without running a full diagnostic check.
-    /// Updates latestSpeedTest and reloads history.
+    /// latency and jitter without running a full diagnostic check. The
+    /// result lands in history via `history.load()` at the scan's end, and
+    /// every speed row reads `HistoryStore.latestSpeedTest(for:)` from
+    /// there — scoped to the network it was measured on.
     @discardableResult
     func runSpeedTest(reason: String = "speed test requested") -> Bool {
         launch(depth: .speedOnly, reason: reason, target: nil, adoptAsReport: false)
@@ -1106,10 +1122,6 @@ final class HopwatchCoordinator {
                     self.latestRun = result
                     self.hydratedReport = nil
                     self.alerts.evaluate(run: result.snapshot)
-                }
-                if let st = result.snapshot.speedtest, st.downMbps != nil {
-                    self.latestSpeedTest = st
-                    self.latestSpeedTestAt = result.finishedAt
                 }
                 // The run appended itself to baseline.jsonl, so the charts
                 // and the network list are one record out of date until
@@ -1224,6 +1236,49 @@ final class HopwatchCoordinator {
 
     // MARK: - Presentation helpers
 
+    /// Whether the newest monitor sample's readings may be presented at
+    /// all. The gate every live cell asks (see `MonitorFreshness`): false
+    /// while the monitor is paused for any reason, while a scan is
+    /// saturating the link, or while the newest sample is older than twice
+    /// the configured cadence (or the stream itself reported a gap past
+    /// that bound). Cells that present without this check showed last
+    /// night's numbers as if they were this minute's.
+    var liveReadingsPresentable: Bool {
+        MonitorFreshness.samplePresentable(
+            ts: monitor.latest?.ts,
+            gapS: monitor.latest?.gapS,
+            cadenceS: monitor.latest?.status.cadenceS,
+            paused: monitor.isPausedForAnyReason,
+            scanning: isScanning,
+            fallbackCadenceS: Defaults.fastInterval)
+    }
+
+    /// Whether the medium tier's carried-over readings (Wi-Fi radio
+    /// figures) may still be presented, from the sample's own `age_s`.
+    /// Fail-open when the CLI never emitted it — see `MonitorFreshness`.
+    var mediumTierPresentable: Bool {
+        MonitorFreshness.tierPresentable(
+            ageS: monitor.latest?.ageS?.medium,
+            intervalS: Defaults.mediumInterval)
+    }
+
+    /// Public figures for the country-flag and IP rows: the sample's own
+    /// figures only when the slow tier's fetch verified them this cycle
+    /// (`public.ok == true`); otherwise the last-known figures for *this*
+    /// network from `lastKnownPublic`. A post-switch sample's stale
+    /// figures describe the *previous* network — `MON_PUB_STALE` is set on
+    /// a change and the old numbers ride along until the next fetch — so
+    /// unverified sample figures are never presented here; they would
+    /// file the flag with the wrong country.
+    private var livePublicInfo: MonitorSample.PublicInfo? {
+        if let sample = monitor.latest, sample.publicInfo.ok == true {
+            return sample.publicInfo
+        }
+        guard let id = monitor.latest?.network.historyJoinID else { return nil }
+        return lastKnownPublic[id]
+    }
+
+    // MARK: - Sharing
     /// Refreshes Location Services authorization and unredacts Wi-Fi details
     /// if newly granted.
     func refreshLocationState() {
