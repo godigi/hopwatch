@@ -45,7 +45,11 @@ wan_load_balancing_run() {
   WAN_LB_ASNS="$asns"
   WAN_LB_IPS="$ips"
 
-  local -a _w_asn=( $asns ) _w_ip=( $ips )
+  # $asns / $ips are space-joined single-word tokens built above; read -a
+  # splits them on whitespace without glob expansion (SC2206).
+  local -a _w_asn _w_ip
+  read -r -a _w_asn <<< "$asns"
+  read -r -a _w_ip <<< "$ips"
   local n_asn="${#_w_asn[@]}" n_ip="${#_w_ip[@]}"
   if [ -z "$asns" ] || [ "${n_asn:-0}" -eq 0 ]; then
     info "Could not run the dual-WAN probe (no JSON response)."
