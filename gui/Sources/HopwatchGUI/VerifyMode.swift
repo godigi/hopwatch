@@ -79,6 +79,7 @@ private enum VerifyHarness {
         runHeadlineRuleTests()
         runPhaseWeightsTests()
         runActivityFoldTests()
+        runActivityContinuityTests()
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
         runLossFilteringTests()
@@ -818,6 +819,168 @@ private enum VerifyHarness {
         equal(ActivityEntry.duration(45), "45s", "sub-minute durations read in seconds")
         equal(ActivityEntry.duration(240), "4m", "a whole number of minutes drops seconds")
         equal(ActivityEntry.duration(3600 * 2 + 720), "2h 12m", "hours keep minutes")
+        print("")
+    }
+
+    // MARK: - Activity fold across monitor restarts
+
+    /// The app restarts its own monitor for a cadence change and to start and
+    /// end its 60-second investigation burst, which on a faulty link is about
+    /// once a minute. Each restart records a "monitor-started" event, and the
+    /// fold used to read every one as the end of whatever was open: one
+    /// continuous fault came out as many short entries, "4 times · 48s+
+    /// total" for a router that was dropping packets throughout.
+    ///
+    /// A restart the app caused is no evidence the fault ended, and the app
+    /// knows it caused it, so those events carry `continuesPrevious` and the
+    /// fold steps over them. Everything else — an app launch, monitoring
+    /// switched off and on, a crash, a changed network — is still a boundary.
+    /// No window and no cutoff: the fold never guesses whether a restart was
+    /// "quick enough" to count.
+    static func runActivityContinuityTests() {
+        print("Activity fold across monitor restarts")
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let fired = "Router dropping packets"
+        let cleared = "Resolved: Router dropping packets"
+        func ev(_ kind: String, _ offset: TimeInterval, _ summary: String = fired,
+                _ rule: String? = "G2", net: String? = "wifi:mac=aa") -> NetworkEvent {
+            NetworkEvent(date: day.addingTimeInterval(offset), kind: kind,
+                         summary: summary, ruleID: rule, network: net)
+        }
+        func restart(_ offset: TimeInterval, continued: Bool,
+                     net: String? = "wifi:mac=aa") -> NetworkEvent {
+            NetworkEvent(date: day.addingTimeInterval(offset),
+                         kind: "monitor-started", summary: "Monitoring started",
+                         network: net, continuesPrevious: continued)
+        }
+
+        // The case this exists for: one fault, three restarts the app made.
+        let steady = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+            restart(120, continued: true),
+            restart(180, continued: true),
+            ev("rule-cleared", 300, cleared),
+        ])
+        equal(steady.count, 1, "a fault across three app restarts is one row")
+        equal(steady.first?.occurrences, 1, "counted once, not four times")
+        equal(steady.first?.totalDuration, 300, "carrying its full five minutes")
+        check(steady.first?.durationIsLowerBound == false,
+              "and no `+`: the clear was seen, so the span is a measurement")
+        check(steady.first?.isOngoing == false, "closed by the clear it observed")
+        equal(steady.first?.detail, "lasted 5m", "rendered as one duration")
+
+        // The monitor often re-reports the fault a few samples after a
+        // restart. That second fire is the same fault re-sighted.
+        let refires = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+            ev("rule-fired", 78),
+            restart(120, continued: true),
+            ev("rule-fired", 138),
+            ev("rule-cleared", 300, cleared),
+        ])
+        equal(refires.count, 1, "re-fires after the restarts stay one row")
+        equal(refires.first?.occurrences, 1, "as the one episode")
+        equal(refires.first?.totalDuration, 300, "from the first fire to the clear")
+
+        // Still firing as far as anything knows: a continued restart must
+        // not end it, and an unended episode still claims no duration.
+        let open = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+        ])
+        equal(open.count, 1, "an open fault with only a restart after it is one row")
+        check(open.first?.isOngoing == true, "still open: the restart ended nothing")
+        equal(open.first?.totalDuration, nil, "and no duration is invented for it")
+        equal(open.first?.detail, nil, "so the row adds nothing to the summary")
+
+        // Re-sighted after restarts while still open: a floor with its `+`.
+        let resighted = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+            ev("rule-fired", 300),
+        ])
+        equal(resighted.first?.occurrences, 1, "re-sighting an open fault is not a second one")
+        equal(resighted.first?.totalDuration, 300, "the span to the last sighting")
+        check(resighted.first?.durationIsLowerBound == true, "marked a floor")
+        check(resighted.first?.isOngoing == true, "still open")
+        equal(resighted.first?.detail, "lasted 5m+", "and the `+` renders on it")
+
+        // A fault that clears and comes back is two, restarts or not.
+        let recurs = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+            ev("rule-cleared", 120, cleared),
+            restart(180, continued: true),
+            ev("rule-fired", 240),
+            ev("rule-cleared", 300, cleared),
+        ])
+        equal(recurs.count, 1, "both episodes file under the day's one row")
+        equal(recurs.first?.occurrences, 2, "as two occurrences, not one long one")
+        equal(recurs.first?.totalDuration, 180, "summing 120s and 60s, not the 300s between")
+        equal(recurs.first?.detail, "2 times · 3m total", "count and total render")
+
+        // A restart the app did not make is a boundary, as before.
+        let boundary = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: false),
+            ev("rule-fired", 90),
+        ])
+        equal(boundary.first?.occurrences, 2, "a restart that is not the app's still ends the entry")
+        check(boundary.first?.durationIsLowerBound == true,
+              "as a floor, because nobody watched the gap")
+
+        // ...including one after continued restarts: the continued ones are
+        // stepped over, the real one closes the whole span.
+        let mixed = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: true),
+            restart(120, continued: false),
+        ])
+        equal(mixed.count, 1, "mixed restarts fold to one row")
+        equal(mixed.first?.totalDuration, 120, "closed at the first real boundary")
+        check(mixed.first?.isOngoing == false, "and no longer open")
+        check(mixed.first?.durationIsLowerBound == true, "as a floor")
+
+        // A network change across the restart is a boundary whatever caused
+        // the restart. That is decided where the network identity is known
+        // (`NetworkEvent.continuesPrevious`), and the fold reads the result.
+        let moved = ActivityEntry.fold([
+            ev("rule-fired", 0),
+            restart(60, continued: NetworkEvent.continuesPrevious(
+                appRestarted: true, previousNetwork: "mac:aa", currentNetwork: "mac:bb"),
+                    net: "wifi:mac=bb"),
+            ev("rule-fired", 90, net: "wifi:mac=bb"),
+        ])
+        equal(moved.first?.occurrences, 2, "a network change still ends the entry")
+        check(moved.first?.isOngoing == true, "the new network's fault is its own, still open")
+        equal(moved.first?.totalDuration, 60, "the old network's ran to the move")
+
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "mac:aa", currentNetwork: "mac:aa"),
+              "an app restart on the same network continues")
+        check(!NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "mac:aa", currentNetwork: "mac:bb"),
+              "an app restart onto a different network does not")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "mac:aa", currentNetwork: nil),
+              "a first sample before the network is identified is not a move")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: nil, currentNetwork: "mac:aa"),
+              "nor is one with nothing to compare against")
+        check(!NetworkEvent.continuesPrevious(
+            appRestarted: false, previousNetwork: "mac:aa", currentNetwork: "mac:aa"),
+              "a launch, a switch-off and on, or a crash recovery is a boundary")
+
+        // The marker is stored, so it has to survive a round trip, and events
+        // stored before it existed must keep reading as boundaries.
+        let encoded = try? JSONEncoder().encode(restart(0, continued: true))
+        let decoded = encoded.flatMap { try? JSONDecoder().decode(NetworkEvent.self, from: $0) }
+        check(decoded?.continuesPrevious == true, "the marker survives encoding")
+        let legacy = Data(#"{"kind":"monitor-started","summary":"Monitoring started"}"#.utf8)
+        check((try? JSONDecoder().decode(NetworkEvent.self, from: legacy))?.continuesPrevious == false,
+              "an event stored without it decodes as a boundary")
         print("")
     }
 

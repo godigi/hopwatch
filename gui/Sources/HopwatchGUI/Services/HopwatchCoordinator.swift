@@ -514,13 +514,21 @@ final class HopwatchCoordinator {
         // The first cycle of a monitor process records monitor-started, matching
         // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
         // uses this boundary to close open episodes as lower bounds rather than
-        // silently spanning the restart with a "+".
+        // silently spanning the restart with a "+" — except where this app
+        // restarted its own monitor, which it knows, and the network is not
+        // known to have changed. That one is marked and stepped over: it is
+        // no evidence a fault ended. `lastNetworkID` still names the network
+        // of the previous process here; it is advanced further down.
         if sample.seq == 1 {
             eventLog.record(
                 kind: "monitor-started",
                 summary: "Monitoring started",
                 network: sample.network.id,
-                date: sample.timestamp)
+                date: sample.timestamp,
+                continuesPrevious: NetworkEvent.continuesPrevious(
+                    appRestarted: monitor.childContinuesPrevious,
+                    previousNetwork: lastNetworkID,
+                    currentNetwork: sample.network.historyJoinID))
         }
 
         for change in sample.changes {
