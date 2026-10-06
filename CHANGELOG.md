@@ -6,6 +6,11 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Running the bats suite no longer writes to your real run history. `tests/test_json.bats` and `tests/test_output.bats` run real `--quick` scans, and nothing redirected the store, so every `bats tests/` from any checkout appended eight runs (and four `.log` files) to `~/net-diag/baseline.jsonl` -- the file the app's per-network medians and history are computed from. About 42 of the last 50 stored runs on one machine's current network were test runs. `tests/setup_suite.bash` now sandboxes `$HOME` under `$BATS_RUN_TMPDIR` for the whole run (and unsets `HOPWATCH_LOG_DIR`/`NETDIAG_LOG_DIR`/`LOG_DIR`), for `bats tests/` and `bats tests/one_file.bats` alike. It sandboxes `$HOME` rather than exporting a store variable because that variable outranks `HOME` and would redirect the tests that set `HOME` on purpose. `tests/test_store_isolation.bats` asks the CLI where it would write (`--history`'s `sources.live`) and fails if that is ever outside the bats temp dir.
+- `tests/test_monitor.bats` no longer leaks real monitors. `start_monitor` was called as `pid="$(start_monitor)"`, which made the monitor's parent a subshell that exits at once; it was re-parented to pid 1 before `lib/monitor.sh` captured its parent, which disables the monitor's parent-died guard (correctly, for the launchd recorder). One such orphan pinged a router every 2 seconds for 42 minutes. Monitors are now started so the bats test shell stays their parent, a `teardown()` kills every monitor a test started (TERM, then KILL), and each carries `--monitor-count` as a hard cap. The file header no longer claims to be network-free: the pause/resume and orphan-cleanup tests ping the real gateway.
+
 ## [1.10.6] - 2026-10-06
 
 ### Fixed

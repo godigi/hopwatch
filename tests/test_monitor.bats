@@ -10,9 +10,16 @@
 # would test one condition once on one machine — this tests every condition
 # on every push.
 #
-# Network-free by construction: every test drives the pure functions
-# (_mon_rules, monitor_sample.py) or exercises argument validation, which
-# exits before any probe runs.
+# Mostly network-free: the parity block and the rest of the file drive the
+# pure functions (_mon_rules, monitor_sample.py) or exercise argument
+# validation, which exits before any probe runs. The exception is the
+# "Pause and resume" and "Orphan cleanup" blocks near the end, which start a
+# real `hopwatch --monitor` and so really ping the gateway and resolve DNS
+# every couple of seconds. A monitor that outlives its test keeps doing that,
+# so those blocks are bounded three ways: the bats test shell is the
+# monitor's parent (so the product's parent-died guard reaps it if bats is
+# killed), teardown() kills every monitor a test started, and each carries
+# --monitor-count as a hard cap.
 
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
@@ -31,6 +38,30 @@ setup() {
   . "$REPO/lib/traffic.sh"
   # shellcheck source=../lib/monitor.sh
   . "$REPO/lib/monitor.sh"
+}
+
+# Every monitor (or monitor-launching shell) a test started, so teardown can
+# kill them even when an assertion failed before the test's own `kill`.
+MON_PIDS=()
+
+# TERM, wait briefly for a clean exit, then KILL. Teardown runs after a
+# failed assertion too, which is precisely when the test's own kill is
+# skipped; the 60 s monitors it leaves behind are what this exists for.
+teardown() {
+  local p i
+  for p in "${MON_PIDS[@]+"${MON_PIDS[@]}"}"; do
+    kill -0 "$p" 2>/dev/null || continue
+    kill -TERM "$p" 2>/dev/null || true
+    for i in 1 2 3 4 5 6; do
+      kill -0 "$p" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$p" 2>/dev/null; then
+      kill -KILL "$p" 2>/dev/null || true
+    fi
+    wait "$p" 2>/dev/null || true
+  done
+  MON_PIDS=()
 }
 
 # Reset both rule engines to a healthy baseline, then let each test perturb
@@ -1246,15 +1277,32 @@ assert ch[0]['summary'] == 'Network interface changed: en0 → en5'
 # controlling terminal keeps the group non-orphaned. That is precisely how
 # it would have shipped.
 
-# Start a monitor in the background and return its pid. `pgrep -f` is
-# deliberately avoided: bats runs each test through a shell whose own
-# command line contains the pattern, so pgrep matches the wrong process and
-# the signal lands on the test runner.
+# Start a monitor in the background; its pid lands in $MON_PID and is
+# registered for teardown(). This must NOT be called as `pid="$(start_monitor)"`:
+# the command substitution makes the monitor's parent a subshell that exits at
+# once, so the monitor is re-parented to pid 1 before lib/monitor.sh captures
+# its parent. With a parent of 1 the monitor's parent-died guard is disabled
+# (launchd legitimately starts the recorder as ppid 1), and a monitor orphaned
+# that way ran for 42 minutes pinging the router every 2 seconds. Calling it
+# directly keeps the bats test shell as the parent, so the guard reaps the
+# monitor if bats itself dies.
+#
+# --monitor-count is the third line of defence: it stops the monitor after
+# that many samples whatever else goes wrong (a paused monitor takes none, so
+# it never trips the tests that pause). 90 samples at the 2 s cadence is
+# about three minutes, against tests that need under one.
+#
+# `pgrep -f` is deliberately avoided: bats runs each test through a shell
+# whose own command line contains the pattern, so pgrep matches the wrong
+# process and the signal lands on the test runner. `3>&-` keeps the
+# background process off bats' result fd.
 start_monitor() {
   "$REPO/bin/hopwatch" --monitor --monitor-fast-interval 2 \
     --monitor-medium-interval 3600 --monitor-slow-interval 3600 \
-    > "$BATS_TEST_TMPDIR/stream.jsonl" 2>"$BATS_TEST_TMPDIR/stream.err" &
-  printf '%s' "$!"
+    --monitor-count 90 \
+    > "$BATS_TEST_TMPDIR/stream.jsonl" 2>"$BATS_TEST_TMPDIR/stream.err" 3>&- &
+  MON_PID=$!
+  MON_PIDS+=("$MON_PID")
 }
 
 alive() { ps -o stat= -p "$1" >/dev/null 2>&1; }
@@ -1300,7 +1348,7 @@ except Exception:
 }
 
 @test "SIGUSR1 suspends probing and SIGUSR2 resumes it" {
-  local pid; pid="$(start_monitor)"
+  start_monitor; local pid="$MON_PID"
   wait_until 30 have_samples 1 || { echo "monitor produced no samples at all"; kill -9 "$pid"; return 1; }
   local before; before="$(samples)"
 
@@ -1322,7 +1370,7 @@ except Exception:
 @test "a paused monitor stays alive rather than being killed by SIGHUP" {
   # The actual regression. Six seconds is three times the ping probe that
   # used to orphan the process group and take it down.
-  local pid; pid="$(start_monitor)"
+  start_monitor; local pid="$MON_PID"
   # Wait for a real sample rather than sleeping: pausing a monitor that has
   # not probed yet would still pass this test while asserting nothing, since
   # the orphaning it guards against happens inside a probe.
@@ -1336,7 +1384,7 @@ except Exception:
 }
 
 @test "a paused monitor says so rather than going silently quiet" {
-  local pid; pid="$(start_monitor)"
+  start_monitor; local pid="$MON_PID"
   wait_until 30 have_samples 1 || { echo "monitor produced no samples at all"; kill -9 "$pid"; return 1; }
 
   kill -USR1 "$pid"
@@ -1357,12 +1405,12 @@ except Exception:
 @test "SIGTERM stops the monitor promptly, paused or not" {
   # "Promptly" is bounded by the longest probe a cycle can be inside when
   # the signal lands, not by a number that felt right on a laptop.
-  local pid; pid="$(start_monitor)"
+  start_monitor; local pid="$MON_PID"
   wait_until 30 have_samples 1 || { echo "monitor produced no samples at all"; kill -9 "$pid"; return 1; }
   kill -TERM "$pid"
   wait_until 15 not_alive "$pid" || { echo "monitor ignored SIGTERM"; kill -9 "$pid"; return 1; }
 
-  pid="$(start_monitor)"
+  start_monitor; pid="$MON_PID"
   wait_until 30 have_samples 1 || { echo "monitor produced no samples at all"; kill -9 "$pid"; return 1; }
   kill -USR1 "$pid"
   sleep 2
@@ -1404,11 +1452,17 @@ except Exception:
   # An intermediate shell stands in for the app: it spawns the monitor,
   # then is killed outright, exactly as a force-quit or a crash would be.
   local out="$BATS_TEST_TMPDIR/pid"
-  bash -c "'$REPO/bin/hopwatch' --monitor --monitor-fast-interval 2 \
-             >/dev/null 2>&1 & echo \$! > '$out'; sleep 60" &
+  # `exec sleep` keeps the stand-in shell's pid (the monitor's parent) alive
+  # without leaving a stray `sleep 60` behind when it is killed. The monitor
+  # is capped, and both pids are registered, so teardown reaps whichever
+  # survives a failure.
+  bash -c "'$REPO/bin/hopwatch' --monitor --monitor-fast-interval 2 --monitor-count 30 \
+             >/dev/null 2>&1 3>&- & echo \$! > '$out'; exec sleep 60" 3>&- &
   local shell_pid=$!
+  MON_PIDS+=("$shell_pid")
   sleep 4
   local mon_pid; mon_pid="$(cat "$out")"
+  MON_PIDS+=("$mon_pid")
   ps -o stat= -p "$mon_pid" >/dev/null 2>&1 || { echo "monitor never started"; return 1; }
 
   kill -9 "$shell_pid" 2>/dev/null
