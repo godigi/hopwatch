@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The monitor reported a "gap" (a sleep or stall) on nearly every cycle. A gap is flagged when the time since the previous cycle started exceeds `THRESH_MON_GAP_FACTOR` times the cadence, but that time includes the previous cycle's own probes, which take 8-11 s on a lossy link and up to ~47 s when every tier fires at once, while the app runs cadences of 5 s, 3 s and 2 s (tolerances of 15, 9 and 6 s). In one live journal 113 of a monitor's 114 cycles carried a `gap_s` of 10-13 s, and 1462 historical gap lines were 7-9 s. Downstream, `--events` summed them into 12831 s of unobserved time in a 10800 s window, the Home screen's "% offline or asleep" figure was wrong, and the live chart broke its line on every sample. The tolerance now has a floor, `THRESH_MON_GAP_MIN_S` (60 s), set above the worst cycle the probe timeouts can add up to. A 10 s cadence now tolerates 60 s rather than 30 s; a 300 s cadence is unchanged. Anything over a minute, which includes every real sleep, is still reported.
+- The monitor's pause marker re-emitted the previous cycle's `gap_s`, so the journal showed an identical gap twice, two seconds apart, on consecutive `seq`. The marker measures nothing and now carries `null`; the gap is reported once, by the cycle that saw it.
+- A comment in `lib/monitor.sh` claimed the gap excludes the cycle's own work. It excludes only the current cycle's; it is start-to-start and includes the previous cycle's. Corrected, along with a comment in `MonitorSeries.swift` that called `gap_s` monotonic (it is wall clock).
+
 ## [1.10.6] - 2026-10-06
 
 ### Fixed

@@ -1522,12 +1522,56 @@ except Exception:
 }
 
 @test "monitor: a cycle at exactly the tolerance is not a gap" {
-  # factor 3 × 10 s cadence = 30 s. The boundary is exclusive, so 30 is
-  # still a slow cycle and 31 is a discontinuity.
-  run _mon_gap_seconds 30 10
-  [ "$output" = "" ] || { echo "30 s flagged at a 10 s cadence: '$output'"; return 1; }
-  run _mon_gap_seconds 31 10
-  [ "$output" = "31" ] || { echo "31 s not flagged: '$output'"; return 1; }
+  # factor 3 x 10 s cadence = 30 s, which is below the 60 s floor, so the
+  # floor decides: the boundary is exclusive, 60 is still a slow cycle and
+  # 61 is a discontinuity.
+  run _mon_gap_seconds 60 10
+  [ "$output" = "" ] || { echo "60 s flagged at a 10 s cadence: '$output'"; return 1; }
+  run _mon_gap_seconds 61 10
+  [ "$output" = "61" ] || { echo "61 s not flagged: '$output'"; return 1; }
+}
+
+# The tolerance has a floor because a cycle's own probe time does not
+# shrink with the cadence. The app runs 5 s (healthy), 3 s (degraded) and
+# 2 s (investigation burst); at factor 3 alone those tolerate 15, 9 and
+# 6 s, and a cycle on a lossy link legitimately takes 8-11 s (all three
+# tiers firing at once can take ~46 s). Measured live: 113 of one
+# monitor's 114 cycles carried a "gap" of 10-13 s.
+@test "monitor: the floor stops a short cadence calling a slow cycle a gap" {
+  local args
+  for args in "13 3" "9 2" "16 5" "11 2" "46 5" "46 2"; do
+    # shellcheck disable=SC2086
+    run _mon_gap_seconds $args
+    [ "$output" = "" ] || { echo "args [$args] flagged: '$output'"; return 1; }
+  done
+}
+
+@test "monitor: the floor does not hide a real stall at a short cadence" {
+  local args
+  for args in "61 3" "61 2" "61 5" "300 2"; do
+    # shellcheck disable=SC2086
+    run _mon_gap_seconds $args
+    [ "$output" = "${args%% *}" ] || { echo "args [$args] gave '$output'"; return 1; }
+  done
+}
+
+@test "monitor: the boundary at a 3 s cadence is the floor, not 3 x 3" {
+  run _mon_gap_seconds "$THRESH_MON_GAP_MIN_S" 3
+  [ "$output" = "" ] || { echo "floor itself flagged: '$output'"; return 1; }
+  run _mon_gap_seconds $((THRESH_MON_GAP_MIN_S + 1)) 3
+  [ "$output" = "$((THRESH_MON_GAP_MIN_S + 1))" ] || { echo "floor+1 not flagged: '$output'"; return 1; }
+}
+
+@test "monitor: the floor clears a worst-case cycle with margin" {
+  # Reachable in one cycle: fast tier 6 (gateway) + 8 (internet) + 2 (web),
+  # medium 3 (dns) + 8 (two tcp) + 4 (wifi) + 2 (browser), slow 4 + 4
+  # (public, with its fallback) + 3 (captive), plus 2 s minimum rest and 1 s
+  # of whole-second clock truncation. Written out because the probe
+  # timeouts live in lib/monitor.sh; if one of them grows, this fails and
+  # the floor has to be reconsidered with it.
+  local worst=$(( 6 + 8 + 2 + 3 + 8 + 4 + 2 + 4 + 4 + 3 + 2 + 1 ))
+  [ "$THRESH_MON_GAP_MIN_S" -ge $(( worst + 10 )) ] || {
+    echo "floor $THRESH_MON_GAP_MIN_S leaves under 10 s over worst case $worst"; return 1; }
 }
 
 @test "monitor: an overnight sleep reports the seconds lost" {
@@ -1553,6 +1597,36 @@ except Exception:
     eval "run _mon_gap_seconds $args"
     [ "$output" = "" ] || { echo "args [$args] gave '$output'"; return 1; }
   done
+}
+
+@test "monitor: the pause marker does not repeat the previous cycle's gap" {
+  # The paused branch emits a sample before the cycle top resets MON_GAP_S,
+  # so it used to re-emit whatever gap the last cycle had reported: the
+  # journal showed identical gap_s two seconds apart on consecutive seq.
+  # Driven in-process: every probe stubbed, _mon_emit records the gap it was
+  # handed, and flips the state the signal handlers would have flipped.
+  local probe
+  for probe in link vpn gateway internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_rules() { :; }
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  _mon_emit() {
+    printf 'emit paused=%s gap=[%s]\n' "$MON_PAUSED" "$MON_GAP_S"
+    case "$MON_PAUSED" in
+      0) MON_PAUSED=1 ;;   # first sample out: the pause signal arrives
+      *) MON_STOP=1 ;;     # the pause marker is out: let the loop end
+    esac
+  }
+  MON_PAUSED=0 MON_STOP=0 MON_SEQ=0 MONITOR_COUNT=0 MON_LINK_UP=0
+  MON_PREV_CYCLE_TS=$(( EPOCHSECONDS - 100000 )) MON_PREV_CADENCE=10
+  run monitor_run
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qx 'emit paused=0 gap=\[100000\]' || {
+    echo "a genuine gap was not reported on the cycle that saw it:"; echo "$output"; return 1; }
+  printf '%s\n' "$output" | grep -qx 'emit paused=1 gap=\[\]' || {
+    echo "the pause marker repeated the previous gap:"; echo "$output"; return 1; }
 }
 
 @test "monitor: gap_s reaches the emitted sample" {

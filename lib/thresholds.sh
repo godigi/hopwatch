@@ -359,6 +359,29 @@ THRESH_WIFI_EVENTS_STORED=50
 # and every sleep/wake exceeds by orders of magnitude.
 THRESH_MON_GAP_FACTOR=3
 
+# The floor under that tolerance, in seconds. The factor alone is tuned for
+# a 10 s cadence, but the app runs 5 s (healthy), 3 s (degraded) and 2 s
+# (the investigation burst), where 3x is 15, 9 and 6 s, and a cycle's own
+# probe time does not shrink with the cadence. `elapsed` is start-to-start,
+# so it includes the previous cycle's work: a lossy link legitimately takes
+# 8-11 s (gateway ping up to 6 s, internet pings up to 8 s, web probes up
+# to 2 s, a 2 s minimum rest) and nearly every cycle was reported as a gap.
+# Measured live: 113 of one monitor's 114 cycles carried a "gap" of 10-13 s,
+# and `--events` summed them into more unobserved time than the window held.
+#
+# The tolerance has to exceed the worst cycle that can legitimately happen,
+# not the typical one. Summed from lib/monitor.sh's timeouts with every tier
+# firing at once (a network change, or the 300 s slow tier landing on a
+# medium one) and every probe running to its limit:
+#   fast    6 gateway + 8 internet + 2 web                       = 16
+#   medium  3 dns + 8 two TCP + 4 wifi + 2 browser               = 17
+#   slow    4 + 4 public (curl -4, then its fallback) + 3 captive = 11
+#   plus 2 minimum rest and 1 for whole-second clock truncation  =  3
+# = 47 s. 30 does not clear that, so the floor is 60: 13 s of margin, and
+# still far below any sleep or stall worth reporting. At a 10 s cadence this
+# raises the tolerance from 30 s to 60 s; a 300 s cadence is unaffected.
+THRESH_MON_GAP_MIN_S=60
+
 # ── Bufferbloat grading ──────────────────────────────────────────────────
 # Waveform/DSLReports cutoffs for added latency under load, in ms:
 # A < 5, B < 30, C < 60, D < 200, F ≥ 200. B1/B2 warn at grade C and go
