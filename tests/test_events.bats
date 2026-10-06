@@ -17,6 +17,11 @@ setup() {
   NETDIAG="$REPO/bin/hopwatch"
   EVENTS="$REPO/helpers/events.py"
   J="$BATS_TEST_TMPDIR/events.jsonl"
+  # The reader takes its one cutoff from lib/thresholds.sh through the
+  # environment, as bin/hopwatch hands it over, and refuses to run without.
+  # shellcheck source=../lib/thresholds.sh
+  . "$REPO/lib/thresholds.sh"
+  export THRESH_EV_RESTART_BRIDGE_S
 }
 
 # One journal line. $1 kind, $2 timestamp, $3 seq, then kind-specific args.
@@ -189,6 +194,286 @@ assert ep['duration_s'] is None, ep
 assert ep['start_unobserved'] is True, ep
 assert ep['ongoing'] is False, ep
 assert ep['ended_by'] == 'cleared', ep
+"
+}
+
+# ── A restart is a blind spot, not an end ───────────────────────────────
+#
+# The app restarts the monitor to change cadence and to start and end a
+# 60-second investigation burst, and a fault that keeps flapping severity
+# re-arms the burst about once a minute. Every restart writes a
+# monitor-started line, and the fresh monitor re-reports the still-firing
+# rule a few seconds later. Read literally, one continuous router fault
+# became a dozen short "monitor-restart" episodes.
+#
+# These tests pin what the reader does with that shape. The window itself
+# comes from lib/thresholds.sh; the boundary tests pin it explicitly so
+# they do not move when the shipped value is retuned.
+
+# A python assertion over the episodes for rule $1, reading JSON on stdin.
+# The body is $2, with `eps` in scope.
+eps_for() {
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+eps = [e for e in d['episodes'] if e['rule'] == '$1']
+$2
+"
+}
+
+@test "a rule that re-fires within the window after a restart is one episode" {
+  ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  ev monitor-started 2026-10-06T20:34:53Z 1
+  ev rule-fired      2026-10-06T20:35:11Z 3 G2
+  ev rule-cleared    2026-10-06T20:40:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+# The span of the whole fault, first fire to the clear that was seen.
+assert ep['started'] == '2026-10-06T20:34:39Z', ep
+assert ep['ended'] == '2026-10-06T20:40:00Z', ep
+assert ep['duration_s'] == 321, ep
+# 20:34:53 to 20:35:11: nobody saw it, and it is counted as such rather
+# than absorbed into the duration.
+assert ep['unobserved_s'] == 18, ep
+assert ep['restarts_bridged'] == 1, ep
+# It ended because it cleared, and nothing about it is a lower bound.
+assert ep['ended_by'] == 'cleared', ep
+assert ep['ongoing'] is False, ep
+assert 'duration_is_lower_bound' not in ep, ep
+"
+}
+
+@test "a re-fire after the window leaves two episodes, the first still restart-ended" {
+  THRESH_EV_RESTART_BRIDGE_S=60
+  export THRESH_EV_RESTART_BRIDGE_S
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:01:00Z 1
+  ev rule-fired      2026-10-06T20:02:01Z 3 G2
+  ev rule-cleared    2026-10-06T20:03:00Z 4 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+first, second = eps
+assert first['ended_by'] == 'monitor-restart', first
+assert first['duration_is_lower_bound'] is True, first
+assert first['duration_s'] == 60, first
+assert 'restarts_bridged' not in first, first
+assert second['started'] == '2026-10-06T20:02:01Z', second
+assert second['ended_by'] == 'cleared', second
+assert 'restarts_bridged' not in second, second
+"
+}
+
+@test "the window is inclusive at its edge, and not a second past it" {
+  THRESH_EV_RESTART_BRIDGE_S=60
+  export THRESH_EV_RESTART_BRIDGE_S
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:01:00Z 1
+  ev rule-fired      2026-10-06T20:02:00Z 3 G2
+  ev rule-cleared    2026-10-06T20:03:00Z 4 G2
+  run read_events
+  eps_for G2 "assert len(eps) == 1, eps"
+
+  rm -f "$J"
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:01:00Z 1
+  ev rule-fired      2026-10-06T20:02:01Z 3 G2
+  ev rule-cleared    2026-10-06T20:03:00Z 4 G2
+  run read_events
+  eps_for G2 "assert len(eps) == 2, eps"
+}
+
+@test "a different rule after a restart does not continue the first" {
+  ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  ev monitor-started 2026-10-06T20:34:53Z 1
+  ev rule-fired      2026-10-06T20:35:11Z 3 G3
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['ended_by'] == 'monitor-restart', eps[0]
+assert eps[0]['duration_is_lower_bound'] is True, eps[0]
+assert 'restarts_bridged' not in eps[0], eps[0]
+"
+  eps_for G3 "
+assert len(eps) == 1, eps
+assert eps[0]['started'] == '2026-10-06T20:35:11Z', eps[0]
+"
+}
+
+@test "the same rule on a different network does not continue the first" {
+  # A laptop that changed network across the restart has a new fault, not
+  # the old one resumed.
+  NET=wifi:mac=aa ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  NET=wifi:mac=aa ev monitor-started 2026-10-06T20:34:53Z 1
+  NET=wifi:mac=bb ev rule-fired      2026-10-06T20:35:11Z 3 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+by_net = {e['network']: e for e in eps}
+assert by_net['wifi:mac=aa']['ended_by'] == 'monitor-restart', eps
+assert 'restarts_bridged' not in by_net['wifi:mac=aa'], eps
+assert by_net['wifi:mac=bb']['ongoing'] is True, eps
+"
+}
+
+@test "a rule that cleared before the restart is not resurrected by a later fire" {
+  # Only a restart-closed episode can be continued. This one ended because
+  # the monitor *saw* it clear, so a fire seconds after the restart is a
+  # new fault.
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev rule-cleared    2026-10-06T20:00:30Z 2 G2
+  ev monitor-started 2026-10-06T20:00:40Z 1
+  ev rule-fired      2026-10-06T20:00:50Z 3 G2
+  ev rule-cleared    2026-10-06T20:01:20Z 4 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+assert [e['duration_s'] for e in eps] == [30, 30], eps
+assert all(e['ended_by'] == 'cleared' for e in eps), eps
+assert all('restarts_bridged' not in e for e in eps), eps
+"
+}
+
+@test "a chain of burst restarts is one episode (the shape of the real journal)" {
+  # The 2026-10-06 20:34-20:40Z fault, as the journal wrote it: a restart
+  # every ~60 s, the rule re-fired ~18 s after each one. Network id is
+  # synthetic; the real one is a MAC and this repo is public.
+  export NET=wifi:mac=00:11:22:33:44:55
+  ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  ev monitor-started 2026-10-06T20:34:53Z 1
+  ev gap             2026-10-06T20:35:03Z 2 15
+  ev rule-fired      2026-10-06T20:35:11Z 3 G2
+  ev monitor-started 2026-10-06T20:35:51Z 1
+  ev rule-fired      2026-10-06T20:36:09Z 3 G2
+  ev monitor-started 2026-10-06T20:36:50Z 1
+  ev rule-fired      2026-10-06T20:37:08Z 3 G2
+  ev rule-cleared    2026-10-06T20:40:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['duration_s'] == 321, ep
+assert ep['unobserved_s'] == 54, ep
+assert ep['restarts_bridged'] == 3, ep
+assert ep['ended_by'] == 'cleared', ep
+assert 'duration_is_lower_bound' not in ep, ep
+"
+  # Three starts happened and the window still says so: bridging an
+  # episode must not rewrite what the recorder did.
+  printf '%s' "$output" | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['observation']['monitor_starts'] == 3
+"
+}
+
+@test "a merged episode whose last segment ends in a restart is still restart-ended" {
+  ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  ev monitor-started 2026-10-06T20:34:53Z 1
+  ev rule-fired      2026-10-06T20:35:11Z 3 G2
+  ev monitor-started 2026-10-06T20:35:51Z 1
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['ended_by'] == 'monitor-restart', ep
+assert ep['duration_is_lower_bound'] is True, ep
+assert ep['ended'] == '2026-10-06T20:35:51Z', ep
+assert ep['duration_s'] == 72, ep
+assert ep['restarts_bridged'] == 1, ep
+assert ep['ongoing'] is False, ep
+"
+}
+
+@test "a merged episode still open at the end is measured to the last event" {
+  ev rule-fired      2026-10-06T20:34:39Z 23 G2
+  ev monitor-started 2026-10-06T20:34:53Z 1
+  ev rule-fired      2026-10-06T20:35:11Z 3 G2
+  ev gap             2026-10-06T20:36:00Z 4 20
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['ended_by'] == 'still-open', ep
+assert ep['ongoing'] is True, ep
+assert ep['duration_s'] == 81, ep
+# 18 s across the restart plus the 20 s gap line inside the open stretch.
+assert ep['unobserved_s'] == 38, ep
+assert ep['restarts_bridged'] == 1, ep
+"
+}
+
+@test "back-to-back restarts inside the window do not break the candidate" {
+  # A monitor that was replaced before its second sample could not have
+  # reported the rule even if it were still firing, so it is not evidence
+  # that the fault stopped.
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:00:20Z 1
+  ev monitor-started 2026-10-06T20:00:34Z 1
+  ev rule-fired      2026-10-06T20:00:52Z 3 G2
+  ev rule-cleared    2026-10-06T20:02:00Z 4 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 120, eps[0]
+assert eps[0]['restarts_bridged'] == 2, eps[0]
+assert eps[0]['unobserved_s'] == 32, eps[0]
+"
+}
+
+@test "a long silent process between two restarts is not bridged across" {
+  # Ten minutes of a monitor running and never reporting the rule is not a
+  # blind spot, it is a measurement: the candidate must not survive it.
+  ev rule-fired      2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:00:20Z 1
+  ev monitor-started 2026-10-06T20:10:20Z 1
+  ev rule-fired      2026-10-06T20:10:38Z 3 G2
+  ev rule-cleared    2026-10-06T20:11:00Z 4 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+assert eps[0]['ended_by'] == 'monitor-restart', eps[0]
+assert eps[0]['duration_s'] == 20, eps[0]
+assert eps[1]['duration_s'] == 22, eps[1]
+"
+}
+
+@test "events.py refuses to run without the restart window, and says where it lives" {
+  # A default here would be a second home for a number with one, and a
+  # stale copy still yields a plausible episode count.
+  ev rule-fired 2026-10-06T20:00:00Z 1 G2
+  run env -u THRESH_EV_RESTART_BRIDGE_S \
+    python3 "$EVENTS" --journal "$J" --version test
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"THRESH_EV_RESTART_BRIDGE_S"* ]] || return 1
+  [[ "$output" == *"lib/thresholds.sh"* ]] || return 1
+}
+
+@test "--events reads the window from lib/thresholds.sh without help from the caller" {
+  # The CLI is the one caller that must supply it; run it with the variable
+  # scrubbed from the environment to prove bin/hopwatch does.
+  mkdir -p "$BATS_TEST_TMPDIR/h/net-diag"
+  ev rule-fired      "$(ago 10)" 1 G2
+  ev monitor-started "$(ago 9)"  1
+  ev rule-fired      "$(ago 8)"  3 G2
+  cp "$J" "$BATS_TEST_TMPDIR/h/net-diag/events.jsonl"
+  run env -u THRESH_EV_RESTART_BRIDGE_S HOME="$BATS_TEST_TMPDIR/h" HOPWATCH_LOG_DIR="$BATS_TEST_TMPDIR/h/net-diag" \
+    "$NETDIAG" --events=1
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['restarts_bridged'] == 1, eps[0]
 "
 }
 

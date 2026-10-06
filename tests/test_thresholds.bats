@@ -54,7 +54,7 @@ setup() {
            THRESH_AV_WINDOW_HOURS THRESH_AV_OUTAGE_RULES \
            THRESH_AV_OUTAGE_COUNT THRESH_AV_DOWNTIME_S \
            THRESH_AV_FLAP_MAX_S THRESH_AV_FLAP_COUNT \
-           THRESH_AV_UNOBSERVED_NOTE_PCT \
+           THRESH_AV_UNOBSERVED_NOTE_PCT THRESH_EV_RESTART_BRIDGE_S \
            THRESH_TRAFFIC_SAMPLE_S THRESH_TRAFFIC_BUSY_MBPS \
            THRESH_LAN_ACTIVE_DEVICES \
            THRESH_WIFI_STICKY_DELTA_DBM THRESH_WIFI_STICKY_MAX_RSSI \
@@ -284,5 +284,22 @@ setup() {
   cp "$REPO/helpers/summary.py" "$BATS_TEST_TMPDIR/planted_summary.py"
   printf '\nif False:\n    pass  # if loss >= 20:\n' >> "$BATS_TEST_TMPDIR/planted_summary.py"
   run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$BATS_TEST_TMPDIR/planted_summary.py"
+  [ "$status" -eq 0 ]
+}
+
+@test "helpers/events.py carries no inline numeric cutoff either" {
+  # events.py decides whether a restart ended a fault or only interrupted
+  # our sight of it, which changes how many episodes a person is told
+  # about. It reads THRESH_EV_RESTART_BRIDGE_S from the environment; the
+  # regression this catches is that window creeping back in as a literal,
+  # where a change to lib/thresholds.sh would never reach it.
+  run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$REPO/helpers/events.py"
+  [ "$status" -ne 0 ] || { echo "inline cutoff in events.py:"; echo "$output"; return 1; }
+}
+
+@test "the guard would actually catch a cutoff planted in events.py" {
+  cp "$REPO/helpers/events.py" "$BATS_TEST_TMPDIR/planted_events.py"
+  printf '\nif False:\n    pass  # if gap_s <= 90:\n' >> "$BATS_TEST_TMPDIR/planted_events.py"
+  run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$BATS_TEST_TMPDIR/planted_events.py"
   [ "$status" -eq 0 ]
 }

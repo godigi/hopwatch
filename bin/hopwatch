@@ -630,11 +630,16 @@ if [ "$WATCH" -eq 1 ]; then
   esac
 fi
 if [ "$EVENTS" -eq 1 ]; then
-  # Reading the journal is deliberately *not* judging it. No thresholds are
-  # exported here and helpers/events.py imports none: it pairs episodes and
-  # reports how much of the window was actually observed, and whether four
-  # minutes of downtime is acceptable is a verdict that belongs to a rule.
-  # AV-1/AV-2 are where that will live.
+  # Reading the journal is deliberately *not* judging it. The one number
+  # exported here is not a verdict: it is how long a freshly restarted
+  # monitor may take to re-report a fault that was already there, which
+  # decides whether a restart ended an episode or only interrupted our
+  # sight of it. helpers/events.py pairs episodes and reports how much of
+  # the window was actually observed, and whether four minutes of downtime
+  # is acceptable is a verdict that belongs to a rule — AV-1/AV-2.
+  # shellcheck source=lib/thresholds.sh
+  . "$LIB_DIR/thresholds.sh"
+  export THRESH_EV_RESTART_BRIDGE_S
   case "$EVENTS_WINDOW_HOURS" in
     ''|*[!0-9]*) printf 'hopwatch: --events expects a window in hours (got: %s)\n' "$EVENTS_WINDOW_HOURS" >&2; exit 3 ;;
   esac

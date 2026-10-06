@@ -477,6 +477,38 @@ THRESH_AV_DOWNTIME_S=300
 THRESH_AV_FLAP_MAX_S=120
 THRESH_AV_FLAP_COUNT=6
 
+# How long after a monitor restart a fault may re-fire and still be the same
+# fault. The app restarts the monitor to change cadence and to start and end
+# its 60 s investigation burst, and severity flapping re-arms the burst about
+# once a minute; each restart writes `monitor-started`, which
+# helpers/events.py reads as the end of everything open. Without a window,
+# one continuous 40-minute router fault was reported as a dozen episodes of
+# 10-69 s. A re-fire inside this window after a restart is the same episode,
+# continued, and the time between is counted as unobserved, not as fault.
+#
+# Why 90 s: a fresh monitor's first sample is a baseline (nothing to diff
+# against, so `changes` is empty and a rule already firing is never
+# journaled), so a re-fire can only appear in sample 2 or later. Three
+# things set how late:
+#   * the fast cadence is 10 s, and the cycles in the journal's own `gap`
+#     lines run 10-15 s, so each further sample costs about 12 s;
+#   * a rule that waits on THRESH_MON_LOSS_CONFIRM_CYCLES (2) consecutive
+#     cycles needs sample 2 at the earliest, one cycle after the baseline;
+#   * the slowest probe a rule can wait on for a *second* result is the
+#     medium tier (TCP, DNS, browser) at MONITOR_MEDIUM_INTERVAL = 60 s; the
+#     first came in sample 1. The re-fires actually seen are quicker (G2
+#     18 s after a restart, swapping places with TCP-1 as the rolling loss
+#     window filled from a single probe), so this is the ceiling, not the
+#     typical case.
+# 60 s for the medium tier plus three fast cycles (confirm cycles and one to
+# emit) is 90 s. Longer starts to merge separate faults: a link that cleared
+# during the blind spot and failed again is two episodes.
+#
+# This is a statement about how long a monitor takes to *report* a fault,
+# not about whether any duration is acceptable. helpers/events.py still
+# judges nothing; it reads this number the way it reads the journal.
+THRESH_EV_RESTART_BRIDGE_S=90
+
 # Above this much of the window unobserved, the counts are a lower bound
 # and the sentence says so. Not a suppression: an outage that was seen
 # still happened, and staying silent about it because the Mac also slept

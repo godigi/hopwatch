@@ -108,7 +108,9 @@ uninstall_watcher_run() {
 # process that should always be running, and launchd restarting it after a
 # crash is the whole point. The journal is append-only across those
 # restarts, and helpers/events.py closes any episode still open at a
-# restart rather than letting it span a period nobody watched.
+# restart rather than letting it span a period nobody watched — unless the
+# same rule re-fires within THRESH_EV_RESTART_BRIDGE_S, in which case the
+# restart was only a blind spot and the episode carries on.
 #
 # stdout goes to /dev/null on purpose. `--monitor` emits a sample every few
 # seconds forever; that stream is for a program reading the pipe, and
