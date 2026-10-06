@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.8] - 2026-10-06
+
 ### Fixed
 
 - `hopwatch --events` no longer chops one continuous fault into many short episodes at every monitor restart. The app restarts the monitor to change cadence and to start and end its 60-second investigation burst, which on a flapping link is about once a minute; each restart wrote `monitor-started`, which `helpers/events.py` read as the end of every open episode, and the fresh monitor then re-reported the still-firing rule as a brand new `rule-fired`. In the last three hours of a real journal that was 25 episodes, 11 of them "ended by monitor-restart", 12 for G2 alone. An episode closed by a restart now stays open to continuation: if the same rule fires again on the same network within `THRESH_EV_RESTART_BRIDGE_S` (90 s, in `lib/thresholds.sh`) of the latest restart, it is one episode. Its duration spans both, the time between is added to `unobserved_s`, a new `restarts_bridged` count (present only when above zero) says how many restarts were stepped over, and it is labelled `monitor-restart` / `duration_is_lower_bound` only if a restart really ended its last segment. A rule that cleared first, a different rule, a different network, or a re-fire outside the window are not merged. The reader still judges nothing: the window is how long a fresh monitor takes to report a fault that was already there. Additive; `--events` `schema` stays 1. `AV-1`/`AV-2` read these episodes through `lib/availability.sh` and now count a bridged fault once.
@@ -4104,7 +4106,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.7...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.8...HEAD
+[1.10.8]: https://github.com/godigi/hopwatch/compare/v1.10.7...v1.10.8
 [1.10.7]: https://github.com/godigi/hopwatch/compare/v1.10.6...v1.10.7
 [1.10.6]: https://github.com/godigi/hopwatch/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/godigi/hopwatch/compare/v1.10.4...v1.10.5
