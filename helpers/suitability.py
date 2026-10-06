@@ -145,7 +145,7 @@ _LEVEL_ORDER: tuple[str, ...] = ("good", "degraded", "broken")
 # ICMP-1, and the like) land here with an empty map, which is
 # indistinguishable from "fired but touches none of these five
 # activities" — exactly what they mean.
-_IMPACTS_BY_RULE: dict[str, dict[str, str]] = {
+_IMPACTS_BY_RULE = IMPACTS_BY_RULE = {
     rule["id"]: rule.get("impacts", {}) for rule in RULES
 }
 

@@ -166,22 +166,24 @@ THRESH_ICMP_TOTAL_LOSS_PCT=100
 
 # TCP-2 — new connections intermittently refused while ping passes
 # (lib/monitor.sh, mirrored on the scan's tcp_reach panel in
-# lib/diagnosis.sh). The measured world this rule names: a modem that
-# RSTs outbound TCP in ~10 ms — far under the real path's RTT, so the
-# refusal is local — while ICMP to the same hosts is fine and normal
+# lib/diagnosis.sh). The measured world this rule names: something near
+# the user RSTing outbound TCP in ~10 ms — far under the real path's RTT,
+# so the refusal is generated near the user (router or the provider's
+# equipment; unconfirmed) — while ICMP to the same hosts is fine and normal
 # websites load. On the live network 8.8.8.8:443 was refused 10 of 16
 # times and the ping to it 0% of the time; no existing rule covers the
 # shape, and P2 misread it as an outage 349 times a day.
 #
 # Two cutoffs over the rolling refused-connect ratio (attempts that got a
 # connection refused or failed, as a percentage of attempts):
-#   warn at half of connections refused — one of the monitor's two
-#   targets, or three of the scan's five — every cycle at the fast
-#   cadence for the confirm window;
-#   critical at all of them refused — the modem's TCP path is unusable,
-#   and the pings passing make "check your router" the right shop, not
-#   "call your ISP".
-THRESH_CONNECT_WARN_PCT=50
+#   warn at one in ten refused — two of the monitor's twenty windowed
+#   attempts, or one of the scan's five. It was 50 until 2026-10-05,
+#   when a link refusing 45% of new connections (pages half-loading)
+#   read as "ok"; a tenth is already visible to someone browsing;
+#   critical at all of them refused — new connections are unusable,
+#   and the pings passing make "restart the router, then tell your
+#   provider if it comes back" the right advice, not "the line is down".
+THRESH_CONNECT_WARN_PCT=10
 THRESH_CONNECT_CRIT_PCT=100
 
 # ── WiFi ─────────────────────────────────────────────────────────────────
@@ -447,6 +449,20 @@ THRESH_BUFFERBLOAT_CONSTRAINED_MBPS=30
 # A middle hop above this with a clean destination is classified as ICMP
 # rate limiting; the same boundary must be used by both branches.
 THRESH_MTR_HOP_LOSS_PCT=2
+
+# ── Hop attribution for the GUI's route card [Phase 3 reporting plan] ────
+# The GUI's hop card used to keep its own inline idea of what makes a
+# router hop worth warning about — a literal 30 ms round-trip floor
+# checked against the internet leg. That number decides what the app
+# tells the user, so it lives here and only here, read by
+# helpers/inference.py through the environment.
+#
+# A gateway round-trip above this warns the router hop, but only when the
+# internet leg does not contradict it (a router replying slower than the
+# whole round trip is CPU reply delay, not link latency). The cross-check
+# reuses this same constant on both legs rather than introducing a second
+# number.
+THRESH_GW_RTT_WARN_MS=30
 
 # ── Default-route re-check [N1, N1c] ─────────────────────────────────────
 # How long to wait before re-reading the routing table when the first read

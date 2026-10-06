@@ -588,7 +588,8 @@ it would accumulate forever.
   "wifi":    {"rssi": null, "noise": null, "snr": null, "channel": null},
   "dns":     {"ok": true, "resolver": "192.168.15.1", "elapsed_ms": 12},
   "tcp":     {"any_ok": true, "targets": [{"host": "github.com", "port": 443,
-                                           "ok": true, "elapsed_ms": 30}]},
+                                           "ok": true, "elapsed_ms": 30}],
+              "refused": {"pct": 0, "attempts": 20, "state": null, "summary": null}},
   "web":     {"ok": true, "fail_kind": null, "success_pct": 100.0},
   "public":  {"ok": true, "ip": "…", "isp": "…", "asn": "AS10429",
               "city": "…", "country": "Brazil", "country_iso": "BR",
@@ -604,6 +605,78 @@ it would accumulate forever.
   ]
 }
 ```
+
+## `tcp.refused` — the refused-connect verdict (monitor stream)
+
+`tcp.any_ok` is **one cycle's** two connects and is not a verdict: at a
+~2-in-3 refusal rate both fail on ~40% of cycles while browsing mostly
+works. Do not render "blocked" from it. The verdict is `tcp.refused`:
+
+| field | meaning |
+|---|---|
+| `pct` | rolling refused-connect percentage over the loss window (the instrument TCP-2 reads); `null` until measured, and after a link drop or network change |
+| `attempts` | connection attempts that percentage was taken over; `null` with `pct` |
+| `state` | `"warn"` or `"critical"` when TCP-2 is **confirmed** this cycle (same multi-cycle confirmation and `THRESH_CONNECT_*` cutoffs as the rule), else `null`; `"critical"` is the sustained all-refused case |
+| `summary` | one sentence stating the measurement, written by the CLI, present only when `state` is non-null — e.g. `Most new connections are being refused` or `Every one of the last 12 test connections was refused`. Render it verbatim. It names no culprit; blame is in the rules catalog's TCP-2 entry. |
+
+Present in every sample (additive within schema 2); the all-`null`
+object when the TCP-2 instrument has no data. It sits outside the
+medium-tier freshness gate, because `state` is the same confirmed verdict
+as `TCP-2` in `status.rules`.
+
+## `suitability`, `hops`, `headline` — the per-sample presentation blocks (monitor stream, additive within schema 2)
+
+Three blocks helpers/inference.py derives each cycle from the fired rules
+plus the sample's own figures, with every cutoff imported from
+`lib/thresholds.sh` via the environment. They exist so a consumer never
+re-derives a verdict from a number (the app used to keep its own private
+cutoffs, and the menu-bar app contradicted the report it links to):
+
+```json
+"suitability": [
+  {"activity": "calls", "label": "May cut out", "verdict": "degraded",
+   "metric": "0% loss · 9 ms jitter", "because": ["LA-1", "LA-2"],
+   "unmeasured_reason": null}
+],
+"hops": {
+  "mac":     {"laggy": false, "good": true, "detail": "Excellent"},
+  "router":  {"warn": false, "detail": ""},
+  "internet": {"warn": true, "detail": "266 ms latency"}
+},
+"headline": {"text": "Limited for Calls and Gaming",
+             "subtitle": "Calls: 0% loss, 9 ms jitter · Gaming: 266 ms",
+             "critical": false}
+```
+
+* `suitability` — one row per activity in `ACTIVITY_ORDER` (the five:
+  calls, streaming, gaming, vpn, browsing; render whichever the UI
+  shows). `verdict` is `good` / `degraded` / `broken` / `unmeasured`:
+  the worst impact among the fired rules' catalog entries, never a
+  re-derivation from a figure. `label` is the CLI's short word for the
+  row; `metric` is the figure line backing it — the pair rule is that an
+  unmeasured row renders an empty `metric` and every other verdict a
+  non-empty one, so a "Buffering" label can never sit over "0% loss ·
+  3 ms". `unmeasured_reason` names what the monitor does not probe (the
+  speed test; the MTU/path checks a full check runs) for the honest
+  "we didn't measure this" case.
+* `hops` — `mac` (`good`, `laggy`, `detail`, where `detail` is the
+  radio-scale word for the current RSSI from `--signal-scale`'s
+  thresholds, with `(laggy)` appended and routed-figured reasons once a
+  hop qualifies), `router` and `internet` (`warn`, `detail`). The
+  router/internet cross-checks reuse `THRESH_GW_RTT_WARN_MS` and
+  `THRESH_LATENCY_JITTER_WARN_MS`; a rule that fires owns its hop's
+  `detail` and never needs the figure fallback.
+* `headline` — `null` while every grid activity (calls, gaming,
+  streaming, browsing) is `good`; otherwise `{text, subtitle,
+  critical}`. `critical` is `true` exactly when any activity is
+  `broken` — and `status.severity` is required to be `critical` or
+  `warn` whenever any row is broken (asserted by the invariant tests in
+  `tests/test_monitor.bats`).
+
+When the thresholds are missing from the environment the blocks are
+omitted (one stderr warning); consumers must cope with absent blocks by
+rendering a neutral, judgement-free fallback — never by computing their
+own verdict.
 
 ## Conventions specific to the stream
 
@@ -752,9 +825,9 @@ The fast tier carries the whole reachability decision (identity, both
 loss legs, the HTTPS canaries), which is why a network change is judged
 within seconds of joining. The medium tier's TCP probe deliberately
 lists one content host (`github.com:443`) beside one resolver
-(`8.8.8.8:443`) — a modem that RSTs resolver traffic on sight (measured:
-a refusal inside ~10 ms,well under the path's real RTT, so it comes from
-the local box) still leaves one leg of evidence the internet itself is
+(`8.8.8.8:443`) — a box near the user that RSTs resolver traffic on sight
+(measured: a refusal inside ~10 ms, well under the path's real RTT, so
+it is generated near the user) still leaves one leg of evidence the internet itself is
 reachable; TCP-2 owns that pattern and P2 no longer mistakes it for an
 outage. The slow tier is the only tier making an external call whose
 content is rate-limited (the geo fetch), which is why it is slow and why

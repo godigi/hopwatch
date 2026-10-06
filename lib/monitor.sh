@@ -167,6 +167,14 @@ MON_TCP_LINES=""
 # the same "a window half full of the old network measures neither".
 MON_TCP_HIST=""
 MON_TCP2_REFUSED_PCT=""
+# How many connection attempts that percentage was taken over (so a
+# consumer can say "the last 12", not just "100%"), and the CONFIRMED TCP-2
+# state this cycle's rules reached: "warn", "critical", or empty. The state
+# is the verdict — decided here, against lib/thresholds.sh, after the same
+# multi-cycle confirmation as every other rule — so a consumer never infers
+# "refused" or "blocked" from one sample's tcp.any_ok.
+MON_TCP2_ATTEMPTS=""
+MON_TCP2_STATE=""
 # The web canary's own instruments (see _mon_probe_web): curl's failure
 # class for the newest attempt, and the same rolling window shape as the
 # loss legs — MON_WEB_HIST folds one "attempts:failures" pair per probe,
@@ -401,6 +409,7 @@ _mon_loss_reset() {
   # attempts along with the packets.
   MON_TCP_HIST=""
   MON_TCP2_REFUSED_PCT=""
+  MON_TCP2_ATTEMPTS=""
   MON_WEB_HIST=""
   MON_WEB_SUCC_PCT=""
 }
@@ -528,13 +537,14 @@ _mon_probe_tcp() {
   # one. Two independent targets so a single unreachable host doesn't read
   # as "the internet is gone".
   #
-  # The second target is a NON-RESOLVER host name deliberately: a modem can
-  # RST connections to resolver/anonymizer IPs on sight (measured on the
-  # live network: 1.1.1.1:443 refused 11 of 16 times, in ~10 ms — far
-  # faster than the 58 ms the RTT to that host implies, so the refusal
-  # comes from the local box) while ordinary websites keep loading.
-  # Pointing both probes at resolvers would make every such modem look
-  # like an outage; one content host keeps one foot in the internet as
+  # The second target is a NON-RESOLVER host name deliberately: something
+  # near the user can RST connections to resolver/anonymizer IPs on sight
+  # (measured on one live network: 1.1.1.1:443 refused 11 of 16 times, in
+  # ~10 ms — far faster than the 58 ms the RTT to that host implies, so
+  # the refusal is generated near the user; which box sends it — the
+  # router or the provider's equipment — was never confirmed) while
+  # ordinary websites keep loading. Pointing both probes at resolvers
+  # would make every such path look like an outage; one content host keeps one foot in the internet as
   # users actually experience it. (TCP-2, below, is the rule that names
   # the refusal pattern itself.)
   local entry host port t0 ms any=0 oks=0 fails=0
@@ -567,6 +577,7 @@ _mon_probe_tcp() {
   MON_TCP_HIST="${summary%%|*}"
   totals="${summary#*|}"
   MON_TCP2_REFUSED_PCT="$(_mon_loss_pct "${totals%%|*}" "${totals##*|}")"
+  MON_TCP2_ATTEMPTS="${totals%%|*}"
 }
 
 _mon_probe_internet() {
@@ -632,8 +643,8 @@ _mon_probe_web() {
   tmp_dir="$NETDIAG_TMP_DIR"
   # -w '%{exitcode}' alongside the HTTP code so a request that never
   # completed carries its curl failure class through to the sample: 7 =
-  # connection refused (the modem's RST, the measured pattern on this
-  # network), 28 = timed out (a black hole), 6 = could not resolve. curl
+  # connection refused (a fast RST from near the user, the measured
+  # pattern on one network), 28 = timed out (a black hole), 6 = could not resolve. curl
   # documents --write-out's %{exitcode} from 7.77; older builds print the
   # literal text — treated as unmeasured rather than guessed at.
   curl -4 -sS -o /dev/null -w '%{http_code} %{exitcode}' \
@@ -691,7 +702,7 @@ _mon_web_verdict() {
 }
 
 # Classify WHY the canaries failed, from the curl exit each carried (see
-# the probe above). "refused" — a fast local RST, the modem's habit on the
+# the probe above). "refused" — a fast RST from near the user, the pattern on the
 # network this phase was written for; "timeout" — a silent black hole;
 # "dns" — the name never resolved (rare here: the canaries are literal
 # IPs... note cp.cloudflare.com and www.gstatic.com are NOT literals, so
@@ -848,6 +859,7 @@ _mon_rules() {
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
+  MON_TCP2_STATE=""
 
   if [ "$MON_LINK_UP" -eq 0 ]; then
     _mon_add_rule critical N1
@@ -868,7 +880,7 @@ _mon_rules() {
     # rules actually look.
     MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
     MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
-    MON_TCP2_REFUSED_PCT=""
+    MON_TCP2_REFUSED_PCT=""; MON_TCP2_ATTEMPTS=""
     MON_WEB_FAIL_KIND=""; MON_WEB_SUCC_PCT=""
     return 0
   fi
@@ -922,8 +934,8 @@ _mon_rules() {
   #     loss from every verdict.
   #
   # TCP-2 (refused connects with clean pings) below owns the other shape a
-  # modem can wear: refusing new connections while forwarding everything
-  # else, on which the canary repeats a refusal while pings are pristine.
+  # near-user box can wear: refusing new connections while forwarding
+  # everything else, on which the canary repeats a refusal while pings are pristine.
   local _mon_gw_filtered=0
   if [ "${MON_TCP_OK:-0}" = "1" ] \
      && loss_at_least "$MON_GW_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
@@ -1031,8 +1043,20 @@ _mon_rules() {
 
   # ── TCP-2 — connections intermittently refused while ping passes ──────
   # The measured fault no other rule names: outbound TCP RST in ~10 ms —
-  # far under the real path's RTT, so the refusal is the local modem,
-  # not the far host — while pings are pristine and normal sites load.
+  # far under the real path's RTT, so the refusal is generated near the
+  # user, not by the far host — while pings are pristine and normal sites
+  # load. Whether the box doing it is the router or the provider's
+  # equipment is NOT knowable here (it takes a privileged packet capture),
+  # so nothing in this rule, or in the prose it drives, claims either.
+  # The same fault drops new UDP flows too (measured: direct DNS to
+  # public resolvers timed out at the same rate), which this TCP-only
+  # instrument cannot see; the catalog entry says so.
+  #
+  # `MON_TCP2_STATE` is the verdict consumers render. A single sample's
+  # tcp.any_ok == false (both connects of one cycle failed) is NOT a
+  # verdict: at a ~2-in-3 refusal rate it happens on ~40% of cycles while
+  # browsing mostly works, which is exactly how a GUI that read it
+  # headlined "web blocked" and flapped.
   # lib/monitor.sh cannot see WHY a connect failed (the RST vs the
   # timeout read the same here), so the rule says "refused or
   # unreachable" for what it measures and lets the web block's
@@ -1071,8 +1095,10 @@ _mon_rules() {
   sig_tcp2w_connect_warn="$_mon_tcp2_warn"
   if _mon_verdict_cycle TCP2 "$THRESH_MON_CRIT_CONFIRM_CYCLES" connect_crit; then
     _mon_add_rule critical TCP-2
+    MON_TCP2_STATE="critical"
   elif _mon_verdict_cycle TCP2W "$THRESH_MON_LOSS_CONFIRM_CYCLES" connect_warn; then
     _mon_add_rule warn TCP-2
+    MON_TCP2_STATE="warn"
   fi
 
   # ── L1 / L2 — internet-side packet loss ────────────────────────────────
@@ -1248,6 +1274,9 @@ _mon_emit() {
   NETDIAG_MON_DNS_MS="$MON_DNS_MS" \
   NETDIAG_MON_TCP_OK="$MON_TCP_OK" \
   NETDIAG_MON_TCP_LINES="$MON_TCP_LINES" \
+  NETDIAG_MON_TCP2_PCT="${MON_TCP2_REFUSED_PCT:-}" \
+  NETDIAG_MON_TCP2_STATE="${MON_TCP2_STATE:-}" \
+  NETDIAG_MON_TCP2_ATTEMPTS="${MON_TCP2_ATTEMPTS:-}" \
   NETDIAG_MON_WEB_OK="$MON_WEB_OK" \
   NETDIAG_MON_WEB_FAIL_KIND="${MON_WEB_FAIL_KIND:-}" \
   NETDIAG_MON_WEB_SUCC_PCT="${MON_WEB_SUCC_PCT:-}" \
@@ -1272,6 +1301,17 @@ _mon_emit() {
   NETDIAG_MON_PAUSED="$MON_PAUSED" \
   NETDIAG_MON_CADENCE_S="$1" \
   NETDIAG_MON_HAVE_PREV="$MON_HAVE_PREV" \
+  LOSS_WARN_PCT="$LOSS_WARN_PCT" \
+  LOSS_CRIT_PCT="$LOSS_CRIT_PCT" \
+  THRESH_GW_LOSS_CRIT_PCT="$THRESH_GW_LOSS_CRIT_PCT" \
+  THRESH_LATENCY_JITTER_WARN_MS="$THRESH_LATENCY_JITTER_WARN_MS" \
+  THRESH_INTERNET_LATENCY_WARN_MS="$THRESH_INTERNET_LATENCY_WARN_MS" \
+  THRESH_INTERNET_LATENCY_CRIT_MS="$THRESH_INTERNET_LATENCY_CRIT_MS" \
+  THRESH_DNS_LATENCY_WARN_MS="$THRESH_DNS_LATENCY_WARN_MS" \
+  THRESH_GW_RTT_WARN_MS="$THRESH_GW_RTT_WARN_MS" \
+  THRESH_WIFI_RSSI_EXCELLENT_DBM="$THRESH_WIFI_RSSI_EXCELLENT_DBM" \
+  THRESH_WIFI_RSSI_G1_DBM="$THRESH_WIFI_RSSI_G1_DBM" \
+  THRESH_WIFI_RSSI_WEAK_DBM="$THRESH_WIFI_RSSI_WEAK_DBM" \
   NETDIAG_MON_PREV_PUB_IP="$MON_PREV_PUB_IP" \
   NETDIAG_MON_PREV_PUB_CC="$MON_PREV_PUB_CC" \
   NETDIAG_MON_PREV_PUB_ISP="$MON_PREV_PUB_ISP" \
@@ -1283,6 +1323,13 @@ _mon_emit() {
   NETDIAG_MON_PREV_RULES="$MON_PREV_RULES" \
   python3 "$HELPERS_DIR/monitor_sample.py"
 }
+
+# The threshold set helpers/inference.py (pulled in by monitor_sample
+# above) judges the presentation blocks — suitability hops & headline —
+# with, exported verbatim from lib/thresholds.sh (sourced at the top of
+# this file): the same environment-only discipline helpers/history.py
+# spells out. Written as a standalone note rather than inline in _mon_emit
+# because the assignment list there cannot carry a comment.
 
 # ── Loop ─────────────────────────────────────────────────────────────────
 

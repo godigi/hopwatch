@@ -28,6 +28,24 @@ import json
 import os
 import sys
 
+# The block that turns rules and figures into per-activity, per-hop and
+# headline judgements. Loaded lazily inside main(): the module resolves
+# its thresholds from the environment at import time, and a caller that
+# intentionally runs without them should still get a sample. Any
+# exception here (a broken rules_catalog sibling among them) degrades to
+# no blocks rather than a dead stream — the same contract the journal
+# appends fail-open under.
+try:
+    import inference
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import inference
+    except Exception:
+        inference = None
+except Exception:
+    inference = None
+
 # Lazily resolved rule ID -> catalog title ("G2" -> "Router dropping packets"),
 # so a rule-fired/rule-cleared summary speaks the same plain-English name the
 # GUI's report card and `--rules-catalog` already use, rather than the bare
@@ -92,6 +110,43 @@ def _tri(name: str) -> bool | None:
     if v == "0":
         return False
     return None
+
+
+# Shares a person says aloud. The nearest one to the measured ratio is the
+# phrase — "most", never "66.7% blocked". Three steps only, deliberately:
+# with nine ("about 2 in 3", "about 4 in 5", ...) the sentence changed on
+# almost every cycle as the rolling ratio moved, and a headline that
+# rewrites itself every two seconds reads as noise; the exact figure is
+# in `pct` for anyone who wants it. This is wording for a measurement,
+# not a cutoff: whether the ratio matters is decided upstream (TCP-2 in
+# lib/monitor.sh, against lib/thresholds.sh) and arrives here as the
+# confirmed `state`.
+_SPOKEN_SHARES = ((1 / 4, "Some"), (1 / 2, "About half of"), (3 / 4, "Most"))
+
+
+def build_refused() -> dict:
+    """The refused-connect instrument behind TCP-2, with its sentence.
+
+    `state` is the monitor's confirmed TCP-2 verdict ("warn"/"critical",
+    else null) and `summary` is written here, in the CLI, only when a
+    verdict stands — so a consumer renders `summary` verbatim and never
+    composes "blocked" out of one sample's tcp.any_ok. The sentence states
+    the measurement; it deliberately names no culprit (the catalog's TCP-2
+    entry carries the blame, and it is hedged).
+    """
+    pct = _f("TCP2_PCT")
+    attempts = _i("TCP2_ATTEMPTS")
+    state = _env("TCP2_STATE")
+    if state not in ("warn", "critical"):
+        state = None
+    summary = None
+    if state == "critical":
+        summary = (f"Every one of the last {attempts} test connections was refused"
+                   if attempts else "Every new connection is being refused")
+    elif state == "warn" and pct is not None:
+        _, share = min(_SPOKEN_SHARES, key=lambda s: abs(s[0] - pct / 100.0))
+        summary = f"{share} new connections are being refused"
+    return {"pct": pct, "attempts": attempts, "state": state, "summary": summary}
 
 
 def build_tcp() -> list[dict]:
@@ -454,9 +509,11 @@ def main() -> None:
         "tcp": ({
             "any_ok": _tri("TCP_OK"),
             "targets": build_tcp(),
+            "refused": build_refused(),
         } if medium_fresh else {
             "any_ok": None,
             "targets": [],
+            "refused": build_refused(),
         }),
         # The fast HTTPS canary, one level deeper than the bare ok flag:
         # fail_kind names HOW the newest request failed (curl's exit class:
@@ -511,6 +568,61 @@ def main() -> None:
     changes = _changes()
     if changes:
         sample["changes"] = changes
+
+    # ── Presentation blocks (Phase 3 of the reporting plan) ────────────
+    # suitability: one row per activity — verdict from the fired rules'
+    # impacts, a label and a figure line ("3% loss · 9 ms jitter") that
+    # can never contradict it. hops: mac/router/internet state + reason,
+    # judged from the same thresholds the rules fired on. headline: the
+    # degraded status hero's copy. All three are computed by
+    # helpers/inference.py from lib/thresholds.sh values exported into
+    # the environment — the GUI renders them and re-derives nothing.
+    #
+    # A missing or malformed threshold set prints one stderr warning and
+    # omits the blocks rather than killing the sample: the stream's
+    # contract is to keep reporting even when an appendage fails (the
+    # same shape _journal_append applies). Consumers render their own
+    # neutral fallbacks for absent blocks, none of which judge.
+    if inference is not None:
+        roam_state = {
+            "rules": rules,
+            "link_up": link_up,
+            "is_wifi": is_wifi,
+            "rssi": _i("WIFI_RSSI"),
+            "gw_loss": _f("GW_LOSS"),
+            "gw_rtt": _f("GW_RTT"),
+            "gw_jitter": _f("GW_JITTER"),
+            "inet_loss": _f("INET_LOSS"),
+            "inet_loss_alt": _f("INET_LOSS_ALT"),
+            "inet_rtt": _f("INET_RTT"),
+            "inet_jitter": _f("INET_JITTER"),
+            "dns_ok": _tri("DNS_OK"),
+            "dns_ms": _f("DNS_MS"),
+            "tcp_ok": _tri("TCP_OK"),
+            "web_ok": _tri("WEB_OK"),
+            "web_fail_kind": _env("WEB_FAIL_KIND"),
+            "web_succ_pct": _f("WEB_SUCC_PCT"),
+            "vpn_active": sample["vpn"]["active"],
+            "vpn_name": _env("VPN_NAME"),
+            "icmp_filtered": sample["status"]["icmp_filtered"],
+            "ssid": _env("SSID"),
+            "prev_ssid": _env("PREV_SSID"),
+            "bssid": _env("BSSID"),
+            "prev_bssid": _env("PREV_BSSID"),
+        }
+        try:
+            blocks = inference.build(roam_state)
+        except SystemExit:
+            print("monitor_sample.py: inference refused (thresholds "
+                  "missing?) — omitting suitability/hops/headline",
+                  file=sys.stderr)
+        except Exception as exc:
+            print(f"monitor_sample.py: inference failed ({exc}) — omitting "
+                  "suitability/hops/headline", file=sys.stderr)
+        else:
+            sample["suitability"] = blocks["suitability"]
+            sample["hops"] = blocks["hops"]
+            sample["headline"] = blocks["headline"]
 
     _journal_append(sample, changes)
 

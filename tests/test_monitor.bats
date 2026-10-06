@@ -608,7 +608,21 @@ ping_summary() {
 # ── Sample shape ─────────────────────────────────────────────────────────
 
 emit() {
-  env -i PATH="$PATH" "$@" python3 "$HELPERS/monitor_sample.py"
+  # helpers/inference.py (the per-sample suitability/hops/headline
+  # blocks) refuses to run without its thresholds — the same
+  # environment-only discipline helpers/history.py applies — so the
+  # emit harness exports them verbatim from lib/thresholds.sh.
+  . "$REPO/lib/thresholds.sh"
+  local __inference_env=(PATH="$PATH")
+  local __t
+  for __t in LOSS_WARN_PCT LOSS_CRIT_PCT THRESH_GW_LOSS_CRIT_PCT \
+             THRESH_LATENCY_JITTER_WARN_MS THRESH_INTERNET_LATENCY_WARN_MS \
+             THRESH_INTERNET_LATENCY_CRIT_MS THRESH_DNS_LATENCY_WARN_MS \
+             THRESH_GW_RTT_WARN_MS THRESH_WIFI_RSSI_EXCELLENT_DBM \
+             THRESH_WIFI_RSSI_G1_DBM THRESH_WIFI_RSSI_WEAK_DBM; do
+    __inference_env+=("$__t=${!__t}")
+  done
+  env -i "${__inference_env[@]}" "$@" python3 "$HELPERS/monitor_sample.py"
 }
 
 @test "monitor_sample: an empty environment still emits one valid object" {
@@ -628,9 +642,234 @@ emit() {
 import json,sys
 d = json.load(sys.stdin)
 for k in ('schema','version','ts','seq','refreshed','link','network','vpn',
-          'gateway','wifi','dns','tcp','public','status'):
+          'gateway','wifi','dns','tcp','public','status',
+          'suitability','hops','headline'):
     assert k in d, k
 "
+}
+
+# ── Presentation blocks (Phase 3 of the reporting plan) ──────────────────
+# helpers/inference.py derives per-sample suitability / hops / headline
+# from the fired rules plus figures, with every cutoff imported from
+# lib/thresholds.sh. Two invariants the plan names are asserted on every
+# synthetic state below:
+#   * an activity's label agrees with its metric line (an unmeasured
+#     verdict renders an EMPTY metric; every other verdict a non-empty
+#     one), and
+#   * no activity row is broken while sample severity is below warn —
+#     the GUI pill reads the severity, so a red row must mean a
+#     non-green pill.
+
+# Every state the monitor can present itself in, as monitor_sample.py
+# environment for the invariant sweep.
+phase3_states() {
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=0' \
+                'NETDIAG_MON_RULES=N1 ' \
+                'NETDIAG_MON_SEVERITY=critical'
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=1' \
+                'NETDIAG_MON_RULES=P2 ' \
+                'NETDIAG_MON_SEVERITY=critical'
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=1' \
+                'NETDIAG_MON_RULES=TCP-2 ' \
+                'NETDIAG_MON_SEVERITY=warn' \
+                'NETDIAG_MON_WEB_SUCC_PCT=60' \
+                'NETDIAG_MON_WEB_FAIL_KIND=refused'
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=1' \
+                'NETDIAG_MON_RULES=LA-1 LA-2 ' \
+                'NETDIAG_MON_SEVERITY=warn' \
+                'NETDIAG_MON_INET_RTT=266' \
+                'NETDIAG_MON_INET_JITTER=31'
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=1' \
+                'NETDIAG_MON_RULES=G3 ' \
+                'NETDIAG_MON_SEVERITY=warn' \
+                'NETDIAG_MON_GW_LOSS=10' \
+                'NETDIAG_MON_GW_RTT=3'
+  printf '%s\n' 'NETDIAG_MON_LINK_UP=1' \
+                'NETDIAG_MON_RULES=' \
+                'NETDIAG_MON_SEVERITY=ok' \
+                'NETDIAG_MON_GW_LOSS=0' \
+                'NETDIAG_MON_GW_RTT=3' \
+                'NETDIAG_MON_INET_LOSS=0' \
+                'NETDIAG_MON_INET_RTT=12' \
+                'NETDIAG_MON_TCP_OK=1'
+}
+
+@test "inference.py refuses to judge without its thresholds" {
+  # The refusal, not a fallback: a stale default would still render a
+  # plausible verdict. monitor_sample.py softens this to omitting the
+  # blocks (a live stream must keep flowing); the strict refusal is this
+  # helper's own contract, tested directly.
+  run env -i PATH="$PATH" PYTHONPATH="$HELPERS" \
+    python3 -c "import inference; inference.build({'rules': []})"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"threshold"* ]] || return 1
+  [[ "$output" == *"lib/thresholds.sh"* ]] || return 1
+}
+
+@test "monitor_sample: without thresholds the blocks are omitted, the stream alive" {
+  # stderr warns once; stdout stays a valid sample line. The parse must
+  # see stdout alone.
+  run bash -c 'env -i PATH="$1" python3 "$2" 2>/dev/null' _ "$PATH" "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert "suitability" not in d, "suitability present without thresholds"
+assert "hops" not in d, "hops present without thresholds"
+assert "headline" not in d, "headline present without thresholds"
+'
+}
+
+@test "monitor_sample: 266 ms renders gaming degraded, headline warns, pill severity warn" {
+  # The screenshot that started the plan: 266 ms reads "Severity: OK" →
+  # green pill, Gaming "Smooth". Post-Phase-1 the rule fires; the sample
+  # must say so on every surface at once.
+  run emit NETDIAG_MON_LINK_UP=1 \
+           NETDIAG_MON_RULES='LA-1 ' \
+           NETDIAG_MON_SEVERITY=warn \
+           NETDIAG_MON_INET_RTT=266 \
+           NETDIAG_MON_INET_JITTER=9 \
+           NETDIAG_MON_INET_LOSS=0 \
+           NETDIAG_MON_GW_RTT=3 \
+           NETDIAG_MON_TCP_OK=1 \
+           NETDIAG_MON_DNS_OK=1 \
+           NETDIAG_MON_WEB_OK=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=measured \
+           NETDIAG_MON_WIFI_RSSI=-62
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+rows = {r["activity"]: r for r in d["suitability"]}
+assert rows["gaming"]["verdict"] == "degraded", rows["gaming"]
+assert rows["gaming"]["label"] == "Lag likely", rows["gaming"]
+assert "266" in rows["gaming"]["metric"], rows["gaming"]
+h = d["headline"]
+assert h and "Gaming" in h["text"], h
+assert h["critical"] is False, h
+assert d["hops"]["internet"]["warn"] is True, d["hops"]
+assert "266 ms latency" in d["hops"]["internet"]["detail"], d["hops"]
+'
+}
+
+@test "monitor_sample: an activity with no live speed test says so" {
+  run emit NETDIAG_MON_LINK_UP=1
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+rows = {r["activity"]: r for r in d["suitability"]}
+row = rows["streaming"]
+assert row["verdict"] == "unmeasured", row
+assert row["metric"] == "", row
+assert "speed test" in row["unmeasured_reason"], row
+'
+}
+
+@test "monitor_sample: invariants hold across every monitor state" {
+  # Two plan-mandated invariants over every synthetic state the monitor
+  # can present: (1) an activity's label agrees with its metric line —
+  # unmeasured rows carry an EMPTY metric, everything else a non-empty
+  # one; (2) no activity row is broken while the pill's severity is
+  # below warn, and headline.critical is 'true' exactly when a row is
+  # broken. A state file is one line; output lands in tmp and one python
+  # assertion set checks both.
+  local __tmp="$BATS_TEST_TMPDIR/sample.json"
+  local __base=(NETDIAG_MON_LINK_UP=1 NETDIAG_MON_GW_LOSS=1 NETDIAG_MON_GW_RTT=4
+    NETDIAG_MON_INET_LOSS=0 NETDIAG_MON_INET_LOSS_ALT=0 NETDIAG_MON_INET_RTT=60
+    NETDIAG_MON_INET_JITTER=8 NETDIAG_MON_TCP_OK=1 NETDIAG_MON_DNS_OK=1
+    NETDIAG_MON_WEB_OK=1 NETDIAG_MON_WEB_SUCC_PCT=100
+    NETDIAG_MON_MEASUREMENT_STATE=measured NETDIAG_MON_WIFI_RSSI=-62)
+
+  local __variants=(
+    "RULES=|SEVERITY=ok"
+    "RULES=G3|SEVERITY=warn|GW_LOSS=14"
+    "RULES=TCP-2|SEVERITY=warn|WEB_SUCC_PCT=60|WEB_FAIL_KIND=refused"
+    "RULES=LA-1|SEVERITY=warn|INET_RTT=266"
+    "RULES=LA-2|SEVERITY=warn|INET_JITTER=40"
+    "RULES=D1|SEVERITY=warn|DNS_OK=0"
+    "RULES=CP-1|SEVERITY=warn|CAPTIVE=1"
+    "LINK_UP=0|RULES=N1|SEVERITY=critical"
+  )
+  local __v __env=()
+  for __v in "${__variants[@]}"; do
+    IFS='|' read -ra __pairs <<<"$__v"
+    __env=("${__base[@]}")
+    local __kv
+    for __kv in "${__pairs[@]}"; do
+      __env+=("NETDIAG_MON_${__kv%%=*}=${__kv#*=}")
+    done
+    emit "${__env[@]}" > "$__tmp" || { echo "emit failed: $__v"; return 1; }
+    python3 - "$__tmp" <<'PYEOF' || { echo "invariants failed: $__v"; return 1; }
+import json, sys
+d = json.load(open(sys.argv[1]))
+sev_rank = {"ok": 0, "info": 1, "warn": 2, "critical": 3}
+worst_broken = any(r["verdict"] == "broken" for r in d["suitability"])
+worst_degraded = any(r["verdict"] == "degraded" for r in d["suitability"])
+for r in d["suitability"]:
+    assert r["label"], r
+    if r["verdict"] == "unmeasured":
+        assert r["metric"] == "", r
+    else:
+        assert r["metric"], r
+    if r["verdict"] == "broken":
+        assert sev_rank[d["status"]["severity"]] >= sev_rank["warn"], r
+if worst_broken or worst_degraded:
+    assert d["headline"] is not None, d["headline"]
+    assert d["headline"]["critical"] == worst_broken, d["headline"]
+else:
+    assert d["headline"] is None, d["headline"]
+PYEOF
+  done
+}
+
+@test "monitor_sample: 40 ms router hop warns only when the internet leg does not contradict" {
+  # gw 40 AND inet 60: both legs slow — the router claim stands. gw 40
+  # while the whole round trip is 10: CPU reply delay, not link latency;
+  # the hop stays quiet.
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_GW_RTT=40 NETDIAG_MON_INET_RTT=60 \
+           NETDIAG_MON_GW_LOSS=0 NETDIAG_MON_INET_LOSS=0 NETDIAG_MON_INET_LOSS_ALT=0 \
+           NETDIAG_MON_TCP_OK=1 NETDIAG_MON_WEB_OK=1
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["hops"]["router"]["warn"] is True, d["hops"]
+'
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_GW_RTT=40 NETDIAG_MON_INET_RTT=10 \
+           NETDIAG_MON_GW_LOSS=0 NETDIAG_MON_INET_LOSS=0 NETDIAG_MON_INET_LOSS_ALT=0 \
+           NETDIAG_MON_TCP_OK=1 NETDIAG_MON_WEB_OK=1
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["hops"]["router"]["warn"] is False, d["hops"]
+'
+}
+
+@test "monitor_sample: the mac hop's radio word comes from the shared signal scale" {
+  # -62: Good band; -76: Weak band; the label never re-derives a band of
+  # its own.
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_IFACE_TYPE=wifi NETDIAG_MON_WIFI_RSSI=-62
+  printf '%s' "$output" | python3 -c '
+import json, sys
+assert json.load(sys.stdin)["hops"]["mac"]["detail"] == "Good"
+'
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_IFACE_TYPE=wifi NETDIAG_MON_WIFI_RSSI=-76
+  printf '%s' "$output" | python3 -c '
+import json, sys
+assert json.load(sys.stdin)["hops"]["mac"]["detail"] == "Weak"
+'
+}
+
+@test "monitor_sample: vpn honest until a full check ran" {
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_VPN_ACTIVE=1 NETDIAG_MON_VPN_NAME=Mullvad
+  printf '%s' "$output" | python3 -c '
+import json, sys
+row = {r["activity"]: r for r in json.load(sys.stdin)["suitability"]}["vpn"]
+assert row["label"] == "Connected", row
+assert "Mullvad" in row["metric"], row
+'
 }
 
 # network.group_id is the canonical --history group key — the id the app
@@ -1317,20 +1556,18 @@ except Exception:
 }
 
 @test "monitor: gap_s reaches the emitted sample" {
-  run env NETDIAG_MON_SEQ=5 NETDIAG_MON_GAP_S=28800 \
-    python3 "$REPO/helpers/monitor_sample.py"
+  # 2>/dev/null: stderr carries the inference warning; \$output must
+  # parse as one JSON line alone.
+  run emit NETDIAG_MON_SEQ=5 NETDIAG_MON_GAP_S=28800
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | python3 -c "
-import json, sys
-assert json.load(sys.stdin)['gap_s'] == 28800
-"
+  printf '%s' "$output" | python3 -c "import json,sys; assert json.load(sys.stdin)['gap_s'] == 28800"
 }
 
 @test "monitor: an ordinary sample carries gap_s null, not zero" {
   # 0 would mean 'no time passed', which is a measurement. null means
   # 'no discontinuity', which is the absence of one — the same
   # null-vs-zero distinction the JSON schema draws everywhere else.
-  run env NETDIAG_MON_SEQ=5 python3 "$REPO/helpers/monitor_sample.py"
+  run emit NETDIAG_MON_SEQ=5
   printf '%s' "$output" | python3 -c "
 import json, sys
 assert json.load(sys.stdin)['gap_s'] is None
@@ -1338,10 +1575,9 @@ assert json.load(sys.stdin)['gap_s'] is None
 }
 
 @test "monitor: gateway and internet jitter and top-level jitter_ms are emitted" {
-  run env NETDIAG_MON_SEQ=5 \
-    NETDIAG_MON_GW_JITTER="0.75" \
-    NETDIAG_MON_INET_JITTER="3.42" \
-    python3 "$REPO/helpers/monitor_sample.py"
+  run emit NETDIAG_MON_SEQ=5 \
+           NETDIAG_MON_GW_JITTER="0.75" \
+           NETDIAG_MON_INET_JITTER="3.42"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
@@ -1629,6 +1865,20 @@ assert d['tcp']['targets'][0]['elapsed_ms'] == 30.0
   [ "$MON_SEVERITY" = "warn" ]
 }
 
+@test "TCP-2 warn fires at one in ten refused, and not below it" {
+  # The cutoff was 50 until a link refusing 45% of new connections read
+  # as "ok" while pages half-loaded.
+  reset_state; MON_TCP2_REFUSED_PCT=10 MON_TCP_OK=1
+  MON_WEB_OK=1 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" == *"TCP-2"* ]] || return 1
+  [ "$MON_SEVERITY" = "warn" ]
+  reset_state; MON_TCP2_REFUSED_PCT=9 MON_TCP_OK=1
+  MON_WEB_OK=1 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" != *"TCP-2"* ]] || return 1
+}
+
 @test "TCP-2 stays quiet when a ping leg is lossy" {
   # Lossy legs are the loss rules' territory; this rule owns the
   # clean-ping refusal pattern only.
@@ -1636,6 +1886,78 @@ assert d['tcp']['targets'][0]['elapsed_ms'] == 30.0
   MON_INET_LOSS=25 MON_INET_LOSS_ALT=25
   _mon_rules; _mon_rules
   [[ "$MON_RULES" != *"TCP-2"* ]] || return 1
+}
+
+# The GUI used to decide "Web traffic blocked (port 443)" from ONE sample's
+# tcp.any_ok == false (both of that cycle's connects failed). At a ~66%
+# per-connect failure rate that is ~40% of samples, so the headline flapped
+# while browsing mostly worked. The verdict now arrives from the CLI as the
+# confirmed TCP-2 state plus a sentence that states the measurement.
+
+@test "TCP-2 state: confirmed warn/critical only, never from one cycle" {
+  reset_state; MON_TCP2_REFUSED_PCT=67 MON_TCP_OK=0
+  MON_WEB_OK=1 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  [ -z "$MON_TCP2_STATE" ]
+  _mon_rules
+  [ "$MON_TCP2_STATE" = "warn" ]
+  reset_state; MON_TCP2_REFUSED_PCT=100 MON_TCP_OK=0
+  MON_WEB_OK=0 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules
+  [ "$MON_TCP2_STATE" = "critical" ]
+  reset_state; MON_TCP2_REFUSED_PCT=0 MON_TCP_OK=1 MON_WEB_OK=1
+  MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules
+  [ -z "$MON_TCP2_STATE" ]
+}
+
+@test "TCP-2 state: a lone failed cycle below the cutoff leaves it empty" {
+  reset_state; MON_TCP2_REFUSED_PCT=5 MON_TCP_OK=0
+  MON_WEB_OK=1 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules; _mon_rules
+  [ -z "$MON_TCP2_STATE" ]
+}
+
+@test "monitor_sample: tcp.refused states the measurement, in prose, without 'blocked'" {
+  run emit NETDIAG_MON_TCP2_PCT=67 NETDIAG_MON_TCP2_STATE=warn NETDIAG_MON_TCP2_ATTEMPTS=20
+  printf '%s' "$output" | python3 -c "
+import json,sys
+r = json.load(sys.stdin)['tcp']['refused']
+assert r['pct'] == 67.0, r
+assert r['attempts'] == 20, r
+assert r['state'] == 'warn', r
+assert r['summary'] == 'Most new connections are being refused', r
+"
+  run emit NETDIAG_MON_TCP2_PCT=100 NETDIAG_MON_TCP2_STATE=critical NETDIAG_MON_TCP2_ATTEMPTS=12
+  printf '%s' "$output" | python3 -c "
+import json,sys
+r = json.load(sys.stdin)['tcp']['refused']
+assert r['state'] == 'critical', r
+assert r['summary'] == 'Every one of the last 12 test connections was refused', r
+assert 'block' not in r['summary'].lower(), r
+"
+}
+
+@test "monitor_sample: tcp.refused carries no sentence unless the CLI confirmed the verdict" {
+  run emit NETDIAG_MON_TCP2_PCT=67 NETDIAG_MON_TCP2_ATTEMPTS=20
+  printf '%s' "$output" | python3 -c "
+import json,sys
+r = json.load(sys.stdin)['tcp']['refused']
+assert r['pct'] == 67.0 and r['state'] is None and r['summary'] is None, r
+"
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json,sys
+r = json.load(sys.stdin)['tcp']['refused']
+assert r == {'pct': None, 'attempts': None, 'state': None, 'summary': None}, r
+"
+}
+
+@test "_mon_emit forwards the TCP-2 instrument to the sample helper" {
+  for v in TCP2_PCT TCP2_STATE TCP2_ATTEMPTS; do
+    grep -q "NETDIAG_MON_${v}=" "$REPO/lib/monitor.sh" || {
+      echo "not forwarded: $v"; return 1; }
+  done
 }
 
 # ── P1/P2 vs L1: the two ranges must stay disjoint ───────────────────────
