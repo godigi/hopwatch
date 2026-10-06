@@ -569,23 +569,38 @@ All of the below are implemented and can fire.
   refused.
 - Evidence: refused attempts / total attempts, per-target TCP panel,
   clean ping figures.
-- Recommendation: restart the router; if it persists, update the router
-  firmware and report the pattern to the provider — the box refusing the
-  connections is theirs, not the internet's.
+- Recommendation: restart the router **as a test that tells the two
+  suspects apart** — if it clears, the router was the cause; if the
+  refusals come straight back, they are more likely coming from the
+  provider's equipment. Then update the router firmware and report the
+  pattern to the provider if it persists. The rule does not claim which
+  box is at fault: that needs a privileged packet capture, which Hopwatch
+  never takes.
+- Scope: the instrument measures **TCP only**, but the same fault was
+  measured dropping new **UDP** flows at the same rate (direct DNS to
+  public resolvers timing out), so the catalog entry and the diagnosis
+  text say calls, games and direct DNS can be affected too. A UDP probe
+  is not part of the monitor.
 - Rationale: this fault had **no rule at all** and was being misreported as
   an outage. Measured on the network that motivated it: outbound TCP to
   resolver and anonymizer IPs was RST within ~10 ms — far under the ~58 ms
-  the real path takes, so the refusal comes from the local modem — at
+  the real path takes, so the refusal is generated near the user — at
   50–70% of attempts, while ICMP to the same hosts sat at 0% loss and
   ordinary websites kept loading. A canary aimed exactly there fired P2
   ("your ISP is down") 349 times in 24 h, median episode 12 s, while the
   user's actual complaint — new connections being slow and flaky — had no
   name. TCP-2 is that name. It matters because the two failure shapes
   need opposite advice: a true outage means "check your ISP's status
-  page"; locally-refused connections mean "power-cycle the modem".
+  page"; locally-refused connections mean "power-cycle the router, and tell your
+  provider if it comes straight back".
+- Monitor sample: the verdict reaches consumers as `tcp.refused`
+  (`pct`, `attempts`, `state` = the confirmed `warn`/`critical`, and a
+  `summary` sentence written in the CLI — see `docs/JSON-SCHEMA.md`). A
+  consumer must never build a "blocked" verdict from one sample's
+  `tcp.any_ok`.
 - Deliberately NOT keyed on resolver targets alone: the monitor's TCP
   probe lists one content host (`github.com:443`) beside one resolver
-  (`8.8.8.8:443`) so a modem that only RSTs resolver/anonymizer IPs still
+  (`8.8.8.8:443`) so a path that only RSTs resolver/anonymizer IPs still
   leaves one leg of evidence that the internet itself is reachable. A
   rule that read resolvers only would cry "outage" while browsing worked.
 
