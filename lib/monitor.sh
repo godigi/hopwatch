@@ -774,6 +774,14 @@ _mon_probe_browser() {
 # success; the loop ALSO sets it on a network change, where any
 # last-known figures describe the OLD network until a fresh fetch
 # verifies the new one.
+#
+# _mon_geo_body_json — a fetch counts only when the body carries the
+# one field every consumer reads. Pure, so the non-JSON-as-failure rule
+# is testable without a network.
+_mon_geo_body_json() {
+  local body="$1"
+  [ -n "$body" ] && [[ "$body" =~ \"ip\":[[:space:]]*\" ]]
+}
 _mon_probe_public() {
   MON_PUBLIC_OK=""; MON_CAPTIVE=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
@@ -782,7 +790,7 @@ _mon_probe_public() {
   for attempt in 1 2; do
     out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null \
       || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
-    [[ "$out" =~ \"ip\":[[:space:]]*\" ]] && break
+    _mon_geo_body_json "$out" && break
     out=""
     [ "$attempt" -eq 1 ] || break
   done
