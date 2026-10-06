@@ -326,6 +326,38 @@ scanner_rules() {
   [[ "$m" != *"G2"* ]] || return 1
 }
 
+# The branch this file claimed to cover and did not: a strong Wi-Fi signal
+# over critical gateway loss. lib/diagnosis.sh used to answer it with W5
+# (warn) and suppress G2, while the monitor said G2 (critical) — a red dot
+# over an amber report, and an alert waiting for a G-rule sentence that
+# never came. A cause hypothesis must not lower severity, so both engines
+# now say G2 critical, and this test holds them to it.
+@test "parity: gateway loss with a strong Wi-Fi signal is G2 critical on both, not W5" {
+  # Loss >= THRESH_ICMP_FILTERED_LOSS_PCT with a working TCP path is TCP-1
+  # (a filtering gateway), not a fault, so TCP is down here — the same
+  # setup the "TCP also failing still names G2" test uses.
+  reset_state; MON_GW_LOSS=68 GW_LOSS=68 MON_WIFI_RSSI=-37 WIFI_RSSI=-37
+  MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  local m; m="$(monitor_rules)"
+  [ "$m" = "G2 " ] || { echo "monitor rules: [$m]"; return 1; }
+  reset_state; MON_GW_LOSS=68 GW_LOSS=68 MON_WIFI_RSSI=-37 WIFI_RSSI=-37
+  MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  _mon_rules
+  [ "$MON_SEVERITY" = "critical" ]
+  # Scanner, in this shell so its severities stay readable. Asserted on the
+  # full rule list, not just the monitor vocabulary, so a W5 (or any other
+  # lower-severity stand-in for G2) cannot hide behind the filter.
+  . "$REPO/lib/diagnosis.sh"
+  diagnosis_run >/dev/null
+  local i g2_sev="" rules=" ${DIAG_RULE[*]} "
+  for i in "${!DIAG_RULE[@]}"; do
+    [ "${DIAG_RULE[$i]}" = "G2" ] && g2_sev="${DIAG_SEV[$i]}"
+  done
+  [ "$g2_sev" = "critical" ] || { echo "scanner G2 severity: [$g2_sev]; rules:$rules"; return 1; }
+  case "$rules" in (*" W5 "*) echo "W5 fired: $rules"; return 1 ;; esac
+  [ "$MAX_SEVERITY" -ge 2 ]
+}
+
 @test "parity: severe internet loss over a clean router is L1 on both" {
   reset_state; MON_INET_LOSS=25 MON_INET_LOSS_ALT=25 INET_LOSS=25 INET_LOSS_ALT=25
   local m; m="$(monitor_rules)"; reset_state

@@ -169,10 +169,16 @@ runs stop filing under the synthetic "unknown" network.
 
 ### W5 — Asymmetric Wi-Fi link (return path loss)
 
-- Trigger: `is_wifi AND wifi.rssi >= -65 AND gateway.loss_pct >= 5%`
-- Severity: `warn`
-- Recommendation: move closer to the router.
-- Rationale: Wall-powered access points transmit at 200–500 mW, but battery-powered laptops transmit at only 30–50 mW. The Mac receives strong signal, but return packets are dropped through walls or interference. Firing W5 correctly attributes loss to Wi-Fi rather than falsely accusing the router hardware (G2) or ISP.
+> **RETIRED — W5 can no longer fire. It is now `G2`.** This section stays
+> because stored runs recorded `W5` and `--rules-catalog` still has to
+> title and explain them; it is not a rule you will see raised on a new run.
+
+- Former trigger: `is_wifi AND wifi.rssi >= -65 AND gateway.loss_pct >= 20%` (the critical gateway-loss floor; the `5%` once listed here was never reachable — W5 only ever existed inside G2's critical branch).
+- Former severity: `warn`.
+- What replaced it: [`G2`](#g2--gateway-loss-with-healthy-wifi), severity `critical`, with W5's cause folded into G2's wording: the signal the Mac hears is strong, so the likely cause is the router struggling to hear the Mac back — move closer, and reboot the router if it persists.
+- Why it was retired: W5 lowered severity on the strength of a guess about the cause. `lib/monitor.sh` kept saying `G2` critical for the same link, so the app showed a red dot over an amber report, and an alert waiting for a G-rule sentence never got one. Loss at or above `THRESH_GW_LOSS_CRIT_PCT` is a measurement, not a hypothesis, and stays critical in both engines whatever the cause; the cause only changes G2's cause sentence. `tests/test_monitor.bats` now holds both engines to this for a strong-signal link.
+- Rationale it carried (still true, now in G2's text): wall-powered access points transmit at 200–500 mW, but battery-powered laptops transmit at only 30–50 mW. The Mac receives a strong signal, but return packets are dropped through walls or interference.
+- What an old stored run shows: the rule ID `W5`, titled "Asymmetric Wi-Fi link (retired — now G2)", at its original `warn` severity, with the original sentence the run recorded. Nothing is rewritten in history.
 
 ### AWDL-1 — Apple Wireless Direct Link channel hopping
 
@@ -181,7 +187,7 @@ runs stop filing under the synthetic "unknown" network.
 - Recommendation: set AirDrop receiving to "Off" in Control Center, or disconnect Sidecar and AirPlay while on video calls or gaming.
 - Rationale: Apple Wireless Direct Link (AWDL) is used by macOS for peer-to-peer Apple ecosystem features (AirDrop, AirPlay, Sidecar, Universal Control). To discover peers, the Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 and 149). While off-channel, traffic stalls in network buffers, causing periodic 200–500 ms latency spikes and micro-stutter in Zoom, Google Meet, Microsoft Teams, and real-time gaming even though overall packet loss is 0% and base ping is low.
 
-> **G1, G2, G3 and W5 all fire only when `TCP-1` does not.** A gateway that
+> **G1, G2 and G3 all fire only when `TCP-1` does not** (and so did W5, before it was retired into G2). A gateway that
 > drops pings while still carrying TCP is filtering, not failing; see the
 > precedence note under TCP-1 below. The trigger lines here read as
 > `... AND NOT TCP-1`.
@@ -210,9 +216,13 @@ runs stop filing under the synthetic "unknown" network.
 
 ### G2 — Gateway loss with healthy WiFi
 
-- Trigger: `gateway.loss_pct >= 20 AND NOT W1`
-- Severity: `critical`
-- Recommendation: router itself is misbehaving — reboot it.
+- Trigger: `gateway.loss_pct >= 20 AND NOT W1` (no weak signal to blame, so G1 does not fire)
+- Severity: `critical` — always, whatever the suspected cause.
+- Recommendation: branches on what was measured, like G3:
+  * wired ethernet, or Wi-Fi with a middling signal — the router itself is misbehaving; reboot it (on ethernet, check the cable);
+  * half-duplex ethernet (`ETH-2` fired) — fix the negotiation first, not the router;
+  * Wi-Fi with a **strong** signal (`wifi.rssi >= THRESH_WIFI_ASYMMETRIC_MIN_RSSI`) — the Mac hears the router well, so the likely cause is the router struggling to hear the Mac back through walls or interference (a router transmits far louder than a laptop); move closer, and reboot the router if it persists. This is the case the retired rule `W5` used to claim as a `warn`.
+- Rationale: the strong-signal case lives inside G2 rather than beside it because `lib/monitor.sh` and `lib/diagnosis.sh` must name the same rule at the same severity for the same link. A cause hypothesis picks the sentence; it never lowers the severity of measured critical loss.
 
 ### G3 — Gateway loss below the critical floor
 

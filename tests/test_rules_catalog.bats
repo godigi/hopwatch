@@ -389,11 +389,16 @@ assert len(ids) == len(set(ids)), sorted(set(x for x in ids if ids.count(x) > 1)
 
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
+  # Documented exclusion the other way round: W5 is RETIRED. No call site
+  # emits it (asserted in its own test below) but the entry stays so a
+  # stored run that recorded it can still be titled. Narrowing this list is
+  # fine; growing it needs the same justification W5 has.
   local catalog_ids
   catalog_ids="$(printf '%s' "$output" | python3 -c '
 import json, sys
+RETIRED = {"W5"}
 d = json.load(sys.stdin)
-print("\n".join(sorted(r["id"] for r in d["rules"])))
+print("\n".join(sorted(r["id"] for r in d["rules"] if r["id"] not in RETIRED)))
 ')"
 
   local extracted_sorted
@@ -414,6 +419,29 @@ assert 'UP-1' not in ids
   # And confirm the premise: no add_diag call for UP-1 exists anywhere.
   run bash -c "grep -RhE 'add_diag[[:space:]]+(critical|warn|info)[[:space:]]+UP-1' '$REPO'/lib/*.sh"
   [ "$status" -ne 0 ]
+}
+
+@test "W5 is retired: still in the catalog for old runs, but no call site emits it" {
+  # Stored runs from before W5 was folded into G2 carry W5 in status.rules
+  # and diagnosis[].rule; the app titles those from this catalog, so the
+  # entry must stay resolvable and must say it is retired. A call site
+  # that brought W5 back would put a warn next to the monitor's critical
+  # G2 again (the red-dot-over-amber-report defect).
+  local q="['\"]"
+  run grep -hE "(add_diag|_mon_add_rule)[[:space:]]+${q}?(critical|warn|info)${q}?[[:space:]]+${q}?W5${q}?" \
+    "$REPO/bin/hopwatch" "$REPO"/lib/*.sh
+  [ "$status" -ne 0 ]
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+w5 = [r for r in d['rules'] if r['id'] == 'W5']
+assert len(w5) == 1, w5
+assert 'retired' in w5[0]['title'].lower(), w5[0]['title']
+assert 'retired' in w5[0]['blurb'].lower(), w5[0]['blurb']
+assert 'G2' in w5[0]['title'], w5[0]['title']
+"
 }
 
 # ── Unknown-flag behavior is unaffected ──────────────────────────────────

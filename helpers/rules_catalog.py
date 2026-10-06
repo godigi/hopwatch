@@ -385,16 +385,24 @@ RULES: list[dict[str, object]] = [
     },
     {
         "id": "W5",
-        "title": "Asymmetric Wi-Fi link (return path loss)",
+        "title": "Asymmetric Wi-Fi link (retired — now G2)",
         "category": "wifi",
         "also": "router",
         "severity": "warn",
         "scope": "scan",
+        # RETIRED. No add_diag call site emits W5 any more; the entry stays
+        # so a stored run that recorded it can still be titled and
+        # explained. tests/test_rules_catalog.bats names it as a documented
+        # exclusion from the call-site parity check, exactly as it does
+        # UP-1 in the other direction. Do not delete without a plan for old
+        # stored runs, and do not re-add a call site: the same situation is
+        # G2 now. See docs/DIAGNOSIS-RULES.md#w5--asymmetric-wi-fi-link-return-path-loss.
         "blurb": (
-            "Your Mac hears a strong signal from the router, but the router "
-            "struggles to hear your Mac through walls or interference, "
-            "causing packet loss on the return path. Moving closer to the "
-            "router balances transmission power."
+            "Retired: current versions report this situation as the router "
+            "dropping packets, at critical severity. Older reports raised "
+            "this as a warning when your Mac heard a strong signal from the "
+            "router but the router struggled to hear your Mac back through "
+            "walls or interference, causing packet loss on the return path."
         ),
         "doc": "DIAGNOSIS-RULES.md#w5--asymmetric-wi-fi-link-return-path-loss",
         "impacts": {
@@ -505,9 +513,11 @@ RULES: list[dict[str, object]] = [
         "blurb": (
             "Your Mac is losing packets between your Mac and your router "
             "— the connection between your Mac and your router is "
-            "severely degraded. A reboot of the router (power off, wait, "
-            "then power back on) or moving closer to it clears this in "
-            "most cases. On ethernet, check the cable."
+            "severely degraded. With a strong Wi-Fi signal the likely "
+            "cause is the router struggling to hear your Mac back, so "
+            "moving closer helps; either way, a reboot of the router "
+            "(power off, wait, then power back on) clears this in most "
+            "cases. On ethernet, check the cable."
         ),
         "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi",
         "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",

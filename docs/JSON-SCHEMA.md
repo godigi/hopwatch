@@ -1315,7 +1315,11 @@ today's fields keeps working against tomorrow's catalog.
   drift apart silently. `UP-1` is the one documented exception — reserved
   in `docs/DIAGNOSIS-RULES.md` for a rule that has never fired, because
   the Report card already states UPnP status directly and a second
-  restatement would say the same fact twice.
+  restatement would say the same fact twice. `W5` is the exception in the
+  other direction: **retired**, so no call site emits it, but the entry
+  stays (its `title` and `blurb` say so, and name `G2` as the replacement)
+  because stored runs recorded it and a consumer still has to title them.
+  `tests/test_rules_catalog.bats` names it as the documented exclusion.
 - **`title`** is a short plain-English noun phrase, not a sentence — the
   label a chip or a list row shows.
 - **`category`** is the measurement family the rule judges (`router`,

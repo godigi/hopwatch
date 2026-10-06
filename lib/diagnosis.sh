@@ -250,13 +250,21 @@ diagnosis_run() {
     fi
   fi
 
-  # G1/G2/G3/W5 — gateway loss. All four describe trouble on the connection
+  # G1/G2/G3 — gateway loss. All three describe trouble on the connection
   # between the Mac and the router *inside the home* — never the ISP or the
   # wider internet — and say so in plain words, because a reader who
   # doesn't know the difference between "router" and "internet" reads any
   # mention of packet loss as "my internet is down". Each names the most
   # likely cause too: Wi-Fi signal/interference, asymmetric link, or on
   # ethernet, the cable/port — mirrored from the same branch G3 uses below.
+  #
+  # G2 over a strong Wi-Fi signal (THRESH_WIFI_ASYMMETRIC_MIN_RSSI) used to be a separate
+  # warn-severity rule, W5, that suppressed G2. That made this engine say
+  # "warn" for a link lib/monitor.sh called critical — a red dot over an
+  # amber report — and let a hypothesis about the cause lower the severity
+  # of a measured fact. Loss at or over THRESH_GW_LOSS_CRIT_PCT is critical
+  # whatever the cause; the strong signal now only picks G2's cause sentence.
+  # W5 is retired and no longer fires (docs/DIAGNOSIS-RULES.md#w5).
   if [ "$_gw_icmp_filtered" -eq 1 ]; then
     : # TCP-1 has already described this link.
   elif loss_at_least "$GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
@@ -270,7 +278,7 @@ diagnosis_run() {
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. That is what the half-duplex ethernet link above causes, so fix the negotiation first rather than the router; collisions on a half-duplex link produce exactly this."
     elif [ "$IS_WIFI" -eq 1 ] && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
          && [ "$WIFI_RSSI" -ge "$THRESH_WIFI_ASYMMETRIC_MIN_RSSI" ]; then
-      add_diag warn W5 "Your Mac hears a strong signal from your router (${WIFI_RSSI} dBm), but packet loss (${GW_LOSS}%) indicates your router is struggling to hear your Mac through walls or interference. Try moving closer to the router."
+      add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. The Wi-Fi signal your Mac hears from the router is strong (${WIFI_RSSI} dBm), so the likely cause is the router struggling to hear your Mac back — through walls or interference, since a router transmits far louder than a laptop can. Try moving closer to the router, and if it keeps happening, reboot the router (unplug it for 30 seconds, then plug it back in)."
     else
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. Try rebooting the router (unplug it for 30 seconds, then plug it back in) or moving closer to it; on ethernet, check the cable."
     fi

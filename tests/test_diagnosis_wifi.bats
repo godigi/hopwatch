@@ -2,7 +2,7 @@
 #
 # tests/test_diagnosis_wifi.bats — unit tests for Wi-Fi diagnostic rules:
 #   W4: Wi-Fi transmit rate collapsed despite strong RSSI
-#   W5: Asymmetric Wi-Fi link / return path loss with strong router beacon
+#   G2 with a strong signal (the case W5 used to claim; W5 is retired)
 #   W2: Low SNR floor (< 20 dB) with strong signal
 
 setup() {
@@ -128,39 +128,71 @@ assert_contains() {
   ! diag_has W4 || { echo "W4 fired with empty tx_rate"; return 1; }
 }
 
-# ── W5: Asymmetric Wi-Fi link (return path loss) ──────────────────────────
+# ── G2 with a strong signal (formerly W5) ─────────────────────────────────
+# W5 used to turn this case into a warn and suppress G2, while lib/monitor.sh
+# said G2 critical for the same link. Loss over the critical threshold stays
+# critical in both engines; the strong signal only changes G2's cause
+# sentence. W5 is retired and must never fire.
 
-@test "diagnosis: W5 fires on strong RSSI with gateway loss, preventing G2" {
+@test "diagnosis: strong signal with critical gateway loss is G2 critical, not W5" {
   wifi_baseline
   WIFI_RSSI=-50
   GW_LOSS=25
   diagnosis_run >/dev/null
-  diag_has W5 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
-  [ "$(diag_sev_for W5)" = "warn" ]
-  assert_contains "$(diag_text_for W5)" "struggling to hear your Mac through walls"
-  assert_contains "$(diag_text_for W5)" "packet loss (25%)"
-  # Crucial: G2 must NOT fire (router is not the problem, asymmetric wireless link is)
-  ! diag_has G2 || { echo "G2 fired alongside W5!"; return 1; }
+  diag_has G2 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  [ "$(diag_sev_for G2)" = "critical" ]
+  ! diag_has W5 || { echo "retired W5 fired"; return 1; }
+  ! diag_has G1 || { echo "G1 fired on a strong signal"; return 1; }
+  local text; text="$(diag_text_for G2)"
+  assert_contains "$text" "losing 25% of the packets it sends to your router"
+  assert_contains "$text" "not out on the wider internet or with your provider"
+  assert_contains "$text" "signal your Mac hears from the router is strong (-50 dBm)"
+  assert_contains "$text" "struggling to hear your Mac"
+  assert_contains "$text" "moving closer"
+  assert_contains "$text" "reboot the router"
+  [ "$MAX_SEVERITY" -ge 2 ]
 }
 
-@test "diagnosis: W5 stays silent on a clean gateway (0% loss)" {
+@test "diagnosis: strong-signal G2 cause sentence is not used on ethernet" {
+  wifi_baseline
+  IS_WIFI=0
+  WIFI_RSSI=""
+  GW_LOSS=25
+  diagnosis_run >/dev/null
+  diag_has G2 || { echo "G2 did not fire on wired Ethernet loss"; return 1; }
+  [ "$(diag_sev_for G2)" = "critical" ]
+  case "$(diag_text_for G2)" in (*"strong signal"*) echo "wired G2 mentions signal"; return 1 ;; esac
+}
+
+@test "diagnosis: strong-signal G2 stays silent on a clean gateway (0% loss)" {
   wifi_baseline
   WIFI_RSSI=-50
   GW_LOSS=0
   diagnosis_run >/dev/null
+  ! diag_has G2 || { echo "G2 fired with zero loss"; return 1; }
   ! diag_has W5 || { echo "W5 fired with zero loss"; return 1; }
 }
 
-@test "diagnosis: with weak Wi-Fi signal, G1 fires instead of W5" {
+@test "diagnosis: W5 is retired — loss in the warn band on a strong signal is G3, never W5" {
+  wifi_baseline
+  WIFI_RSSI=-50
+  GW_LOSS=15
+  diagnosis_run >/dev/null
+  diag_has G3 || { echo "rules: ${DIAG_RULE[*]}"; return 1; }
+  ! diag_has W5 || { echo "retired W5 fired"; return 1; }
+}
+
+@test "diagnosis: with weak Wi-Fi signal, G1 fires instead of G2" {
   wifi_baseline
   WIFI_RSSI=-75
   GW_LOSS=25
   diagnosis_run >/dev/null
   ! diag_has W5 || { echo "W5 fired on weak signal"; return 1; }
+  ! diag_has G2 || { echo "G2 fired on weak signal"; return 1; }
   diag_has G1 || { echo "G1 did not fire for weak signal gateway loss"; return 1; }
 }
 
-@test "diagnosis: on wired Ethernet with loss, G2 fires instead of W5" {
+@test "diagnosis: on wired Ethernet with loss, G2 fires and W5 does not" {
   wifi_baseline
   IS_WIFI=0
   WIFI_RSSI=""

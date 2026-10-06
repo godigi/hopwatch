@@ -6,6 +6,16 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The scan and the monitor disagreed about a Wi-Fi link with a strong signal and critical gateway packet loss. `lib/monitor.sh` said `G2` (critical); `lib/diagnosis.sh` said `W5` (warn) and suppressed `G2`. The app showed a red dot over an amber report, and an alert waiting for a G-rule sentence never got one (seen live: monitor `G2` at 68% loss and -37 dBm, scan `W5` warn at 55%). Both engines now say `G2`, critical. Loss at or above the critical threshold is a measurement and stays critical whatever the suspected cause; the strong signal now only selects G2's cause sentence ("the likely cause is the router struggling to hear your Mac back... move closer, and if it keeps happening, reboot it").
+- The Report card's Router row no longer drops to a warning colour on a strong-signal Wi-Fi link with gateway loss. That override sat on top of the red `bad` the row would otherwise get, and also coloured the row for loss below the lowest gateway rule, so it contradicted the diagnosis in both directions. It followed W5's gate and goes with W5.
+- `tests/test_monitor.bats` claimed to hold the two engines to the same rule set for the same link but never covered this branch; it now does.
+
+### Removed
+
+- Rule `W5` (asymmetric Wi-Fi link) is retired and can no longer fire; its case is folded into `G2`. Its catalog entry and `docs/DIAGNOSIS-RULES.md` section stay, marked retired, so stored runs that recorded `W5` still resolve to a title and an explanation. `THRESH_WIFI_ASYMMETRIC_LOSS_PCT` is gone (nothing read it once the Router-row override was removed); `THRESH_WIFI_ASYMMETRIC_MIN_RSSI` stays as the threshold that picks G2's cause sentence.
+
 ## [1.10.5] - 2026-10-06
 
 ### Changes
