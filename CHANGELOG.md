@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.5] - 2026-10-06
+
+### Changes
+
+- fix: stop reporting a lossy link as "ping is just blocked" (1.10.4)
+
 ## [1.10.4] - 2026-10-06
 
 ### Fixed
@@ -4062,7 +4068,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.4...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.5...HEAD
+[1.10.5]: https://github.com/godigi/hopwatch/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/godigi/hopwatch/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/godigi/hopwatch/compare/v1.10.1...v1.10.2
