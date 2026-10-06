@@ -258,6 +258,9 @@ MON_SPEED_DOWN=""
 MON_SPEED_UP=""
 MON_SPEED_AT=""
 MON_SPEED_NETWORK=""
+# The run store the full check appends to, set by bin/hopwatch and only ever
+# READ here (the monitor writes nothing to disk but the opt-in journal).
+MON_HISTORY_STORE=""
 MON_HW_PORTS=""
 # launchd's pid. Named rather than written as a bare 1 so the orphan check
 # below reads as the sentinel it is, and so tests/test_thresholds.bats's
@@ -839,7 +842,7 @@ _mon_geo_body_json() {
 # answer about this link.
 _mon_probe_last_speed() {
   local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/last_speed.py"
-  local store="${LOG_DIR:+$LOG_DIR/baseline.jsonl}"
+  local store="${MON_HISTORY_STORE:-}"
   local line="" down up at
   if [ -n "$MON_SPEED_NETWORK" ] && [ "$MON_SPEED_NETWORK" != "$MON_NETWORK_ID" ]; then
     MON_SPEED_DOWN=""; MON_SPEED_UP=""; MON_SPEED_AT=""

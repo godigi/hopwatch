@@ -363,10 +363,10 @@ assert "latency-test" in kinds, kinds
 # ── the last full check's speed (read on the slow tier) ──────────────────
 
 @test "_mon_probe_last_speed reads the store for this network and clears it on a move" {
-  LOG_DIR="$BATS_TEST_TMPDIR"
+  MON_HISTORY_STORE="$BATS_TEST_TMPDIR/baseline.jsonl"
   HELPERS_DIR="$REPO/helpers"
   printf '%s\n' '{"timestamp":"2026-10-06T10:00:00Z","network":{"id":"ssid:Home"},"speedtest":{"down_mbps":65.1,"up_mbps":51.9}}' \
-    > "$LOG_DIR/baseline.jsonl"
+    > "$MON_HISTORY_STORE"
   MON_NETWORK_ID="ssid:Home"
   _mon_probe_last_speed
   [ "$MON_SPEED_DOWN" = "65.1" ]

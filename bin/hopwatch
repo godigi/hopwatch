@@ -864,6 +864,9 @@ if [ "$MONITOR" -eq 1 ]; then
   . "$LIB_DIR/vpn.sh"
   # shellcheck source=lib/monitor.sh
   . "$LIB_DIR/monitor.sh"
+  # The run store, for the Streaming row's last full-check speed. Read-only:
+  # lib/monitor.sh never writes it (tests/test_monitor.bats holds that).
+  MON_HISTORY_STORE="$LOG_DIR/baseline.jsonl"
   monitor_run
   NETDIAG_COMPLETED=1
   exit 0
