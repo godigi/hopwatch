@@ -96,6 +96,10 @@ extension ActivityEntry {
         /// the log, so the sighting is tracked per episode instead.
         var lastSeen: Date
         var isLowerBound: Bool
+        /// An open episode on a network the machine has left. Not an
+        /// ending — no `rule-cleared` was seen — but not claimable as
+        /// "ongoing" either. See `fold(_:currentNetwork:)`.
+        var wasLeft: Bool = false
     }
 
     /// Fold a transition log into episodes, then group same-rule episodes
@@ -105,7 +109,21 @@ extension ActivityEntry {
     /// walked oldest-first, because pairing is only meaningful forwards.
     /// Pure — no clock, no environment — so `--verify` can drive it with
     /// constructed input.
+    ///
+    /// `currentNetwork` scopes the "ongoing" claim: an open episode on a
+    /// network the machine has since *left* is rendered as ended. It is
+    /// not observed to have ended — there was no `rule-cleared`, or the
+    /// clear was never recorded — but "ongoing" is a claim about now, and
+    /// nothing on a network nobody is measuring anymore can be claimed
+    /// about now. (The "cleared before the switch" case — a clear event
+    /// that arrived just ahead of the switch, or never at all — used to
+    /// keep rendering that condition as if it were still firing.)
+    /// `nil` current network means "not identified yet"; the
+    /// open-episode claim is then unverifiable for every network and the
+    /// fold keeps its old all-open behaviour rather than declaring
+    /// everything over.
     static func fold(_ events: [NetworkEvent],
+                     currentNetwork: String? = nil,
                      calendar: Calendar = .current) -> [ActivityEntry] {
         let chronological = events.sorted { $0.date < $1.date }
 
@@ -185,12 +203,27 @@ extension ActivityEntry {
             }
         }
         // Whatever is still firing.
-        for episode in open.values { episodes.append(episode) }
+        let currentCanonical = HopwatchGUI.NetworkIdentity.canonical(currentNetwork ?? "")
+        for (_, episode) in open {
+            var closed = episode
+            // An open episode on a network the machine has left: still open
+            // in the strict sense, but unclaimable *now* — "ongoing" is a
+            // claim about a network nobody is on anymore. `wasLeft` (not
+            // `end`) carries it down, so no duration is invented for a span
+            // that was never observed to stop.
+            if currentCanonical != nil,
+               HopwatchGUI.NetworkIdentity.canonical(episode.network ?? "") != currentCanonical {
+                closed.wasLeft = true
+            }
+            episodes.append(closed)
+        }
 
-        return group(episodes: episodes, loose: loose, calendar: calendar)
+        return group(episodes: episodes, loose: loose,
+                     present: currentCanonical, calendar: calendar)
     }
 
     private static func group(episodes: [Episode], loose: [NetworkEvent],
+                              present: String?,
                               calendar: Calendar) -> [ActivityEntry] {
         var entries: [String: ActivityEntry] = [:]
 
@@ -247,7 +280,14 @@ extension ActivityEntry {
                 // A sub-second pair is a sampling artefact, not a duration
                 // worth printing; it still counts as an occurrence.
                 totalDuration: duration >= 1 ? duration : nil,
-                isOngoing: episode.end == nil,
+                // "Ongoing" is a claim about now. With a current network
+                // identified, an episode never seen to end can only carry
+                // that claim while its network is the one being measured;
+                // one left behind renders as ended (with no invented end).
+                // Without a current network the claim is unverifiable for
+                // every network, so the old observation-only rule stands.
+                isOngoing: episode.end == nil
+                    && (present == nil ? true : !episode.wasLeft),
                 durationIsLowerBound: episode.isLowerBound))
         }
 
@@ -381,4 +421,38 @@ extension ActivityEntry {
         let remainder = minutes % 60
         return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
     }
+}
+
+extension ActivityEntry {
+
+    /// The events that belong to the current network, in store order.
+    ///
+    /// Recent activity is an answer about the network the reader is *on*:
+    /// "three packet-loss episodes this morning" read against a list that
+    /// also contains the hotel they stayed at last night is a scoping
+    /// failure, not a rough metric. Both sides of the comparison go
+    /// through `NetworkIdentity.canonical` — the event's `network` field
+    /// carries the raw record id (`wifi:mac=…`) while the live network is
+    /// a historyJoinID (`mac:…`), and comparing the two spellings matched
+    /// nothing. A nil current network keeps everything: before the
+    /// machine is identified, "which network is this" has no answer, and
+    /// an empty panel there would say "nothing happened", which is not
+    /// what a nil means.
+    static func scoped(_ events: [NetworkEvent],
+                       to networkID: String?) -> [NetworkEvent] {
+        guard let currentCanonical = HopwatchGUI.NetworkIdentity.canonical(networkID ?? "") else {
+            return events
+        }
+        return events.filter {
+            HopwatchGUI.NetworkIdentity.canonical($0.network ?? "") == currentCanonical
+        }
+    }
+
+    /// The row's trailing timing label: the "ongoing" vs "ended <age>"
+    /// distinction Phase 4 asks the activity rows to make. `nil` means
+    /// "no special phrase — date by the relative age as before": every
+    /// closed row runs though its own off-screen clock, so the caller's
+    /// relative-time view handles ended rows and only a still-firing
+    /// episode needs the replacement word.
+    var timingLabel: String? { isOngoing ? "Ongoing" : nil }
 }
