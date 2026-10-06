@@ -42,6 +42,14 @@ struct MonitorSample: Decodable, Sendable {
     var suitability: [RunSnapshot.SuitabilityRow] = []
     var hops: Hops?
     var headline: Headline?
+    /// Per-tier data age in seconds (schema 2, Phase 1 of the
+    /// reporting-accuracy plan): `fast` is refreshed every cycle, and
+    /// `medium`/`slow` say how far back their carried-over readings come
+    /// from. `nil` per tier until that tier's first run — age 0 is a
+    /// measurement, not the absence of one. Absent against an older CLI,
+    /// which decodes as all-nil and leaves the blanking cells on ts-based
+    /// staleness alone.
+    var ageS: AgeS?
 
     /// Effective instantaneous jitter in ms, prioritizing internet then gateway.
     var liveJitterMs: Double? {
@@ -70,7 +78,7 @@ struct MonitorSample: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schema, version, ts, seq, refreshed, link, network, vpn
         case gateway, internet, wifi, dns, tcp, status, changes
-        case suitability, hops, headline
+        case suitability, hops, headline, ageS = "age_s"
         case gapS = "gap_s"
         case jitterMs = "jitter_ms"
         case publicInfo = "public"
@@ -255,6 +263,15 @@ struct MonitorSample: Decodable, Sendable {
         }
     }
 
+    /// Per-tier ages, in the stream's own `age_s` shape.
+    struct AgeS: Decodable, Sendable, Equatable {
+        var fast: Int?
+        var medium: Int?
+        var slow: Int?
+
+        enum CodingKeys: String, CodingKey { case fast, medium, slow }
+    }
+
     struct PublicInfo: Decodable, Sendable, Equatable {
         var ok: Bool?
         var ip: String?
@@ -267,9 +284,15 @@ struct MonitorSample: Decodable, Sendable {
         var country: String?
         var countryISO: String?
         var captivePortal: Bool?
+        /// False (or nil on a stream older than the field) means the geo
+        /// block was fetched and verified this cycle. True means the
+        /// figures are last-KNOWN — the fetch (or the network change
+        /// before its next fetch) has not verified them. Never blanked by
+        /// a failed attempt; consumers do not blank the flag on it.
+        var stale: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case ok, ip, isp, asn, city, country
+            case ok, ip, isp, asn, city, country, stale
             case countryISO = "country_iso"
             case captivePortal = "captive_portal"
         }
@@ -416,6 +439,7 @@ extension MonitorSample {
         suitability = c.lenient(.suitability, [])
         hops = c.lenient(.hops)
         headline = c.lenient(.headline)
+        ageS = c.lenient(.ageS)
     }
 }
 
@@ -541,6 +565,15 @@ extension MonitorSample.TCP.Refused {
     }
 }
 
+extension MonitorSample.AgeS {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fast = c.lenient(.fast)
+        medium = c.lenient(.medium)
+        slow = c.lenient(.slow)
+    }
+}
+
 extension MonitorSample.PublicInfo {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -552,6 +585,7 @@ extension MonitorSample.PublicInfo {
         country = c.lenient(.country)
         countryISO = c.lenient(.countryISO)
         captivePortal = c.lenient(.captivePortal)
+        stale = c.lenient(.stale)
     }
 }
 
