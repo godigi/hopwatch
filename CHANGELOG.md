@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.9] - 2026-10-06
+
 ### Fixed
 
 - An alert could notify no more often than every 30 minutes, whatever its definition said. `NotificationManager` kept its own fixed 30-minute cooldown per alert id on the real clock, underneath the per-definition `cooldown` that `AlertEngine` already enforces, so "Connection lost" (defined to repeat after 5 minutes) and the 1-minute public-IP alert could only repeat every 30, and the Settings captions saying otherwise were false. The in-place update that swaps the holding line ("Checking whether it's your Wi-Fi or your router...") for the CLI's own sentence went through the same check and was dropped whenever it arrived inside those 30 minutes, which is always, so the macOS notification kept showing the holding text while the dropdown was correct. The definition's cooldown is now the one authority; the manager keeps only a 30-second storm guard (`NotificationManager.minimumRepeatInterval`), which sits below the shortest definition cooldown (60 s) and so cannot contradict one. An in-place update of a notification that was delivered is no longer rate-limited and does not restart the guard; an update with no delivered notification to replace (an alert raised inside its cooldown, whose scan lands later) is dropped instead of posting a new one. The engine now hands the manager its own clock so the two read the same time. The "rate-limited to at most one per 30 minutes" line in Settings now says what is true. Resolved notices were never subject to the cooldown and are unchanged. `--verify` gains "Alert notifications (one cooldown authority)" and rewrites the old 30-minute check, and those count posts rather than scans, which is why this went unnoticed.
@@ -4113,7 +4115,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.8...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.9...HEAD
+[1.10.9]: https://github.com/godigi/hopwatch/compare/v1.10.8...v1.10.9
 [1.10.8]: https://github.com/godigi/hopwatch/compare/v1.10.7...v1.10.8
 [1.10.7]: https://github.com/godigi/hopwatch/compare/v1.10.6...v1.10.7
 [1.10.6]: https://github.com/godigi/hopwatch/compare/v1.10.5...v1.10.6
