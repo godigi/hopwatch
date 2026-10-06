@@ -673,6 +673,10 @@ shellcheck bin/hopwatch install.sh lib/*.sh
 bats tests/
 ```
 
+The suite sandboxes `$HOME` (`tests/setup_suite.bash`), so running it never
+touches your real `~/net-diag` history, from `bats tests/` or from a single
+file.
+
 ## License
 
 [MIT](./LICENSE).
