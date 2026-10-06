@@ -1601,3 +1601,90 @@ assert d['dns']['ok'] is True and d['tcp']['any_ok'] is True
 assert d['tcp']['targets'][0]['elapsed_ms'] == 30.0
 "
 }
+
+# ── TCP-2 behaviour ──────────────────────────────────────────────────────
+
+@test "TCP-2 fires critical on the all-connections-refused pattern and clears" {
+  # The modem RSTs every new connect in ~10 ms while pings stay pristine:
+  # refused ratio at the critical cutoff, confirmed over two cycles, then
+  # cleared the instant connects succeed again.
+  reset_state; MON_TCP2_REFUSED_PCT=100 MON_TCP_OK=0
+  MON_WEB_OK=0 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  [[ "$MON_RULES" != *"TCP-2"* ]] || return 1
+  _mon_rules
+  [[ "$MON_RULES" == *"TCP-2"* ]] || return 1
+  [ "$MON_SEVERITY" = "critical" ]
+  reset_state; MON_TCP2_REFUSED_PCT=0 MON_TCP_OK=1 MON_WEB_OK=1
+  MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  [[ "$MON_RULES" != *"TCP-2"* ]] || return 1
+}
+
+@test "TCP-2 warn fires on a half-refused pattern" {
+  reset_state; MON_TCP2_REFUSED_PCT=50 MON_TCP_OK=1
+  MON_WEB_OK=1 MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" == *"TCP-2"* ]] || return 1
+  [ "$MON_SEVERITY" = "warn" ]
+}
+
+@test "TCP-2 stays quiet when a ping leg is lossy" {
+  # Lossy legs are the loss rules' territory; this rule owns the
+  # clean-ping refusal pattern only.
+  reset_state; MON_TCP2_REFUSED_PCT=100
+  MON_INET_LOSS=25 MON_INET_LOSS_ALT=25
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" != *"TCP-2"* ]] || return 1
+}
+
+# ── P1/P2 vs L1: the two ranges must stay disjoint ───────────────────────
+
+@test "no [P1 L1] co-firing on total internet loss" {
+  # Everything dead + DNS down: the unreachable verdict owns it, L1's
+  # range stops just below total.
+  reset_state; MON_WEB_OK=0 MON_DNS_OK=0 MON_TCP_OK=0
+  MON_INET_LOSS=100 MON_INET_LOSS_ALT=100
+  _mon_rules; _mon_rules
+  [[ "$MON_RULES" == *"P1"* ]] || return 1
+  [[ "$MON_RULES" != *"L1"* ]] || return 1
+}
+
+@test "parity: a fully-refused TCP panel with clean pings is TCP-2 on both" {
+  # The monitor folds the ratio itself; the scan models the same state on
+  # its tcp_reach panel (all five targets refused, pings on both legs
+  # clean) so both engines name TCP-2 for the same link.
+  reset_state
+  MON_TCP2_REFUSED_PCT=100 MON_TCP_OK=0 MON_WEB_OK=0
+  MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  TCP_REACH_LINES="1.1.1.1:443|FAIL
+8.8.8.8:443|FAIL
+github.com:443|FAIL
+apple.com:443|FAIL
+cloudflare.com:443|FAIL"
+  _mon_rules; _mon_rules
+  local m; m="$(monitor_rules)"; reset_state
+  TCP_REACH_LINES="1.1.1.1:443|FAIL
+8.8.8.8:443|FAIL
+github.com:443|FAIL
+apple.com:443|FAIL
+cloudflare.com:443|FAIL"
+  INET_LOSS=0 INET_LOSS_ALT=0
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"TCP-2"* ]] || return 1
+  # Clean pings keep it out of the loss rules on both sides.
+  [[ "$m" != *"G2"* ]] || return 1
+  [[ "$m" != *"L1"* ]] || return 1
+}
+
+# ── Geo body classification ──────────────────────────────────────────────
+
+@test "a non-JSON geo body counts as a failed fetch" {
+  # A portal's login page answers 200 with HTML — that is not a verdict
+  # with null fields, it is no verdict at all.
+  _mon_geo_body_json '<html>Sign in to我们 WiFi</html>' && return 1
+  _mon_geo_body_json '' && return 1
+  _mon_geo_body_json '{"ip":"203.0.113.42","country_iso":"BR"}' || return 1
+  # The connection-refusal classifier from the canary has the same
+  # three-way shape covered by its own tests above.
+}

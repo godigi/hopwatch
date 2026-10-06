@@ -97,16 +97,23 @@ sev_of() {
   fired G2
 }
 
-@test "L1 yields to TCP-1 when ICMP is filtered but TCP works" {
-  # Hotel/corporate networks drop ICMP wholesale. TCP-1 already explains
-  # that; firing L1 as well would tell the user their ISP is down when
-  # every real connection is fine.
+@test "gateway-filtered ICMP leaves the internet leg clean" {
+  # Hotel/corporate networks drop ICMP wholesale. TCP-1 owns that only
+  # when the internet leg is CLEAN below the warn floor: loss on BOTH
+  # legs is packet loss, not filtering — calling it "just filtered"
+  # is the smooth-gaming bug, where a fault verdict was suppressed by
+  # an inference the link never earned. Two legs at 100% loss with TCP
+  # working is G2 (gateway silent and forwarding) plus ICMP-1 (pings
+  # blocked upstream while traffic works), never TCP-1 and never L1:
+  # total loss on both targets belongs to the unreachable family.
   healthy_baseline
   GW_LOSS=100 INET_LOSS=100 INET_LOSS_ALT=100
   TCP_REACH_ANY_OK=1
   diagnosis_run >/dev/null
-  fired TCP-1
+  not_fired TCP-1
   not_fired L1
+  fired G2
+  fired ICMP-1
 }
 
 @test "L1 and L2 stay silent when the loss probes never ran" {
