@@ -91,7 +91,15 @@ full_check_speed_fixture() {
     printf 'SPEED_PHASE\n'
     SPEEDTEST_DOWN_MBPS=300 SPEEDTEST_UP_MBPS=100 SPEEDTEST_LATENCY_MS=12
   }
-  source <(sed -n '/^progress_plan "$RUN_MODE"/,$p' "$NETDIAG")
+  # Source the orchestration tail from a real file, not `source <(...)`.
+  # On bash 3.2 (/bin/bash, which `#!/usr/bin/env bash` resolves to
+  # whenever Homebrew's bash is not first on PATH) sourcing a process
+  # substitution reads nothing and returns 0: the fixture then ran no
+  # orchestration at all and the test failed with status 0 and empty
+  # output. A plain file behaves the same on every bash.
+  sed -n '/^progress_plan "$RUN_MODE"/,$p' "$NETDIAG" \
+    > "$BATS_TEST_TMPDIR/full-check-tail.sh"
+  source "$BATS_TEST_TMPDIR/full-check-tail.sh"
 }
 
 @test "full check final printed and saved diagnosis consumes measured speed" {
