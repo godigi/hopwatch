@@ -66,6 +66,7 @@ private enum VerifyHarness {
         runHealthResolverTests()
         runAlertAttributionTests()
         runAlertSettleTests()
+        runEventAlertDwellTests()
         runCaptivePortalActionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
@@ -337,6 +338,188 @@ private enum VerifyHarness {
         event.land([("W5", "warn", "SUMMARY-W5")])
         equal(event.body("captive-portal"), captive.interimBody,
               "and neither a landed nor an ended scan rewrites it")
+        print("")
+    }
+
+    // MARK: - Event-driven alerts and dwell
+
+    /// `vpn-dropped` and `different-network` are raised by a *transition*
+    /// (VPN up→down, gateway MAC changing under one SSID), which is visible
+    /// in exactly one monitor sample. Their dwell asks for the condition to
+    /// hold continuously, so a dwell measured against the transition alone
+    /// restarts on the very next sample and never elapses: the alerts could
+    /// not fire at all. The rule is that a transition *starts* a wait, and
+    /// the alert fires if the new state is still the state after the dwell
+    /// and is dropped if it reverted first.
+    ///
+    /// Samples arrive every `every` seconds here, which is the monitor's
+    /// slow tier. The clock is the rig's, so none of this waits for real.
+    static func runEventAlertDwellTests() {
+        print("Event-driven alerts (dwell on a transition)")
+        guard let vpnDef = AlertDefinition.byID("vpn-dropped"),
+              let netDef = AlertDefinition.byID("different-network"),
+              let ipDef = AlertDefinition.byID("public-ip-changed") else {
+            check(false, "event-driven definitions exist"); return
+        }
+        let every: TimeInterval = 5
+
+        func vpn(_ up: Bool) -> MonitorSample {
+            var s = MonitorSample(); s.vpn.active = up; return s
+        }
+        func gateway(_ mac: String?, ssid: String? = "HomeWiFi") -> MonitorSample {
+            var s = MonitorSample(); s.link.ssid = ssid; s.link.gatewayMAC = mac; return s
+        }
+        func addr(_ ip: String) -> MonitorSample {
+            var s = MonitorSample(); s.publicInfo.ip = ip; return s
+        }
+        /// One monitor cycle: evaluate at the rig's clock, then let it advance.
+        func tick(_ rig: AlertRig, _ s: MonitorSample, times n: Int = 1) {
+            for _ in 0..<n { rig.engine.evaluate(sample: s); rig.t = rig.t.addingTimeInterval(every) }
+        }
+        func fired(_ rig: AlertRig, _ id: String) -> Int { rig.posts.filter { $0 == "netdiag.\(id)" }.count }
+        func resolved(_ rig: AlertRig, _ id: String) -> Int { rig.posts.filter { $0 == "netdiag.\(id).resolved" }.count }
+        func isActive(_ rig: AlertRig, _ id: String) -> Bool { rig.engine.active[id] != nil }
+
+        // ── vpn-dropped ──────────────────────────────────────────────
+        // The new state persists: down seen at t0, still down at t0+dwell.
+        let drop = AlertRig(catalog: nil, scanStarts: true)
+        tick(drop, vpn(true), times: 3)
+        tick(drop, vpn(false))                       // t0: the transition sample
+        check(!isActive(drop, "vpn-dropped"), "a VPN drop does not fire on the transition sample alone")
+        tick(drop, vpn(false))                       // t0 + 5 s
+        check(!isActive(drop, "vpn-dropped"), "still inside the \(Int(vpnDef.dwell)) s dwell, nothing yet")
+        tick(drop, vpn(false))                       // t0 + 10 s
+        check(isActive(drop, "vpn-dropped"), "a VPN that stays down for the dwell raises the alert")
+        equal(fired(drop, "vpn-dropped"), 1, "and notifies exactly once")
+        equal(drop.scansRequested, 1, "and asks for one scan")
+        tick(drop, vpn(false), times: 12)
+        equal(fired(drop, "vpn-dropped"), 1, "a VPN that stays down does not notify again on later samples")
+        equal(drop.scansRequested, 1, "or scan again")
+        check(isActive(drop, "vpn-dropped"), "the alert stays raised while the VPN is still down")
+
+        // It clears when the VPN returns, and says so.
+        tick(drop, vpn(true))
+        check(!isActive(drop, "vpn-dropped"), "the alert clears when the VPN comes back")
+        equal(resolved(drop, "vpn-dropped"), 1, "and a resolved notice is posted, since the drop was announced")
+
+        // Dropped again inside the cooldown: raised, but no second
+        // notification and no second scan.
+        tick(drop, vpn(false), times: 3)
+        check(isActive(drop, "vpn-dropped"), "a second drop that persists is raised again")
+        equal(drop.scansRequested, 1, "inside the cooldown it starts no scan")
+        // And once the cooldown has passed, it is a fresh notification.
+        tick(drop, vpn(true))
+        drop.t = drop.t.addingTimeInterval(vpnDef.cooldown)
+        tick(drop, vpn(false), times: 3)
+        equal(drop.scansRequested, 2, "after the cooldown a persisting drop is announced afresh")
+
+        // The state reverts inside the dwell: a blip, not an alert.
+        let blip = AlertRig(catalog: nil, scanStarts: true)
+        tick(blip, vpn(true), times: 3)
+        tick(blip, vpn(false))                       // t0
+        tick(blip, vpn(true))                        // t0 + 5 s: back before the dwell
+        tick(blip, vpn(true), times: 6)
+        check(!isActive(blip, "vpn-dropped"), "a VPN that reconnects inside the dwell never raises the alert")
+        equal(fired(blip, "vpn-dropped"), 0, "and posts nothing")
+        equal(resolved(blip, "vpn-dropped"), 0, "not even a resolved notice for something never announced")
+        // The wait is dropped, not remembered: a later, real drop starts a
+        // fresh dwell instead of inheriting the blip's elapsed time.
+        tick(blip, vpn(false))
+        tick(blip, vpn(false))
+        check(!isActive(blip, "vpn-dropped"), "a later drop starts its own dwell rather than inheriting the blip's")
+        tick(blip, vpn(false))
+        check(isActive(blip, "vpn-dropped"), "and fires when that one persists")
+
+        // A VPN that was never up has nothing to drop.
+        let never = AlertRig(catalog: nil, scanStarts: true)
+        tick(never, vpn(false), times: 10)
+        check(!isActive(never, "vpn-dropped"), "no VPN ever seen up means no VPN-dropped alert")
+
+        // The network-just-changed grace period holds the alert rather
+        // than swallowing it: NWPathMonitor reports a VPN coming or going
+        // as a path change, which opens that window at the same moment.
+        let held = AlertRig(catalog: nil, scanStarts: true)
+        var inGrace = true
+        held.engine.inNetworkGracePeriod = { inGrace }
+        tick(held, vpn(true), times: 3)
+        tick(held, vpn(false), times: 8)             // 40 s, all inside the grace window
+        check(!isActive(held, "vpn-dropped"), "nothing fires while the grace period is open")
+        inGrace = false
+        tick(held, vpn(false))
+        check(!isActive(held, "vpn-dropped"), "the dwell starts when the grace period lifts, not before")
+        tick(held, vpn(false), times: 2)
+        check(isActive(held, "vpn-dropped"), "a drop that outlasts the grace period and the dwell is still raised")
+        equal(fired(held, "vpn-dropped"), 1, "once")
+
+        // ── different-network ────────────────────────────────────────
+        let swap = AlertRig(catalog: nil, scanStarts: true)
+        tick(swap, gateway("aa:aa"), times: 3)
+        tick(swap, gateway("bb:bb"))                 // t0: a different router, same name
+        check(!isActive(swap, "different-network"), "a changed gateway does not fire on the transition sample alone")
+        tick(swap, gateway("bb:bb"), times: 5)       // t0 + 25 s
+        check(!isActive(swap, "different-network"), "still inside the \(Int(netDef.dwell)) s dwell, nothing yet")
+        tick(swap, gateway("bb:bb"))                 // t0 + 30 s
+        check(isActive(swap, "different-network"), "a gateway that stays changed for the dwell raises the alert")
+        equal(fired(swap, "different-network"), 1, "and notifies exactly once")
+        tick(swap, gateway("bb:bb"), times: 12)
+        equal(fired(swap, "different-network"), 1, "later samples on the new router do not notify again")
+        check(isActive(swap, "different-network"), "the alert stays raised while the new router is still the one in use")
+        tick(swap, gateway("aa:aa"))
+        check(!isActive(swap, "different-network"), "the alert clears when the familiar router is back")
+        equal(resolved(swap, "different-network"), 0, "with no resolved notice, because the definition says it does not resolve")
+
+        let flip = AlertRig(catalog: nil, scanStarts: true)
+        tick(flip, gateway("aa:aa"), times: 3)
+        tick(flip, gateway("bb:bb"), times: 3)       // 10 s on the other router
+        tick(flip, gateway("aa:aa"), times: 10)      // and back, inside the dwell
+        check(!isActive(flip, "different-network"), "a gateway that flips back inside the dwell never raises the alert")
+        equal(fired(flip, "different-network"), 0, "and posts nothing")
+
+        let moved = AlertRig(catalog: nil, scanStarts: true)
+        tick(moved, gateway("aa:aa"), times: 3)
+        tick(moved, gateway("bb:bb"), times: 3)
+        tick(moved, gateway("cc:cc", ssid: "CoffeeShop"), times: 10)
+        check(!isActive(moved, "different-network"), "moving to a different Wi-Fi name is not the same name behind a different router")
+        equal(fired(moved, "different-network"), 0, "and posts nothing")
+
+        let hidden = AlertRig(catalog: nil, scanStarts: true)
+        tick(hidden, gateway("aa:aa", ssid: nil), times: 3)
+        tick(hidden, gateway("bb:bb", ssid: nil), times: 12)
+        check(!isActive(hidden, "different-network"), "with the SSID hidden there is no name to be the same, so no alert")
+
+        // Same grace-period behaviour as the VPN one: held, then dwell.
+        let graced = AlertRig(catalog: nil, scanStarts: true)
+        var settling = true
+        graced.engine.inNetworkGracePeriod = { settling }
+        tick(graced, gateway("aa:aa"), times: 3)
+        tick(graced, gateway("bb:bb"), times: 8)
+        check(!isActive(graced, "different-network"), "nothing fires while the grace period is open")
+        settling = false
+        tick(graced, gateway("bb:bb"), times: 6)
+        check(!isActive(graced, "different-network"), "the dwell starts when the grace period lifts")
+        tick(graced, gateway("bb:bb"))
+        check(isActive(graced, "different-network"), "a router change that outlasts the grace period and the dwell is still raised")
+
+        // ── unchanged behaviour ──────────────────────────────────────
+        // public-ip-changed has no dwell: the transition sample is enough.
+        let ip = AlertRig(catalog: nil, scanStarts: true)
+        tick(ip, addr("203.0.113.1"), times: 3)
+        tick(ip, addr("203.0.113.2"))
+        equal(fired(ip, "public-ip-changed"), 1, "a changed public IP notifies on the sample that shows it (dwell \(Int(ipDef.dwell)))")
+        tick(ip, addr("203.0.113.2"), times: 6)
+        equal(fired(ip, "public-ip-changed"), 1, "and not again while it stays changed")
+
+        // A rule-driven alert still has to hold continuously: one sample
+        // of a rule is a blip, and a gap restarts the dwell.
+        let rule = AlertRig(catalog: nil, scanStarts: true)
+        var g2 = MonitorSample(); g2.status.rules = ["G2"]
+        tick(rule, g2, times: 2)
+        tick(rule, MonitorSample())
+        tick(rule, g2, times: 4)
+        check(!isActive(rule, "wifi-unstable"), "a rule that lapses restarts its dwell")
+        tick(rule, g2, times: 2)
+        check(isActive(rule, "wifi-unstable"), "and fires once it has held for the whole dwell")
+        equal(rule.scansRequested, 1, "with a single scan")
         print("")
     }
 
