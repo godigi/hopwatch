@@ -194,8 +194,53 @@ fault. `ended_by` says how each one ended:
 | `ended_by` | meaning |
 |---|---|
 | `cleared` | the fault went away and the monitor saw it |
-| `monitor-restart` | the recorder died or the Mac rebooted while it was open. Closed there, with `duration_is_lower_bound: true`, rather than silently spanning a period nobody watched |
+| `monitor-restart` | the recorder died or the Mac rebooted while it was open, **and the same rule did not re-fire within `THRESH_EV_RESTART_BRIDGE_S` of the restart** (see below). Closed there, with `duration_is_lower_bound: true`, rather than silently spanning a period nobody watched |
 | `still-open` | open at the end of the record. `ongoing: true`, and the duration is measured **to the last event**, never to now — the recorder may have stopped an hour ago and "ongoing for four hours" would be inventing observation |
+
+**A restart is a blind spot, not necessarily an end.** The app restarts
+the monitor to change cadence and to start and end its investigation
+burst, and a fresh monitor re-reports a still-running fault a few samples
+later as a new `rule-fired`. Reading that as "ended, then a new fault"
+turned one long fault into a dozen short ones. So when an episode is closed
+by a restart and the **same rule on the same network** fires again within
+`THRESH_EV_RESTART_BRIDGE_S` (`lib/thresholds.sh`, 90 s) of the latest
+restart, the two are reported as one episode:
+
+```json
+{"rule": "G2", "summary": "Router dropping packets",
+ "network": "wifi:mac=…", "network_label": "Home",
+ "started": "2026-10-06T20:34:39Z", "ended": "2026-10-06T20:40:00Z",
+ "duration_s": 321, "ongoing": false, "unobserved_s": 54,
+ "restarts_bridged": 3, "ended_by": "cleared"}
+```
+
+* `started` is the first fire; `duration_s` spans every segment, so it
+  includes the stretches in between.
+* `unobserved_s` carries those stretches (restart to re-fire, per restart),
+  added to any `gap` inside the segments, so a reader can still tell a
+  fault watched end to end from one stitched together.
+* `restarts_bridged` is the number of restarts stepped over. **Present only
+  when greater than zero**, like `start_unobserved`. It is additive: the
+  `--events` `schema` stays `1`, and a reader that ignores it still gets a
+  correct `duration_s` and `unobserved_s`.
+* `ended_by` and `ongoing` describe the *last* segment only. A bridged
+  episode is `monitor-restart` (with `duration_is_lower_bound: true`) only
+  if a restart really ended it and nothing re-fired afterwards.
+* Nothing is bridged if the rule was seen to clear first, if the rule
+  differs, if the network differs, or if the re-fire is later than the
+  window. A restart that arrives more than the window after the previous
+  one also ends the candidate: a monitor that ran that long without
+  reporting the rule was watching, not blind.
+
+This is not a verdict. The window is how long a freshly started monitor
+takes to *report* a fault that was already there; it says nothing about
+whether any duration is acceptable. `monitor_starts` in `observation` still
+counts every start, bridged or not.
+
+**What bridging cannot recover.** A fresh monitor's first sample is only a
+baseline: a rule already firing in it is never journaled as fired. A fault
+that simply carries on through a restart therefore leaves no re-fire to
+bridge to, and its episode still ends at the restart.
 
 **A fault can end inside the window and have begun outside it.** That is
 the likeliest shape of "was the internet down last night?", so the episode
