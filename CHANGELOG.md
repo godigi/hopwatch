@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.6] - 2026-10-06
+
 ### Fixed
 
 - The scan and the monitor disagreed about a Wi-Fi link with a strong signal and critical gateway packet loss. `lib/monitor.sh` said `G2` (critical); `lib/diagnosis.sh` said `W5` (warn) and suppressed `G2`. The app showed a red dot over an amber report, and an alert waiting for a G-rule sentence never got one (seen live: monitor `G2` at 68% loss and -37 dBm, scan `W5` warn at 55%). Both engines now say `G2`, critical. Loss at or above the critical threshold is a measurement and stays critical whatever the suspected cause; the strong signal now only selects G2's cause sentence ("the likely cause is the router struggling to hear your Mac back... move closer, and if it keeps happening, reboot it").
@@ -4078,7 +4080,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.5...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.6...HEAD
+[1.10.6]: https://github.com/godigi/hopwatch/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/godigi/hopwatch/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/godigi/hopwatch/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.10.3
