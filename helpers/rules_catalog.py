@@ -1060,27 +1060,34 @@ RULES: list[dict[str, object]] = [
         "scope": "both",
         "blurb": (
             "New connections are being refused quickly and locally while "
-            "pings pass — usually the modem or router badly rejecting "
-            "connection attempts rather than the internet being down. "
-            "Browsing can keep working while new connections struggle: "
-            "links to sites you are already talking to survive, but every "
-            "page load, call setup or game join has to open a fresh one."
+            "pings pass — something close to you is rejecting them, your "
+            "router or your provider's equipment, rather than the internet "
+            "being down. Hopwatch tests this with TCP connections, but the "
+            "same fault can drop new UDP traffic too — call setup, game "
+            "joins, DNS sent straight to a public resolver — so it is not "
+            "limited to web pages. Flows already open tend to survive; "
+            "every page load, call setup or game join has to start a "
+            "new one."
         ),
         "doc": "DIAGNOSIS-RULES.md#tcp-2--connections-intermittently-refused-while-ping-passes",
         "impacts": {"calls": "degraded", "streaming": "degraded",
-                    "gaming": "broken", "vpn": "degraded"},
+                    "gaming": "broken", "vpn": "degraded",
+                    "browsing": "degraded"},
         "fix": (
-            "Restart the router — unplug it briefly, then plug it "
-            "back in. If the pattern comes back, update the router's "
-            "firmware, and if it still persists, report it to your internet "
-            "provider: it is their box refusing connections, not the "
-            "internet failing."
+            "Restart the router — unplug it for half a minute, then plug "
+            "it back in — and watch whether the refusals stop. That is a "
+            "test that tells the two apart: if it clears, the router was "
+            "the cause; if the refusals come straight back, they are more "
+            "likely coming from your provider's equipment further up the "
+            "line. Either way, update the router's firmware next, and if "
+            "it persists, report the pattern to your internet provider."
         ),
         "fix_away": (
             "Ask whoever runs this network to restart or power-cycle the "
             "router, or try a different connection (a phone hotspot is "
-            "enough) to confirm the fault sits with this network's modem "
-            "rather than with your Mac."
+            "enough) to confirm the fault sits with this network's "
+            "equipment — the router or the provider's line — rather than "
+            "with your Mac."
         ),
         "fix_target": "your_router",
     },

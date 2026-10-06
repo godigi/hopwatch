@@ -217,9 +217,10 @@ diagnosis_run() {
   fi
 
   # TCP-2 — connections intermittently refused while ping passes. The
-  # measured fault no other rule names: a modem that RSTs outbound TCP in
-  # ~10 ms — far under the real path's RTT, so the refusal is local —
-  # while pings are pristine. Measured on the live network the rule was
+  # measured fault no other rule names: something near the user RSTing
+  # outbound TCP in ~10 ms — far under the real path's RTT, so the refusal
+  # is generated near the user (router or the provider's equipment; not
+  # confirmed which) — while pings are pristine. Measured on the live network the rule was
   # written for: 8.8.8.8:443 refused 10 of 16 times, 1.1.1.1:443 11 of 16,
   # ICMP to both 0% — and no existing rule covered the shape.
   #
@@ -243,9 +244,9 @@ diagnosis_run() {
       local _tcp2_pct
       _tcp2_pct="$(awk -v f="$_tcp2_fails" -v t="$_tcp2_tries" 'BEGIN{printf "%.0f", f*100/t}')"
       if [ "$_tcp2_pct" -ge "$THRESH_CONNECT_CRIT_PCT" ]; then
-        add_diag critical TCP-2 "Every new connection this Mac tried to open was refused — all ${_tcp2_tries} of the test connections failed, instantly and locally, while pings to the same internet passed. That reads as the modem or router badly rejecting new connection attempts rather than a line outage: what is already working keeps working, but nothing new can start — new pages stall, calls fail to connect, games cannot join a server. Restart your router (unplug it for half a minute); if that clears it, you are done; if not, update the router firmware and then report the pattern to your provider — it is their box refusing, not the internet."
+        add_diag critical TCP-2 "Every new connection this Mac tried to open was refused — all ${_tcp2_tries} of the test connections failed, instantly and locally, while pings to the same internet passed. That points to something close to you — your router or your provider's equipment — rejecting new connection attempts rather than a line outage: what is already working keeps working, but nothing new can start — new pages stall, calls fail to connect, games cannot join a server, and other new traffic such as UDP can be affected the same way. Restart your router (unplug it for half a minute) as a test: if that clears it, the router was the cause; if the refusals come straight back, they are more likely coming from your provider's equipment. Then update the router firmware and report the pattern to your provider."
       elif [ "$_tcp2_pct" -ge "$THRESH_CONNECT_WARN_PCT" ]; then
-        add_diag warn TCP-2 "Connections are being intermittently refused — ${_tcp2_fails} of ${_tcp2_tries} test connections failed quickly and locally while pings to the same internet passed. That pattern — fast, local refusals on a link whose pings are perfect — is usually the modem or router badly rejecting connection attempts, not the line being down. Browsing can still work while new connections struggle, so it is easy to miss. Restart your router (unplug for half a minute) and re-run; report it to your provider if it persists."
+        add_diag warn TCP-2 "Connections are being intermittently refused — ${_tcp2_fails} of ${_tcp2_tries} test connections failed quickly and locally while pings to the same internet passed. That pattern — fast, local refusals on a link whose pings are perfect — points to something close to you, your router or your provider's equipment, rejecting connection attempts rather than the line being down. Browsing can still work while new connections struggle, so it is easy to miss, and new UDP traffic (calls, games, direct DNS) can be affected too. Restart your router (unplug for half a minute) and re-run: if that clears it, the router was the cause; if the refusals come back, report it to your provider."
       fi
     fi
   fi

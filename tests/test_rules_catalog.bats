@@ -693,3 +693,42 @@ for r in json.load(sys.stdin)["rules"]:
 assert not bad, bad
 '
 }
+
+# ── TCP-2 blames neither box with certainty, and is not TCP-only ─────────
+#
+# A live measurement showed new TCP *and* UDP flows refused at the same
+# rate, with a hop that answers ICMP "administratively prohibited" past the
+# home router — so the evidence supports "something close to you", not "it
+# is the modem". Which box sends the RSTs was never confirmed.
+
+@test "rules-catalog: TCP-2 does not assert the modem or the router is at fault" {
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+r = next(x for x in json.load(sys.stdin)["rules"] if x["id"] == "TCP-2")
+for field in ("blurb", "fix", "fix_away"):
+    text = r[field].lower()
+    for banned in ("usually the modem", "their box", "it is their", "the modem or router"):
+        assert banned not in text, f"{field}: {banned!r}"
+assert "provider" in r["blurb"].lower(), "blurb names the provider side"
+assert "router" in r["blurb"].lower(), "blurb names the router side"
+# Restarting the router is a test that tells the two apart, not the diagnosis.
+assert "restart" in r["fix"].lower() and "straight back" in r["fix"].lower(), r["fix"]
+'
+}
+
+@test "rules-catalog: TCP-2 says it is not limited to TCP" {
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+r = next(x for x in json.load(sys.stdin)["rules"] if x["id"] == "TCP-2")
+assert "UDP" in r["blurb"], r["blurb"]
+'
+}
+
+@test "diagnosis.sh TCP-2 prose agrees with the catalog on blame" {
+  run grep -nE "usually the modem or router|their box refusing|it is their box|the modem or router badly" "$REPO/lib/diagnosis.sh"
+  [ "$status" -ne 0 ] || { echo "$output"; return 1; }
+}
