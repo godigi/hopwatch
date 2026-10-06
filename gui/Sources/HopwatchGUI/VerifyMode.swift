@@ -68,6 +68,7 @@ private enum VerifyHarness {
         runAlertSettleTests()
         runEventAlertDwellTests()
         runAlertNotificationAuthorityTests()
+        runPublicIPEventTests()
         runCaptivePortalActionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
@@ -195,6 +196,10 @@ private enum VerifyHarness {
         var t = Date(timeIntervalSince1970: 1_700_000_000)
         var scanStarts: Bool
         var scansRequested = 0
+        /// The definitions `onAlertFired` was called for. That callback is
+        /// where the coordinator writes the event log's "alert" entry, so
+        /// one call is one entry.
+        var firedAlerts: [String] = []
         var posts: [String] = []
         /// Every post in full, for the checks that care what was said and
         /// whether it was allowed to make a sound.
@@ -217,7 +222,8 @@ private enum VerifyHarness {
                 NetdiagCoordinator.severityRank(self.catalog?[id]?.severity)
             }
             engine.ruleText = { [unowned self] id in self.catalog?[id]?.blurb }
-            engine.onAlertFired = { [unowned self] _, _ in
+            engine.onAlertFired = { [unowned self] def, _ in
+                firedAlerts.append(def.id)
                 scansRequested += 1
                 return scanStarts
             }
@@ -589,6 +595,67 @@ private enum VerifyHarness {
         cooled.land([("G2", "warn", "SUMMARY-G2")])
         equal(cooled.posts.count, before, "and its scan landing posts nothing for a notification that was never delivered")
         equal(cooled.body(), "SUMMARY-G2", "though the dropdown still gets the CLI's sentence")
+        print("")
+    }
+
+    // MARK: - Public IP change is an event
+
+    /// A public IP changing is something that happened, not a condition that
+    /// persists, and the monitor reports it in exactly one sample. Modelled
+    /// as an alert it was raised, shown in the dropdown for one cycle with
+    /// an empty body, cleared on the next sample, and then announced by the
+    /// resolution feedback as "back to normal". As an event (`isEvent`) it
+    /// notifies and is logged, and is never active at all.
+    static func runPublicIPEventTests() {
+        print("Public IP change (an event, never an active alert)")
+        guard let def = AlertDefinition.byID("public-ip-changed") else {
+            check(false, "public-ip-changed definition exists"); return
+        }
+        check(def.isEvent, "public-ip-changed is an event")
+        check(def.rules.isEmpty && !def.resolves,
+              "an event has no rule to look up and nothing to resolve")
+        equal(AlertDefinition.all.filter(\.isEvent).map(\.id), ["public-ip-changed"],
+              "it is the only event: captive-portal, vpn-dropped and different-network persist, so they stay alerts")
+
+        let every: TimeInterval = 5
+        func addr(_ ip: String) -> MonitorSample {
+            var s = MonitorSample(); s.publicInfo.ip = ip; return s
+        }
+        let rig = AlertRig(catalog: nil, scanStarts: true)
+        var everActive = false
+        var everRanked = false
+        func tick(_ s: MonitorSample, times n: Int = 1) {
+            for _ in 0..<n {
+                rig.engine.evaluate(sample: s)
+                if rig.engine.active["public-ip-changed"] != nil { everActive = true }
+                if !rig.engine.activeSorted.isEmpty { everRanked = true }
+                rig.t = rig.t.addingTimeInterval(every)
+            }
+        }
+        func notified() -> Int { rig.posts.filter { $0 == "netdiag.public-ip-changed" }.count }
+
+        tick(addr("203.0.113.1"), times: 3)
+        tick(addr("203.0.113.2"))                               // the transition sample
+        equal(notified(), 1, "the transition notifies")
+        equal(rig.firedAlerts, ["public-ip-changed"], "and is recorded to the event log once")
+        check(!everActive, "it is not in the active alerts on the transition sample")
+        tick(addr("203.0.113.2"), times: 6)
+        check(!everActive, "nor on any sample after")
+        check(!everRanked, "so the headline, the Activity badge and the banner never see it")
+        equal(rig.posts.filter { $0.hasSuffix(".resolved") }.count, 0,
+              "and a later healthy sample produces no resolved notice")
+        equal(notified(), 1, "and no second notification")
+
+        // The definition's own cooldown, not the notification layer's.
+        tick(addr("203.0.113.3"))                               // 35 s after the first change: inside 60 s
+        equal(notified(), 1, "a second change inside its 60 s cooldown does not notify")
+        equal(rig.firedAlerts.count, 1, "and is not logged as a second alert")
+        check(!everActive, "and does not appear as an active alert while it waits")
+        tick(addr("203.0.113.3"), times: 6)
+        tick(addr("203.0.113.4"))                               // well past 60 s
+        equal(notified(), 2, "a change after the cooldown notifies again")
+        equal(rig.firedAlerts.count, 2, "and is logged again")
+        check(!everActive && !everRanked, "and still never becomes active")
         print("")
     }
 

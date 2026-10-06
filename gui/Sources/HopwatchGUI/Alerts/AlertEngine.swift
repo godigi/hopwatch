@@ -474,6 +474,23 @@ final class AlertEngine {
         let since = conditionSince[def.id] ?? now
         conditionSince[def.id] = since
         guard now.timeIntervalSince(since) >= def.dwell else { return }
+
+        // An event happened and is over; it has no state to be active in.
+        // Notify and log, subject to the same cooldown, and leave `active`
+        // alone so nothing downstream can show it, rank it, count it, or
+        // later announce it as cleared. (Inside the cooldown there is
+        // nothing to do at all: an alert in that position is tracked so the
+        // dropdown can show it, and an event is never shown.)
+        if def.isEvent {
+            if let last = lastNotifiedAt[def.id], now.timeIntervalSince(last) < def.cooldown { return }
+            lastNotifiedAt[def.id] = now
+            deliver(id: def.id, title: def.title, body: bodyOverride ?? def.interimBody,
+                    isOutage: def.isOutage, replacing: false)
+            log.info("event: \(def.id, privacy: .public)")
+            _ = def.scanOnly ? false : (onAlertFired?(def, firingRules) ?? false)
+            return
+        }
+
         guard active[def.id] == nil else { return }
 
         if def.oncePerNetwork {

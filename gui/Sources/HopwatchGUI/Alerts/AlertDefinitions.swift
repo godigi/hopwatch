@@ -92,6 +92,21 @@ struct AlertDefinition: Identifiable, Sendable {
     /// an app ends up contradicting its own report.
     let interimBody: String
 
+    /// An event rather than an alert: something that *happened* and is over
+    /// the moment it is seen, with no condition that persists and so nothing
+    /// to be "active" or to "clear". It notifies (honouring `cooldown`) and
+    /// is recorded to the event log like any alert, but `AlertEngine` never
+    /// puts it in `active` — which is what feeds the dropdown's banner, the
+    /// headline, the Activity badge, and the "back to normal" resolution
+    /// toast, none of which mean anything for a public IP changing.
+    ///
+    /// Stored rather than derived from `rules.isEmpty && dwell == 0 && …`:
+    /// `different-network` and `captive-portal` also have no rules, and a
+    /// later tweak to a timing field must not quietly turn an event into a
+    /// banner or the reverse. Only for definitions with `resolves: false`
+    /// and no rules; `--verify` checks it.
+    var isEvent: Bool = false
+
     static let all: [AlertDefinition] = [
         AlertDefinition(
             id: "connection-lost", title: "No internet connection",
@@ -131,7 +146,7 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 60, resolves: false, scanOnly: false,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Fires as soon as it's seen; won't repeat within 1 minute.",
-            interimBody: ""),
+            interimBody: "", isEvent: true),
 
         AlertDefinition(
             id: "captive-portal", title: "This network needs you to sign in",

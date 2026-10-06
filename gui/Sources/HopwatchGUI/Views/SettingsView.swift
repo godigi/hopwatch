@@ -285,7 +285,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("Hopwatch waits before telling you about something, and won't repeat itself for a while afterwards — so a connection that wobbles for a few seconds stays quiet. Weak-signal warnings wait two minutes and repeat at most once an hour.")
+                Text("Hopwatch waits before telling you about something, and won't repeat itself for a while afterwards — so a connection that wobbles for a few seconds stays quiet.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
