@@ -149,16 +149,22 @@ require_tags() {
 # ── The file and the CLI agree ───────────────────────────────────────────
 
 @test "HOPWATCH_VERSION is documented in the CHANGELOG" {
-  # The release workflow enforces this against the tag; here it is
-  # enforced on every push, so a version bump without a CHANGELOG entry
-  # fails at the point it is made rather than at release time.
+  # A local build may be ahead of the last release tag. Keep its notes under
+  # Unreleased, with an explicit version marker; once tagged, require its
+  # own version section so the published release has retrievable notes.
   local cli
   cli="$(sed -n 's/^HOPWATCH_VERSION="\(.*\)"$/\1/p' "$REPO/bin/hopwatch" | head -1)"
   [ -n "$cli" ] || cli="$(sed -n 's/^NETDIAG_VERSION="\(.*\)"$/\1/p' "$REPO/bin/hopwatch" | head -1)"
   [ -n "$cli" ] || { echo "could not read HOPWATCH_VERSION from bin/hopwatch"; return 1; }
   run python3 "$SECTION" --file "$CHANGELOG" --version "$cli"
-  [ "$status" -eq 0 ] || {
-    echo "bin/hopwatch reports $cli, which has no '## [$cli]' section"
+  [ "$status" -eq 0 ] && return 0
+  [ -z "$(git -C "$REPO" tag -l "v$cli")" ] || {
+    echo "tagged version $cli has no '## [$cli]' section"
+    return 1
+  }
+  run python3 "$SECTION" --file "$CHANGELOG" --version Unreleased
+  [[ "$output" == *"Local build version: $cli "* ]] || {
+    echo "bin/hopwatch reports $cli, which has neither release notes nor an Unreleased local-build marker"
     return 1
   }
 }

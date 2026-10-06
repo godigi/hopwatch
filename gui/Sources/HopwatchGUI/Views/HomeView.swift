@@ -591,7 +591,6 @@ struct HomeView: View {
         let channel = coordinator.monitor.latest?.wifi?.channel
             ?? snap?.wifi?.channel
             ?? snap?.wifiScan?.currentChannel
-        let neighborCount = snap?.wifiScan?.neighbourCount ?? 0
 
         // 1. Jitter (Matching user mockup)
         let jitterBadge: DashboardCheckTable.GradeBadge = {
@@ -641,23 +640,7 @@ struct HomeView: View {
 
         // 3. Wi-Fi channel (Matching user mockup)
         if isConnectedToWiFi {
-            let isCrowded = neighborCount > 3
-            let channelText = channel != nil ? "\(channel!)" : (bandChannelText.isEmpty ? "Connected" : bandChannelText)
-            let channelBadge = DashboardCheckTable.GradeBadge(
-                label: isCrowded ? "Crowded" : "Clear",
-                tone: isCrowded ? .warn : .good
-            )
-            rows.append(.init(
-                id: "wifi-channel",
-                icon: isCrowded ? "antenna.radiowaves.left.and.right.slash" : "antenna.radiowaves.left.and.right",
-                label: "Wi-Fi channel",
-                measured: channelText,
-                subvalue: neighborCount > 0 ? "\(neighborCount) neighboring networks" : nil,
-                usual: "—",
-                badge: channelBadge,
-                isWarning: isCrowded,
-                isGood: !isCrowded
-            ))
+            rows.append(DashboardCheckEvidence.wifiChannel(snapshot: snap, channel: channel, fallbackChannel: bandChannelText))
         }
 
         // 4. Signal (Matching user mockup)
@@ -780,46 +763,10 @@ struct HomeView: View {
         ))
 
         // 10. DNS
-        let dnsTotal = snap?.dns.count ?? 0
-        let dnsOk = snap?.dns.filter(\.ok).count ?? 0
-        let dnsText = dnsTotal > 0 ? "\(dnsOk) of \(dnsTotal) resolvers OK" : "All lookups healthy"
-        let dnsBadge = DashboardCheckTable.GradeBadge(
-            label: (dnsTotal > 0 && dnsOk < dnsTotal) ? "Degraded" : "Good",
-            tone: (dnsTotal > 0 && dnsOk < dnsTotal) ? .warn : .good
-        )
-        rows.append(.init(
-            id: "dns",
-            icon: dnsTotal > 0 && dnsOk < dnsTotal ? "exclamationmark.triangle.fill" : "checkmark",
-            label: "Name lookups (DNS)",
-            measured: dnsText,
-            subvalue: nil,
-            usual: "—",
-            badge: dnsBadge,
-            isWarning: dnsTotal > 0 && dnsOk < dnsTotal,
-            isGood: dnsTotal == 0 || dnsOk == dnsTotal
-        ))
+        rows.append(DashboardCheckEvidence.dns(snapshot: snap))
 
         // 11. Lag under load (Bufferbloat)
-        let bb = snap?.bufferbloat
-        let bbRouterGrade = bb?.gwGrade ?? "A"
-        let bbRouterAdded = bb?.gwDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+3 ms"
-        let bbInetGrade = bb?.inetGrade ?? "A"
-        let bbInetAdded = bb?.inetDeltaMs.map { String(format: "+%.0f ms", $0) } ?? "+15 ms"
-        let bbBadge = DashboardCheckTable.GradeBadge(
-            label: "Grade \(bbInetGrade)",
-            tone: (bbInetGrade == "A" || bbInetGrade == "B") ? .good : (bbInetGrade == "C" ? .warn : .critical)
-        )
-        rows.append(.init(
-            id: "bufferbloat",
-            icon: bbInetGrade == "D" || bbInetGrade == "F" ? "exclamationmark.triangle.fill" : "checkmark",
-            label: "Lag under load",
-            measured: "Router \(bbRouterGrade) (\(bbRouterAdded))",
-            subvalue: "Internet \(bbInetGrade) (\(bbInetAdded))",
-            usual: "+3 ms router",
-            badge: bbBadge,
-            isWarning: bbInetGrade == "D" || bbInetGrade == "F",
-            isGood: bbInetGrade != "D" && bbInetGrade != "F"
-        ))
+        rows.append(DashboardCheckEvidence.bufferbloat(snapshot: snap))
 
         // 12. Packet size (MTU)
         let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500
@@ -858,22 +805,7 @@ struct HomeView: View {
         ))
 
         // 14. Web connections
-        let webOk = snap?.tcpReach.first?.ok ?? true
-        let webBadge = DashboardCheckTable.GradeBadge(
-            label: webOk ? "Good" : "Blocked",
-            tone: webOk ? .good : .critical
-        )
-        rows.append(.init(
-            id: "web",
-            icon: webOk ? "checkmark" : "exclamationmark.triangle.fill",
-            label: "Web connections",
-            measured: webOk ? "TCP 443 reachable" : "TCP 443 blocked",
-            subvalue: nil,
-            usual: "—",
-            badge: webBadge,
-            isWarning: !webOk,
-            isGood: webOk
-        ))
+        rows.append(DashboardCheckEvidence.web(snapshot: snap))
 
         // 15. Speed test
         let speedDown = snap?.speedtest?.downMbps ?? coordinator.latestSpeedTest?.downMbps
@@ -1352,9 +1284,7 @@ struct HomeView: View {
     }
 
     private var loadedRTTText: String {
-        let gw = currentRunResult?.snapshot.bufferbloat.gwDeltaMs.map { "\(Int($0)) ms" } ?? "12 ms"
-        let inet = currentRunResult?.snapshot.bufferbloat.inetDeltaMs.map { "\(Int($0)) ms" } ?? "99 ms"
-        return "router \(gw) / internet \(inet)"
+        DashboardCheckEvidence.loadedRTT(snapshot: currentRunResult?.snapshot)
     }
 
     // MARK: - CoreWLAN RSSI Helper

@@ -56,6 +56,28 @@ assert_contains() {
   case "$1" in (*"$2"*) return 0 ;; *) echo "expected '$1' to contain '$2'" >&2; return 1 ;; esac
 }
 
+@test "dns: working direct public resolvers cannot invent a configured fallback" {
+  dns_baseline
+  . "$REPO/lib/dns.sh"
+  DNS_OK=0 DNS_LINES="" TARGET=""
+  scutil() {
+    printf 'nameserver[0] : 192.0.2.1\nnameserver[1] : 192.0.2.2\n'
+  }
+  with_timeout() { shift; "$@"; }
+  dig() {
+    case "$*" in
+      *@1.1.1.1*|*@8.8.8.8*) printf '203.0.113.10\n' ;;
+    esac
+  }
+  dns_run >/dev/null || true
+  [ "$DNS_PRIMARY_FAIL" -eq 1 ]
+  [ "$DNS_FALLBACK_OK" -eq 0 ]
+  [ -z "$SECONDARY_DNS" ]
+  diagnosis_run >/dev/null
+  ! diag_has D5 || { echo "D5 named a resolver that never answered"; return 1; }
+  diag_has D1
+}
+
 @test "diagnosis: D5 fires when primary DNS fails but secondary resolver responds" {
   dns_baseline
   DNS_OK=0
@@ -84,6 +106,7 @@ assert_contains() {
   dns_baseline
   DNS_OK=0
   PUBLIC_OK=0
+  TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
   DNS_PRIMARY_FAIL=1
   DNS_FALLBACK_OK=0
   DNS_LINES="192.168.1.1|apple.com||FAIL"$'\n'"8.8.8.8|apple.com||FAIL"$'\n'

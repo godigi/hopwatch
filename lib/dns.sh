@@ -67,12 +67,8 @@ dns_run() {
         break
       fi
     done
-    if [ "$DNS_FALLBACK_OK" -eq 0 ] && [ "${#_res_list[@]}" -ge 2 ]; then
-      if grep -q "1.1.1.1.*OK\|8.8.8.8.*OK" <<<"$DNS_LINES"; then
-        DNS_FALLBACK_OK=1
-        SECONDARY_DNS="${_res_list[1]}"
-      fi
-    fi
+    # Direct public-resolver answers above prove only those resolvers
+    # work. They cannot establish fallback to a configured secondary.
   fi
 
   # Latency check on primary system resolver

@@ -32,7 +32,7 @@ public_run() {
     [[ "$pub_out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && PUB_CC_ISO="${BASH_REMATCH[1]}"
     ok "Public IP: $PUB_IP  ($PUB_ISP, $PUB_CITY ${PUB_CC_ISO:-$PUB_CC})"
   else
-    bad "Could not reach ifconfig.co — no internet, captive portal, or DNS broken."
+    warn "Could not reach ifconfig.co — public IP and ISP metadata are unavailable."
   fi
 
   # Captive portal sniff. The body is captured, not discarded: a portal
@@ -50,7 +50,12 @@ public_run() {
   # means. A probe that never answered classifies "unknown" and stays
   # silent here: silence beats a guess.
   case "$(captive_portal_classify "$captive_code" "$captive_body")" in
-    ok)     ok "No captive portal." ;;
+    ok)
+      # This independent website answered correctly even if the metadata
+      # service failed. Reachability does not require public-IP metadata.
+      PUBLIC_OK=1
+      ok "No captive portal."
+      ;;
     portal)
       CAPTIVE_PORTAL=1
       CAPTIVE_PORTAL_CODE="$captive_code"

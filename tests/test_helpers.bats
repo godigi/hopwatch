@@ -273,6 +273,39 @@ _write_history() {
   [ "$(printf '%s' "$output" | jq_get regressions)" = "[]" ]
 }
 
+@test "accuracy: baseline keeps the same gateway MAC across SSID visibility changes" {
+  hist="$TMP/h.jsonl"; cur="$TMP/c.json"
+  _write_history "$hist" "wifi:ssid=Home,mac=aa:bb:cc:dd:ee:ff" 10 3.0
+  printf '{"network":{"id":"wifi:mac=AA:BB:CC:DD:EE:FF"},"gateway":{"rtt_avg_ms":40}}' > "$cur"
+  run python3 "$REPO/helpers/baseline.py" --history "$hist" --current "$cur"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq_get compared_runs)" = '10' ]
+  [ "$(printf '%s' "$output" | jq_get skipped_other_networks)" = '0' ]
+  [[ "$output" == *'time to reach your router'* ]]
+}
+
+@test "accuracy: baseline MTU increase is healthy but decrease remains an advisory" {
+  hist="$TMP/h.jsonl"; cur="$TMP/c.json"
+  local case_data previous current expected
+  for case_data in '1380 1500 0' '1500 1380 1' '1500 1500 0'; do
+    read -r previous current expected <<< "$case_data"
+    : > "$hist"
+    for _ in 1 2 3; do
+      printf '{"network":{"id":"wifi:ssid=Home"},"mtu":{"effective":%s}}\n' "$previous" >> "$hist"
+    done
+    printf '{"network":{"id":"wifi:ssid=Home"},"mtu":{"effective":%s}}' "$current" > "$cur"
+    run python3 "$REPO/helpers/baseline.py" --history "$hist" --current "$cur"
+    [ "$status" -eq 0 ]
+    local count
+    count="$(printf '%s' "$output" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["regressions"]))')"
+    [ "$count" = "$expected" ] || { echo "$case_data: $output"; return 1; }
+    if [ "$expected" = 1 ]; then
+      [ "$(printf '%s' "$output" | jq_get regressions.0.metric)" = '"mtu.effective"' ]
+      [ "$(printf '%s' "$output" | jq_get regressions.0.kind)" = '"change"' ]
+    fi
+  done
+}
+
 # ── baseline.py: absolute floors keep noise out of BL-1 ──────────────────
 # The bug this pins: a pure ratio test flagged differences that are
 # arithmetically real and practically invisible — a bufferbloat delta

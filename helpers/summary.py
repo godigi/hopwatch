@@ -34,12 +34,12 @@ from typing import Any
 # two disagree today (tests/test_history.bats:116, tracker NET.2), and
 # importing the Python side means --summary inherits --history's answer
 # rather than silently picking a winner.
-from history import group_key, clean, is_redacted
+from history import group_key, clean, is_redacted, metric_value
 
 # The shared pair-table --history's judged block reads too — see
 # helpers/judgement.py's module docstring for why there is exactly one of
 # these rather than a second copy of the same six cutoffs living here.
-from judgement import require_threshold, JUDGED_METRICS
+from judgement import require_threshold, level, judged_value, JUDGED_METRICS
 
 # Prose wrapping width. Not a threshold — nothing is judged against it and
 # no diagnosis depends on it; it is the shape of a paragraph, which is why
@@ -120,29 +120,22 @@ def plural(n: int, noun: str) -> str:
 OK, WARN, CRIT = "✓", "⚠", "×"
 
 
-def judge(value: float, warn: float, crit: float, higher_is_worse: bool = True) -> str:
+def judge(value: float, warn: float, crit: float, higher_is_worse: bool = True,
+          inclusive: bool = True) -> str:
     """One glyph for one number, against two cutoffs from thresholds.sh.
 
     The comparisons here are against named parameters, never literals —
     tests/test_thresholds.bats greps this file for a bare number beside a
     comparison operator and fails the build on one.
     """
-    if higher_is_worse:
-        if value >= crit:
-            return CRIT
-        if value >= warn:
-            return WARN
-        return OK
-    if value <= crit:
-        return CRIT
-    if value <= warn:
-        return WARN
-    return OK
+    return {"critical": CRIT, "warn": WARN, "ok": OK}[
+        level(value, warn, crit, higher_is_worse, inclusive)]
 
 
 def stats(label: str, values: list[float | int], unit: str = "",
           warn: float | None = None, crit: float | None = None,
-          higher_is_worse: bool = True) -> str:
+          higher_is_worse: bool = True, inclusive: bool = True,
+          judged_values: list[tuple[float, float]] | None = None) -> str:
     if not values:
         # Absence of a measurement is not a verdict. Same rule the Report
         # card follows when it renders a grey minus.circle instead of a
@@ -153,17 +146,27 @@ def stats(label: str, values: list[float | int], unit: str = "",
             f"   ({plural(len(values), 'sample')})")
     if warn is None or crit is None:
         return f"     {label:24s}  {body}"
+    observations = ([(v, v) for v in values]
+                    if judged_values is None else judged_values)
+    if not observations:
+        return f"     {label:24s}  {body}   not judged (ICMP filtered)"
+    policy_values = [policy for _raw, policy in observations]
+    policy_med = statistics.median(policy_values)
+    select_extreme = max if higher_is_worse else min
+    extreme_raw, extreme = select_extreme(observations, key=lambda pair: pair[1])
 
     # The glyph judges the median — the typical case, which is what a
     # distribution summary is for. A worse extreme is named rather than
     # promoted: "usually fine, once terrible" is the true sentence, and
     # letting the max own the glyph would make one bad minute in a month
     # read as a broken network.
-    glyph = judge(med, warn, crit, higher_is_worse)
-    worst = judge(hi if higher_is_worse else lo, warn, crit, higher_is_worse)
+    glyph = judge(policy_med, warn, crit, higher_is_worse, inclusive)
+    worst = judge(extreme, warn, crit, higher_is_worse, inclusive)
     if worst != glyph:
-        extreme = hi if higher_is_worse else lo
-        body += f"   {worst} {'max' if higher_is_worse else 'min'} {fmt_val(extreme)}{unit}"
+        edge = "max" if higher_is_worse else "min"
+        if higher_is_worse and extreme_raw != extreme:
+            edge = "worst"
+        body += f"   {worst} {edge} {fmt_val(extreme_raw)}{unit}"
     return f"  {glyph}  {label:24s}  {body}"
 
 
@@ -181,6 +184,7 @@ def _judged_kwargs(key: str) -> dict[str, float | bool]:
         "warn": require_threshold(warn_env),
         "crit": require_threshold(crit_env),
         "higher_is_worse": higher_is_worse,
+        "inclusive": key != "mtu_effective",
     }
 
 
@@ -236,14 +240,25 @@ def report_network(label: str, records: list[dict]) -> None:
     def metric(path: str) -> list[float]:
         out = []
         for r in records:
-            v = get_nested(r, path)
-            if isinstance(v, (int, float)):
+            v = metric_value(r, path)
+            if v is not None:
                 out.append(float(v))
         return out
+
+    def judged_metric(path: str, key: str) -> list[tuple[float, float]]:
+        values = []
+        for r in records:
+            value = metric_value(r, path)
+            if value is not None:
+                policy_value = judged_value(key, value, r)
+                if policy_value is not None:
+                    values.append((float(value), policy_value))
+        return values
 
     print("     metric                    min / med / max")
     print(stats("gateway RTT (ms)", metric("gateway.rtt_avg_ms")))
     print(stats("gateway loss (%)", metric("gateway.loss_pct"),
+                judged_values=judged_metric("gateway.loss_pct", "gateway_loss_pct"),
                 **_judged_kwargs("gateway_loss_pct")))
     print(stats("bufferbloat gw Δ (ms)", metric("bufferbloat.gw_delta_ms"),
                 **_judged_kwargs("bufferbloat_gw_ms")))
@@ -260,8 +275,10 @@ def report_network(label: str, records: list[dict]) -> None:
     print(stats("WiFi RSSI (dBm)", metric("wifi.rssi"),
                 **_judged_kwargs("wifi_rssi_dbm")))
     print(stats("path MTU", metric("mtu.effective"),
+                judged_values=judged_metric("mtu.effective", "mtu_effective"),
                 **_judged_kwargs("mtu_effective")))
     print(stats("NTP drift (s)", metric("ntp.drift_seconds"),
+                judged_values=judged_metric("ntp.drift_seconds", "ntp_drift_s"),
                 **_judged_kwargs("ntp_drift_s")))
     # Throughput has no absolute cutoff — "slow" is relative to what this
     # link has done before, which is BL-1's job in --show, not a number

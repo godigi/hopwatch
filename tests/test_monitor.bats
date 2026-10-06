@@ -27,6 +27,8 @@ setup() {
   . "$REPO/lib/globals.sh"
   # shellcheck source=../lib/netid.sh
   . "$REPO/lib/netid.sh"
+  # shellcheck source=../lib/traffic.sh
+  . "$REPO/lib/traffic.sh"
   # shellcheck source=../lib/monitor.sh
   . "$REPO/lib/monitor.sh"
 }
@@ -150,18 +152,32 @@ scanner_rules() {
 }
 
 @test "parity: internet down with DNS also failing is P1 on both" {
-  reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_DNS_OK=0 DNS_OK=0
+  # No independent TCP success can refute this measured public failure.
+  reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0 MON_DNS_OK=0 DNS_OK=0
   local m; m="$(monitor_rules)"; reset_state
-  MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_DNS_OK=0 DNS_OK=0
+  MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0 MON_DNS_OK=0 DNS_OK=0
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"P1"* ]] || return 1
 }
 
 @test "parity: internet down with DNS working is P2 on both" {
-  reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0
-  local m; m="$(monitor_rules)"; reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0
+  reset_state; MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
+  local m; m="$(monitor_rules)"; reset_state
+  MON_PUBLIC_OK=0 PUBLIC_OK=0 MON_TCP_OK=0 TCP_REACH_ANY_OK=0
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"P2"* ]] || return 1
+}
+
+@test "parity: failed web probe with working TCP does not claim an internet outage" {
+  reset_state
+  MON_WEB_OK=0 MON_PUBLIC_OK=0 PUBLIC_OK=0
+  MON_INET_LOSS=100 MON_INET_LOSS_ALT=100
+  INET_LOSS=100 INET_LOSS_ALT=100
+  local m; m="$(monitor_rules)"
+  local s; s="$(scanner_rules)"
+  [[ "$m" != *"P1"* && "$m" != *"P2"* ]]
+  [[ "$s" != *"P1"* && "$s" != *"P2"* ]]
+  [ "$m" = "$s" ]
 }
 
 @test "parity: DNS failing while the internet is reachable is D1 on both" {
@@ -470,7 +486,7 @@ ping_summary() {
   # The old monitor could carry a five-minute-old public success while the
   # user's web traffic had already stopped. The fast canary is authoritative
   # once it has produced a result.
-  reset_state; MON_WEB_OK=0 MON_PUBLIC_OK=1
+  reset_state; MON_WEB_OK=0 MON_PUBLIC_OK=1 MON_TCP_OK=0
   _mon_rules
   [[ "$MON_RULES" == *"P2"* ]] || return 1
   [ "$MON_MEASUREMENT_STATE" = "measured" ]
@@ -761,6 +777,7 @@ assert ch[0]['to'] == 'Cafe \"Sunset\" 5G'
 
 @test "monitor_sample: rule transitions emit fired and cleared entries" {
   run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=measured \
            NETDIAG_MON_RULES='G2 TCP-1 ' NETDIAG_MON_PREV_RULES='VPN-1 TCP-1 '
   printf '%s' "$output" | python3 -c "
 import json,sys
@@ -775,6 +792,130 @@ by_id = {c['id']: c for c in ch}
 assert by_id['rule-fired']['summary'] == 'Router dropping packets', ch
 assert by_id['rule-cleared']['summary'] == 'Resolved: VPN carrying your traffic', ch
 "
+}
+
+@test "monitor_sample: unknown measurement does not claim an L1 recovery" {
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=unknown \
+           NETDIAG_MON_RULES='' NETDIAG_MON_PREV_RULES='L1 '
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json,sys
+sample = json.load(sys.stdin)
+assert sample["status"]["measurement"] == "unknown"
+assert not any(change["id"] == "rule-cleared" for change in sample.get("changes", []))
+'
+}
+
+@test "monitor_sample: gateway measurement cannot clear unmeasured internet fault" {
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=measured \
+           NETDIAG_MON_CLEARABLE_RULES='N1 VPN-1 G1 G2 G3 TCP-1 ' \
+           NETDIAG_MON_RULES='' NETDIAG_MON_PREV_RULES='L1 '
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json,sys
+sample = json.load(sys.stdin)
+assert not any(change["id"] == "rule-cleared" for change in sample.get("changes", []))
+'
+}
+
+@test "_mon_snapshot_prev retains internet fault when only gateway was measured" {
+  reset_state
+  MON_PREV_RULES="L1 "
+  MON_GW_LOSS=0 MON_INET_LOSS="" MON_INET_LOSS_ALT="" MON_WEB_OK=""
+  _mon_rules
+  [ "$MON_MEASUREMENT_STATE" = "unknown" ]
+  [[ " $MON_CLEARABLE_RULES " != *" L1 "* ]]
+  _mon_snapshot_prev
+  [ "$MON_PREV_RULES" = "L1 " ]
+  MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  _mon_snapshot_prev
+  [ "$MON_PREV_RULES" = "" ]
+}
+
+@test "partial measurement presents an unresolved internet fault as unverified" {
+  reset_state
+  MON_PREV_RULES="L1 "
+  MON_GW_LOSS=0 MON_INET_LOSS="" MON_INET_LOSS_ALT="" MON_WEB_OK=""
+  _mon_rules
+  [[ " $MON_RULES " == *" L1 "* ]]
+  [ "$MON_MEASUREMENT_STATE" = "unknown" ]
+  [ "$MON_SEVERITY" = "critical" ]
+}
+
+@test "unverified critical fault does not masquerade as fresh critical over D1" {
+  reset_state
+  MON_PREV_RULES="L1 "
+  MON_GW_LOSS=0 MON_INET_LOSS="" MON_INET_LOSS_ALT=""
+  MON_WEB_OK=1 MON_PUBLIC_OK=1 MON_TCP_OK=0 MON_DNS_OK=0
+  _mon_rules
+  [[ " $MON_RULES " == *" D1 "* && " $MON_RULES " == *" L1 "* ]]
+  [ "$MON_SEVERITY" = "critical" ]
+  [ "$MON_MEASUREMENT_STATE" = "unknown" ]
+}
+
+@test "an unmeasured prerequisite cannot clear L1 or P2" {
+  reset_state
+  MON_PREV_RULES="L1 " MON_GW_LOSS="" MON_INET_LOSS=40 MON_INET_LOSS_ALT=40
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " != *" L1 "* ]]
+  reset_state
+  MON_PREV_RULES="P2 " MON_GW_LOSS="" MON_WEB_OK=0 MON_TCP_OK=0 MON_PUBLIC_OK=0
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " != *" P2 "* ]]
+}
+
+@test "confirmation streak reset does not clear persistent G3" {
+  reset_state
+  MON_PREV_RULES="G3 " MON_GW_LOSS=15 MON_GW_LOSS_STREAK=0
+  _mon_rules
+  [[ " $MON_RULES " == *" G3 "* ]]
+  [[ " $MON_CLEARABLE_RULES " != *" G3 "* ]]
+}
+
+@test "unknown captive classification cannot clear CP-1" {
+  reset_state
+  MON_PREV_RULES="CP-1 " MON_CAPTIVE="" MON_INET_LOSS=0 MON_INET_LOSS_ALT=0
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " != *" CP-1 "* ]]
+  [[ " $MON_RULES " == *" CP-1 "* ]]
+}
+
+@test "unavailable browser check cannot clear BR-1" {
+  reset_state
+  MON_PREV_RULES="BR-1 " MON_REFRESHED="fast medium "
+  MON_BROWSER_DESYNC_COUNT=0 MON_BROWSER_CHECKED=0
+  _mon_rules
+  [[ " $MON_RULES " == *" BR-1 "* ]]
+  [[ " $MON_CLEARABLE_RULES " != *" BR-1 "* ]]
+  MON_BROWSER_CHECKED=1
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " == *" BR-1 "* ]]
+  [[ " $MON_RULES " != *" BR-1 "* ]]
+}
+
+@test "monitor_sample: journal records recovery only after measured traffic" {
+  local journal="$BATS_TEST_TMPDIR/recovery.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=unknown \
+           NETDIAG_MON_RULES='' NETDIAG_MON_PREV_RULES='L1 '
+  [ "$status" -eq 0 ]
+  [ ! -e "$journal" ]
+
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_MEASUREMENT_STATE=measured \
+           NETDIAG_MON_RULES='' NETDIAG_MON_PREV_RULES='L1 '
+  [ "$status" -eq 0 ]
+  python3 - "$journal" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    events = [json.loads(line) for line in stream]
+assert len(events) == 1, events
+assert events[0]["kind"] == "rule-cleared", events
+assert events[0]["from"] == "L1", events
+PY
 }
 
 @test "monitor_sample: an unknown rule id falls back to a generic phrase" {
@@ -1160,15 +1301,16 @@ except Exception:
   # side is null. If a link-down sample (empty interface/SSID) clobbered
   # the snapshot, en0 → "" → en5 would never report interface-changed.
   # Identity fields keep their last known value; rules and the VPN flag
-  # snapshot unconditionally (their empties are meaningful — that is
-  # what lets rule-cleared fire).
+  # snapshot rule recovery when the relevant measurement was made.
   MON_PUB_IP="203.0.113.42"; MON_PUB_CC="Brazil"; MON_PUB_ISP="ExampleNet"
   MON_VPN_ACTIVE=1; MON_VPN_NAME="Mullvad"
   MON_SSID="HomeNet"; MON_BSSID="aa:bb:cc:dd:ee:ff"; MON_INTERFACE="en0"
   MON_RULES="G2 "
+  MON_MEASUREMENT_STATE="measured" MON_CLEARABLE_RULES="G2 "
   _mon_snapshot_prev
   MON_INTERFACE=""; MON_SSID=""; MON_BSSID=""; MON_VPN_NAME=""
   MON_RULES=""; MON_VPN_ACTIVE=0
+  MON_MEASUREMENT_STATE="measured" MON_CLEARABLE_RULES="G2 "
   _mon_snapshot_prev
   [ "$MON_PREV_INTERFACE" = "en0" ]
   [ "$MON_PREV_SSID" = "HomeNet" ]
@@ -1176,6 +1318,17 @@ except Exception:
   [ "$MON_PREV_VPN_NAME" = "Mullvad" ]
   [ "$MON_PREV_RULES" = "" ]
   [ "$MON_PREV_VPN_ACTIVE" = "0" ]
+}
+
+@test "_mon_snapshot_prev retains a fault until a measured healthy cycle" {
+  MON_RULES="L1 " MON_MEASUREMENT_STATE="measured"
+  _mon_snapshot_prev
+  MON_RULES="" MON_MEASUREMENT_STATE="unknown"
+  _mon_snapshot_prev
+  [ "$MON_PREV_RULES" = "L1 " ]
+  MON_MEASUREMENT_STATE="measured" MON_CLEARABLE_RULES="L1 "
+  _mon_snapshot_prev
+  [ "$MON_PREV_RULES" = "" ]
 }
 
 @test "monitor state block initializes every MON_PREV_ variable" {
@@ -1282,4 +1435,3 @@ assert data['internet']['rtt_jitter_ms'] == 3.42
 assert data['jitter_ms'] == 3.42
 "
 }
-

@@ -126,9 +126,10 @@ def _changes() -> list[dict]:
     None on either side means "not measured" on that side, and an
     unmeasured→measured transition is not a change — same convention as
     the rest of the stream, where null is absence of measurement.
-    Rules are the exception: they are always evaluated, so set
-    difference is safe. Summaries are user-facing prose; the GUI
-    renders them verbatim (CLAUDE.md: no verdict strings in Swift).
+    A missing rule only means recovery when the current cycle measured
+    that rule's inputs; an unmeasured cycle has no evidence of clearance. Summaries
+    are user-facing prose; the GUI renders them verbatim (CLAUDE.md: no
+    verdict strings in Swift).
 
     Invariant this relies on: a field whose null suppresses the diff
     must keep its last known value in the previous-sample snapshot
@@ -199,7 +200,13 @@ def _changes() -> list[dict]:
         out.append({"id": "rule-fired", "field": "status.rules",
                     "from": None, "to": rid,
                     "summary": title if title else f"Issue {rid} detected"})
-    for rid in sorted(rules_prev - rules_now):
+    clearable_env = "NETDIAG_MON_CLEARABLE_RULES"
+    if clearable_env in os.environ:
+        clearable = set((_env("CLEARABLE_RULES") or "").split())
+    else:
+        # Compatibility for standalone callers of this helper.
+        clearable = rules_prev if _env("MEASUREMENT_STATE") == "measured" else set()
+    for rid in sorted((rules_prev - rules_now) & clearable):
         title = _get_rule_title(rid)
         out.append({"id": "rule-cleared", "field": "status.rules",
                     "from": rid, "to": None,

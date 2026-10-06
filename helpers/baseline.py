@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare a netdiag JSON snapshot to medians over the last N historical runs.
 
-History is scoped by network identity (`network.id`, see lib/netid.sh).
+History is scoped by history.py's canonical network identity (gateway MAC
+first, then SSID or gateway IP), so SSID visibility cannot split a baseline.
 Without that scoping the file is one flat stream across every network the
 machine has ever been on, so a laptop moving between home, office, and a
 café tripped "gateway RTT x4 spike", "ISP changed", "WiFi channel changed"
@@ -10,9 +11,8 @@ add_diag warn that bumped the exit code to 1. Comparing a run only
 against prior runs on the same network makes these regressions mean what
 they claim to mean.
 
-Records written before network identity existed have no `network.id`.
-They're skipped rather than pooled, so old history ages out of relevance
-instead of silently polluting the comparison.
+Older records can join through the same identity backfill as --history.
+Records with no usable identity, and redacted records, are skipped.
 
 Inputs:
   --history PATH   Path to a JSONL file with one snapshot per line.
@@ -33,7 +33,7 @@ Output (stdout): a JSON object
 Regressions are surfaced when:
   * a "higher is worse" metric (RTT, loss, delta) exceeds median × FACTOR
   * a "higher is better" metric (RSSI, throughput) falls below median × FACTOR
-  * an absolute-comparison metric (PMTU, ISP, WiFi channel) changes value
+  * path MTU decreases, or an absolute-comparison metric (ISP) changes value
 """
 
 from __future__ import annotations
@@ -45,6 +45,8 @@ import statistics
 import sys
 from pathlib import Path
 from typing import Any
+
+from history import group_key, is_redacted
 
 # (path, human label, kind, factor)
 #   spike: flag when current > median * factor
@@ -76,7 +78,7 @@ from typing import Any
 # test, which is what stops a bufferbloat delta of 0.1 ms going to 0.7 ms
 # — a ×7 "spike" that never leaves grade A — from reading as a regression.
 # `mtu.effective`, `speedtest.*` and `public.isp` have no floor: an
-# absolute value changing (MTU, ISP) is significant at any size, and speed
+# MTU decrease or ISP change is significant at any size, and speed
 # already has its own confirmation rule below.
 #
 # Labels are plain English on purpose: this text is read verbatim in a
@@ -172,6 +174,12 @@ def evaluate(current: dict, history: list[dict],
                 counts[v] = counts.get(v, 0) + 1
             majority = max(counts.items(), key=lambda kv: kv[1])
             if majority[1] >= max(3, len(hist_clean) // 2) and cur != majority[0]:
+                if path == "mtu.effective":
+                    # Packet size increasing is an improvement, never BL-1.
+                    if (not isinstance(cur, (int, float))
+                            or not isinstance(majority[0], (int, float))
+                            or cur >= majority[0]):
+                        continue
                 regressions.append({
                     "metric": path, "current": cur, "median": majority[0],
                     "label": label, "kind": "change",
@@ -270,9 +278,10 @@ def main() -> None:
     # matters: taking the tail first would leave a laptop with almost no
     # same-network history right after a batch of runs somewhere else.
     network_id = get_nested(current, "network.id")
-    if network_id:
+    network_key, _ = group_key(current)
+    if network_key != "unknown" and not is_redacted(current):
         same_network = [r for r in history_all
-                        if get_nested(r, "network.id") == network_id]
+                        if not is_redacted(r) and group_key(r)[0] == network_key]
     else:
         # No identity for the current run (no gateway MAC, no SSID, no
         # gateway). Comparing against an arbitrary mix would be worse than

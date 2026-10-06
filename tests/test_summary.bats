@@ -323,3 +323,66 @@ summarise_judged() {
   [[ "$output" == *"2  Completely rewritten wording."* ]] || { echo "$output"; return 1; }
   [[ "$output" != *"Old wording"* ]] || { echo "$output"; return 1; }
 }
+
+@test "accuracy: filtered gateway ping loss is displayed without a fault glyph" {
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" \
+    '"gateway":{"loss_pct":100},"diagnosis":[{"severity":"info","rule":"TCP-1"}]'
+  run summarise_judged
+  [ "$status" -eq 0 ]
+  local line
+  line="$(printf '%s\n' "$output" | grep 'gateway loss')"
+  [[ "$line" == *"100"* ]]
+  [[ "$line" != *"×"* && "$line" != *"⚠"* && "$line" != *"✓"* ]]
+}
+
+@test "accuracy: VPN MTU and exact MTU boundaries use the scan verdict" {
+  local case_data value expected tunnel line
+  for case_data in '1380 ✓ true' '1400 ✓ false' '1280 ⚠ false' '1279 ⚠ true'; do
+    read -r value expected tunnel <<< "$case_data"
+    : > "$STORE"
+    rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" \
+      "\"vpn\":{\"active\":$tunnel},\"mtu\":{\"effective\":$value}"
+    run summarise_judged
+    [ "$status" -eq 0 ]
+    line="$(printf '%s\n' "$output" | grep 'path MTU')"
+    [[ "$line" == *"$expected"* && "$line" == *"$value"* ]] || { echo "$case_data: $line"; return 1; }
+  done
+}
+
+@test "accuracy: signed and alternating NTP drift cannot hide a severe clock fault" {
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" '"ntp":{"drift_seconds":-120}'
+  run summarise_judged
+  [ "$status" -eq 0 ]
+  local line
+  line="$(printf '%s\n' "$output" | grep 'NTP drift')"
+  [[ "$line" == *"×"* && "$line" == *"-120"* ]]
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" '"ntp":{"drift_seconds":120}'
+  run summarise_judged
+  [ "$status" -eq 0 ]
+  line="$(printf '%s\n' "$output" | grep 'NTP drift')"
+  [[ "$line" == *"×"* && "$line" != *"✓"* ]]
+}
+
+@test "review: a tunnel MTU extreme annotation prints the observed packet size" {
+  local mtu line
+  for mtu in 1380 1380 1279; do
+    rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" \
+      "\"vpn\":{\"active\":true},\"mtu\":{\"effective\":$mtu}"
+  done
+  run summarise_judged
+  [ "$status" -eq 0 ]
+  line="$(printf '%s\n' "$output" | grep 'path MTU ' )"
+  [[ "$line" == *"⚠ min 1279.0"* ]] || { echo "$line"; return 1; }
+  [[ "$line" != *"1280.0"* ]]
+}
+
+@test "review: a negative clock drift extreme annotation preserves the observed sign" {
+  local drift line
+  for drift in 0.5 0.5 -120; do
+    rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" "\"ntp\":{\"drift_seconds\":$drift}"
+  done
+  run summarise_judged
+  [ "$status" -eq 0 ]
+  line="$(printf '%s\n' "$output" | grep 'NTP drift')"
+  [[ "$line" == *"× worst -120.0"* ]] || { echo "$line"; return 1; }
+}

@@ -12,6 +12,44 @@ setup() {
   NETDIAG="$REPO/bin/hopwatch"
 }
 
+headline_fixture() {
+  JSON_MODE=0 QUIET=0 QUICK=0 EXPERT=0 LOG=/dev/null
+  . "$REPO/lib/thresholds.sh"
+  . "$REPO/lib/common.sh"
+  . "$REPO/lib/globals.sh"
+  . "$REPO/lib/speedtest.sh"
+  . "$REPO/lib/headline.sh"
+  FOCUS=ping NO_SPEED=1 NO_BUFFERBLOAT=1
+  GATEWAY=192.168.1.1 GW_LOSS=0 GW_LATENCY=2
+}
+
+@test "output: healthy ping-only Internet row reports observed reachability" {
+  headline_fixture
+  PUBLIC_CHECKED=0 PUBLIC_OK=0 INET_LOSS=0 INET_LOSS_ALT=0
+  run headline_run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *unreachable* ]]
+  [[ "$output" == *"reachable"* ]]
+}
+
+@test "output: an unrun Internet check stays unmeasured" {
+  headline_fixture
+  PUBLIC_CHECKED=0 PUBLIC_OK=0 INET_LOSS="" INET_LOSS_ALT=""
+  run headline_run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *unreachable* ]]
+  [[ "$output" == *"not measured"* ]]
+}
+
+@test "output: reachable Internet without public metadata has an honest label" {
+  headline_fixture
+  PUBLIC_CHECKED=1 PUBLIC_OK=1
+  run headline_run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reachable"* ]]
+  [[ "$output" != *"Internet      ?"* ]]
+}
+
 @test "output: the text report has a suitability section" {
   run "$NETDIAG" --quick
   [ "$status" -le 2 ]

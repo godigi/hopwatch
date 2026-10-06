@@ -649,12 +649,16 @@ it would accumulate forever.
   `lib/monitor.sh` against the same `lib/thresholds.sh` constants that
   `lib/diagnosis.sh` reads. For any given network state the monitor and a
   full run name the **same** rule IDs; the bats suite asserts that parity
-  over eleven conditions. Consumers render this list. They must not
-  re-derive it, or the app can contradict the report it links to.
+  across the conditions they can both measure. When a previously reported
+  rule's inputs are missing, the stream carries that last-known rule until
+  the relevant probes can evaluate recovery. Consumers render this list.
+  They must not re-derive it, or the app can contradict the report it links to.
 - **`status.measurement`** is separate from health severity. `measured`
   means a fast gateway, internet-loss, or HTTPS reachability probe produced
-  a result; `unknown` means the link may still be associated but traffic was
-  not successfully tested; `link-down` means there was no default route.
+  a result sufficient for the current health verdict; `unknown` means the
+  link may still be associated but traffic was not sufficiently tested,
+  including when an unverified last-known fault dominates current evidence;
+  `link-down` means there was no default route.
   `unknown` must never be rendered as an all-clear.
 - **`status.icmp_filtered`** is TCP-1 holding: real connections work,
   only ping is being dropped. Common on hotel and corporate networks.
@@ -679,10 +683,10 @@ it would accumulate forever.
   measured" and suppresses the entry, so a first slow-tier result is
   not a "change"; to keep that sound, the previous-sample snapshot
   retains the last *known* value of every null-suppressed field
-  (a link-down sample must not erase the baseline). Rules are the
-  deliberate exception — they are always evaluated, so `rule-fired`/
-  `rule-cleared` come from plain set difference; do not "fix" the
-  rules path to match the null rule. Rule transitions carry the rule
+  (a link-down sample must not erase the baseline). `rule-cleared` is
+  emitted only when this cycle measured the inputs needed to evaluate
+  that particular rule. An unknown or partial cycle keeps the last-known
+  rule pending and does not record a recovery. Rule transitions carry the rule
   ID on one side and `null` on the other (`rule-fired`: `from` null;
   `rule-cleared`: `to` null), so consumers must treat `from`/`to` as
   nullable. `rule-fired`'s `summary` is the rule's title from
@@ -870,7 +874,8 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
   the key rather than assume it.
 - **`networks[].judged`** (schema 2+) is a sibling of `metric_stats`, not a
   replacement for it: `metric_stats` states facts with no verdict;
-  `judged` states a verdict, drawn from those same facts. It is
+  `judged` states a verdict using context-aware metric readings and
+  recurring recorded diagnoses. It is
   `{"overall": "ok" | "warn" | "critical" | null, "summary": "<sentence>",
   "metrics": {key: "ok" | "warn" | "critical" | null}}`.
 
@@ -885,17 +890,22 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
   "healthy"** — a consumer that defaults a missing key to `ok` would be
   inventing a verdict this project has deliberately declined to state.
 
-  Each present verdict judges **the median only** —
-  `metric_stats[key].median` run through the same comparison
-  `--summary`'s text report has always used — never a single run's
-  `value`, which is what `--show`'s own `comparison` block judges
-  instead. This is why a verdict is `null` exactly when the corresponding
-  `metric_stats[key]` is `null`: both are gated on the identical
-  `THRESH_COMPARE_MIN_SAMPLES` check over the identical population, so
-  there is one nullability rule here, not two that could disagree.
-  `overall` is the worst of the present verdicts (`critical` beats `warn`
-  beats `ok`), or `null` when every judged metric on this network is
-  `null` — too few checks to judge any of them yet.
+  Each present metric verdict judges **the median only**, never a single
+  run's value. The judgement population can differ from the raw
+  `metric_stats` population: gateway loss from a run with `TCP-1` is
+  displayed but excluded from router-fault judgement; NTP drift is judged
+  by magnitude; and VPN or split-tunnel MTU uses the scan's tunnel policy.
+  Thus `judged.metrics[key]` may be `null` while `metric_stats[key]` has
+  numbers. `--summary` applies the same context to its verdict glyphs and
+  retains raw min/median/max values in its text.
+
+  `overall` is the worst present metric verdict or recurring recorded
+  diagnosis severity (`critical` beats `warn` beats `ok`). Recurrence
+  requires at least `THRESH_COMPARE_MIN_SAMPLES` fault-bearing full,
+  quick, or legacy checks in the selected history; focused checks do not
+  vote. One isolated old failure cannot make an otherwise healthy network
+  critical. `overall` is `null` only when neither a metric nor recurring
+  diagnoses has enough evidence to judge.
 
   `summary` is CLI-authored prose (`helpers/judgement.py`'s
   `compose_summary`) — e.g. "Usually healthy across 1,913 checks.",
@@ -905,9 +915,9 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
   `overall` is `null`. Consumers render it verbatim, the same discipline
   `diagnosis[].summary` and `rules[].blurb` already hold: a GUI must not
   compose its own wording from `overall` and `metrics`, because
-  `helpers/judgement.py` is the same table `--summary`'s text output
-  reads for the identical six metrics, and a second wording is a second
-  place for the two to quietly disagree.
+  `helpers/judgement.py` supplies the same metric policy used by
+  `--summary`'s text output, and a second wording is a second place for
+  the two to quietly disagree.
 
   Every cutoff `judged` compares against comes from `lib/thresholds.sh`
   through the environment, via `helpers/judgement.py`'s

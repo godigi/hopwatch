@@ -17,6 +17,7 @@ setup() {
   . "$REPO/lib/common.sh"
   # shellcheck source=../lib/globals.sh
   . "$REPO/lib/globals.sh"
+  . "$REPO/lib/traffic.sh"
   # shellcheck source=../lib/traceroute.sh
   . "$REPO/lib/traceroute.sh"
   # shellcheck source=../lib/mtr.sh
@@ -1301,6 +1302,7 @@ diag_text_for() {
   # shellcheck source=../lib/diagnosis.sh
   . "$REPO/lib/diagnosis.sh"
   GATEWAY="10.125.128.1" LINK_UP=1 GW_LOSS=0 PUBLIC_OK=0 DNS_OK=0
+  PUBLIC_CHECKED=1
   CAPTIVE_PORTAL=0
   DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
   diagnosis_run >/dev/null

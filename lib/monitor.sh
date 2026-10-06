@@ -146,6 +146,8 @@ MON_PUB_CITY=""
 MON_PUBLIC_OK=""
 MON_CAPTIVE=""
 MON_RULES=""
+MON_CLEARABLE_RULES=""
+MON_BROWSER_CHECKED=0
 MON_SEVERITY="ok"
 # `ok` severity means no diagnosis rule fired. It does not mean the probes
 # succeeded; keep measurement availability separate so the GUI can avoid a
@@ -561,6 +563,7 @@ _mon_probe_wifi_signal() {
 
 _mon_probe_browser() {
   MON_BROWSER_DESYNC_COUNT=0
+  MON_BROWSER_CHECKED=0
   local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/browser_check.py"
   [ -f "$helper" ] || return 0
   local out
@@ -568,7 +571,13 @@ _mon_probe_browser() {
   [ -n "$out" ] || return 0
   local status count _
   IFS=$'\t' read -r status count _ <<< "$out"
-  if [ "$status" = "DESYNC" ] && [ "${count:-0}" -gt 0 ]; then
+  case "$status" in
+    OK) MON_BROWSER_CHECKED=1 ;;
+    DESYNC) [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] \
+              && MON_BROWSER_CHECKED=1 ;;
+    *) return 0 ;;
+  esac
+  if [ "$MON_BROWSER_CHECKED" -eq 1 ] && [ "$status" = "DESYNC" ]; then
     MON_BROWSER_DESYNC_COUNT="$count"
   fi
 }
@@ -629,6 +638,9 @@ _mon_add_rule() {
 
 _mon_rules() {
   MON_RULES=""
+  # A rule can clear only when this cycle measured the inputs that decide it.
+  # Link and VPN state are observed every cycle, even when traffic is not.
+  MON_CLEARABLE_RULES="N1 VPN-1 "
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
@@ -663,6 +675,13 @@ _mon_rules() {
   # the slower public probe for compatibility with the first sample and with
   # older test/CLI inputs that do not provide MON_WEB_OK.
   local _mon_public_ok="${MON_WEB_OK:-$MON_PUBLIC_OK}"
+  # A failed HTTPS probe does not prove the internet is down when other
+  # public traffic succeeds. Match the full scan's outage interpretation.
+  if [ "${MON_TCP_OK:-0}" = "1" ] \
+     || loss_below "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+     || loss_below "$MON_INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
+    _mon_public_ok=1
+  fi
 
   # Is the gateway's ping loss filtering rather than fault? Decided before
   # the loss rules below because it decides whether they run at all, and
@@ -783,6 +802,78 @@ _mon_rules() {
     _mon_add_rule warn BR-1
   fi
 
+  # A rule's absence is recovery only when this cycle could evaluate that
+  # rule. A healthy gateway ping cannot resolve last cycle's L1 if both
+  # public ping summaries are missing. A restarted confirmation streak
+  # cannot resolve G3/L2 while loss remains in their warning bands.
+  if [ -n "$MON_GW_LOSS" ]; then
+    MON_CLEARABLE_RULES+="G1 G2 "
+    if ! loss_at_least "$MON_GW_LOSS" "$LOSS_WARN_PCT" \
+       || loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
+      MON_CLEARABLE_RULES+="G3 "
+    fi
+    if loss_below "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
+      MON_CLEARABLE_RULES+="TCP-1 "
+    else
+      case " $MON_REFRESHED " in
+        *" medium "*) [ -n "$MON_TCP_OK" ] && MON_CLEARABLE_RULES+="TCP-1 " ;;
+      esac
+    fi
+  fi
+  if [ -n "$MON_GW_LOSS" ] && [ -n "$MON_INET_LOSS" ] \
+     && [ -n "$MON_INET_LOSS_ALT" ]; then
+    MON_CLEARABLE_RULES+="L1 "
+    if ! loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT" \
+       || { ! loss_at_least "$MON_INET_LOSS" "$LOSS_WARN_PCT" \
+            && ! loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_WARN_PCT"; } \
+       || { loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT" \
+            && loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_CRIT_PCT"; } \
+       || [ "$_mon_icmp_filtered" -eq 1 ]; then
+      MON_CLEARABLE_RULES+="L2 "
+    fi
+    if loss_below "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+       || loss_below "$MON_INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
+      MON_CLEARABLE_RULES+="ICMP-1 "
+    fi
+  fi
+  if [ "$_mon_public_ok" = "1" ] \
+     || { [ -n "$MON_GW_LOSS" ] \
+          && { [ -n "$MON_WEB_OK" ] || [ -n "$MON_PUBLIC_OK" ]; }; }; then
+    MON_CLEARABLE_RULES+="P1 P2 "
+  fi
+  [ -n "$MON_CAPTIVE" ] && MON_CLEARABLE_RULES+="CP-1 "
+  if [ "$MON_DNS_OK" = "1" ] \
+     || { [ "$MON_DNS_OK" = "0" ] && [ "$_mon_public_ok" = "0" ] \
+          && [ -n "$MON_GW_LOSS" ]; }; then
+    MON_CLEARABLE_RULES+="D1 "
+  fi
+  case " $MON_REFRESHED " in
+    *" medium "*) [ "$MON_BROWSER_CHECKED" -eq 1 ] \
+                     && MON_CLEARABLE_RULES+="BR-1 " ;;
+  esac
+
+  # Preserve unresolved last-known rules in the public sample as well as
+  # the private snapshot. Otherwise the GUI sees rules=[] and severity=ok
+  # and announces a recovery that the journal correctly refused to record.
+  local current_severity="$MON_SEVERITY" prior unresolved=0
+  for prior in $MON_PREV_RULES; do
+    case " $MON_RULES " in *" $prior "*) continue ;; esac
+    case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
+    case "$prior" in
+      N1|G1|G2|P1|P2|L1) _mon_add_rule critical "$prior" ;;
+      G3|D1|CP-1|L2|BR-1) _mon_add_rule warn "$prior" ;;
+      *) _mon_add_rule info "$prior" ;;
+    esac
+    unresolved=1
+  done
+  if [ "$unresolved" -eq 1 ]; then
+    case "$current_severity" in
+      ok|info) MON_MEASUREMENT_STATE="unknown" ;;
+      *) [ "$current_severity" != "$MON_SEVERITY" ] \
+           && MON_MEASUREMENT_STATE="unknown" ;;
+    esac
+  fi
+
   # Cadence follows severity, not rule count: an info-level VPN notice is
   # not a reason to probe twice as often.
   case "$MON_SEVERITY" in
@@ -800,10 +891,9 @@ _mon_rules() {
 # monitor_sample.py suppresses comparisons where either side is null,
 # so an empty value here (a link-down sample, a fetch that failed)
 # must not erase the baseline — otherwise en0 → "" → en5 never
-# reports interface-changed. Rules and the VPN flag are always
-# evaluated, so they snapshot unconditionally; their empties are
-# meaningful (that is what lets rule-cleared and vpn-disconnected
-# fire).
+# reports interface-changed. A missing rule is meaningful only after its
+# own inputs were measured; otherwise retain it for the next cycle that
+# can evaluate recovery. The VPN flag is observed independently of traffic.
 _mon_snapshot_prev() {
   [ -n "$MON_PUB_IP" ]    && MON_PREV_PUB_IP="$MON_PUB_IP"
   [ -n "$MON_PUB_CC" ]    && MON_PREV_PUB_CC="$MON_PUB_CC"
@@ -813,7 +903,17 @@ _mon_snapshot_prev() {
   [ -n "$MON_BSSID" ]     && MON_PREV_BSSID="$MON_BSSID"
   [ -n "$MON_INTERFACE" ] && MON_PREV_INTERFACE="$MON_INTERFACE"
   MON_PREV_VPN_ACTIVE="$MON_VPN_ACTIVE"
-  MON_PREV_RULES="$MON_RULES"
+  local prior rule next_rules="$MON_RULES"
+  for prior in $MON_PREV_RULES; do
+    case " $MON_CLEARABLE_RULES " in
+      *" $prior "*) ;;
+      *) case " $next_rules " in
+           *" $prior "*) ;;
+           *) next_rules="${next_rules}${prior} " ;;
+         esac ;;
+    esac
+  done
+  MON_PREV_RULES="$next_rules"
   MON_HAVE_PREV=1
   return 0
 }
@@ -873,6 +973,7 @@ _mon_emit() {
   NETDIAG_MON_PUB_CC_ISO="$MON_PUB_CC_ISO" \
   NETDIAG_MON_CAPTIVE="$MON_CAPTIVE" \
   NETDIAG_MON_RULES="$MON_RULES" \
+  NETDIAG_MON_CLEARABLE_RULES="$MON_CLEARABLE_RULES" \
   NETDIAG_MON_SEVERITY="$MON_SEVERITY" \
   NETDIAG_MON_MEASUREMENT_STATE="$MON_MEASUREMENT_STATE" \
   NETDIAG_MON_ICMP_FILTERED="$MON_ICMP_FILTERED" \

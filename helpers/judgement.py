@@ -59,7 +59,7 @@ def require_threshold(name: str) -> float:
 
 
 def level(value: float, warn: float, crit: float,
-          higher_is_worse: bool = True) -> str:
+          higher_is_worse: bool = True, inclusive: bool = True) -> str:
     """One verdict word for one number, against two cutoffs from thresholds.sh.
 
     The comparisons here are against named parameters, never literals —
@@ -72,11 +72,44 @@ def level(value: float, warn: float, crit: float,
         if value >= warn:
             return "warn"
         return "ok"
-    if value <= crit:
+    if value < crit or (inclusive and value == crit):
         return "critical"
-    if value <= warn:
+    if value < warn or (inclusive and value == warn):
         return "warn"
     return "ok"
+
+
+def metric_level(key: str, value: float, warn: float, crit: float,
+                 higher_is_worse: bool) -> str:
+    """MTU uses the scan's strict lower boundaries; other rows stay inclusive."""
+    return level(value, warn, crit, higher_is_worse,
+                 inclusive=key != "mtu_effective")
+
+
+def judged_value(key: str, value: float, record: dict) -> float | None:
+    """One observation for policy judgement, leaving raw distributions intact.
+
+    TCP-1 already proves the gateway's ICMP silence is filtering. Clock
+    drift is judged by magnitude before aggregation. Tunnel MTUs map to
+    representatives of the scan's healthy/warn bands: their size remains
+    unchanged in stored runs, charts, and summary distributions.
+    """
+    if key == "gateway_loss_pct":
+        if any(isinstance(d, dict) and d.get("rule") == "TCP-1"
+               for d in record.get("diagnosis") or []):
+            return None
+    if key == "ntp_drift_s":
+        return abs(value)
+    if key == "mtu_effective":
+        vpn = record.get("vpn")
+        path = record.get("path_actors")
+        vpn = vpn if isinstance(vpn, dict) else {}
+        path = path if isinstance(path, dict) else {}
+        if vpn.get("active") is True or path.get("split_tunnel") is True:
+            minimum = require_threshold("THRESH_MTU_CRIT")
+            return (minimum if value < minimum
+                    else require_threshold("THRESH_MTU_STANDARD"))
+    return value
 
 
 # ── The one table both consumers judge from ───────────────────────────────
@@ -131,11 +164,9 @@ def _join_fragments(fragments: list[str]) -> str:
 
 def compose_summary(overall: str | None, offender_phrases: list[str],
                      n_checks: int) -> str:
-    """The one sentence both --summary's text and --history's judged.summary
-    render verbatim — see the module docstring for why there is only one
-    of these rather than two wordings that could drift apart.
+    """The network-level sentence --history supplies to its consumers.
 
-    `overall` is the worst verdict across JUDGED_METRICS for this network
+    `overall` is the worst metric or recurring diagnosis verdict
     (or None when every judged metric is null, i.e. below
     THRESH_COMPARE_MIN_SAMPLES). `offender_phrases` is the phrase fragment
     of every metric that judged warn or critical, in JUDGED_METRICS order.

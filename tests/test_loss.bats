@@ -23,6 +23,7 @@ setup() {
   . "$REPO/lib/common.sh"
   # shellcheck source=../lib/globals.sh
   . "$REPO/lib/globals.sh"
+  . "$REPO/lib/traffic.sh"
   # shellcheck source=../lib/diagnosis.sh
   . "$REPO/lib/diagnosis.sh"
 }
@@ -327,6 +328,7 @@ sev_of() {
   # (loss < 20) — a total internet outage diagnosed as nothing at all.
   healthy_baseline
   GW_LOSS=8 PUBLIC_OK=0 DNS_OK=1
+  TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
   diagnosis_run >/dev/null
   fired P2
   [ "$MAX_SEVERITY" -eq 2 ]
@@ -335,6 +337,7 @@ sev_of() {
 @test "P1 still fires with minor gateway loss when DNS is also down" {
   healthy_baseline
   GW_LOSS=8 PUBLIC_OK=0 DNS_OK=0
+  TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
   diagnosis_run >/dev/null
   fired P1
 }
@@ -370,7 +373,7 @@ sev_of() {
 @test "diagnosis_run emits every critical when more than one fires" {
   healthy_baseline
   GW_LOSS=0 PUBLIC_OK=0 DNS_OK=1
-  INET_LOSS=40 INET_LOSS_ALT=40
+  TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
   diagnosis_run >/dev/null
   fired P2
   fired L1

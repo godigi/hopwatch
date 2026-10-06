@@ -58,6 +58,73 @@ diag_text_for() {
   return 1
 }
 
+@test "diagnosis: healthy ping-only does not invent a public or DNS outage" {
+  accuracy_baseline
+  FOCUS=ping PUBLIC_CHECKED=0 PUBLIC_OK=0 DNS_OK=0 TCP_REACH_ANY_OK=0
+  diagnosis_run >/dev/null
+  ! diag_has P1 || { echo "unexpected P1"; return 1; }
+  ! diag_has P2 || { echo "unexpected P2"; return 1; }
+  [ "$MAX_SEVERITY" -eq 0 ]
+}
+
+@test "diagnosis: independent public ping or TCP success refutes metadata failure" {
+  local evidence
+  for evidence in ping tcp; do
+    accuracy_baseline
+    PUBLIC_OK=0 INET_LOSS=100 INET_LOSS_ALT=100 TCP_REACH_ANY_OK=0
+    if [ "$evidence" = ping ]; then INET_LOSS_ALT=0; else TCP_REACH_ANY_OK=1; fi
+    diagnosis_run >/dev/null
+    ! diag_has P1 || { echo "unexpected P1 with $evidence success"; return 1; }
+    ! diag_has P2 || { echo "unexpected P2 with $evidence success"; return 1; }
+    [ "$MAX_SEVERITY" -lt 2 ]
+  done
+}
+
+@test "diagnosis: measured unrefuted public failure retains critical outage rules" {
+  local dns rule
+  for dns in 0 1; do
+    accuracy_baseline
+    PUBLIC_OK=0 DNS_OK="$dns" TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
+    diagnosis_run >/dev/null
+    rule=P1; [ "$dns" -eq 1 ] && rule=P2
+    diag_has "$rule"
+    [ "$(diag_sev_for "$rule")" = critical ]
+    [ "$MAX_SEVERITY" -eq 2 ]
+  done
+}
+
+@test "diagnosis: captive portal owns measured public failure" {
+  accuracy_baseline
+  PUBLIC_OK=0 TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
+  CAPTIVE_PORTAL=1 CAPTIVE_PORTAL_CODE=302
+  diagnosis_run >/dev/null
+  diag_has CP-1
+  [ "$(diag_sev_for CP-1)" = critical ]
+  ! diag_has P1
+  ! diag_has P2
+}
+
+@test "public: genuine Apple canary success keeps reachability without metadata" {
+  accuracy_baseline
+  . "$REPO/lib/public.sh"
+  PUBLIC_OK=0 PUB_IP="" PUB_ISP="" TARGET=""
+  curl() {
+    case "$*" in
+      *ifconfig.co*) return 7 ;;
+      *captive.apple.com*) cat "$REPO/tests/fixtures/captive_apple_success.txt"; printf '\n200' ;;
+    esac
+  }
+  public_run >/dev/null || true
+  [ "$PUBLIC_CHECKED" -eq 1 ]
+  [ "$PUBLIC_OK" -eq 1 ]
+  [ -z "$PUB_IP" ]
+  [ -z "$PUB_ISP" ]
+  [ "$CAPTIVE_PORTAL" -eq 0 ]
+  diagnosis_run >/dev/null
+  ! diag_has P1
+  ! diag_has P2
+}
+
 @test "diagnosis: M1 stays silent on VPN with standard tunnel MTU (1380 bytes)" {
   accuracy_baseline
   VPN_ACTIVE=1
@@ -152,6 +219,7 @@ diag_text_for() {
 @test "remediation: D2 never instructs modifying System Settings network adapter DNS" {
   accuracy_baseline
   PUBLIC_OK=0
+  TCP_REACH_ANY_OK=0 INET_LOSS=100 INET_LOSS_ALT=100
   DNS_OK=0
   DNS_LINES="1.1.1.1|apple.com||FAIL"
   diagnosis_run >/dev/null
@@ -212,4 +280,3 @@ diag_text_for() {
   [[ "$text" != *"replace"* ]]
   [[ "$text" == *"pause"* ]] || [[ "$text" == *"QoS"* ]]
 }
-

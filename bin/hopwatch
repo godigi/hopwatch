@@ -33,6 +33,11 @@ fi
 
 set -u
 
+# The signed app bundles these Python helpers as sealed resources. Python's
+# import cache would add files inside the bundle after launch and invalidate
+# its signature, so all helper subprocesses must keep bytecode in memory.
+export PYTHONDONTWRITEBYTECODE=1
+
 # ── Exit-code contract ─────────────────────────────────────────────────────
 # 0 healthy · 1 warnings only · 2 ≥ 1 critical diagnosis · 3 script error.
 #
@@ -1073,24 +1078,17 @@ netid_fingerprint_changed "$NETID_FP_START" "$NETID_FP_END" \
   && NETWORK_CHANGED_MID_RUN=1
 
 headline_run     # one-line punchline of everything above
-diagnosis_run
 
-# The speed test runs LAST, after the Report card and the diagnoses have
-# already been printed. It is by far the most expensive phase (~58 s of a
-# ~95 s run with speedtest-cli), and every check that matters for a
-# diagnosis has completed by now — nothing in diagnosis_run reads
-# SPEEDTEST_*, only the JSON emitter does. Running it before the report
-# meant the user stared at a spinner for a minute before learning anything
-# about their network, including in the case where the answer was "your
-# router is dropping packets" and they'd have acted on it immediately.
+# The Report card provides early feedback before the most expensive
+# phase. The definitive diagnosis waits for speed: B1/B2 use measured
+# capacity to interpret saturation, and SP-1 compares it with WiFi's rate.
 #
-# It still cannot be parallelised: it deliberately saturates the link, so
-# it would corrupt every latency, loss, and bufferbloat number if it
-# overlapped them. Last is the only safe place for it.
+# Speed still runs last among probes: it deliberately saturates the link,
+# so it must not overlap latency, loss, or bufferbloat measurements.
 run_timed speedtest   speedtest_run
 
-# output_run comes after, so --json and the log still carry the speed
-# figures — only the human-readable ordering changed.
+# Print and save the same verdict, with all available measurements.
+diagnosis_run
 output_run
 
 # gping prompt: if the user didn't pass --gping or --no-gping and we're

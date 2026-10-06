@@ -17,6 +17,17 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "history helper imports do not write bytecode into a bundled CLI" {
+  local bundle="$BATS_TEST_TMPDIR/bundle"
+  mkdir -p "$bundle/bin" "$bundle/lib" "$bundle/helpers"
+  cp "$BATS_TEST_DIRNAME/../bin/hopwatch" "$bundle/bin/"
+  cp "$BATS_TEST_DIRNAME/../lib/"*.sh "$bundle/lib/"
+  cp "$BATS_TEST_DIRNAME/../helpers/"*.py "$bundle/helpers/"
+  run env HOME="$BATS_TEST_TMPDIR/home" "$bundle/bin/hopwatch" --history
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$bundle/helpers" -name '*.pyc' -print -quit)" ]
+}
+
 # ── Exit-code contract: 0 healthy · 1 warn · 2 critical · 3 script error ──
 # Usage errors must NOT exit 2 — that status is reserved for "a critical
 # diagnosis was found", and a wrapper can't tell a typo from a dead link.

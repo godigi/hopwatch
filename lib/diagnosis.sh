@@ -15,6 +15,15 @@
 # discredits both.
 
 diagnosis_run() {
+  # A failed metadata request is refuted by actual public traffic. Keep
+  # the original public/captive evidence for CP-1, whose interception
+  # diagnosis takes precedence over the wider-outage rules.
+  local _public_traffic_ok="$PUBLIC_OK"
+  if [ "${TCP_REACH_ANY_OK:-0}" -eq 1 ] \
+     || loss_below "${INET_LOSS:-}" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+     || loss_below "${INET_LOSS_ALT:-}" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
+    _public_traffic_ok=1
+  fi
   # N1 / N1c — no usable network. Every rule below keys off a measurement
   # that only exists once there IS a link, so without this the most basic
   # failure mode (WiFi off, cable unplugged) fired zero rules and the run
@@ -93,7 +102,8 @@ diagnosis_run() {
     add_diag critical DH-3 "$_joined, but the network never gave it an address — so your Mac assigned itself a placeholder one (${LINK_IP:-a self-assigned address}) that can't reach anything. This is almost always the router's address service (DHCP) being down, out of addresses, or still starting up after a reboot. $_fix; if that doesn't work, restart the router. Nothing will work until the network hands out a real address."
   elif [ -z "$GATEWAY" ]; then
     add_diag critical N1 "Your Mac has no network connection at all — nothing is joined and no cable is carrying a link. Turn WiFi on and pick a network, or check that the ethernet cable is seated at both ends. Nothing else can be diagnosed until this is fixed."
-  elif [ "${PUBLIC_CHECKED:-0}" -eq 1 ] && [ "$PUBLIC_OK" -eq 0 ] && [ -z "$GW_LOSS" ]; then
+  elif [ "${PUBLIC_CHECKED:-0}" -eq 1 ] && [ "$_public_traffic_ok" -eq 0 ] \
+       && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] && [ -z "$GW_LOSS" ]; then
     # Reachable only from a focused run (--mtu-only), where the gateway
     # section is skipped so P1/P2 below can't evaluate. PUBLIC_CHECKED
     # gates it because --wifi-only never runs public_run at all, and the
@@ -306,7 +316,8 @@ diagnosis_run() {
   #
   # CP-1 above owns the portal case. Without this guard both fire, and P1's
   # "call your ISP" outranks the one instruction that actually works.
-  if [ "$PUBLIC_OK" -eq 0 ] && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] \
+  if [ "${PUBLIC_CHECKED:-0}" -eq 1 ] && [ "$_public_traffic_ok" -eq 0 ] \
+     && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] \
      && loss_below "$GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
     if [ "$DNS_OK" -eq 0 ]; then
       add_diag critical P1 "Your local network is working but the wider internet is unreachable, and name lookups are also failing — likely a DNS or upstream-ISP outage. Try opening http://1.1.1.1 in a browser: if it loads, the problem is DNS; if not, it's the ISP."
@@ -323,11 +334,11 @@ diagnosis_run() {
   # the total case and requires nothing of the sort — which is the point.
   # D5 handles the specific silent fallback case: primary resolver is dead
   # and secondary answers, causing multi-second timeout delays on every query.
-  if [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$PUBLIC_OK" -eq 0 ]; then
+  if [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 0 ]; then
     add_diag warn D2 "No name lookups are working at all — every DNS server your Mac tried failed to answer. On its own that would point at your DNS settings, but nothing else on the internet is reachable either, so this is most likely a symptom rather than the cause. Fix the connection first; if lookups still fail once it's back, restart your router."
   elif [ "${DNS_PRIMARY_FAIL:-0}" -eq 1 ] && [ "${DNS_FALLBACK_OK:-0}" -eq 1 ]; then
     add_diag warn D5 "Your primary DNS server (${PRIMARY_DNS}) is not responding. macOS is experiencing a multi-second delay waiting for timeouts before silently falling back to secondary DNS (${SECONDARY_DNS:-a secondary resolver}). This causes web pages and links to hesitate for several seconds before opening. Update your DNS settings or restart your router."
-  elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$PUBLIC_OK" -eq 1 ]; then
+  elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 1 ]; then
     add_diag warn D1 "The internet works but some name lookups are failing — your DNS server is flaky. Restart your router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks, consider Encrypted DNS in your browser."
   fi
 
@@ -403,7 +414,7 @@ diagnosis_run() {
     [ -n "$IPV6_PING_LOSS" ] && [ "${IPV6_PING_LOSS%.*}" -ge "$THRESH_IPV6_LOSS_PCT" ] && v6_broken=1
     [ "$IPV6_AAAA_OK" -eq 0 ] && v6_broken=1
     [ "$IPV6_TCP_OK" -eq 0 ] && v6_broken=1
-    if [ "$v6_broken" -eq 1 ] && [ "$PUBLIC_OK" -eq 1 ]; then
+    if [ "$v6_broken" -eq 1 ] && [ "$_public_traffic_ok" -eq 1 ]; then
       aaaa_str=$([ "$IPV6_AAAA_OK" -eq 1 ] && echo OK || echo FAIL)
       tcp6_str=$([ "$IPV6_TCP_OK" -eq 1 ] && echo OK || echo FAIL)
       add_diag warn V6-1 "Big sites (Google, YouTube, Cloudflare-hosted apps) feel sluggish for the first second of every page load — your network has a half-working modern-internet (IPv6) setup. Your Mac tries the new way, waits ~250 ms for it to fail, then falls back to the old way. Reboot the router; if it persists, ask your ISP whether IPv6 is actually enabled (technical: loss ${IPV6_PING_LOSS}%, AAAA ${aaaa_str}, TCP6 ${tcp6_str} — Happy Eyeballs is masking the failure)."
@@ -443,7 +454,7 @@ diagnosis_run() {
   # guard L1 would tell those users their ISP is down on a working link,
   # which is the same false-critical shape as the ping6 bug in v0.5.2.
   local _icmp_filtered=0
-  if [ "$PUBLIC_OK" -eq 1 ] && [ "$TCP_REACH_ANY_OK" -eq 1 ] \
+  if [ "$_public_traffic_ok" -eq 1 ] && [ "$TCP_REACH_ANY_OK" -eq 1 ] \
      && loss_at_least "$INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
      && loss_at_least "$INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
     _icmp_filtered=1

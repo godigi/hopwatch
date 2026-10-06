@@ -159,12 +159,16 @@ headline_run() {
   fi
 
   # ── Internet (public reach) ───────────────────────────────────────────
-  if [ "$PUBLIC_OK" -eq 1 ]; then
-    local publine="${PUB_ISP:-?}"
+  if [ "$PUBLIC_OK" -eq 1 ] || [ "${TCP_REACH_ANY_OK:-0}" -eq 1 ] \
+     || loss_below "${INET_LOSS:-}" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
+     || loss_below "${INET_LOSS_ALT:-}" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
+    local publine="${PUB_ISP:-reachable · ISP metadata unavailable}"
     [ -n "$PUB_CITY" ] && publine="$publine (${PUB_CITY}${PUB_CC:+, $PUB_CC})"
     _row ok "Internet" "$publine"
-  else
+  elif [ "${PUBLIC_CHECKED:-0}" -eq 1 ]; then
     _row bad "Internet" "unreachable"
+  else
+    _row "" "Internet" "not measured"
   fi
 
   # ── Internet latency / jitter (always-on probe to 1.1.1.1) ────────────

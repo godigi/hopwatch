@@ -647,6 +647,127 @@ print("ok")'
   [ "$output" = "2" ]
 }
 
+# Detection accuracy fixtures keep every stored run distinct, even when
+# the measurements repeat. Expected verdicts come from the scan policy.
+accuracy_records() {
+  python3 - "$LIVE" "$1" "$2" <<'PY'
+import datetime, json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+offset = len(p.read_text().splitlines())
+extra = json.loads(sys.argv[3])
+with p.open('a') as f:
+    for i in range(int(sys.argv[2])):
+        ts = datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(seconds=offset+i)
+        r = {'timestamp': ts.isoformat(), 'network': {'id': 'wifi:mac=aa:bb:cc:dd:ee:ff'},
+             'gateway': {'loss_pct': 0}, 'wifi': {'rssi': -50}, 'mtu': {'effective': 1500}}
+        r.update(extra)
+        f.write(json.dumps(r)+'\n')
+PY
+}
+
+@test "accuracy: ten critical internet loss checks cannot be judged healthy" {
+  accuracy_records 10 '{"internet_latency":{"loss_pct":40},"diagnosis":[{"rule":"L1","severity":"critical"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"critical"' ]
+  run hget networks.0.judged.summary
+  [[ "$output" != *"Usually healthy"* ]]
+}
+
+@test "accuracy: repeated DNS critical faults survive many clean metric checks" {
+  accuracy_records 90 '{}'
+  accuracy_records 10 '{"diagnosis":[{"rule":"D2","severity":"critical"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"critical"' ]
+}
+
+@test "accuracy: recurring recorded warnings constrain the network verdict" {
+  accuracy_records 10 '{"diagnosis":[{"rule":"D1","severity":"warn"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"warn"' ]
+}
+
+@test "accuracy: one old critical check does not label a clean network persistently faulty" {
+  accuracy_records 1 '{"diagnosis":[{"rule":"L1","severity":"critical"}]}'
+  accuracy_records 20 '{}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"ok"' ]
+}
+
+@test "accuracy: focused faults do not vote but quick checks do and limit windows recurrence" {
+  accuracy_records 10 '{"run_mode":"dns-only","diagnosis":[{"rule":"D2","severity":"critical"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"ok"' ]
+  accuracy_records 10 '{"run_mode":"quick","diagnosis":[{"rule":"L1","severity":"critical"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"critical"' ]
+  run hget networks.0.judged.overall --limit 5
+  [ "$output" = 'null' ]
+}
+
+@test "accuracy: TCP-1 gateway loss remains raw evidence without a router fault" {
+  accuracy_records 10 '{"gateway":{"loss_pct":100},"diagnosis":[{"rule":"TCP-1","severity":"info"}]}'
+  run hget networks.0.judged.overall
+  [ "$output" = '"ok"' ]
+  run hget networks.0.judged.metrics.gateway_loss_pct
+  [ "$output" = 'null' ]
+  run hget networks.0.metric_stats.gateway_loss_pct.median
+  [ "$output" = '100.0' ] || [ "$output" = '100' ]
+  run hget runs.0.metrics.gateway_loss_pct
+  [ "$output" = '100' ]
+}
+
+@test "accuracy: tunnel MTU 1380 is healthy while its raw size stays visible" {
+  accuracy_records 10 '{"vpn":{"active":true},"mtu":{"effective":1380}}'
+  run hget networks.0.judged.metrics.mtu_effective
+  [ "$output" = '"ok"' ]
+  run hget networks.0.metric_stats.mtu_effective.median
+  [ "$output" = '1380.0' ] || [ "$output" = '1380' ]
+}
+
+@test "accuracy: MTU exact boundaries and split-tunnel exception match the scan" {
+  local case_data value expected tunnel
+  for case_data in '1400 ok false' '1280 warn false' '1279 critical false' '1280 ok true' '1279 warn true'; do
+    read -r value expected tunnel <<< "$case_data"
+    : > "$LIVE"
+    accuracy_records 10 "{\"path_actors\":{\"split_tunnel\":$tunnel},\"mtu\":{\"effective\":$value}}"
+    run hget networks.0.judged.metrics.mtu_effective
+    [ "$output" = "\"$expected\"" ] || { echo "$case_data: $output"; return 1; }
+  done
+}
+
+@test "accuracy: negative and alternating NTP drift are judged by each observation's magnitude" {
+  accuracy_records 10 '{"ntp":{"drift_seconds":-120}}'
+  run hget networks.0.judged.metrics.ntp_drift_s
+  [ "$output" = '"critical"' ]
+  : > "$LIVE"
+  accuracy_records 5 '{"ntp":{"drift_seconds":-120}}'
+  accuracy_records 5 '{"ntp":{"drift_seconds":120}}'
+  run hget networks.0.judged.metrics.ntp_drift_s
+  [ "$output" = '"critical"' ]
+  run hget networks.0.metric_stats.ntp_drift_s.median
+  [ "$output" = '0.0' ]
+  run hget runs.0.metrics.ntp_drift_s
+  [ "$output" = '-120' ]
+}
+
+@test "accuracy: severe negative NTP drift compares worse than small positive drift" {
+  accuracy_records 10 '{"ntp":{"drift_seconds":0.5}}'
+  accuracy_records 1 '{"ntp":{"drift_seconds":-120}}'
+  local newest
+  newest="$(hist | get runs.-1.id | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+  run hget comparison.metrics.ntp_drift_s.verdict --show "$newest"
+  [ "$output" = '"worst"' ]
+  run hget run.ntp.drift_seconds --show "$newest"
+  [ "$output" = '-120' ]
+}
+
+@test "review: malformed tunnel context cannot crash historical MTU judgement" {
+  accuracy_records 10 '{"vpn":true,"path_actors":"unexpected","mtu":{"effective":1380}}'
+  run hget networks.0.judged.metrics.mtu_effective
+  [ "$status" -eq 0 ]
+  [ "$output" = '"warn"' ]
+}
+
 @test "--limit windows every quantity a network reports" {
   # `--limit` used to window `severity_counts` and `metric_stats` but not
   # `run_count`, `check_count`, `first_seen` or `last_seen`, so one object

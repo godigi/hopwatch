@@ -6,6 +6,19 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent false P1/P2 internet-outage diagnoses from healthy focused pings, a single failed public-IP metadata service, or a failed monitor web probe when independent TCP traffic succeeds. Preserve measured true outages and captive-portal precedence.
+- Attribute DNS fallback only after the configured secondary resolver answers; a direct public-resolver answer no longer impersonates the configured fallback.
+- Run the full check's final diagnosis after the speed measurement so printed and saved capacity advice agree, while retaining the early Report card.
+- Keep unresolved monitor faults through unknown or partially measured cycles; record recovery only when that rule's own inputs were measured.
+- Judge history using recurring recorded faults and scan context: filtered gateway ICMP loss, absolute clock drift, and VPN or split-tunnel MTU policy. Keep raw measurements visible.
+- Match baselines across SSID visibility changes on the same network, and treat MTU increases as improvements rather than regressions.
+- Show current-channel Wi-Fi neighbors and the CLI's crowding verdict on the dashboard. Display skipped DNS, TCP, and bufferbloat probes as unknown instead of healthy, accept any successful TCP target as reachable, and do not invent missing latency or grades.
+- Prevent Python helper imports from writing bytecode into the signed app bundle after launch.
+
+See [the detection audit](docs/2026-10-06-detection-audit.md) for each of the 13 corrected cases and their regression coverage.
+
 ## [1.10.2] - 2026-10-05
 
 ### Changes

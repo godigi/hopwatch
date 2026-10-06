@@ -45,6 +45,82 @@ declared_names() {
   done | sort -u
 }
 
+# Run the actual full-check orchestration with deterministic probes. The
+# diagnosis, JSON emitter and history append stay real, so this catches
+# ordering bugs that preloaded-speed diagnosis unit tests cannot see.
+full_check_speed_fixture() {
+  local phase
+  HELPERS_DIR="$REPO/helpers"
+  . "$REPO/lib/globals.sh"
+  . "$REPO/lib/traffic.sh"
+  . "$REPO/lib/diagnosis.sh"
+  . "$REPO/lib/output.sh"
+  RUN_MODE=full FOCUS="" TARGET="" NETDIAG_VERSION=1.10.2
+  TIMESTAMP_ISO=2026-10-06T12:00:00Z
+  LOG_DIR="$BATS_TEST_TMPDIR/speed-run" LOG="$BATS_TEST_TMPDIR/speed.log"
+  NO_BASELINE=1 BASELINE=0 HISTORY_APPEND=1
+  NETDIAG_KEEP_HISTORY=2000 NETDIAG_KEEP_LOGS=200
+  GPING_DECISION=no WATCH_CHILD=0 WATCH=0 NO_GPING=1
+  GATEWAY=192.168.1.1 GW_LOSS=0 GW_LATENCY=2
+  PUBLIC_CHECKED=1 PUBLIC_OK=1 DNS_OK=1
+  INET_LOSS=0 INET_LOSS_ALT=0 TCP_REACH_ANY_OK=1
+  IS_WIFI=1 WIFI_SSID=Home WIFI_RSSI=-50 WIFI_SNR=35 WIFI_TX=400
+  MTU_EFFECTIVE=1500
+  for phase in iface vpn wifi gateway arp netid dhcp public dns ipv6 tcp_reach \
+               ntp hosts browser wifi_scan wifi_disconnect wan_load_balancing \
+               wan_upnp path traffic internet_ping mtu traceroute wan_double_nat \
+               mtr watchdog availability gping; do
+    eval "${phase}_run() { :; }"
+  done
+  run_timed() { shift; "$@"; }
+  launch_parallel() { shift; "$@"; }
+  collect_parallel() { :; }
+  progress_plan() { :; }
+  progress_spin_start() { :; }
+  progress_spin_stop() { :; }
+  netid_fingerprint_live() { printf stable; }
+  netid_fingerprint_changed() { return 1; }
+  watchdog_heartbeat() { :; }
+  headline_run() { printf 'EARLY_REPORT\n'; }
+  bufferbloat_run() {
+    BUFFERBLOAT_GW_GRADE=D BUFFERBLOAT_INET_GRADE=D
+    BUFFERBLOAT_GW_DELTA=180 BUFFERBLOAT_INET_DELTA=190
+    printf 'BUFFERBLOAT_FINISHED\n'
+  }
+  speedtest_run() {
+    printf 'SPEED_PHASE\n'
+    SPEEDTEST_DOWN_MBPS=300 SPEEDTEST_UP_MBPS=100 SPEEDTEST_LATENCY_MS=12
+  }
+  source <(sed -n '/^progress_plan "$RUN_MODE"/,$p' "$NETDIAG")
+}
+
+@test "full check final printed and saved diagnosis consumes measured speed" {
+  run full_check_speed_fixture
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"On a fast connection"* ]]
+  [[ "$output" == *"download speed (300 Mbps)"* ]]
+  local early speed diagnosis bufferbloat
+  early="$(printf '%s\n' "$output" | grep -n '^EARLY_REPORT$' | cut -d: -f1)"
+  speed="$(printf '%s\n' "$output" | grep -n '^SPEED_PHASE$' | cut -d: -f1)"
+  diagnosis="$(printf '%s\n' "$output" | grep -n 'What we found' | cut -d: -f1)"
+  bufferbloat="$(printf '%s\n' "$output" | grep -n '^BUFFERBLOAT_FINISHED$' | cut -d: -f1)"
+  [ "$bufferbloat" -lt "$speed" ]
+  [ "$early" -lt "$speed" ]
+  [ "$speed" -lt "$diagnosis" ]
+  python3 - "$BATS_TEST_TMPDIR/speed-run/baseline.jsonl" <<'PY'
+import json, sys
+records = [json.loads(line) for line in open(sys.argv[1])]
+assert len(records) == 1, records
+record = records[0]
+rules = {d['rule']: d for d in record['diagnosis']}
+assert rules['B1']['severity'] == 'warn', rules
+assert rules['B2']['severity'] == 'warn', rules
+assert rules['SP-1']['severity'] == 'info', rules
+assert len(record['diagnosis']) == 3, record['diagnosis']
+assert record['speedtest']['down_mbps'] == 300, record['speedtest']
+PY
+}
+
 # ── The plan and the run sequence agree ──────────────────────────────────
 
 @test "every phase bin/hopwatch runs is declared in some mode's plan" {

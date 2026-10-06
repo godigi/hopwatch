@@ -128,7 +128,8 @@ from typing import Any, Iterable, NoReturn
 # reads too — see helpers/judgement.py's module docstring for why this
 # file's `judged` block and --summary's judged rows read literally the
 # same six cutoffs rather than two copies that could drift apart.
-from judgement import require_threshold, level, compose_summary, JUDGED_METRICS
+from judgement import (require_threshold, metric_level, judged_value,
+                       compose_summary, JUDGED_METRICS)
 
 # macOS substitutes this when the caller lacks Location Services, and
 # --redact substitutes the other. Neither is a name; treating either as one
@@ -713,14 +714,12 @@ def population_stats(values: list[float], min_samples: int,
     }
 
 
-# ── judged: a network-level verdict, from the same metric_stats ──────────
+# ── judged: a network-level verdict, with scan context ───────────────────
 # `judged` is a sibling of `metric_stats`, not a replacement for it:
 # metric_stats states facts (median/p10/p90) with no verdict; judged states
-# a verdict, and only for the six metrics that have a policy threshold at
-# all (helpers/judgement.py's JUDGED_METRICS). It judges the median only —
-# the same discipline --summary's report_network has always held — so a
-# verdict is null exactly when the corresponding metric_stats entry is
-# null: one nullability rule, not two.
+# a verdict for the six metrics that have a policy threshold and recurring
+# recorded diagnoses. Judged populations apply per-run context; raw
+# metric_stats and run measurements remain unchanged.
 
 
 def load_judged_thresholds() -> dict[str, tuple[float, float, bool, str]]:
@@ -742,10 +741,11 @@ _VERDICT_RANK = {"ok": 1, "warn": 2, "critical": 3}
 
 def build_judged(metric_stats: dict[str, dict | None],
                  judged_thresholds: dict[str, tuple[float, float, bool, str]],
-                 check_count: int) -> dict:
-    """One network's `judged` block: a verdict per JUDGED_METRICS key, the
-    worst of them, and the sentence --summary would print for the same
-    numbers.
+                 check_count: int, severity_counts: dict[str, int],
+                 min_samples: int) -> dict:
+    """Judge context-adjusted metric medians and recurring check severities.
+
+    Raw metric distributions are separate from this policy population.
     """
     metrics: dict[str, str | None] = {}
     offenders: list[str] = []
@@ -755,11 +755,24 @@ def build_judged(metric_stats: dict[str, dict | None],
         if stats is None:
             metrics[key] = None
             continue
-        verdict = level(stats["median"], warn, crit, higher_is_worse)
+        verdict = metric_level(key, stats["median"], warn, crit, higher_is_worse)
         metrics[key] = verdict
         worst = max(worst, _VERDICT_RANK[verdict])
         if verdict != "ok":
             offenders.append(phrase)
+    # Recurrence is a count of fault-bearing checks, not a fraction of all
+    # stored runs. Reuse the existing minimum evidence requirement so one
+    # rare old fault does not own the verdict, while many clean medians
+    # cannot conceal repeated critical DNS/internet failures. Full, quick,
+    # and legacy checks each vote once; focused *-only runs never vote.
+    critical = severity_counts.get("critical", 0)
+    warnings = severity_counts.get("warn", 0)
+    if critical >= min_samples:
+        worst = max(worst, _VERDICT_RANK["critical"])
+        offenders.append("critical faults recur in recorded checks")
+    elif critical + warnings >= min_samples:
+        worst = max(worst, _VERDICT_RANK["warn"])
+        offenders.append("faults recur in recorded checks")
     overall = {v: k for k, v in _VERDICT_RANK.items()}.get(worst)
     return {
         "overall": overall,
@@ -773,8 +786,8 @@ def build_comparison(rec: dict, network_runs: list[dict],
     """Every metric in METRICS, this run against every run on its network.
 
     Exactly that table, no second one: it already carries a direction per
-    metric, which is why the CLI rather than the GUI is the thing that
-    knows whether higher is better.
+    metric. NTP comparisons use each reading's magnitude; the full stored
+    run and chart measurements retain its sign.
     """
     metrics: dict[str, dict] = {}
     for path, out_key, _label, unit, direction in METRICS:
@@ -782,8 +795,11 @@ def build_comparison(rec: dict, network_runs: list[dict],
         for other in network_runs:
             v = metric_value(other, path)
             if v is not None:
-                samples.append(v)
-        metrics[out_key] = judge_metric(metric_value(rec, path), samples,
+                samples.append(abs(v) if out_key == "ntp_drift_s" else v)
+        value = metric_value(rec, path)
+        if value is not None and out_key == "ntp_drift_s":
+            value = abs(value)
+        metrics[out_key] = judge_metric(value, samples,
                                         unit, direction, min_samples, tail_pctl)
     return {"metrics": metrics}
 
@@ -961,6 +977,7 @@ def main() -> None:
     # 1,926 legacy records here, so a chart that plots it without saying
     # how thin it is presents a single reading as a trend.
     runs = [build_run(rid, rec, key) for rid, rec, key in assigned]
+    records_by_id = {rid: rec for rid, rec, _key in assigned}
     if args.limit and args.limit > 0:
         runs = runs[-args.limit:]
 
@@ -994,6 +1011,7 @@ def main() -> None:
         g["severity_counts"] = {}
         g["metric_samples"] = {}
         g["metric_values"] = {}
+        g["judged_values"] = {}
 
     global_samples: dict[str, int] = {}
     checks = 0
@@ -1019,6 +1037,10 @@ def main() -> None:
             g["metric_samples"][mk] = g["metric_samples"].get(mk, 0) + 1
             g["metric_values"].setdefault(mk, []).append(mv)
             global_samples[mk] = global_samples.get(mk, 0) + 1
+            if mk in JUDGED_METRICS:
+                value = judged_value(mk, mv, records_by_id[run["id"]])
+                if value is not None:
+                    g["judged_values"].setdefault(mk, []).append(value)
 
     networks = []
     for key, g in sorted(groups.items(), key=lambda kv: -kv[1]["run_count"]):
@@ -1039,6 +1061,10 @@ def main() -> None:
             mk: population_stats(g["metric_values"].get(mk, []), min_samples, tail_pctl)
             for _p, mk, _lbl, _u, _d in METRICS
         }
+        judged_stats = {
+            mk: population_stats(g["judged_values"].get(mk, []), min_samples, tail_pctl)
+            for mk in JUDGED_METRICS
+        }
         networks.append({
             "id": key,
             "label": label_for(key, g),
@@ -1053,10 +1079,8 @@ def main() -> None:
             "ssids": g["ssids"],
             "metric_samples": g["metric_samples"],
             "metric_stats": metric_stats,
-            # A verdict, drawn from the metric_stats block right above —
-            # see build_judged. Sibling of metric_stats, never inside it:
-            # that block stays contractually verdict-free.
-            "judged": build_judged(metric_stats, judged_thresholds, g["check_count"]),
+            "judged": build_judged(judged_stats, judged_thresholds, g["check_count"],
+                                   g["severity_counts"], min_samples),
             "severity_counts": g["severity_counts"],
         })
 
