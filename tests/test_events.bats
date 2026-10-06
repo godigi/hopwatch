@@ -338,3 +338,84 @@ assert 'recorder' in f, f
   run bash -c "grep -E 'WATCHER_LABEL=\"com\.(hopwatch|netdiag)\.watcher\"' '$REPO/lib/watchdog.sh'"
   [ "$status" -eq 0 ]
 }
+
+# ── unstable periods: one line per stretch of trouble ───────────────────
+
+@test "periods: flapping episodes of one rule join into ONE period" {
+  # The live journal's shape: a fire, a restart, a fire, a restart — each
+  # a separate episode, none ever cleared. A reader wants one answer.
+  ev rule-fired      2026-10-06T10:00:00Z 1 LA-2
+  ev rule-cleared    2026-10-06T10:00:20Z 2 LA-2
+  ev rule-fired      2026-10-06T10:02:00Z 3 LA-2
+  ev rule-cleared    2026-10-06T10:02:40Z 4 LA-2
+  ev rule-fired      2026-10-06T10:04:00Z 5 LA-2
+  ev rule-cleared    2026-10-06T10:04:10Z 6 LA-2
+  run python3 "$EVENTS" --journal "$J" --version test --join-s 300
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert len(d['episodes']) == 3, d['episodes']
+p = d['periods']
+assert len(p) == 1, p
+assert p[0]['rule'] == 'LA-2' and p[0]['spikes'] == 3, p
+assert p[0]['observed_s'] == 70, p
+assert p[0]['span_s'] == 250, p
+assert p[0]['started'] == '2026-10-06T10:00:00Z', p
+assert p[0]['ended'] == '2026-10-06T10:04:10Z', p
+"
+}
+
+@test "periods: a calm longer than the join distance splits two periods" {
+  ev rule-fired   2026-10-06T10:00:00Z 1 LA-2
+  ev rule-cleared 2026-10-06T10:00:30Z 2 LA-2
+  ev rule-fired   2026-10-06T10:10:00Z 3 LA-2
+  ev rule-cleared 2026-10-06T10:10:30Z 4 LA-2
+  run python3 "$EVENTS" --journal "$J" --version test --join-s 300
+  printf '%s' "$output" | python3 -c "
+import json, sys
+p = json.load(sys.stdin)['periods']
+assert len(p) == 2 and all(x['spikes'] == 1 for x in p), p
+"
+}
+
+@test "periods: other rules and other networks never join" {
+  ev rule-fired   2026-10-06T10:00:00Z 1 LA-2
+  ev rule-cleared 2026-10-06T10:00:30Z 2 LA-2
+  ev rule-fired   2026-10-06T10:01:00Z 3 G2
+  ev rule-cleared 2026-10-06T10:01:30Z 4 G2
+  NET="wifi:mac=bb" ev rule-fired   2026-10-06T10:02:00Z 5 LA-2
+  NET="wifi:mac=bb" ev rule-cleared 2026-10-06T10:02:30Z 6 LA-2
+  run python3 "$EVENTS" --journal "$J" --version test --join-s 300
+  printf '%s' "$output" | python3 -c "
+import json, sys
+p = json.load(sys.stdin)['periods']
+assert len(p) == 3, p
+"
+}
+
+@test "periods: with no join distance supplied nothing is joined" {
+  ev rule-fired   2026-10-06T10:00:00Z 1 LA-2
+  ev rule-cleared 2026-10-06T10:00:30Z 2 LA-2
+  run read_events
+  printf '%s' "$output" | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['periods'] == []
+"
+}
+
+@test "--events hands events.py the monitor's unstable window as the join distance" {
+  ev rule-fired   2026-10-06T10:00:00Z 1 LA-2
+  ev rule-cleared 2026-10-06T10:00:30Z 2 LA-2
+  ev rule-fired   2026-10-06T10:02:00Z 3 LA-2
+  ev rule-cleared 2026-10-06T10:02:30Z 4 LA-2
+  mkdir -p "$BATS_TEST_TMPDIR/logs"
+  cp "$J" "$BATS_TEST_TMPDIR/logs/events.jsonl"
+  HOPWATCH_LOG_DIR="$BATS_TEST_TMPDIR/logs" run "$NETDIAG" --events=0
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+p = json.load(sys.stdin)['periods']
+assert len(p) == 1 and p[0]['spikes'] == 2, p
+"
+}

@@ -243,6 +243,74 @@ def episodes(rows):
     return done
 
 
+def periods(eps, join_s):
+    """Fold episodes into unstable periods: one line per stretch of trouble.
+
+    A link that flaps produces many short episodes of the same rule — on
+    the live network 14 of them in an hour, "14 times · 1m19s+ total" —
+    and a reader asking "was it unstable?" wants ONE answer, not a list to
+    count. Episodes of one rule on one network whose gap (previous end to
+    next start) is under `join_s` are the same period. Bounded by that
+    distance and nothing else, so an hour of flapping with a ten-minute
+    calm in the middle is two periods, not one.
+
+    This is grouping, not judging: `join_s` is lib/thresholds.sh's
+    THRESH_MON_UNSTABLE_WINDOW_S, handed in by bin/hopwatch — the same
+    figure after which the live monitor stops calling a link "recently
+    unstable". With none supplied there is nothing to join on and no
+    periods are reported, rather than guessing one here.
+
+    An episode with no observed start (an orphan clear) is never merged:
+    its place in time is unknown.
+    """
+    if not join_s or join_s <= 0:
+        return []
+    out: list[dict] = []
+    by_key: dict[tuple, dict] = {}
+    ordered = sorted((e for e in eps if e.get("started")),
+                     key=lambda e: e["started"])
+    for ep in ordered:
+        start = _parse_ts(ep["started"])
+        end = _parse_ts(ep.get("ended")) or start
+        key = (ep.get("network"), ep["rule"])
+        cur = by_key.get(key)
+        if cur is not None and start is not None and cur["_end"] is not None \
+                and (start - cur["_end"]).total_seconds() < join_s:
+            cur["spikes"] += 1
+            cur["observed_s"] += ep.get("duration_s") or 0
+            cur["unobserved_s"] += ep.get("unobserved_s") or 0
+            if end and end > cur["_end"]:
+                cur["_end"] = end
+            cur["ended"] = ep.get("ended")
+            cur["ongoing"] = bool(ep.get("ongoing"))
+            cur["duration_is_lower_bound"] = (cur["duration_is_lower_bound"]
+                                              or bool(ep.get("duration_is_lower_bound")))
+            if ep.get("summary"):
+                cur["summary"] = ep["summary"]
+            continue
+        cur = {
+            "rule": ep["rule"],
+            "summary": ep.get("summary"),
+            "network": ep.get("network"),
+            "network_label": ep.get("network_label"),
+            "started": ep["started"],
+            "ended": ep.get("ended"),
+            "ongoing": bool(ep.get("ongoing")),
+            "spikes": 1,
+            "observed_s": ep.get("duration_s") or 0,
+            "unobserved_s": ep.get("unobserved_s") or 0,
+            "duration_is_lower_bound": bool(ep.get("duration_is_lower_bound")),
+            "_start": start,
+            "_end": end,
+        }
+        by_key[key] = cur
+        out.append(cur)
+    for per in out:
+        a, b = per.pop("_start"), per.pop("_end")
+        per["span_s"] = int((b - a).total_seconds()) if a and b else None
+    return out
+
+
 def observation(rows, start, end):
     """How much of the window was actually watched."""
     gaps = [r for r in rows if r.get("kind") == "gap"]
@@ -267,6 +335,8 @@ def main() -> int:
     ap.add_argument("--archive", type=Path, default=None)
     ap.add_argument("--hours", type=float, default=None)
     ap.add_argument("--version", default="")
+    ap.add_argument("--join-s", type=float, default=None,
+                    help="join distance for `periods` (THRESH_MON_UNSTABLE_WINDOW_S)")
     args = ap.parse_args()
 
     archive = args.archive
@@ -283,6 +353,7 @@ def main() -> int:
         kind = row.get("kind") or "unknown"
         by_kind[kind] = by_kind.get(kind, 0) + 1
 
+    eps = episodes(kept)
     out = {
         "schema": SCHEMA_EVENTS,
         "version": args.version,
@@ -291,7 +362,8 @@ def main() -> int:
         "to": end.strftime("%Y-%m-%dT%H:%M:%SZ") if end else None,
         "counts": {"events": len(kept), "by_kind": by_kind},
         "observation": observation(kept, start, end),
-        "episodes": episodes(kept),
+        "episodes": eps,
+        "periods": periods(eps, args.join_s),
         "events": [{k: v for k, v in row.items() if k != "_at"}
                    for row in kept],
     }

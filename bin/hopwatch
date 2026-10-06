@@ -627,15 +627,21 @@ fi
 if [ "$EVENTS" -eq 1 ]; then
   # Reading the journal is deliberately *not* judging it. No thresholds are
   # exported here and helpers/events.py imports none: it pairs episodes and
-  # reports how much of the window was actually observed, and whether four
+  # reports how much of the window was actually observed. The one figure it
+  # is handed, THRESH_MON_UNSTABLE_WINDOW_S, is a join distance for grouping
+  # episodes into periods, not a cutoff on anything. And whether four
   # minutes of downtime is acceptable is a verdict that belongs to a rule.
   # AV-1/AV-2 are where that will live.
   case "$EVENTS_WINDOW_HOURS" in
     ''|*[!0-9]*) printf 'hopwatch: --events expects a window in hours (got: %s)\n' "$EVENTS_WINDOW_HOURS" >&2; exit 3 ;;
   esac
+  # The block below that sources thresholds is not reached on this path.
+  # shellcheck source=lib/thresholds.sh
+  . "$LIB_DIR/thresholds.sh"
   python3 "$HELPERS_DIR/events.py" \
     --journal "$LOG_DIR/events.jsonl" \
     --hours "$EVENTS_WINDOW_HOURS" \
+    --join-s "$THRESH_MON_UNSTABLE_WINDOW_S" \
     --version "$NETDIAG_VERSION" || exit 3
   exit 0
 fi
