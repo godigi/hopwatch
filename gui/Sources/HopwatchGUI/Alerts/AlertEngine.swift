@@ -530,12 +530,16 @@ final class AlertEngine {
 
     // MARK: - Delivery
 
+    /// Hands over the engine's clock, not the wall clock: the cooldown that
+    /// decided to notify and the storm guard under it must read the same
+    /// time, or `--verify` cannot walk an alert through both.
     private func deliver(id: String, title: String, body: String, isOutage: Bool, replacing: Bool) {
         notificationManager.deliverDegradation(
             id: id,
             title: title,
             body: body,
             isOutage: isOutage,
+            now: now(),
             replacing: replacing
         )
     }

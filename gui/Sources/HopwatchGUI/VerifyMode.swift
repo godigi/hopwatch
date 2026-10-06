@@ -67,6 +67,7 @@ private enum VerifyHarness {
         runAlertAttributionTests()
         runAlertSettleTests()
         runEventAlertDwellTests()
+        runAlertNotificationAuthorityTests()
         runCaptivePortalActionTests()
         runFullCheckPolicyTests()
         runNetworkIdentityTests()
@@ -195,6 +196,9 @@ private enum VerifyHarness {
         var scanStarts: Bool
         var scansRequested = 0
         var posts: [String] = []
+        /// Every post in full, for the checks that care what was said and
+        /// whether it was allowed to make a sound.
+        var details: [(id: String, title: String, body: String, silent: Bool)] = []
         var catalog: RulesCatalog?
 
         init(catalog: RulesCatalog?, scanStarts: Bool) {
@@ -203,7 +207,10 @@ private enum VerifyHarness {
             let manager = NotificationManager()
             manager.setAuthorizedForTesting(true)
             engine = AlertEngine(notificationManager: manager)
-            manager.onPostNotification = { [unowned self] id, _, _, _ in posts.append(id) }
+            manager.onPostNotification = { [unowned self] id, title, body, silent in
+                posts.append(id)
+                details.append((id, title, body, silent))
+            }
             manager.onRemoveNotification = { _ in }
             engine.now = { [unowned self] in t }
             engine.severityRank = { [unowned self] id in
@@ -520,6 +527,68 @@ private enum VerifyHarness {
         tick(rule, g2, times: 2)
         check(isActive(rule, "wifi-unstable"), "and fires once it has held for the whole dwell")
         equal(rule.scansRequested, 1, "with a single scan")
+        print("")
+    }
+
+    // MARK: - One authority for how often an alert notifies
+
+    /// How often an alert may notify is the definition's `cooldown`, which
+    /// `AlertEngine` enforces before it calls the notification layer. The
+    /// layer used to keep a second, fixed 30-minute cooldown on the real
+    /// clock under the same alert id, which silently overrode the first: an
+    /// alert defined to repeat after five minutes repeated after thirty, and
+    /// the in-place update that swaps the holding line for the CLI's
+    /// sentence was dropped as if it were a new interruption. These checks
+    /// run the whole path (engine, then manager) so a second authority
+    /// cannot come back unnoticed, and they count *posts*, not scans.
+    static func runAlertNotificationAuthorityTests() {
+        print("Alert notifications (one cooldown authority)")
+        guard let lost = AlertDefinition.byID("connection-lost"),
+              let wifi = AlertDefinition.byID("wifi-unstable") else {
+            check(false, "connection-lost and wifi-unstable definitions exist"); return
+        }
+        let catalog = stubCatalog([("G2", "warn", "BLURB-G2"), ("N1", "critical", "BLURB-N1")])
+        func count(_ rig: AlertRig, _ id: String) -> Int { rig.posts.filter { $0 == id }.count }
+
+        // The in-place update reaches the notification, silently.
+        let enrich = AlertRig(catalog: catalog, scanStarts: true)
+        enrich.raise(["G2"])
+        equal(count(enrich, "netdiag.wifi-unstable"), 1, "an alert notifies when it fires")
+        enrich.land([("G2", "warn", "SUMMARY-G2")])
+        equal(count(enrich, "netdiag.wifi-unstable"), 2,
+              "the landed scan re-delivers the notification in place")
+        let update = enrich.details.last
+        equal(update?.body ?? "", "SUMMARY-G2", "and carries the CLI's sentence, not the holding line")
+        check(update?.silent == true, "and is delivered silently rather than as a fresh interruption")
+        check(enrich.details.first?.silent == false, "while the first delivery is not silent")
+
+        // An alert defined to repeat after its cooldown does, as a notification.
+        let repeating = AlertRig(catalog: catalog, scanStarts: true)
+        repeating.raise(["N1"])
+        repeating.clear()
+        equal(count(repeating, "netdiag.connection-lost.resolved"), 1,
+              "a fault that was announced is announced resolved")
+        repeating.t = repeating.t.addingTimeInterval(lost.cooldown)
+        repeating.raise(["N1"])
+        equal(count(repeating, "netdiag.connection-lost"), 2,
+              "an outage is notified again once its own \(Int(lost.cooldown)) s cooldown has passed")
+        repeating.clear()
+        equal(count(repeating, "netdiag.connection-lost.resolved"), 2,
+              "and that second outage is announced resolved too")
+
+        // The definition's cooldown still binds, and an alert raised inside
+        // it does not conjure a notification when its scan lands: there is
+        // no delivered notification for the update to replace.
+        let cooled = AlertRig(catalog: catalog, scanStarts: true)
+        cooled.raise(["G2"])
+        cooled.clear()
+        cooled.raise(["G2"])
+        equal(count(cooled, "netdiag.wifi-unstable"), 1,
+              "inside its \(Int(wifi.cooldown)) s cooldown a re-raised alert does not notify")
+        let before = cooled.posts.count
+        cooled.land([("G2", "warn", "SUMMARY-G2")])
+        equal(cooled.posts.count, before, "and its scan landing posts nothing for a notification that was never delivered")
+        equal(cooled.body(), "SUMMARY-G2", "though the dropdown still gets the CLI's sentence")
         print("")
     }
 
@@ -1732,25 +1801,70 @@ private enum VerifyHarness {
         let outageAllowed = mgr.canNotify(id: "connection-lost", isOutage: true)
         check(outageAllowed.allowed, "outages-only scope permits outage")
 
-        // 30 minute cooldown
+        // Anti-nagging is the alert definition's cooldown, enforced by the
+        // engine. The manager only keeps a storm guard under every one of
+        // those, and must never hold an alert for longer than it defines.
         mgr.scope = .all
         var delivered: [String] = []
         var removed: [String] = []
-        mgr.onPostNotification = { id, _, _, _ in delivered.append(id) }
+        var silentFlags: [Bool] = []
+        mgr.onPostNotification = { id, _, _, silent in delivered.append(id); silentFlags.append(silent) }
         mgr.onRemoveNotification = { id in removed.append(id) }
+        let floor = NotificationManager.minimumRepeatInterval
+        let shortest = AlertDefinition.all.map(\.cooldown).filter { $0 > 0 }.min() ?? 0
+        check(floor < shortest, "the storm guard (\(Int(floor)) s) is shorter than every definition's cooldown (shortest \(Int(shortest)) s)")
 
         let t0 = Date()
         let post1 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t0)
         check(post1, "first degradation alert delivers")
         check(delivered.count == 1, "notification was posted")
 
-        let t1 = t0.addingTimeInterval(300) // 5 minutes later
-        let post2 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t1)
-        check(!post2, "repeat alert within 30 minutes is rate-limited")
+        let burst = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t0.addingTimeInterval(floor / 2))
+        check(!burst, "a repeat inside the storm guard is dropped")
 
-        let t2 = t0.addingTimeInterval(1801) // 30 mins later
-        let post3 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t2)
-        check(post3, "repeat alert after 30 minutes is permitted")
+        let afterGuard = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "loss", isOutage: false, now: t0.addingTimeInterval(floor + 1))
+        check(afterGuard, "a repeat the engine allows, past the storm guard, is not held back for 30 minutes")
+
+        // The shortest-cooldown alert, and an outage at its own cooldown.
+        let ipA = mgr.deliverDegradation(id: "public-ip-changed", title: "IP", body: "", isOutage: false, now: t0)
+        let ipB = mgr.deliverDegradation(id: "public-ip-changed", title: "IP", body: "", isOutage: false,
+                                         now: t0.addingTimeInterval(AlertDefinition.byID("public-ip-changed")?.cooldown ?? 60))
+        check(ipA && ipB, "an alert defined to repeat after a minute can notify after a minute")
+        let lostCooldown = AlertDefinition.byID("connection-lost")?.cooldown ?? 300
+        let outA = mgr.deliverDegradation(id: "connection-lost", title: "Down", body: "", isOutage: true, now: t0)
+        let outB = mgr.deliverDegradation(id: "connection-lost", title: "Down", body: "", isOutage: true,
+                                          now: t0.addingTimeInterval(lostCooldown))
+        check(outA && outB, "an outage can notify again after its own \(Int(lostCooldown)) s cooldown")
+
+        // An in-place update of a notification that was delivered.
+        delivered.removeAll(); silentFlags.removeAll()
+        let u0 = t0.addingTimeInterval(10_000)
+        _ = mgr.deliverDegradation(id: "dns-failing", title: "DNS", body: "holding", isOutage: false, now: u0)
+        let upd = mgr.deliverDegradation(id: "dns-failing", title: "DNS", body: "sentence", isOutage: false,
+                                         now: u0.addingTimeInterval(2), replacing: true)
+        check(upd, "an in-place update of a delivered notification is not rate-limited")
+        check(silentFlags == [false, true], "and it is delivered silently while the original was not")
+        let guardKept = mgr.deliverDegradation(id: "dns-failing", title: "DNS", body: "again", isOutage: false,
+                                               now: u0.addingTimeInterval(floor + 1))
+        check(guardKept, "an update does not restart the storm guard for the next new notification")
+
+        // Nothing to replace: never delivered, so an update must not invent one.
+        delivered.removeAll()
+        let orphan = mgr.deliverDegradation(id: "vpn-dropped", title: "VPN", body: "sentence", isOutage: false,
+                                            now: u0, replacing: true)
+        check(!orphan && delivered.isEmpty, "an update for a notification that was never delivered is dropped")
+
+        // Resolved: announced faults get their resolved notice.
+        delivered.removeAll(); removed.removeAll()
+        let r0 = t0.addingTimeInterval(20_000)
+        _ = mgr.deliverDegradation(id: "internet-degraded", title: "Slow", body: "holding", isOutage: false, now: r0)
+        _ = mgr.deliverDegradation(id: "internet-degraded", title: "Slow", body: "sentence", isOutage: false,
+                                   now: r0.addingTimeInterval(1), replacing: true)
+        mgr.deliverAlertResolved(id: "internet-degraded", title: "Slow")
+        check(delivered.last == "netdiag.internet-degraded.resolved", "a resolved notice follows a delivered, updated fault")
+        check(removed.contains("netdiag.internet-degraded"), "and clears the fault's banner")
+        mgr.deliverAlertResolved(id: "internet-degraded", title: "Slow")
+        check(delivered.filter { $0.hasSuffix(".resolved") }.count == 1, "and is not repeated")
 
         // Restoration notification
         let restored = mgr.deliverRestored(networkName: "HomeNet 5G", latencyMs: 14.0)

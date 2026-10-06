@@ -244,7 +244,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("Alerts are rate-limited to at most one per 30 minutes for an ongoing fault. An immediate notification confirms when your network recovers.")
+                Text("An ongoing fault is announced once, and each alert waits before repeating (see \"Tell me about\" below). An immediate notification confirms when your network recovers.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

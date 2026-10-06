@@ -46,38 +46,37 @@ import Testing
         #expect(allPermitted.allowed)
     }
 
-    @Test @MainActor func thirtyMinuteCooldownRateLimiting() {
+    @Test @MainActor func stormGuardNeverOutlastsAnAlertsOwnCooldown() {
         let mgr = NotificationManager()
         mgr.setAuthorizedForTesting(true)
         mgr.notificationsEnabled = true
 
-        var delivered: [(id: String, title: String, body: String)] = []
-        mgr.onPostNotification = { id, title, body, _ in
-            delivered.append((id, title, body))
-        }
+        var delivered: [(id: String, silent: Bool)] = []
+        mgr.onPostNotification = { id, _, _, silent in delivered.append((id, silent)) }
 
+        let floor = NotificationManager.minimumRepeatInterval
         let t0 = Date()
-        let didPost1 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t0)
-        #expect(didPost1)
-        #expect(delivered.count == 1)
+        #expect(mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t0))
         #expect(mgr.announcedFaults.contains("wifi-unstable"))
 
-        // Attempt 5 minutes later (300s): should be suppressed by cooldown
-        let t1 = t0.addingTimeInterval(300)
-        let didPost2 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t1)
-        #expect(!didPost2)
-        #expect(delivered.count == 1)
+        // A burst inside the storm guard is dropped.
+        #expect(!mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t0.addingTimeInterval(floor / 2)))
 
-        // Different fault id at t1: should be permitted
-        let didPostOther = mgr.deliverDegradation(id: "dns-failing", title: "DNS Failing", body: "Lookups failing", isOutage: false, now: t1)
-        #expect(didPostOther)
-        #expect(delivered.count == 2)
+        // Different id: independent.
+        #expect(mgr.deliverDegradation(id: "dns-failing", title: "DNS Failing", body: "Lookups failing", isOutage: false, now: t0.addingTimeInterval(floor / 2)))
 
-        // Attempt original fault after 30 minutes (1801s): should be permitted
-        let t2 = t0.addingTimeInterval(1801)
-        let didPost3 = mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t2)
-        #expect(didPost3)
-        #expect(delivered.count == 3)
+        // Five minutes on (the engine has already applied the definition's
+        // own cooldown by the time it asks): permitted, not held for 30.
+        #expect(mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "High packet loss", isOutage: false, now: t0.addingTimeInterval(300)))
+
+        // An in-place update of a delivered notification: silent, and not
+        // rate-limited.
+        delivered.removeAll()
+        #expect(mgr.deliverDegradation(id: "wifi-unstable", title: "Wi-Fi Unstable", body: "sentence", isOutage: false, now: t0.addingTimeInterval(301), replacing: true))
+        #expect(delivered.count == 1 && delivered[0].silent)
+
+        // Nothing delivered under this id, so nothing to update.
+        #expect(!mgr.deliverDegradation(id: "vpn-dropped", title: "VPN", body: "sentence", isOutage: false, now: t0, replacing: true))
     }
 
     @Test @MainActor func restorationNotificationCleansUpAndAnnouncesRecovery() {

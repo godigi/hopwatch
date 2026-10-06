@@ -17,14 +17,29 @@ enum NotificationScope: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Manages rate-limited system notifications via UNUserNotificationCenter.
+/// Delivers system notifications via UNUserNotificationCenter.
 ///
-/// Prevents notification fatigue through four mechanisms:
-/// 1. Only notifies on state transitions (e.g. Healthy -> Outage, or Healthy -> High Packet Loss).
-/// 2. Enforces a 30-minute cooldown timer per ongoing fault category.
-/// 3. Respects user-configured scope (all degradation vs complete outages only).
-/// 4. Sends an immediate, reassuring restoration notification when the network stabilizes,
+/// Prevents notification fatigue through four mechanisms, only the first
+/// two of which are this file's:
+/// 1. Respects user-configured scope (all degradation vs complete outages only).
+/// 2. Sends an immediate, reassuring restoration notification when the network stabilizes,
 ///    clearing stale degradation banners from Notification Center.
+/// 3. `AlertEngine` notifies only on state transitions (e.g. Healthy -> Outage).
+/// 4. `AlertEngine` waits out each alert's own `AlertDefinition.cooldown`
+///    before notifying it again. That is the one authority on how often an
+///    alert repeats, and the Settings captions state its values. This layer
+///    used to keep a second, fixed 30-minute cooldown of its own, which
+///    overrode the definitions (an alert defined to repeat after five
+///    minutes could only repeat after thirty) and dropped the in-place
+///    update that swaps the holding line for the CLI's sentence. What is
+///    left is `minimumRepeatInterval`, a storm guard that sits below every
+///    definition's cooldown and so never contradicts one.
+///
+/// An in-place update (`replacing: true`) is not a new interruption: it
+/// rewrites a notification this layer already delivered, silently, and so
+/// it is neither rate-limited nor counted against the storm guard. With no
+/// delivered notification to rewrite it is dropped rather than posted as a
+/// fresh one.
 @MainActor
 @Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
@@ -38,7 +53,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         authorizationStatus == .denied
     }
 
-    /// Internal tracking for rate limiting (cooldown per alert key)
+    /// The shortest gap between two *new* notifications for one alert id,
+    /// whatever the engine asks for. A storm guard and nothing more: how
+    /// often an alert may repeat is `AlertDefinition.cooldown`, enforced by
+    /// `AlertEngine` before it gets here, and this must stay below the
+    /// smallest of those (60 s) so it can never contradict one.
+    static let minimumRepeatInterval: TimeInterval = 30
+
+    /// Internal tracking for the storm guard (last new notification per alert key)
     private var lastNotifiedAt: [String: Date] = [:]
     /// Tracks active faults that were announced via notification
     private(set) var announcedFaults: Set<String> = []
@@ -211,8 +233,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Evaluation & Delivery
 
-    /// Determines whether a notification can be posted according to user settings and cooldown rules.
-    func canNotify(id: String, isOutage: Bool, now: Date = Date()) -> (allowed: Bool, reason: String?) {
+    /// Determines whether a notification can be posted according to user
+    /// settings and the storm guard. `replacing` marks an in-place update of
+    /// a notification already delivered under this id.
+    func canNotify(id: String, isOutage: Bool, now: Date = Date(),
+                   replacing: Bool = false) -> (allowed: Bool, reason: String?) {
         guard notificationsEnabled else {
             return (false, "Notifications disabled by user preference")
         }
@@ -222,8 +247,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         if scope == .outagesOnly && !isOutage {
             return (false, "Suppressed by outages-only filter")
         }
-        if let last = lastNotifiedAt[id], now.timeIntervalSince(last) < 1800 {
-            return (false, "Suppressed by 30-minute cooldown (\(Int(1800 - now.timeIntervalSince(last)))s remaining)")
+        if replacing {
+            guard announcedFaults.contains(id) else {
+                return (false, "No delivered notification to update")
+            }
+            return (true, nil)
+        }
+        if let last = lastNotifiedAt[id], now.timeIntervalSince(last) < Self.minimumRepeatInterval {
+            return (false, "Suppressed by the \(Int(Self.minimumRepeatInterval))s storm guard (\(Int(Self.minimumRepeatInterval - now.timeIntervalSince(last)))s remaining)")
         }
         return (true, nil)
     }
@@ -238,13 +269,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         now: Date = Date(),
         replacing: Bool = false
     ) -> Bool {
-        let check = canNotify(id: id, isOutage: isOutage, now: now)
+        let check = canNotify(id: id, isOutage: isOutage, now: now, replacing: replacing)
         guard check.allowed else {
             log.debug("Degradation alert \(id) suppressed: \(check.reason ?? "unknown", privacy: .public)")
             return false
         }
 
-        lastNotifiedAt[id] = now
+        if !replacing { lastNotifiedAt[id] = now }
         announcedFaults.insert(id)
 
         if let handler = onPostNotification {
