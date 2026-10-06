@@ -664,7 +664,7 @@ struct DashboardLiveChartPanel: View {
 
     private func buildInternetSeries(from filtered: [MonitorSample]) -> MonitorSeries.Result {
         MonitorSeries.build(filtered, tier: "fast") { sample in
-            sample.status.icmpFiltered ? nil : sample.internet.rttAvgMs
+            PingReadout.internetSeriesValue(for: sample)
         }
     }
 

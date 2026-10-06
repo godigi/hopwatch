@@ -342,25 +342,18 @@ struct MenuBarLabel: View {
         return ip
     }
 
-    static func formatPing(internetRtt: Double?, gatewayRtt: Double?, isIcmpFiltered: Bool = false) -> String? {
-        if isIcmpFiltered {
-            if let gatewayRtt, gatewayRtt >= 0 {
-                return "\(Int(round(gatewayRtt)))ms"
-            }
-            return "TCP ok"
-        }
-        guard let rtt = internetRtt ?? gatewayRtt, rtt >= 0 else { return nil }
-        return "\(Int(round(rtt)))ms"
+    static func formatPing(internetRtt: Double?, gatewayRtt: Double?,
+                           filtering: EffectiveLoss.Filtering = .none) -> String? {
+        PingReadout.menuBarPing(internetRtt: internetRtt, gatewayRtt: gatewayRtt, filtering: filtering)
     }
 
     private var pingString: String? {
-        let isFiltered = coordinator.monitor.latest?.status.icmpFiltered == true
-        return Self.formatPing(
-            internetRtt: isFiltered ? nil : (coordinator.monitor.latest?.internet.rttAvgMs
-                ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs),
+        Self.formatPing(
+            internetRtt: coordinator.monitor.latest?.internet.rttAvgMs
+                ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs,
             gatewayRtt: coordinator.monitor.latest?.gateway.rttAvgMs
                 ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs,
-            isIcmpFiltered: isFiltered
+            filtering: EffectiveLoss.filtering(sample: coordinator.monitor.latest)
         )
     }
 }

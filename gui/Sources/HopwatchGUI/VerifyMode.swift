@@ -81,6 +81,7 @@ private enum VerifyHarness {
         runSuitabilityAndFixFieldTests()
         runSuitabilityPanelTests()
         runLossFilteringTests()
+        runLegFilteringViewTests()
         runReportProvenanceTests()
         runTrendsClampTests()
         runRunGroupTests()
@@ -1270,8 +1271,16 @@ private enum VerifyHarness {
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4) == "5ms", "formatPing falls back to gateway RTT")
         check(MenuBarLabel.formatPing(internetRtt: 25.1, gatewayRtt: 3.0) == "25ms", "formatPing prioritizes internet RTT")
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil, "formatPing is nil when unmeasured")
-        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4, isIcmpFiltered: true) == "5ms", "formatPing handles icmpFiltered with gateway fallback")
-        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, isIcmpFiltered: true) == "TCP ok", "formatPing handles icmpFiltered with TCP ok fallback")
+        // Updated: the old `isIcmpFiltered:` flag meant the gateway declines
+        // pings (TCP-1), yet the old check expected the gateway RTT to be shown.
+        // That is the unmeasurable leg; the figures below are the corrected ones.
+        // The old gateway-fallback case lives on as the ICMP-1 (internet
+        // filtered) case, where the gateway RTT is the measurable one.
+        let gwFiltered = EffectiveLoss.Filtering(gatewayLeg: true, internetLeg: false)
+        let inetFiltered = EffectiveLoss.Filtering(gatewayLeg: false, internetLeg: true)
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4, filtering: inetFiltered) == "5ms", "formatPing: internet filtered falls back to the gateway RTT")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, filtering: inetFiltered) == "TCP ok", "formatPing: internet filtered with no gateway RTT reads TCP ok")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, filtering: gwFiltered) == "TCP ok", "formatPing: gateway filtered with nothing measured reads TCP ok")
     }
 
     // MARK: - Diagnostic Share
@@ -1426,11 +1435,16 @@ private enum VerifyHarness {
         check(brRes.macHealth == .warning, "BR-1 marks Mac health as warning")
         check(brRes.badgeTitle == "Culprit: Browser App", "BR-1 gives Culprit: Browser App badge")
 
+        // Updated: this case used TCP-1 with a 100% *internet* figure and expected
+        // it ignored — but TCP-1 is the gateway being filtered, so the internet
+        // figure is the real one. ICMP-1 is the rule that makes the internet
+        // figure unmeasurable, so the same inputs now run under ICMP-1; the
+        // TCP-1 cases are in runLegFilteringViewTests.
         let icmpFiltRes = HopAttributionResolver.resolve(
-            rules: ["TCP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: nil, inetLoss: 100.0
+            rules: ["ICMP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 1.5, gatewayLoss: 0.0, inetRTT: nil, inetLoss: 100.0
         )
-        check(icmpFiltRes.culprit == .none, "TCP-1 ICMP filtered attributes to none (All Clear)")
-        check(icmpFiltRes.ispHealth == .healthy, "TCP-1 ICMP filtered keeps ISP health as healthy")
+        check(icmpFiltRes.culprit == .none, "ICMP-1 attributes to none (All Clear)")
+        check(icmpFiltRes.ispHealth == .healthy, "ICMP-1 keeps ISP health as healthy")
 
         let roamedRes = HopAttributionResolver.resolve(
             rules: [], isWifi: true, wifiRSSI: -58, gatewayRTT: 2.0, gatewayLoss: 5.0, recentRoamed: true
@@ -1980,6 +1994,112 @@ private enum VerifyHarness {
         // mean of those plus 395 (228) the wrapper would have produced.
         equal(fallbackSnapshot.fraction, 518.0 / 691.0,
               "an overlapping phase's samples stay out of the fallback estimate")
+    }
+
+    // MARK: - Filtered-ping legs outside the tiles
+
+    /// TCP-1 (the flag) means the GATEWAY declines pings; ICMP-1 means the
+    /// INTERNET pings are dropped. Every surface other than the suitability
+    /// tiles used to treat the flag as "internet ping unmeasurable".
+    private static func runLegFilteringViewTests() {
+        print("\nFiltered-ping legs: ping cells, hop marks, series, attribution, alerts")
+
+        func sample(gw: Double?, inet: Double?, rtt: Double?, flag: Bool, rules: [String]) -> MonitorSample {
+            var s = MonitorSample()
+            s.gateway.lossPct = gw
+            s.internet.lossPct = inet
+            s.internet.rttAvgMs = rtt
+            s.tcp.anyOk = true
+            s.status.icmpFiltered = flag
+            s.status.rules = rules
+            return s
+        }
+        // name, sample, expected (gatewayLeg, internetLeg)
+        let tcp1 = sample(gw: 100, inet: 0, rtt: 25, flag: true, rules: ["TCP-1"])
+        let tcp1FlagOnly = sample(gw: 100, inet: 0, rtt: 25, flag: true, rules: [])
+        let icmp1 = sample(gw: 0, inet: 100, rtt: nil, flag: false, rules: ["ICMP-1"])
+        let both = sample(gw: 100, inet: 100, rtt: nil, flag: true, rules: ["TCP-1", "ICMP-1"])
+        let neither = sample(gw: 0, inet: 0, rtt: 25, flag: false, rules: [])
+        let fTcp1 = EffectiveLoss.filtering(sample: tcp1)
+        let fFlag = EffectiveLoss.filtering(sample: tcp1FlagOnly)
+        let fIcmp1 = EffectiveLoss.filtering(sample: icmp1)
+        let fBoth = EffectiveLoss.filtering(sample: both)
+        let fNone = EffectiveLoss.filtering(sample: neither)
+
+        // Which hop is marked "Ping blocked" (router = gateway leg, internet = internet leg).
+        check(fTcp1.filters(.gateway) && !fTcp1.filters(.internet), "TCP-1 only: the router hop is the one marked blocked")
+        check(fFlag.filters(.gateway) && !fFlag.filters(.internet), "icmp_filtered flag alone: router hop blocked, internet hop not")
+        check(!fIcmp1.filters(.gateway) && fIcmp1.filters(.internet), "ICMP-1 only: the internet hop is the one marked blocked")
+        check(fBoth.filters(.gateway) && fBoth.filters(.internet), "both rules: both hops marked blocked")
+        check(!fNone.any, "neither: no hop marked blocked")
+
+        // Internet ping cell: RTT unless the internet leg is filtered or nothing came back under TCP-1.
+        check(!PingReadout.internetShowsTCPOk(rtt: 25, filtering: fTcp1), "TCP-1 only with a measured internet RTT: the cell shows the RTT, not TCP ok")
+        check(PingReadout.internetShowsTCPOk(rtt: nil, filtering: fTcp1), "TCP-1 only with no internet RTT: TCP ok")
+        check(PingReadout.internetShowsTCPOk(rtt: 25, filtering: fIcmp1), "ICMP-1: TCP ok even if an RTT is present")
+        check(PingReadout.internetShowsTCPOk(rtt: nil, filtering: fIcmp1), "ICMP-1 with no RTT: TCP ok")
+        check(PingReadout.internetShowsTCPOk(rtt: 25, filtering: fBoth), "both: TCP ok")
+        check(!PingReadout.internetShowsTCPOk(rtt: 25, filtering: fNone), "neither with an RTT: the RTT")
+        check(!PingReadout.internetShowsTCPOk(rtt: nil, filtering: fNone), "neither with no RTT: not TCP ok (the cell shows dash / no reply)")
+
+        // Chart series: blank only when the internet leg is filtered.
+        check(PingReadout.internetSeriesValue(for: tcp1) == 25, "TCP-1 only: the internet RTT series is not blanked")
+        check(PingReadout.internetSeriesValue(for: tcp1FlagOnly) == 25, "icmp_filtered flag alone: the internet RTT series is not blanked")
+        var icmp1WithRtt = icmp1
+        icmp1WithRtt.internet.rttAvgMs = 25
+        check(PingReadout.internetSeriesValue(for: icmp1WithRtt) == nil, "ICMP-1: the internet RTT series is blanked")
+        var bothWithRtt = both
+        bothWithRtt.internet.rttAvgMs = 25
+        check(PingReadout.internetSeriesValue(for: bothWithRtt) == nil, "both: the internet RTT series is blanked")
+        check(PingReadout.internetSeriesValue(for: neither) == 25, "neither: the internet RTT series is plotted")
+
+        // Menu bar.
+        check(MenuBarLabel.formatPing(internetRtt: 25, gatewayRtt: nil, filtering: fTcp1) == "25ms", "menu bar, TCP-1 only: shows the internet RTT")
+        check(MenuBarLabel.formatPing(internetRtt: 25, gatewayRtt: 5, filtering: fTcp1) == "25ms", "menu bar, TCP-1 only: internet RTT wins over a gateway figure")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5, filtering: fIcmp1) == "5ms", "menu bar, ICMP-1 only: falls back to the gateway RTT")
+        check(MenuBarLabel.formatPing(internetRtt: 25, gatewayRtt: 5, filtering: fBoth) == "TCP ok", "menu bar, both: TCP ok")
+        check(MenuBarLabel.formatPing(internetRtt: 25, gatewayRtt: 5, filtering: fNone) == "25ms", "menu bar, neither: unchanged")
+
+        // Hop attribution: TCP-1 drops the gateway loss, ICMP-1 drops the internet loss.
+        let tcp1Res = HopAttributionResolver.resolve(
+            rules: ["TCP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: nil, gatewayLoss: 100.0, inetRTT: 25, inetLoss: 40.0)
+        check(tcp1Res.ispHealth == .critical, "TCP-1 only: the measured internet loss is kept (ISP critical)")
+        check(tcp1Res.routerHealth == .healthy, "TCP-1 only: the unmeasurable gateway loss is dropped (router healthy)")
+        let tcp1Clean = HopAttributionResolver.resolve(
+            rules: ["TCP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: nil, gatewayLoss: 100.0, inetRTT: 25, inetLoss: 0.0)
+        check(tcp1Clean.culprit == .none && tcp1Clean.routerHealth == .healthy && tcp1Clean.ispHealth == .healthy,
+              "TCP-1 only with clean internet: all clear")
+        let icmp1Res = HopAttributionResolver.resolve(
+            rules: ["ICMP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2, gatewayLoss: 30.0, inetRTT: nil, inetLoss: 100.0)
+        check(icmp1Res.ispHealth == .healthy, "ICMP-1 only: the unmeasurable internet loss is dropped (ISP healthy)")
+        check(icmp1Res.routerHealth == .critical, "ICMP-1 only: the measured gateway loss is kept (router critical)")
+        let bothRes = HopAttributionResolver.resolve(
+            rules: ["TCP-1", "ICMP-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: nil, gatewayLoss: 100.0, inetRTT: nil, inetLoss: 100.0)
+        check(bothRes.routerHealth == .healthy && bothRes.ispHealth == .healthy, "both: neither loss figure is trusted")
+        let neitherRes = HopAttributionResolver.resolve(
+            rules: [], isWifi: true, wifiRSSI: -50, gatewayRTT: 2, gatewayLoss: 0.0, inetRTT: 30, inetLoss: 20.0)
+        check(neitherRes.ispHealth == .critical, "neither: internet loss is judged as before")
+        // From a live sample carrying only the flag (no rule list): the flag is TCP-1.
+        let flagRes = HopAttributionResolver.resolve(
+            sample: sample(gw: 100, inet: 40, rtt: 25, flag: true, rules: []))
+        check(flagRes.ispHealth == .critical, "flag-only sample: internet loss is kept")
+        check(flagRes.routerHealth == .healthy, "flag-only sample: gateway loss is dropped")
+
+        // Alerts: only the alert about the filtered leg is suppressed.
+        if let inetAlert = AlertDefinition.byID("internet-degraded"),
+           let gwAlert = AlertDefinition.byID("wifi-unstable"),
+           let lost = AlertDefinition.byID("connection-lost") {
+            check(!inetAlert.suppressedByICMPFilter(fTcp1), "TCP-1 only: an internet-loss alert is not suppressed")
+            check(gwAlert.suppressedByICMPFilter(fTcp1), "TCP-1 only: a gateway-loss alert is suppressed")
+            check(inetAlert.suppressedByICMPFilter(fIcmp1), "ICMP-1 only: an internet-loss alert is suppressed")
+            check(!gwAlert.suppressedByICMPFilter(fIcmp1), "ICMP-1 only: a gateway-loss alert is not suppressed")
+            check(inetAlert.suppressedByICMPFilter(fBoth) && gwAlert.suppressedByICMPFilter(fBoth), "both: both loss alerts suppressed")
+            check(!inetAlert.suppressedByICMPFilter(fNone) && !gwAlert.suppressedByICMPFilter(fNone), "neither: no loss alert suppressed")
+            check(!inetAlert.suppressedByICMPFilter(fFlag), "flag alone: an internet-loss alert is not suppressed")
+            check(!lost.suppressedByICMPFilter(fBoth), "connection-lost is never suppressed by a ping filter")
+        } else {
+            check(false, "alert definitions internet-degraded, wifi-unstable, connection-lost exist")
+        }
     }
 
     // MARK: - Filtered-ping loss and tile agreement

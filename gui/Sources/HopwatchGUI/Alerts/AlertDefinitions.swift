@@ -45,10 +45,20 @@ struct AlertDefinition: Identifiable, Sendable {
     /// True when only a full scan can observe this — the monitor never
     /// claims it, so it is evaluated against a run's diagnosis array.
     let scanOnly: Bool
-    /// Whether TCP-1 holding suppresses this alert. Every loss-derived
-    /// alert says yes: on hotel and corporate WiFi, ICMP is blocked
-    /// wholesale and a loss alert there is always a false one.
-    let suppressedByICMPFilter: Bool
+    /// Which ping leg this alert's loss rules read, or `nil` when none.
+    /// A filter rule that makes that leg unmeasurable suppresses the alert:
+    /// on hotel and corporate WiFi, ICMP is blocked and a loss alert about
+    /// the blocked leg is always a false one. An alert about the *other*
+    /// leg is not suppressed. The mapping is the CLI's own: TCP-1 suppresses
+    /// G1/G2/G3 (gateway), ICMP-1 suppresses L1/L2 (internet) — see
+    /// docs/DIAGNOSIS-RULES.md. No threshold or verdict lives here.
+    let lossLeg: EffectiveLoss.Leg?
+
+    /// Whether the given filtering makes this alert's leg unmeasurable.
+    func suppressedByICMPFilter(_ filtering: EffectiveLoss.Filtering) -> Bool {
+        guard let lossLeg else { return false }
+        return filtering.filters(lossLeg)
+    }
     /// Fire at most once per network rather than on a clock. For the two
     /// alerts that describe a property of *this* network rather than a
     /// condition that comes and goes.
@@ -81,7 +91,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "connection-lost", title: "No internet connection",
             rules: ["N1", "N1b", "P1", "P2"],
             dwell: 15, cooldown: 300, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 15 seconds before alerting, then waits 5 minutes before repeating.",
             interimBody: "Checking what happened…"),
 
@@ -89,7 +99,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "wifi-unstable", title: "Connection is unstable",
             rules: ["G1", "G2", "G3", "WD-1"],
             dwell: 25, cooldown: 1800, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: true, oncePerNetwork: false,
+            lossLeg: .gateway, oncePerNetwork: false,
             caption: "Confirms for 25 seconds before alerting, then waits 30 minutes before repeating.",
             interimBody: "Checking whether it's your Wi-Fi or your router…"),
 
@@ -97,7 +107,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "internet-degraded", title: "Internet connection degraded",
             rules: ["L1", "L2"],
             dwell: 25, cooldown: 600, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: true, oncePerNetwork: false,
+            lossLeg: .internet, oncePerNetwork: false,
             caption: "Confirms for 25 seconds before alerting, then waits 10 minutes before repeating.",
             interimBody: "Checking whether the loss is at your router or your internet provider…"),
 
@@ -105,7 +115,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "dns-failing", title: "Websites aren't loading",
             rules: ["P1", "D1", "D3", "D4", "V6-2"],
             dwell: 30, cooldown: 1800, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 30 seconds before alerting, then waits 30 minutes before repeating.",
             interimBody: "Checking your name lookups…"),
 
@@ -113,7 +123,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "public-ip-changed", title: "Your public IP address changed",
             rules: [],   // raised from a monitor event, not a rule
             dwell: 0, cooldown: 60, resolves: false, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Fires as soon as it's seen; won't repeat within 1 minute.",
             interimBody: ""),
 
@@ -125,7 +135,7 @@ struct AlertDefinition: Identifiable, Sendable {
             // which is exactly the moment a non-technical user is stranded
             // with a Wi-Fi icon that looks connected and no working web.
             dwell: 15, cooldown: 0, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: true,
+            lossLeg: nil, oncePerNetwork: true,
             caption: "Fires once per network, 15 seconds after joining, if the sign-in page didn't open on its own.",
             interimBody: "Open your browser to sign in to this network."),
 
@@ -133,7 +143,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "vpn-dropped", title: "Your VPN disconnected",
             rules: [],   // raised from a vpn.active true→false transition
             dwell: 10, cooldown: 300, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 10 seconds before alerting, then waits 5 minutes before repeating.",
             interimBody: "Your traffic is no longer going through the VPN."),
 
@@ -141,7 +151,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "clock-drift", title: "Your Mac's clock is wrong",
             rules: ["NT-1"],
             dwell: 0, cooldown: 43_200, resolves: true, scanOnly: true,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 12 hours.",
             interimBody: ""),
 
@@ -149,7 +159,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "ip-conflict", title: "IP address conflict",
             rules: ["DI-1", "DI-2"],
             dwell: 0, cooldown: 21_600, resolves: true, scanOnly: true,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 6 hours.",
             interimBody: ""),
 
@@ -157,7 +167,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "different-network", title: "This isn't the network you think",
             rules: [],   // raised from a gateway-MAC change under a known SSID
             dwell: 30, cooldown: 0, resolves: false, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: true,
+            lossLeg: nil, oncePerNetwork: true,
             caption: "Fires once per network, 30 seconds after the router behind a familiar Wi-Fi name changes.",
             interimBody: "The Wi-Fi name is the same, but the router behind it is a different one."),
 
@@ -166,7 +176,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "lease-expiring", title: "Network address expiring soon",
             rules: ["DH-1"],
             dwell: 0, cooldown: 21_600, resolves: false, scanOnly: true,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 6 hours.",
             interimBody: ""),
 
@@ -174,7 +184,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "slower-than-usual", title: "Slower than usual",
             rules: ["BL-1"],
             dwell: 0, cooldown: 43_200, resolves: false, scanOnly: true,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 12 hours.",
             interimBody: ""),
 
@@ -182,7 +192,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "double-nat", title: "Two routers connected (Double NAT)",
             rules: ["NAT-1"],
             dwell: 0, cooldown: 86_400, resolves: true, scanOnly: true,
-            suppressedByICMPFilter: false, oncePerNetwork: true,
+            lossLeg: nil, oncePerNetwork: true,
             caption: "Checked only during a full check; fires once per network, then won't repeat for 24 hours.",
             interimBody: "Two routers are chained together in your home, which can cause gaming and VPN issues."),
 
@@ -190,7 +200,7 @@ struct AlertDefinition: Identifiable, Sendable {
             id: "browser-desync", title: "Browser needs relaunch",
             rules: ["BR-1"],
             dwell: 0, cooldown: 1800, resolves: true, scanOnly: false,
-            suppressedByICMPFilter: false, oncePerNetwork: false,
+            lossLeg: nil, oncePerNetwork: false,
             caption: "Fires immediately when a browser silently updated in the background while open; won't repeat for 30 minutes.",
             interimBody: "Quitting and reopening your browser restores normal browsing."),
     ]

@@ -13,6 +13,9 @@ import Foundation
 /// A filtered leg is excluded, never read as 0 and never read as its raw value.
 enum EffectiveLoss {
 
+    /// The two ping legs a filter rule can make unmeasurable.
+    enum Leg: Equatable, Sendable { case gateway, internet }
+
     struct Filtering: Equatable, Sendable {
         var gatewayLeg: Bool = false
         var internetLeg: Bool = false
@@ -21,6 +24,14 @@ enum EffectiveLoss {
 
         var any: Bool { gatewayLeg || internetLeg }
         var both: Bool { gatewayLeg && internetLeg }
+
+        /// True when ping figures for `leg` say nothing about the link.
+        func filters(_ leg: Leg) -> Bool {
+            switch leg {
+            case .gateway: return gatewayLeg
+            case .internet: return internetLeg
+            }
+        }
     }
 
     /// Which loss legs the CLI says cannot be measured by ping.

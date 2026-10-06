@@ -153,10 +153,13 @@ public enum HopAttributionResolver {
         }
 
         // 2. Evaluate Local Router Health
-        let isIcmpFiltered = ruleSet.contains("TCP-1") || ruleSet.contains("ICMP-1")
-        let effectiveInetLoss = isIcmpFiltered ? nil : inetLoss
-        let isIsolatedGatewayLoss = (effectiveInetLoss != nil && effectiveInetLoss! <= 1.0 && (gatewayLoss ?? 0) < 20.0)
-        let isRealGatewayLoss = (gatewayLoss != nil && gatewayLoss! >= 10 && wifiHealth == .healthy && !recentRoamed && !isIsolatedGatewayLoss)
+        // A filter rule makes one ping leg unmeasurable: TCP-1 the gateway's,
+        // ICMP-1 the internet's. Drop exactly that leg's loss, keep the other.
+        let filtering = EffectiveLoss.filtering(icmpFilteredFlag: false, ruleIDs: rules)
+        let effectiveInetLoss = filtering.internetLeg ? nil : inetLoss
+        let effectiveGatewayLoss = filtering.gatewayLeg ? nil : gatewayLoss
+        let isIsolatedGatewayLoss = (effectiveInetLoss != nil && effectiveInetLoss! <= 1.0 && (effectiveGatewayLoss ?? 0) < 20.0)
+        let isRealGatewayLoss = (effectiveGatewayLoss != nil && effectiveGatewayLoss! >= 10 && wifiHealth == .healthy && !recentRoamed && !isIsolatedGatewayLoss)
 
         var routerHealth: HopHealth = .healthy
         if !ruleSet.isDisjoint(with: routerCriticalRules) || isRealGatewayLoss {
@@ -169,7 +172,7 @@ public enum HopAttributionResolver {
         var ispHealth: HopHealth = .healthy
         if !ruleSet.isDisjoint(with: ispCriticalRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 10) {
             ispHealth = .critical
-        } else if !ruleSet.isDisjoint(with: ispWarningRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 3.0 && gatewayLoss != nil && gatewayLoss! == 0) || (bufferbloatInet != nil && bufferbloatInet! >= 150) {
+        } else if !ruleSet.isDisjoint(with: ispWarningRules) || (effectiveInetLoss != nil && effectiveInetLoss! >= 3.0 && effectiveGatewayLoss != nil && effectiveGatewayLoss! == 0) || (bufferbloatInet != nil && bufferbloatInet! >= 150) {
             ispHealth = .warning
         }
 
@@ -345,8 +348,10 @@ public enum HopAttributionResolver {
         recentRoamed: Bool = false
     ) -> Result {
         var rules = sample.status.rules
-        if sample.status.icmpFiltered && !rules.contains("ICMP-1") && !rules.contains("TCP-1") {
-            rules.append("ICMP-1")
+        // The flag is TCP-1: the gateway declines pings. A sample that carries
+        // the flag without the rule ID is read as TCP-1, never as ICMP-1.
+        if sample.status.icmpFiltered && !rules.contains("TCP-1") {
+            rules.append("TCP-1")
         }
         let isWifi = sample.link.isWiFi
         let roamedInWindow = sample.changes.contains(where: { $0.kind == "wifi-roamed" })

@@ -486,7 +486,8 @@ struct DropdownView: View {
 
     private var internetPingText: String {
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
-        if icmpFiltered { return "TCP ok" }
+        if PingReadout.internetShowsTCPOk(rtt: coordinator.monitor.latest?.internet.rttAvgMs,
+                                          filtering: lossFiltering) { return "TCP ok" }
         guard let rtt = coordinator.monitor.latest?.internet.rttAvgMs else {
             if let loss = coordinator.monitor.latest?.internet.lossPct, loss >= 100 { return "no reply" }
             return "—"
@@ -510,6 +511,9 @@ struct DropdownView: View {
     }
 
     private var routerDetailText: String {
+        if lossFiltering.filters(.gateway) {
+            return "Ping blocked"
+        }
         if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
             return "Wi-Fi roamed"
         }
@@ -539,6 +543,11 @@ struct DropdownView: View {
         let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
         let ping = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
 
+        // Only the filtered leg's hop says "Ping blocked"; its loss figure
+        // describes the probe, not the link.
+        if lossFiltering.filters(.internet) {
+            return "Ping blocked"
+        }
         if loss > 0 && jitter >= 30.0 {
             return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
         }
@@ -547,9 +556,6 @@ struct DropdownView: View {
         }
         if jitter >= 30.0 && !isGatewayJitterDominant {
             return String(format: "%.0f ms jitter", jitter)
-        }
-        if icmpFiltered {
-            return "Ping blocked"
         }
         if internetWarn {
             if ping >= 120.0 {
@@ -751,9 +757,11 @@ struct DropdownView: View {
         coordinator.currentStability
     }
 
-    private var icmpFiltered: Bool {
-        !coordinator.monitor.isPaused && !coordinator.isScanning
-            && coordinator.monitor.latest?.status.icmpFiltered == true
+    /// Which ping legs the live sample says are unmeasurable. Empty while
+    /// paused or scanning, when the cells show "—" rather than a reading.
+    private var lossFiltering: EffectiveLoss.Filtering {
+        guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return .none }
+        return EffectiveLoss.filtering(sample: coordinator.monitor.latest)
     }
 
     private var resolvedRSSI: Int? {

@@ -165,11 +165,13 @@ final class AlertEngine {
         // DHCP, DNS and the default route land a beat apart after a switch.
         // Probes in the first seconds measure a half-configured stack.
         if inNetworkGracePeriod() { return "network just changed" }
-        // TCP-1: real connections work, only ping is being dropped. Hotel
-        // and corporate networks block ICMP wholesale, and without this a
-        // loss alert there fires constantly and is never once correct.
-        if def.suppressedByICMPFilter, sample?.status.icmpFiltered == true {
-            return "ICMP filtered (TCP-1)"
+        // TCP-1 / ICMP-1: real connections work, only ping is being dropped.
+        // Hotel and corporate networks block ICMP wholesale, and without this
+        // a loss alert there fires constantly and is never once correct. Only
+        // an alert about the *filtered* leg is held (TCP-1: gateway, ICMP-1:
+        // internet); loss on the other leg is still real and still alerts.
+        if def.suppressedByICMPFilter(EffectiveLoss.filtering(sample: sample)) {
+            return "ping filtered (TCP-1 / ICMP-1)"
         }
         return nil
     }
