@@ -54,7 +54,8 @@ final class EventStore {
 
     func record(kind: String, summary: String, ruleID: String? = nil,
                 network: String? = nil,
-                date: Date = .now) {
+                date: Date = .now,
+                continuesPrevious: Bool = false) {
         guard !summary.isEmpty else { return }
         // A monitor restart is an observation boundary, never a repeat.
         // It must not be coalesced by isRepeat, or a restart within the
@@ -69,7 +70,8 @@ final class EventStore {
         events = NetworkEvent.trimmed(
             events + [NetworkEvent(date: date, kind: kind,
                                    summary: summary, ruleID: ruleID,
-                                   network: network)],
+                                   network: network,
+                                   continuesPrevious: continuesPrevious)],
             cap: Self.cap)
         save()
     }

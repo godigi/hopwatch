@@ -115,10 +115,22 @@ extension ActivityEntry {
 
         for event in chronological {
             if event.kind == "monitor-started" {
-                // Everything still open was being watched by a process that is
-                // no longer running. Close each at this restart rather than
-                // letting it span a period nobody observed (matching
-                // helpers/events.py:217).
+                // A restart this app made itself, while running, on the same
+                // network: a cadence change, or the start or end of an
+                // investigation burst. About once a minute on a faulty link,
+                // and no evidence whatever that a fault ended — the app
+                // caused it and was watching either side. Stepping over it
+                // is what keeps one continuous fault one entry instead of
+                // one per restart. There is no window here to tune: the
+                // question is who restarted the monitor, not how quickly the
+                // rule came back. See `NetworkEvent.continuesPrevious`.
+                if event.continuesPrevious { continue }
+                // Anything else is a real observation boundary — an app
+                // launch, monitoring switched off and on, a crash, a changed
+                // network. Everything still open was being watched by a
+                // process that is no longer running. Close each at this
+                // restart rather than letting it span a period nobody
+                // observed (matching helpers/events.py:217).
                 for (_, var existing) in open {
                     existing.end = event.date
                     existing.isLowerBound = true

@@ -78,6 +78,19 @@ final class MonitorStream {
     private var pauseSignalPending = false
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
+    /// Set by `restart()` and consumed by the next `spawn()`: the child about
+    /// to start replaces one this app stopped itself, a moment ago, on
+    /// purpose. Cleared by `stop()` and by every path that gives up on
+    /// spawning, so a later start the user or a crash recovery makes cannot
+    /// inherit it.
+    private var restartPending = false
+    /// Whether the current child replaced one this app restarted itself
+    /// (a cadence change, the start or end of an investigation burst) rather
+    /// than being the first, a user's switch-off and on, or a crash
+    /// recovery. Read for the child's first sample, to say whether its
+    /// `monitor-started` is evidence of anything: see
+    /// `NetworkEvent.continuesPrevious`.
+    private(set) var childContinuesPrevious = false
 
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "monitor")
     private let decoder = JSONDecoder()
@@ -93,6 +106,7 @@ final class MonitorStream {
         // Fail-fast only — the path spawned later is re-resolved after
         // the gate, not this one. See startAfterCapabilityCheck.
         guard BinaryLocator.resolve() != nil else {
+            restartPending = false
             lastError = BinaryLocator.missingBinaryMessage
             return
         }
@@ -126,6 +140,7 @@ final class MonitorStream {
             try await CapabilityStore.shared.requireSupport(for: .monitor)
         } catch {
             guard !Task.isCancelled, startGeneration == generation else { return }
+            restartPending = false
             lastError = error.localizedDescription
             log.error("monitor not started: \(error.localizedDescription, privacy: .public)")
             return
@@ -136,6 +151,7 @@ final class MonitorStream {
         // let an override changed mid-handshake validate one binary and
         // launch another.
         guard let binary = BinaryLocator.resolve() else {
+            restartPending = false
             lastError = BinaryLocator.missingBinaryMessage
             return
         }
@@ -145,6 +161,10 @@ final class MonitorStream {
     /// The process itself, split out of `start()` so the capability check
     /// above can sit ahead of it without duplicating any of this.
     private func spawn(binary: String) {
+        // Consumed here even if `run()` below throws: a retry after a failed
+        // launch is a recovery, not the app's own quick restart.
+        childContinuesPrevious = restartPending
+        restartPending = false
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         // A burst overrides the degraded tier as well as the fast one.
@@ -238,6 +258,7 @@ final class MonitorStream {
         process = nil
         isRunning = false
         isPaused = false
+        restartPending = false
         pauseHolders.removeAll()
         pauseReason = nil
         trapsReady = false
@@ -260,10 +281,14 @@ final class MonitorStream {
         let holders = pauseHolders
         let interval = burstInterval
         let until = burstUntil
+        let wasRunning = isRunning
         stop()
         burstInterval = interval
         burstUntil = until
         restartAttempts = 0
+        // After `stop()`, which clears it. Only a monitor that was actually
+        // running is being replaced; restarting one that was not is a start.
+        restartPending = wasRunning
         start()
         for reason in holders { pause(reason: reason) }
     }

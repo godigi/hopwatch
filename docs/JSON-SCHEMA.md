@@ -147,6 +147,28 @@ array in each sample. Until this existed it was rendered and discarded.
 | `monitor-started` | first cycle of a recorder process — lets a reader tell "no events because nothing happened" from "no events because nothing was running" |
 | `gap` | the monitor was not looking, with `gap_s`. Sleep, a stall, a lid closed |
 
+**What a process says at start.** A fresh monitor's first sample has
+nothing to diff against, so its `changes` is empty and a rule already
+firing in it would never be journaled — a fault that simply carried on
+through a restart went silent for as long as it lasted. So after
+`monitor-started` the journal gets one `rule-fired` line per rule firing in
+that first sample, carrying one extra, optional field:
+
+```json
+{"t":"2026-10-06T20:35:51Z","seq":1,"network":"wifi:mac=…",
+ "network_label":"Home","kind":"rule-fired","field":"status.rules",
+ "from":null,"to":"G2","summary":"Router dropping packets",
+ "already_firing":true}
+```
+
+`already_firing` is present only when `true`. It says the monitor did not
+see the rule start; it found it in progress. A reader that ignores it reads
+an ordinary `rule-fired`, which is the right fallback. It is **journal
+only**: the `--monitor` stream's first sample still has no `changes`, so a
+consumer does not alert on a fault it was already showing. Lines written
+before this existed have no such line; the journal has no schema number and
+none was bumped.
+
 Every line carries its own timestamp and network identity rather than
 inheriting them from a header: the file is appended to by successive
 recorder processes across reboots and is read back by time range. It is
@@ -237,10 +259,24 @@ takes to *report* a fault that was already there; it says nothing about
 whether any duration is acceptable. `monitor_starts` in `observation` still
 counts every start, bridged or not.
 
-**What bridging cannot recover.** A fresh monitor's first sample is only a
-baseline: a rule already firing in it is never journaled as fired. A fault
-that simply carries on through a restart therefore leaves no re-fire to
-bridge to, and its episode still ends at the restart.
+**A fault that carries on through a restart.** The new monitor reports it
+in its own first sample (`already_firing`, above), at the restart, so it
+joins the episode the restart closed with nothing added to `unobserved_s`.
+This is the usual case; a re-fire a few samples later, as older journals
+wrote it, still bridges as described.
+
+**What bridging cannot recover.** Journals written before the start lines
+existed have no re-fire for a fault that simply carried on. A restart-closed
+episode that is later followed by a `rule-cleared` for the same rule on the
+same network, with no `rule-fired` in between, is joined to it anyway: a
+monitor can only report a clear for a rule it saw firing, and that process
+had no fire in the journal because its first sample was never written. The
+time from the restart to that clear is added to `unobserved_s` (nothing
+journaled it). A fault that simply carried on and has not cleared yet is,
+in those journals, still cut at the restart. The restart is also trusted to
+be where the previous process stopped: a recorder that died and came back
+hours later bridges across the downtime without counting it as unobserved,
+since the journal has no heartbeat to say when it died.
 
 **A fault can end inside the window and have begun outside it.** That is
 the likeliest shape of "was the internet down last night?", so the episode
@@ -254,6 +290,13 @@ and `start_unobserved: true`:
  "ended": "2026-08-28T07:02:11Z", "duration_s": null,
  "ongoing": false, "unobserved_s": 0, "ended_by": "cleared"}
 ```
+
+A fault the monitor **found already in progress** (`already_firing`) with
+no episode from an earlier process to join is reported with the same flag
+but a known start: `started` is the first moment it was seen, `duration_s`
+is measured from there and carries `duration_is_lower_bound: true`, since
+it began earlier. Both shapes are `start_unobserved`; `started: null` only
+when no firing was seen at all.
 
 `start_unobserved` is present only when `true`, like
 `duration_is_lower_bound`. An end with no beginning is still an end; the
