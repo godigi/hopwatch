@@ -25,11 +25,13 @@ setup() {
 }
 
 # One journal line. $1 kind, $2 timestamp, $3 seq, then kind-specific args.
+# ALREADY=1 marks a rule-fired as "found already firing in the first sample
+# of a monitor", which is how monitor_sample.py writes them at start.
 ev() {
   local kind="$1" ts="$2" seq="$3"; shift 3
   local extra=""
   case "$kind" in
-    rule-fired)   extra=",\"from\":null,\"to\":\"$1\"" ;;
+    rule-fired)   extra=",\"from\":null,\"to\":\"$1\"${ALREADY:+,\"already_firing\":true}" ;;
     rule-cleared) extra=",\"from\":\"$1\",\"to\":null" ;;
     gap)          extra=",\"gap_s\":$1" ;;
   esac
@@ -622,4 +624,239 @@ assert 'recorder' in f, f
   [ "$status" -eq 0 ]
   run bash -c "grep -E 'WATCHER_LABEL=\"com\.(hopwatch|netdiag)\.watcher\"' '$REPO/lib/watchdog.sh'"
   [ "$status" -eq 0 ]
+}
+
+# ── A fault that simply carries on through a restart ────────────────────
+#
+# A fresh monitor's first sample is a baseline, so a rule already firing in
+# it used to be journaled never: the fault went silent for as long as it
+# lasted, and the reader could only close it at the restart. The first
+# sample's rules are now journaled with `already_firing`, so the reader can
+# tell "observed starting" from "found in progress" and join the latter to
+# the episode the previous process had open.
+
+@test "a steady fault across one restart is one episode" {
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev monitor-started 2026-10-06T20:10:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:10:00Z 1 G2
+  ev rule-cleared    2026-10-06T20:20:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['started'] == '2026-10-06T20:00:00Z', ep
+assert ep['ended'] == '2026-10-06T20:20:00Z', ep
+assert ep['duration_s'] == 1200, ep
+# The new monitor reported it in its own first sample: nothing in between
+# went unobserved.
+assert ep['unobserved_s'] == 0, ep
+assert ep['restarts_bridged'] == 1, ep
+assert ep['ended_by'] == 'cleared', ep
+assert ep['ongoing'] is False, ep
+# It began where it was seen to begin.
+assert 'start_unobserved' not in ep, ep
+assert 'duration_is_lower_bound' not in ep, ep
+"
+}
+
+@test "a steady fault across a chain of restarts is one episode with the right totals" {
+  # Three restarts, the second of whose monitors had not yet got the rule
+  # in its first sample and re-fired it 18 s in (the older shape), so the
+  # two kinds of start compose in one episode.
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev monitor-started 2026-10-06T20:01:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:01:00Z 1 G2
+  ev monitor-started 2026-10-06T20:02:00Z 1
+  ev rule-fired      2026-10-06T20:02:18Z 3 G2
+  ev gap             2026-10-06T20:02:40Z 4 12
+  ev monitor-started 2026-10-06T20:03:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:03:00Z 1 G2
+  ev rule-cleared    2026-10-06T20:04:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['started'] == '2026-10-06T20:00:00Z', ep
+assert ep['duration_s'] == 240, ep
+# 18 s blind before the re-fire, plus the 12 s gap line. Start lines add
+# nothing: they were written in the first sample.
+assert ep['unobserved_s'] == 30, ep
+assert ep['restarts_bridged'] == 3, ep
+assert ep['ended_by'] == 'cleared', ep
+assert 'start_unobserved' not in ep, ep
+"
+}
+
+@test "a fault already in progress when the first monitor started is flagged start-unobserved" {
+  ev monitor-started 2026-10-06T20:00:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:00Z 1 G2
+  ev rule-cleared    2026-10-06T20:05:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+# The first moment it is known to have been true, and said to be that.
+assert ep['started'] == '2026-10-06T20:00:00Z', ep
+assert ep['start_unobserved'] is True, ep
+assert ep['ended'] == '2026-10-06T20:05:00Z', ep
+assert ep['duration_s'] == 300, ep
+assert ep['duration_is_lower_bound'] is True, ep
+assert ep['ended_by'] == 'cleared', ep
+assert 'restarts_bridged' not in ep, ep
+"
+}
+
+@test "an in-progress fault with no clear is still-open, start-unobserved, measured to the last event" {
+  ev monitor-started 2026-10-06T20:00:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:00Z 1 G2
+  ev gap             2026-10-06T20:03:00Z 5 10
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['start_unobserved'] is True, ep
+assert ep['ongoing'] is True, ep
+assert ep['ended_by'] == 'still-open', ep
+assert ep['duration_s'] == 180, ep
+assert ep['unobserved_s'] == 10, ep
+"
+}
+
+@test "start-unobserved survives being bridged across a later restart" {
+  ev monitor-started 2026-10-06T20:00:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:00Z 1 G2
+  ev monitor-started 2026-10-06T20:01:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:01:00Z 1 G2
+  ev rule-cleared    2026-10-06T20:02:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['started'] == '2026-10-06T20:00:00Z', ep
+assert ep['start_unobserved'] is True, ep
+assert ep['duration_s'] == 120, ep
+assert ep['restarts_bridged'] == 1, ep
+assert ep['duration_is_lower_bound'] is True, ep
+"
+}
+
+@test "a fault that ended while the monitor was down still ends at the restart" {
+  # The new monitor's first sample did not have G2, so nothing carries it:
+  # closed at the restart, as a lower bound, exactly as before. G3 is in
+  # progress at start, and is its own start-unobserved episode.
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev monitor-started 2026-10-06T20:10:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:10:00Z 1 G3
+  ev rule-cleared    2026-10-06T20:10:30Z 4 G3
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['ended_by'] == 'monitor-restart', ep
+assert ep['ended'] == '2026-10-06T20:10:00Z', ep
+assert ep['duration_s'] == 600, ep
+assert ep['duration_is_lower_bound'] is True, ep
+assert 'restarts_bridged' not in ep, ep
+"
+  eps_for G3 "
+assert len(eps) == 1, eps
+assert eps[0]['start_unobserved'] is True, eps[0]
+assert eps[0]['duration_s'] == 30, eps[0]
+"
+}
+
+@test "an in-progress rule on a different network does not continue the first" {
+  NET=wifi:mac=aa ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  NET=wifi:mac=bb ev monitor-started 2026-10-06T20:10:00Z 1
+  NET=wifi:mac=bb ALREADY=1 ev rule-fired 2026-10-06T20:10:00Z 1 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+by_net = {e['network']: e for e in eps}
+assert by_net['wifi:mac=aa']['ended_by'] == 'monitor-restart', eps
+assert 'restarts_bridged' not in by_net['wifi:mac=aa'], eps
+assert by_net['wifi:mac=bb']['start_unobserved'] is True, eps
+"
+}
+
+@test "a rule that cleared before the restart is not continued by an in-progress line" {
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev rule-cleared    2026-10-06T20:00:30Z 6 G2
+  ev monitor-started 2026-10-06T20:00:40Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:40Z 1 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 2, eps
+assert eps[0]['ended_by'] == 'cleared' and eps[0]['duration_s'] == 30, eps
+assert eps[1]['start_unobserved'] is True, eps
+assert 'restarts_bridged' not in eps[1], eps
+"
+}
+
+@test "the same in-progress line twice does not make two episodes" {
+  # The archive roll can duplicate lines; load() dedupes, and a second
+  # copy from a different process must not reopen anything either.
+  ev monitor-started 2026-10-06T20:00:00Z 1
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:00Z 1 G2
+  ALREADY=1 ev rule-fired 2026-10-06T20:00:01Z 2 G2
+  ev rule-cleared    2026-10-06T20:05:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 300, eps[0]
+"
+}
+
+# ── Journals written before the start lines existed ─────────────────────
+#
+# Old journals have a restart, no re-fire, and later a rule-cleared the
+# fresh monitor saw for a rule it was already carrying. Read literally that
+# was two entries for one fault: the episode closed at the restart, and an
+# orphan clear with no beginning.
+
+@test "an orphan clear after a restart continues the episode the restart closed" {
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev monitor-started 2026-10-06T20:10:00Z 1
+  ev rule-cleared    2026-10-06T20:25:00Z 9 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['started'] == '2026-10-06T20:00:00Z', ep
+assert ep['ended'] == '2026-10-06T20:25:00Z', ep
+assert ep['duration_s'] == 1500, ep
+assert ep['ended_by'] == 'cleared', ep
+assert ep['ongoing'] is False, ep
+assert ep['restarts_bridged'] == 1, ep
+assert 'duration_is_lower_bound' not in ep, ep
+# Nothing journaled what the second monitor saw before the clear.
+assert ep['unobserved_s'] == 900, ep
+"
+}
+
+@test "an orphan clear for a rule the restart did not close is still an end with no beginning" {
+  ev rule-fired      2026-10-06T20:00:00Z 5 G2
+  ev monitor-started 2026-10-06T20:10:00Z 1
+  ev rule-cleared    2026-10-06T20:10:11Z 3 TCP-1
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for TCP-1 "
+assert len(eps) == 1, eps
+assert eps[0]['started'] is None, eps[0]
+assert eps[0]['start_unobserved'] is True, eps[0]
+assert eps[0]['duration_s'] is None, eps[0]
+"
+  eps_for G2 "
+assert len(eps) == 1 and eps[0]['ended_by'] == 'monitor-restart', eps
+"
 }

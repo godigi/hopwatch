@@ -1104,6 +1104,129 @@ assert events[0]["from"] == "L1", events
 PY
 }
 
+# ── What the journal says at monitor start ──────────────────────────────
+#
+# A fresh monitor's first sample has no previous sample to diff against, so
+# `changes` is empty and a rule already firing in it was never journaled.
+# After a restart during a steady fault the journal then went silent for as
+# long as the fault lasted, and helpers/events.py could only end the episode
+# at the restart. The first sample's rules are now written down, marked
+# `already_firing`, so the reader can join them to the episode the previous
+# process had open. The stream is a different matter: its first-sample
+# `changes` stays empty, because the app already knows about a fault it was
+# showing before it restarted the monitor, and must not alert on it again.
+
+# The journal's lines as one JSON list on stdout, for assertions in python.
+journal_lines() {
+  python3 -c "
+import json, sys
+print(json.dumps([json.loads(l) for l in open(sys.argv[1]) if l.strip()]))
+" "$1"
+}
+
+@test "monitor_sample: rules firing in the first sample are journaled as already firing" {
+  local journal="$BATS_TEST_TMPDIR/start.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=1 \
+           NETDIAG_MON_HAVE_PREV=0 NETDIAG_MON_TS=2026-10-06T20:35:51Z \
+           NETDIAG_MON_NETWORK_ID=wifi:mac=00:11:22:33:44:55 \
+           NETDIAG_MON_RULES='G2 TCP-1 '
+  [ "$status" -eq 0 ]
+  run journal_lines "$journal"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+assert [r['kind'] for r in rows] == ['monitor-started', 'rule-fired',
+                                     'rule-fired'], rows
+fired = rows[1:]
+assert [r['to'] for r in fired] == ['G2', 'TCP-1'], fired
+for r in fired:
+    assert r['already_firing'] is True, r
+    assert r['from'] is None, r
+    assert r['field'] == 'status.rules', r
+    assert r['network'] == 'wifi:mac=00:11:22:33:44:55', r
+    assert r['t'] == '2026-10-06T20:35:51Z' and r['seq'] == 1, r
+    assert r['summary'], r
+"
+}
+
+@test "monitor_sample: the stream's first-sample changes stay empty" {
+  # Journaling only. The GUI alerts on `changes`; a fault it was already
+  # showing must not read as a new one because the monitor restarted.
+  local journal="$BATS_TEST_TMPDIR/stream.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=1 \
+           NETDIAG_MON_HAVE_PREV=0 NETDIAG_MON_RULES='G2 '
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert 'changes' not in d, d['changes']
+assert d['status']['rules'], d['status']
+"
+}
+
+@test "monitor_sample: a rule already firing is not journaled again on later samples" {
+  local journal="$BATS_TEST_TMPDIR/once.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=1 \
+           NETDIAG_MON_HAVE_PREV=0 NETDIAG_MON_RULES='G2 '
+  [ "$status" -eq 0 ]
+  # The second and third samples: the same rule, now with a baseline.
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=2 \
+           NETDIAG_MON_HAVE_PREV=1 NETDIAG_MON_RULES='G2 ' \
+           NETDIAG_MON_PREV_RULES='G2 '
+  [ "$status" -eq 0 ]
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=3 \
+           NETDIAG_MON_HAVE_PREV=1 NETDIAG_MON_RULES='G2 ' \
+           NETDIAG_MON_PREV_RULES='G2 '
+  [ "$status" -eq 0 ]
+  run journal_lines "$journal"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+assert [r['kind'] for r in rows] == ['monitor-started', 'rule-fired'], rows
+"
+}
+
+@test "monitor_sample: a rule that fires after the first sample is an ordinary fire" {
+  local journal="$BATS_TEST_TMPDIR/later.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=3 \
+           NETDIAG_MON_HAVE_PREV=1 NETDIAG_MON_RULES='G2 ' \
+           NETDIAG_MON_PREV_RULES=''
+  [ "$status" -eq 0 ]
+  run journal_lines "$journal"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+assert len(rows) == 1 and rows[0]['kind'] == 'rule-fired', rows
+# Observed starting, not found in progress: no marker.
+assert 'already_firing' not in rows[0], rows[0]
+"
+}
+
+@test "monitor_sample: a first sample with no rules journals only monitor-started" {
+  local journal="$BATS_TEST_TMPDIR/quiet.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_SEQ=1 \
+           NETDIAG_MON_HAVE_PREV=0 NETDIAG_MON_RULES=''
+  [ "$status" -eq 0 ]
+  run journal_lines "$journal"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+assert [r['kind'] for r in rows] == ['monitor-started'], rows
+"
+}
+
+@test "monitor_sample: without a journal a firing first sample writes nothing" {
+  local dir="$BATS_TEST_TMPDIR/cwd"
+  mkdir -p "$dir/home"
+  cd "$dir"
+  # Python's own bytecode cache under HOME is not ours to blame.
+  run emit HOME="$dir/home" PYTHONDONTWRITEBYTECODE=1 \
+           NETDIAG_MON_SEQ=1 NETDIAG_MON_HAVE_PREV=0 \
+           NETDIAG_MON_RULES='G2 '
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$dir" -type f)" ]
+}
+
 @test "monitor_sample: an unknown rule id falls back to a generic phrase" {
   # A monitor running against a newer lib/thresholds.sh than the bundled
   # rules_catalog.py knows about must still emit something readable rather

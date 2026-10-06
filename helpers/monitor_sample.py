@@ -120,6 +120,41 @@ def build_tcp() -> list[dict]:
     return out
 
 
+def _rule_fired(rid: str) -> dict:
+    """The change entry for a rule that is firing and was not before."""
+    title = _get_rule_title(rid)
+    return {"id": "rule-fired", "field": "status.rules",
+            "from": None, "to": rid,
+            "summary": title if title else f"Issue {rid} detected"}
+
+
+def _rules_at_start() -> list[dict]:
+    """Rules already firing in this process's first sample, for the journal.
+
+    `_changes()` has nothing to diff the first sample against, so it
+    reports nothing — and the stream must keep it that way: the app was
+    already showing a fault it had before it restarted the monitor, and
+    must not alert on it again. The journal has no such constraint and one
+    the other way. Left unwritten, a fault that simply carried on through a
+    restart went silent in the journal for as long as it lasted, and
+    helpers/events.py could only end its episode at the restart.
+
+    The entries look exactly like a `rule-fired` change, and a reader that
+    knows nothing about this treats them as one. `already_firing` is what
+    says the monitor did not see the rule start — it found it in progress —
+    so a reader can join it to the episode the previous process had open,
+    or, with none to join, call the start unobserved.
+    """
+    if _env("HAVE_PREV") == "1":
+        return []
+    out = []
+    for rid in sorted(set((_env("RULES") or "").split())):
+        entry = _rule_fired(rid)
+        entry["already_firing"] = True
+        out.append(entry)
+    return out
+
+
 def _changes() -> list[dict]:
     """Field-level diff against the previous sample (NETDIAG_MON_PREV_*).
 
@@ -196,10 +231,7 @@ def _changes() -> list[dict]:
     rules_now = set((_env("RULES") or "").split())
     rules_prev = set((_env("PREV_RULES") or "").split())
     for rid in sorted(rules_now - rules_prev):
-        title = _get_rule_title(rid)
-        out.append({"id": "rule-fired", "field": "status.rules",
-                    "from": None, "to": rid,
-                    "summary": title if title else f"Issue {rid} detected"})
+        out.append(_rule_fired(rid))
     clearable_env = "NETDIAG_MON_CLEARABLE_RULES"
     if clearable_env in os.environ:
         clearable = set((_env("CLEARABLE_RULES") or "").split())
@@ -230,9 +262,13 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
     header, docs/JSON-SCHEMA.md). A consumer piping the stream into its own
     program still gets that; the flag is what the recorder passes.
 
-    Three kinds of line are written:
+    Four kinds of line are written:
 
       * one per entry in `changes` — the transition itself;
+      * one `rule-fired` per rule already firing in the first sample, marked
+        `already_firing` (see `_rules_at_start`) — the first sample has no
+        `changes`, so these are what say the fault carried on across a
+        restart;
       * a `gap` when the monitor was not looking (sleep, a stall), because
         a window that does not know how much of itself was observed will
         happily report an outage that was a closed lid, or an uptime that
@@ -274,12 +310,15 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
         lines.append(dict(base, kind="gap", gap_s=gap,
                           summary=f"Not observed for {gap}s"))
 
-    for change in changes:
+    for change in _rules_at_start() + changes:
+        extra = ({"already_firing": True}
+                 if change.get("already_firing") else {})
         lines.append(dict(base, kind=change.get("id"),
                           field=change.get("field"),
                           **{"from": change.get("from")},
                           to=change.get("to"),
-                          summary=change.get("summary")))
+                          summary=change.get("summary"),
+                          **extra))
 
     if not lines:
         return

@@ -51,6 +51,15 @@ fault that is still going is re-reported a few samples later as a brand new
 `rule-fired`. Read literally, one continuous 40-minute router fault came out
 as a dozen episodes of 10-69 s, every one "ended by monitor-restart".
 
+A fresh monitor now says what it found: each rule already firing in its
+first sample is journaled as a `rule-fired` marked `already_firing`
+(`_rules_at_start` in helpers/monitor_sample.py). A fault that simply
+carries on across a restart therefore re-appears at the restart itself, and
+the reader joins it to the episode the restart closed. With no episode to
+join, it is an episode with `start_unobserved`: first seen then, begun
+earlier. Journals written before that carry no such line, and are read the
+older way, below.
+
 So an episode closed by a restart stays a *candidate* for a short while. If
 the same rule fires again on the same network within
 THRESH_EV_RESTART_BRIDGE_S of the latest restart, the two are one episode:
@@ -61,6 +70,12 @@ restarts were stepped over. How the merged episode *ends* is however its
 last segment ended: cleared, still open, or (with `duration_is_lower_bound`)
 another restart nothing followed. If nothing re-fires in the window it stays
 exactly what it was: closed at the restart, as a lower bound.
+
+An old journal can also end such a candidate with a `rule-cleared` that has
+no fire before it. The fresh monitor was carrying the rule from its first
+sample, which was never written down; the clear is the end of the fault the
+restart closed, so they are one episode rather than a restart-ended episode
+and an end with no beginning.
 
 The window is a cutoff, so it is in lib/thresholds.sh and arrives through
 the environment, with no default here (see `require_env_int`), like every
@@ -221,7 +236,9 @@ def episodes(rows, bridge_s):
         if at and ep["_started_at"]:
             ep["duration_s"] = int((at - ep["_started_at"]).total_seconds())
         ep["ended_by"] = reason
-        if lower_bound:
+        # An episode found already in progress has a measured duration that
+        # starts where the monitor first saw it, not where it began.
+        if lower_bound or ep.get("start_unobserved"):
             ep["duration_is_lower_bound"] = True
         if file:
             done.append(ep)
@@ -229,6 +246,18 @@ def episodes(rows, bridge_s):
 
     def stop_bridging(key):
         done.append(candidates.pop(key)["ep"])
+
+    def reopen(key, at):
+        """Take a restart-closed candidate back: the fault carried on."""
+        cand = candidates.pop(key)
+        ep = cand["ep"]
+        for field in ("ended", "ended_by", "duration_is_lower_bound"):
+            ep.pop(field, None)
+        ep["duration_s"] = None
+        ep["ongoing"] = True
+        ep["unobserved_s"] += int((at - cand["blind_from"]).total_seconds())
+        ep["restarts_bridged"] = ep.get("restarts_bridged", 0) + cand["restarts"]
+        open_eps[key] = ep
 
     for row in rows:
         kind, at = row.get("kind"), row["_at"]
@@ -245,22 +274,12 @@ def episodes(rows, bridge_s):
             if cand is not None:
                 if at and (at - cand["anchor"]).total_seconds() <= bridge_s:
                     # The same fault, seen again by a monitor that was
-                    # still warming up. Reopen the episode the restart
-                    # closed rather than starting a second one, and count
-                    # everything from that restart to now as unobserved:
-                    # no process saw this stretch of it.
-                    del candidates[key]
-                    ep = cand["ep"]
-                    for field in ("ended", "ended_by",
-                                  "duration_is_lower_bound"):
-                        ep.pop(field, None)
-                    ep["duration_s"] = None
-                    ep["ongoing"] = True
-                    ep["unobserved_s"] += int(
-                        (at - cand["blind_from"]).total_seconds())
-                    ep["restarts_bridged"] = (
-                        ep.get("restarts_bridged", 0) + cand["restarts"])
-                    open_eps[key] = ep
+                    # still warming up (or reporting it in its first
+                    # sample, with `already_firing`). Reopen the episode
+                    # the restart closed rather than starting a second
+                    # one, and count everything from that restart to now
+                    # as unobserved: no process saw this stretch of it.
+                    reopen(key, at)
                     continue
                 stop_bridging(key)
             open_eps[key] = {
@@ -275,12 +294,25 @@ def episodes(rows, bridge_s):
                 "unobserved_s": 0,
                 "_started_at": at,
             }
+            if row.get("already_firing"):
+                # The monitor's first sample found it firing and no earlier
+                # process left an episode open to continue. `started` is
+                # then the first moment it is *known* to have been true,
+                # and `start_unobserved` says it began earlier.
+                open_eps[key]["start_unobserved"] = True
         elif kind == "rule-cleared" and row.get("from"):
             key = (network, row["from"])
-            if key in candidates:
-                # It went away while the new monitor was watching, so the
-                # old episode is over and was not continued.
-                stop_bridging(key)
+            if key in candidates and at:
+                # A monitor can only report a clear for a rule that was
+                # firing in a sample of its own. The fire was never
+                # journaled — in this process's first sample, before it
+                # wrote those down — so this is the end of the fault the
+                # restart closed, not a new fault that began and ended
+                # unseen. Without this the one fault showed up twice: once
+                # closed at the restart, once as a clear with no beginning.
+                # No window applies: the rule was in the first sample of the
+                # process whose start is the candidate's latest restart.
+                reopen(key, at)
             if key in open_eps:
                 open_eps[key]["ongoing"] = False
                 close(key, at, "cleared")
