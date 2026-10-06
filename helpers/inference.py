@@ -379,6 +379,8 @@ def _suitability(fired, m) -> list:
             "metric": metric,
             "because": because,
             "unmeasured_reason": reason,
+            # The one sentence behind the level (the row's help text).
+            "detail": (DETAILS_BY_LEVEL.get((activity, verdict)) or reason or ""),
         })
     return rows
 
@@ -397,7 +399,28 @@ def _router_hop(m) -> dict:
     gw_jit = _num(m.get("gw_jitter"))
     inet_rtt = _num(m.get("inet_rtt"))
     inet_jit = _num(m.get("inet_jitter"))
+    gw_loss = _num(m.get("gw_loss"))
 
+    hop = {"warn": False, "detail": ""}
+
+    # The value cell's phrasing: the figure, or "no reply" when the
+    # gateway is totally silent (the same total-loss cutoff the CLI's
+    # ICMP rules read) — never an invented number.
+    if gw_rtt is not None:
+        hop["value"] = _fmt_ms(gw_rtt)
+    elif gw_loss is not None and gw_loss >= _T.loss_crit:
+        hop["value"] = "no reply"
+    else:
+        hop["value"] = ""
+
+    router = _router_warn(m, fired, gw_rtt, gw_jit, inet_rtt, inet_jit)
+    hop.update(router)
+    return hop
+
+
+def _router_warn(m, fired, gw_rtt, gw_jit, inet_rtt, inet_jit) -> dict:
+    rule_warns = [rid for rid in (m.get("rules") or [])
+                  if _rule_category(rid) == "router" and rid != "TCP-1"]
     if rule_warns:
         return {"warn": True,
                 "detail": ", ".join(_rule_title(r) for r in rule_warns)}
@@ -427,12 +450,28 @@ def _internet_hop(m) -> dict:
     rtt = _num(m.get("inet_rtt"))
     jit = _num(m.get("inet_jitter"))
 
+    hop = {"warn": False, "detail": ""}
+
+    # The value cell's phrasing: the figure, "TCP ok" when pings are
+    # being filtered (the TCP canary substitutes), "no reply" at total
+    # loss — the same cutoff the ICMP rules read.
+    if m.get("icmp_filtered") and not rule_warns:
+        hop["value"] = "TCP ok"
+    elif rtt is not None:
+        hop["value"] = _fmt_ms(rtt)
+    elif loss is not None and loss >= _T.loss_crit:
+        hop["value"] = "no reply"
+    else:
+        hop["value"] = ""
+
     if not link_up:
-        return {"warn": True, "detail": "No internet"}
+        hop.update({"warn": True, "detail": "No internet"})
+        return _with_jitter_verdict(hop, jit)
 
     if not rule_warns and m.get("icmp_filtered"):
         # TCP-1 holds: pings are being filtered, connections are fine.
-        return {"warn": False, "detail": "Ping blocked · TCP ok"}
+        hop.update({"warn": False, "detail": "Ping blocked · TCP ok"})
+        return _with_jitter_verdict(hop, jit)
 
     if rule_warns:
         # One figure-phrase per rule where a rule maps one-to-one onto a
@@ -459,17 +498,36 @@ def _internet_hop(m) -> dict:
                 phrases.append("Sign-in page")
             else:
                 phrases.append(_rule_title(rid))
-        return {"warn": True, "detail": " · ".join(phrases)}
+        hop.update({"warn": True, "detail": " · ".join(phrases)})
+        return _with_jitter_verdict(hop, jit)
 
     if "loss" not in measured and "web" not in measured:
-        return {"warn": False, "detail": "Not measured yet"}
+        hop.update({"warn": False, "detail": "Not measured yet"})
+        return _with_jitter_verdict(hop, jit)
 
     detail = []
     if loss is not None:
         detail.append("0% packet loss" if loss == 0 else _fmt_pct(loss) + " loss")
     elif rtt is not None:
         detail.append(_fmt_ms(rtt))
-    return {"warn": False, "detail": _join(*detail)}
+    hop["detail"] = _join(*detail)
+    return _with_jitter_verdict(hop, jit)
+
+
+def _with_jitter_verdict(hop: dict, jit) -> dict:
+    """The jitter sub-verdict the ping cell renders: stability judged
+    against the shared THRESH_LATENCY_JITTER_WARN_MS — the same threshold
+    LA-2 fires on — with the phrase it shows next to the cell. Unmeasured
+    says nothing."""
+    if jit is None:
+        hop["jitter_warn"] = False
+        hop["jitter_note"] = None
+    else:
+        jitter_warn = jit >= _T.jitter_warn
+        hop["jitter_warn"] = jitter_warn
+        hop["jitter_note"] = ("Uneven response times" if jitter_warn
+                              else "Stable response times")
+    return hop
 
 
 def _roamed(m) -> bool:

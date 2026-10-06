@@ -2,150 +2,100 @@ import Foundation
 import Testing
 @testable import HopwatchGUI
 
+// RouteWarningResolver is a passthrough since the reporting-accuracy
+// plan's Phase 3: the flags and reasons are the CLI's (helpers/inference.py
+// against lib/thresholds.sh). These tests hold only what rendering owns:
+// verdicts ride through verbatim, the absence of a `hops` block renders
+// neutral rather than re-deriving anything, and the culprit order is
+// mac → router → internet.
 @Suite struct RouteWarningResolverTests {
 
-    @Test func image1ScenarioIsolatedRouterLossSuppressedByDownstreamValidation() {
-        // In the scenario from Image 1:
-        // Internet is pristine: 18ms ping, 3ms jitter, 0% loss, all activities healthy.
-        // Router has isolated ICMP packet drops (e.g. 6%) and 19ms ping.
-        // Wi-Fi must NOT be flagged as laggy, and all hops must remain healthy.
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: true,
-            stage: .healthy,
-            firedCategories: [],
-            gwLoss: 6.0,
-            gwPing: 19.0,
-            gwJitter: 3.0,
-            inetLoss: 0.0,
-            inetPing: 18.0,
-            inetJitter: 3.0,
-            hasRecentRoam: false
-        )
-
-        #expect(!result.isWifiLaggy)
-        #expect(result.macStatusGood)
-        #expect(!result.routerWarn)
-        #expect(!result.internetWarn)
-        #expect(result.culpritHop == nil)
+    private func sample(_ json: String) -> MonitorSample? {
+        try? JSONDecoder().decode(MonitorSample.self, from: Data(json.utf8))
     }
 
-    @Test func image2ScenarioInternetJitterAndLossAttributesToInternet() {
-        // In the scenario from Image 2:
-        // Local link and router are pristine (8ms ping, 0% loss, 1ms jitter).
-        // Internet has 43ms ping, 76ms jitter, 1% loss, degrading Calls & Gaming.
-        // The Internet hop must be warned and attributed as the culprit.
-        let degraded = StageResolver.DegradedSnapshot(
-            headline: "Unstable for calls & gaming",
-            subtitle: "1% packet loss · 76ms jitter · 4K streaming is fine",
-            isCritical: true,
-            affectedActivities: ["Calls", "Gaming"]
-        )
-        let stage = StageResolver.Stage.degraded(degraded)
-
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: true,
-            stage: stage,
-            firedCategories: [],
-            gwLoss: 0.0,
-            gwPing: 8.0,
-            gwJitter: 1.0,
-            inetLoss: 1.0,
-            inetPing: 43.0,
-            inetJitter: 76.0,
-            hasRecentRoam: false
-        )
-
-        #expect(!result.isWifiLaggy)
-        #expect(result.macStatusGood)
-        #expect(!result.routerWarn)
-        #expect(result.internetWarn)
-        #expect(result.culpritHop == "internet")
-    }
-
-    @Test func realWifiDegradationFlagsWifiAndMac() {
-        // When real Wi-Fi latency and loss occurs (propagating to internet)
-        let degraded = StageResolver.DegradedSnapshot(
-            headline: "Calls & gaming may lag",
-            subtitle: "High Wi-Fi latency",
-            isCritical: false,
-            affectedActivities: ["Gaming"]
-        )
-
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: true,
-            stage: .degraded(degraded),
-            firedCategories: [],
-            gwLoss: 15.0,
-            gwPing: 55.0,
-            gwJitter: 30.0,
-            inetLoss: 15.0,
-            inetPing: 65.0,
-            inetJitter: 32.0,
-            hasRecentRoam: false
-        )
-
-        #expect(result.isWifiLaggy)
-        #expect(!result.macStatusGood)
+    @Test func hopFlagsAndReasonsRideThroughVerbatim() {
+        let result = RouteWarningResolver.resolve(sample("""
+        {"hops": {
+           "mac": {"good": false, "laggy": true, "detail": "Good (laggy)"},
+           "router": {"warn": true, "detail": "40 ms latency to router",
+                      "value": "40 ms"},
+           "internet": {"warn": false, "detail": "0% packet loss",
+                        "value": "18 ms",
+                        "jitter_warn": false, "jitter_note": "Stable response times"}}}
+        """) ?? nil)
+        #expect(result.macStatusGood == false)
+        #expect(result.isWifiLaggy == true)
+        #expect(result.macDetail == "Good (laggy)")
+        #expect(result.routerWarn == true)
+        #expect(result.routerDetail == "40 ms latency to router")
+        #expect(result.internetWarn == false)
+        #expect(result.internetDetail == "0% packet loss")
         #expect(result.culpritHop == "wifi")
     }
 
-    @Test func realRouterFailureAttributesToRouter() {
-        // When router rule fires or heavy real gateway loss occurs without Wi-Fi issues
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: true,
-            stage: .watching(severity: .warn),
-            firedCategories: ["router"],
-            gwLoss: 25.0,
-            gwPing: 2.0,
-            gwJitter: 1.0,
-            inetLoss: 25.0,
-            inetPing: 15.0,
-            inetJitter: 2.0,
-            hasRecentRoam: false
-        )
-
-        #expect(result.routerWarn)
+    @Test func culpritHopsInBlameOrder() {
+        // Router and internet warned, mac fine: router wins the blame row.
+        let result = RouteWarningResolver.resolve(sample("""
+        {"hops": {"mac": {"good": true, "laggy": false, "detail": "Good"},
+                  "router": {"warn": true, "detail": "±31 ms jitter", "value": "40 ms"},
+                  "internet": {"warn": true, "detail": "Unreachable", "value": ""}}}
+        """) ?? nil)
         #expect(result.culpritHop == "router")
+
+        // Internet alone: its own blame.
+        let internetOnly = RouteWarningResolver.resolve(sample("""
+        {"hops": {"mac": {"good": true, "laggy": false, "detail": "Good"},
+                  "router": {"warn": false, "detail": "", "value": "3 ms"},
+                  "internet": {"warn": true, "detail": "266 ms latency",
+                               "value": "266 ms"}}}
+        """) ?? nil)
+        #expect(internetOnly.culpritHop == "internet")
+
+        // Nothing wrong: no culprit.
+        let clean = RouteWarningResolver.resolve(sample("""
+        {"hops": {"mac": {"good": true, "laggy": false, "detail": "Excellent"},
+                  "router": {"warn": false, "detail": "", "value": "3 ms"},
+                  "internet": {"warn": false, "detail": "0% packet loss", "value": "60 ms"}}}
+        """) ?? nil)
+        #expect(clean.culpritHop == nil)
     }
 
-    @Test func roamingHandoverSuppressesTransientRouterWarning() {
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: true,
-            stage: .healthy,
-            firedCategories: [],
-            gwLoss: 8.0,
-            gwPing: 12.0,
-            gwJitter: 4.0,
-            inetLoss: 0.0,
-            inetPing: 15.0,
-            inetJitter: 4.0,
-            hasRecentRoam: true
-        )
-
-        #expect(!result.routerWarn)
-        #expect(!result.isWifiLaggy)
+    @Test func jitterVerdictDecodeRideThrough() {
+        let result = RouteWarningResolver.resolve(sample("""
+        {"hops": {"internet": {"warn": false, "detail": "0% packet loss",
+                               "jitter_warn": true,
+                               "jitter_note": "Uneven response times"}}}
+        """) ?? nil)
+        #expect(result.internetDetail == "0% packet loss")
+        // The note is consumed via hops.internet directly (ConnectionRouteView
+        // reads the sample's own sub-verdict); the resolver only renders hops.
+        let note = sample("""
+        {"hops": {"internet": {"jitter_warn": true,
+                               "jitter_note": "Uneven response times"}}}
+        """)?.hops?.internet
+        #expect(note?.jitterWarn == true)
+        #expect(note?.jitterNote == "Uneven response times")
     }
 
-    @Test func wiredConnectionNeverReportsWifiLaggy() {
-        let result = RouteWarningResolver.resolve(
-            linkUp: true,
-            isWiFi: false,
-            stage: .watching(severity: .warn),
-            firedCategories: [],
-            gwLoss: 25.0,
-            gwPing: 50.0,
-            gwJitter: 30.0,
-            inetLoss: 25.0,
-            inetPing: 60.0,
-            inetJitter: 30.0,
-            hasRecentRoam: false
-        )
+    @Test func noHopsBlockRendersNeutralNotJudged() {
+        // An older CLI (no `hops` key): nothing judged. The result must be
+        // all-clear-empty — flags false, no culprit — not a locally
+        // re-derived verdict.
+        let result = RouteWarningResolver.resolve(sample("{}") ?? nil)
+        #expect(result.isWifiLaggy == false)
+        #expect(result.macStatusGood == true)
+        #expect(result.routerWarn == false)
+        #expect(result.internetWarn == false)
+        #expect(result.culpritHop == nil)
+        #expect(result.macDetail == nil)
+        #expect(result.routerDetail == nil)
+        #expect(result.internetDetail == nil)
+    }
 
-        #expect(!result.isWifiLaggy)
+    @Test func nilSampleRendersNeutral() {
+        let result = RouteWarningResolver.resolve(nil)
+        #expect(result.culpritHop == nil)
+        #expect(result.macStatusGood == true)
     }
 }
