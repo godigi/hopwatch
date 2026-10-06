@@ -6,6 +6,23 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-05
+
+### Changes
+
+- refactor: extract _mon_geo_body_json so the non-JSON geo rule is testable
+- test: finish Phase 1 acceptance suite (TCP-2 confirm/clear, P1 gate, geo body, TCP-1 both-legs correction)
+- feat: N1 waits for a route recheck; per-tier ages, geo staleness and medium-tier nulls
+- feat: monitor latency and jitter rules so 266 ms is warn, not ok
+- fix: loss streaks advance only on packets the newest probe lost, above a minimum denominator
+- feat: record curl failure class and rolling web success ratio in the sample
+- fix: one journal writer — withhold --journal when the recorder loads
+- fix: sweep orphaned monitor children at launch
+- fix: stop the monitor tree — close the pipe before the signals
+- feat: TCP-2 rule for intermittently refused connections with clean pings
+- fix: claim ICMP filtering only on a totally silent gateway with a clean internet leg
+- fix: require same-cycle probe agreement and confirmation for critical monitor verdicts
+
 ## [1.10.2] - 2026-10-05
 
 ### Changes
@@ -4038,7 +4055,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/godigi/hopwatch/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/godigi/hopwatch/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/godigi/hopwatch/compare/v1.9.0...v1.10.0
