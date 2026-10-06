@@ -6,6 +6,10 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The "Your VPN disconnected" and "This isn't the network you think" alerts could never fire. Both are raised by a transition (VPN up then down; gateway MAC changing under one Wi-Fi name), which is visible in exactly one monitor sample, while their dwell (10 s and 30 s) needs the condition to hold continuously and was cleared by the very next sample. A transition now starts the wait and the alert fires if the new state is still the state when the dwell ends: the VPN still down, the new router still the one in use. A VPN that reconnects, or a gateway that flips back, inside the dwell is dropped as a blip. The VPN alert clears (with its resolved notice) when the VPN returns; the router alert clears, silently, when the familiar router is back or the Wi-Fi name changes. The network-just-changed grace period holds both rather than swallowing them: the dwell starts when it lifts. `public-ip-changed` (no dwell) and every rule-driven alert are unchanged. `--verify` gains "Event-driven alerts (dwell on a transition)".
+
 ## [1.10.6] - 2026-10-06
 
 ### Fixed

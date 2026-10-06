@@ -37,6 +37,12 @@ struct AlertDefinition: Identifiable, Sendable {
     /// How long the condition must hold continuously before notifying.
     /// Zero means fire on the first observation — correct only for
     /// discrete events, never for a measurement.
+    ///
+    /// For the alerts raised by a transition rather than a rule, "the
+    /// condition" is the *new state* — the VPN still down, the gateway still
+    /// the different one — and the transition only starts the wait. See
+    /// `AlertEngine.conditionHolds`; a dwell here that was measured against
+    /// the transition itself could never elapse.
     let dwell: TimeInterval
     /// Minimum gap between repeat notifications of the same alert.
     let cooldown: TimeInterval

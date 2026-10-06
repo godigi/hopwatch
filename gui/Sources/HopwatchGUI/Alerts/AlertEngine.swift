@@ -129,6 +129,18 @@ final class AlertEngine {
     private var lastNotifiedAt: [String: Date] = [:]
     private var firedForNetwork: [String: Set<String>] = [:]
     private var previousSample: MonitorSample?
+    /// For the transition-raised alerts, the change a sample showed that is
+    /// still waiting to prove it was not a blip. See `conditionHolds`.
+    private var pendingTransition: [String: Transition] = [:]
+
+    /// What an event-driven alert saw change, remembered so the *new state*
+    /// can be tested on every later sample.
+    private enum Transition {
+        /// The VPN was up and is down.
+        case vpnDown
+        /// The gateway MAC under `ssid` stopped being `knownMAC`.
+        case gatewayChanged(ssid: String, knownMAC: String)
+    }
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "alerts")
 
     // MARK: - Permission
@@ -197,8 +209,20 @@ final class AlertEngine {
     }
 
     /// Which live alerts a sample raises. Rule-driven where a rule exists;
-    /// the four event-driven ones read a transition instead, because "your
-    /// VPN dropped" is a change rather than a state and no rule can say it.
+    /// the event-driven ones start from a transition, because "your VPN
+    /// dropped" is a change rather than a state and no rule can say it.
+    ///
+    /// A transition is visible in exactly one sample, and `step` measures
+    /// its dwell as a condition that holds *continuously* and wipes the
+    /// clock on any sample where it does not. Fed the bare transition, the
+    /// two alerts with a dwell (`vpn-dropped`, `different-network`) could
+    /// never fire: the clock started on the one sample that saw the change
+    /// and was cleared by the next. So for those the transition only
+    /// records what changed (`pendingTransition`), and the condition is the
+    /// *new state* still being the state — which is also what a dwell is
+    /// for: a VPN that reconnects in three seconds, or a gateway MAC that
+    /// flips back, is a blip nobody should be interrupted about.
+    /// `public-ip-changed` has no dwell and keeps the bare transition.
     private func conditionHolds(_ def: AlertDefinition,
                                 sample: MonitorSample,
                                 previous: MonitorSample?) -> Bool {
@@ -213,24 +237,63 @@ final class AlertEngine {
             return sample.publicInfo.captivePortal == true
 
         case "vpn-dropped":
-            guard let prev = previous else { return false }
-            return prev.vpn.active && !sample.vpn.active
+            // Back up: the drop is over, whether or not it was announced.
+            // `step` clears the alert (and says so, if it had said the VPN
+            // dropped) when this returns false.
+            if sample.vpn.active {
+                pendingTransition.removeValue(forKey: def.id)
+                return false
+            }
+            if let prev = previous, prev.vpn.active {
+                pendingTransition[def.id] = .vpnDown
+            }
+            return pendingTransition[def.id] != nil
 
         case "different-network":
-            // Same Wi-Fi name, different router behind it. Only meaningful
-            // when the SSID is actually visible — without Location
-            // Services macOS hides it, and comparing two nils would fire
-            // this on every gateway the machine ever sees.
-            guard let prev = previous,
-                  let prevSSID = prev.link.ssid, let ssid = sample.link.ssid,
-                  !prevSSID.isEmpty, prevSSID == ssid,
-                  let prevMAC = prev.link.gatewayMAC, let mac = sample.link.gatewayMAC,
-                  !prevMAC.isEmpty else { return false }
-            return prevMAC != mac
+            return gatewayChangeHolds(def, sample: sample, previous: previous)
 
         default:
             return !def.rules.isDisjoint(with: Set(sample.status.rules))
         }
+    }
+
+    /// Same Wi-Fi name, different router behind it. Only meaningful when
+    /// the SSID is actually visible — without Location Services macOS hides
+    /// it, and comparing two nils would fire this on every gateway the
+    /// machine ever sees.
+    ///
+    /// Holds from the sample that shows the gateway MAC change until the
+    /// familiar MAC is back or the Wi-Fi name is no longer the one it was
+    /// seen under. A MAC this cycle could not read neither confirms nor
+    /// ends the change: the dwell clock restarts, the memory stays.
+    private func gatewayChangeHolds(_ def: AlertDefinition,
+                                    sample: MonitorSample,
+                                    previous: MonitorSample?) -> Bool {
+        guard let ssid = sample.link.ssid, !ssid.isEmpty else {
+            pendingTransition.removeValue(forKey: def.id)
+            return false
+        }
+        let mac = sample.link.gatewayMAC.flatMap { $0.isEmpty ? nil : $0 }
+
+        if case .gatewayChanged(let knownSSID, let knownMAC)? = pendingTransition[def.id] {
+            if ssid == knownSSID {
+                if mac == knownMAC {
+                    pendingTransition.removeValue(forKey: def.id)
+                    return false
+                }
+                return mac != nil
+            }
+            // A different Wi-Fi name altogether: not this router swapping
+            // under that name, and the MAC we remember is for another one.
+            pendingTransition.removeValue(forKey: def.id)
+        }
+
+        guard let prev = previous,
+              let prevSSID = prev.link.ssid, prevSSID == ssid,
+              let prevMAC = prev.link.gatewayMAC, !prevMAC.isEmpty,
+              let mac, prevMAC != mac else { return false }
+        pendingTransition[def.id] = .gatewayChanged(ssid: ssid, knownMAC: prevMAC)
+        return true
     }
 
     // MARK: - Scan evaluation
