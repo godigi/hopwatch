@@ -36,6 +36,7 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 | `internet_latency` | object | `target`, `rtt_avg_ms`, `rtt_jitter_ms`, `loss_pct` against the primary public target, plus `target_alt`, `rtt_avg_ms_alt`, `loss_pct_alt` for the second, independent one. The L1 packet-loss rule escalates to critical only when **both** targets exceed the threshold, so a consumer reproducing the diagnosis needs both numbers. Any field is `null` when that probe didn't run (`--quick`) or returned no summary — never `0`, and never `100`. |
 | `public` | object | `ip`, `asn`, `isp`, `city`, `country`, `country_iso`, `captive_portal`. `country` is the full name (`"Brazil"`); `country_iso` is the ISO-3166 alpha-2 (`"BR"`). Both are emitted because they answer different questions — the name is what a report should read, the code is what a consumer maps to a flag or a locale — and deriving one from the other would mean shipping a country table in every consumer. |
 | `dns` | array | one entry per resolver × name: `resolver`, `name`, `answer`, `ok` |
+| `dns_local` | object \| null | Whether this Mac could open a UDP socket to ask those questions with (rule `SOCK-1`). **`null` when the check never ran**, which is every run in which all lookups were answered: the kernel is asked only after a lookup comes back empty, so the healthy path pays nothing. That is "not measured", not "measured fine". When it ran: `udp_bind` (`"ok"`, the errno name the kernel gave such as `"EADDRNOTAVAIL"`, or `"unavailable"` when the helper could not run), `fault` (`true` when the bind was refused or `dig` reported a bind error — the input `SOCK-1` reads). The remaining fields are evidence captured at fault time, because a reboot erases it, and are `null` unless `fault` is `true`: `udp_sockets` (system-wide UDP socket count), `top_holders[]` (`process`, `pid`, `sockets`, biggest first; `lsof` without root sees only the user's own processes, so a system holder is not listed), `top_holder_share_pct` (the top holder's share of `udp_sockets`) and `tcp_dns_ok` (DNS over TCP still answers, which separates this fault from a resolver outage). Process names survive `--redact`; they identify software, not a person. |
 | `traceroute` | object | `target` + `hops[]` (`n`, `ip`, `responded`, `rtt_ms`) |
 | `per_hop` | array | per-hop loss probe: `n`, `ip`, `responded`, `loss_pct`, `avg_ms` |
 | `bufferbloat` | object | idle/loaded RTT for gateway and internet, their deltas, and `gw_grade`/`inet_grade` (A–F) |
@@ -695,7 +696,8 @@ it would accumulate forever.
   "gateway": {"loss_pct": 0.0, "rtt_avg_ms": 4.1},
   "internet": {"loss_pct": 0.0, "rtt_avg_ms": 11.8},
   "wifi":    {"rssi": null, "noise": null, "snr": null, "channel": null},
-  "dns":     {"ok": true, "resolver": "192.168.15.1", "elapsed_ms": 12},
+  "dns":     {"ok": true, "resolver": "192.168.15.1", "elapsed_ms": 12,
+              "local_fail": false, "local": null},
   "tcp":     {"any_ok": true, "targets": [{"host": "1.1.1.1", "port": 443,
                                            "ok": true, "elapsed_ms": 30}]},
   "public":  {"ok": true, "ip": "…", "isp": "…", "asn": "AS10429",
@@ -758,6 +760,16 @@ it would accumulate forever.
   tier was not due this cycle". `dns.ok` is `null` until the medium tier
   first runs — it is emphatically not `false`, which would mean the query
   was made and failed.
+- **`dns.local_fail`** answers "could this Mac send the question at all"
+  (rule `SOCK-1`). `null` until the medium tier first probes, `false` when
+  a UDP socket was available, `true` when the kernel refused one — in which
+  case `dns.ok: false` says nothing about the resolver. `dns.local` is
+  `null` unless `local_fail` is `true`, then carries the fault-time
+  evidence: `udp_bind` (errno name), `udp_sockets`, `top_holders[]`
+  (`process`, `pid`, `sockets`), `top_holder_share_pct`, `tcp_dns_ok`. The
+  `--journal` line that records `SOCK-1` firing carries the same object as
+  `evidence`, because the stream is not stored and a reboot erases the
+  culprit.
 - **`status.rules`** are rule IDs from
   [`DIAGNOSIS-RULES.md`](./DIAGNOSIS-RULES.md), evaluated in
   `lib/monitor.sh` against the same `lib/thresholds.sh` constants that

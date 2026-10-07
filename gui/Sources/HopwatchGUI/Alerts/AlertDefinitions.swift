@@ -134,7 +134,7 @@ struct AlertDefinition: Identifiable, Sendable {
 
         AlertDefinition(
             id: "dns-failing", title: "Websites aren't loading",
-            rules: ["P1", "D1", "D3", "D4", "V6-2"],
+            rules: ["P1", "D1", "D3", "D4", "V6-2", "SOCK-1"],
             dwell: 30, cooldown: 1800, resolves: true, scanOnly: false,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 30 seconds before alerting, then waits 30 minutes before repeating.",

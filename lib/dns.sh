@@ -4,7 +4,9 @@
 #
 # Reads:  TARGET, DHCP_DNS_SERVERS
 # Writes: DNS_OK, DNS_LINES, SYS_RES, SYS_RES_ALL, SYS_RES_MS, DNS_NXDOMAIN_HIJACK_IP, IPV6_DNS_FAIL,
-#         DNS_PRIMARY_FAIL, DNS_FALLBACK_OK, PRIMARY_DNS, SECONDARY_DNS
+#         DNS_PRIMARY_FAIL, DNS_FALLBACK_OK, PRIMARY_DNS, SECONDARY_DNS,
+#         DNS_LOCAL_FAIL, DNS_LOCAL_BIND, DNS_UDP_SOCKETS, DNS_UDP_HOLDERS,
+#         DNS_UDP_TOP_SHARE_PCT, DNS_TCP_DNS_OK (see dns_probe in lib/common.sh)
 # Entry:  dns_run
 #
 # Safe to run in parallel — does not contend on the WAN link.
@@ -13,9 +15,14 @@ dns_run() {
   hdr "DNS"
   local name dns_fail=0 dns_names
   local _primary_total_count=0 _primary_fail_count=0
+  # A probe that comes back empty may mean "the resolver did not answer" or
+  # "this Mac could not send the question". dns_probe tells them apart and
+  # records the second as DNS_LOCAL_FAIL — see SOCK-1.
+  dns_local_reset
   dns_check() {
     local r="$1" n="$2" o
-    o="$(with_timeout 3 dig +time=2 +tries=1 +short @"$r" "$n" 2>/dev/null | head -1)"
+    dns_probe "$r" "$n" || true
+    o="$DNS_PROBE_ANSWER"
     if [ -n "$o" ]; then
       ok "$r → $n = $o"
       DNS_LINES+="${r}|${n}|${o}|OK"$'\n'
@@ -60,7 +67,8 @@ dns_run() {
     PRIMARY_DNS="$SYS_RES"
     local sec_r sec_ans
     for sec_r in "${_res_list[@]:1}"; do
-      sec_ans="$(with_timeout 3 dig +time=2 +tries=1 +short @"$sec_r" cloudflare.com 2>/dev/null | head -1 || true)"
+      dns_probe "$sec_r" cloudflare.com || true
+      sec_ans="$DNS_PROBE_ANSWER"
       if [ -n "$sec_ans" ]; then
         DNS_FALLBACK_OK=1
         SECONDARY_DNS="$sec_r"
@@ -75,7 +83,8 @@ dns_run() {
   if [ -n "$SYS_RES" ]; then
     local t0 t1 probe_ans
     t0="${EPOCHREALTIME:-}"
-    probe_ans="$(with_timeout 3 dig +time=2 +tries=1 +short @"$SYS_RES" cloudflare.com 2>/dev/null | head -1 || true)"
+    dns_probe "$SYS_RES" cloudflare.com || true
+    probe_ans="$DNS_PROBE_ANSWER"
     t1="${EPOCHREALTIME:-}"
     if [ -n "$t0" ] && [ -n "$t1" ] && [ -n "$probe_ans" ]; then
       SYS_RES_MS="$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.0f", (b-a)*1000}')"
@@ -98,7 +107,8 @@ dns_run() {
     for r in $SYS_RES_ALL; do
       if [[ "$r" == *":"* ]]; then
         local v6_ans
-        v6_ans="$(with_timeout 3 dig +time=2 +tries=1 +short @"$r" apple.com 2>/dev/null | head -1 || true)"
+        dns_probe "$r" apple.com || true
+        v6_ans="$DNS_PROBE_ANSWER"
         if [ -z "$v6_ans" ]; then
           IPV6_DNS_FAIL="$r"
           warn "IPv6 DNS resolver $r is configured but not responding"
@@ -123,5 +133,11 @@ dns_run() {
     setvar DNS_FALLBACK_OK "$DNS_FALLBACK_OK"
     setvar PRIMARY_DNS "$PRIMARY_DNS"
     setvar SECONDARY_DNS "$SECONDARY_DNS"
+    setvar DNS_LOCAL_FAIL "$DNS_LOCAL_FAIL"
+    setvar DNS_LOCAL_BIND "$DNS_LOCAL_BIND"
+    setvar DNS_UDP_SOCKETS "$DNS_UDP_SOCKETS"
+    setvar DNS_UDP_HOLDERS "$DNS_UDP_HOLDERS"
+    setvar DNS_UDP_TOP_SHARE_PCT "$DNS_UDP_TOP_SHARE_PCT"
+    setvar DNS_TCP_DNS_OK "$DNS_TCP_DNS_OK"
   fi
 }

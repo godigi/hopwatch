@@ -73,6 +73,7 @@ reset_state() {
   MON_GW_HIST="" MON_INET_HIST="" MON_INET_HIST_ALT=""
   MON_WIFI_RSSI="" MON_WIFI_SNR=""
   MON_DNS_OK=1 MON_TCP_OK=1 MON_PUBLIC_OK=1 MON_CAPTIVE=0
+  MON_DNS_LOCAL_FAIL="" DNS_LOCAL_FAIL=0
   MON_WEB_OK="" MON_MEASUREMENT_STATE="unknown"
   MON_VPN_ACTIVE=0 MON_ICMP_FILTERED=0 MON_DEGRADED=0
   MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
@@ -105,7 +106,7 @@ monitor_rules_here() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
+MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
@@ -339,6 +340,167 @@ scanner_rules() {
   local m; m="$(monitor_rules)"; reset_state; MON_DNS_OK=0 DNS_OK=0
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"D1"* ]] || return 1
+}
+
+@test "parity: a Mac that cannot open a UDP socket is SOCK-1 on both, and never D1" {
+  # The 2026-10-07 incident: dig failed locally, the internet was fine, and
+  # D1 blamed the router. Both engines must name the local fault instead.
+  reset_state
+  MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=1 DNS_OK=0 DNS_LOCAL_FAIL=1
+  local m; m="$(monitor_rules)"
+  reset_state
+  MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=1 DNS_OK=0 DNS_LOCAL_FAIL=1
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"SOCK-1"* ]] || return 1
+  [[ "$m" != *"D1"* ]] || return 1
+}
+
+@test "SOCK-1: critical in the monitor, and D1 cannot fire beside it" {
+  reset_state; MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=1
+  monitor_rules_here
+  [[ "$MON_RULES_SORTED" == "SOCK-1 " ]] || { echo "rules: $MON_RULES_SORTED"; return 1; }
+  [ "$MON_SEVERITY" = "critical" ]
+  [ "$MON_DEGRADED" -eq 1 ]
+}
+
+@test "SOCK-1: a silent resolver with a usable socket is still D1 in the monitor" {
+  reset_state; MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=0
+  monitor_rules_here
+  [[ "$MON_RULES_SORTED" == "D1 " ]] || { echo "rules: $MON_RULES_SORTED"; return 1; }
+}
+
+@test "SOCK-1: clears only on a cycle that probed and found a socket, and withdraws D1" {
+  reset_state; MON_DNS_OK=1 MON_DNS_LOCAL_FAIL="" MON_PREV_RULES="SOCK-1 "
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " != *" SOCK-1 "* ]]
+  [[ " $MON_RULES " == *" SOCK-1 "* ]]   # kept as last-known, not announced as recovered
+  reset_state; MON_DNS_OK=1 MON_DNS_LOCAL_FAIL=0 MON_PREV_RULES="SOCK-1 "
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " == *" SOCK-1 "* ]]
+  [[ " $MON_RULES " != *" SOCK-1 "* ]]
+  # While SOCK-1 holds, a D1 carried over from before is void and may clear.
+  reset_state; MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=1
+  _mon_rules
+  [[ " $MON_CLEARABLE_RULES " == *" D1 "* ]]
+}
+
+# Stubs for one _mon_probe_dns cycle. The sockcheck stand-in is located the
+# way the real helper is, through HELPERS_DIR, and records every call.
+stub_dns_probe_world() {
+  MON_LINK_UP=1
+  HELPERS_DIR="$BATS_TEST_TMPDIR/helpers"
+  mkdir -p "$HELPERS_DIR"
+  rm -f "$BATS_TEST_TMPDIR/sockcheck.calls"
+  printf '#!/usr/bin/env python3\nopen("%s", "a").write("called\\n")\nprint("%s")\n' \
+    "$BATS_TEST_TMPDIR/sockcheck.calls" "$1" >"$HELPERS_DIR/sockcheck.py"
+  scutil() { printf 'nameserver[0] : 192.168.1.1\n'; }
+  with_timeout() { shift; "$@"; }
+  netstat() { printf 'udp4 0 0 192.168.1.5.50001 *.*\nudp4 0 0 192.168.1.5.50002 *.*\n'; }
+  lsof() {
+    printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
+    printf 'Chatty\\x20App 4242 me 3u IPv4 0x1 0t0 UDP *:50001\n'
+    printf 'Chatty\\x20App 4242 me 4u IPv4 0x1 0t0 UDP *:50002\n'
+  }
+}
+
+@test "SOCK-1: _mon_probe_dns tells a local socket failure from a silent resolver" {
+  stub_dns_probe_world EADDRNOTAVAIL
+  dig() {
+    case "$*" in
+      *+tcp*) printf '104.16.132.229\n' ;;
+      *) echo "dig: isc_socket_bind: address not available" >&2; return 10 ;;
+    esac
+  }
+  _mon_probe_dns
+  [ "$MON_DNS_OK" = "0" ]
+  [ "$MON_DNS_LOCAL_FAIL" = "1" ]
+  [ "$MON_DNS_LOCAL_BIND" = "EADDRNOTAVAIL" ]
+  [ "$MON_DNS_UDP_SOCKETS" = "2" ]
+  [ "$MON_DNS_TCP_DNS_OK" = "1" ]
+  [ "$(printf '%s\n' "$MON_DNS_UDP_HOLDERS" | head -1)" = "Chatty App|4242|2" ]
+  # And the rule that follows from it.
+  reset_state; MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=1
+  [ "$(monitor_rules)" = "SOCK-1 " ]
+}
+
+@test "SOCK-1: _mon_probe_dns on a silent resolver with a healthy bind is a plain DNS failure" {
+  stub_dns_probe_world ok
+  dig() { return 0; }
+  _mon_probe_dns
+  [ "$MON_DNS_OK" = "0" ]
+  [ "$MON_DNS_LOCAL_FAIL" = "0" ]
+  [ -z "$MON_DNS_UDP_HOLDERS" ]
+}
+
+@test "SOCK-1: _mon_probe_dns pays nothing for the check when the lookup is answered" {
+  stub_dns_probe_world EADDRNOTAVAIL
+  dig() { printf '104.16.132.229\n'; }
+  _mon_probe_dns
+  [ "$MON_DNS_OK" = "1" ]
+  [ "$MON_DNS_LOCAL_FAIL" = "0" ]
+  [ ! -e "$BATS_TEST_TMPDIR/sockcheck.calls" ] || { echo "sockcheck ran on a healthy cycle"; return 1; }
+}
+
+@test "SOCK-1: the stream's dns block says the question never left the Mac, with the evidence" {
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_DNS_OK=0 NETDIAG_MON_DNS_LOCAL_FAIL=1 \
+           NETDIAG_MON_DNS_LOCAL_BIND=EADDRNOTAVAIL NETDIAG_MON_DNS_UDP_SOCKETS=16000 \
+           NETDIAG_MON_DNS_UDP_TOP_SHARE_PCT=93 NETDIAG_MON_DNS_TCP_DNS_OK=1 \
+           NETDIAG_MON_DNS_UDP_HOLDERS=$'Chatty App|4242|15000\nrapportd|646|3' \
+           NETDIAG_MON_RULES='SOCK-1 '
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)['dns']
+assert d['ok'] is False and d['local_fail'] is True, d
+assert d['local']['udp_bind'] == 'EADDRNOTAVAIL', d
+assert d['local']['udp_sockets'] == 16000 and d['local']['tcp_dns_ok'] is True, d
+assert d['local']['top_holders'][0] == {'process': 'Chatty App', 'pid': 4242, 'sockets': 15000}, d
+"
+  # Unmeasured and healthy are different claims; neither carries evidence.
+  run emit NETDIAG_MON_LINK_UP=1
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)['dns']
+assert d['local_fail'] is None and d['local'] is None, d
+"
+  run emit NETDIAG_MON_LINK_UP=1 NETDIAG_MON_DNS_OK=1 NETDIAG_MON_DNS_LOCAL_FAIL=0
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)['dns']
+assert d['local_fail'] is False and d['local'] is None, d
+"
+}
+
+@test "SOCK-1: the journal line that records the fault carries the evidence" {
+  local journal="$BATS_TEST_TMPDIR/sock.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_TS=2026-10-07T10:00:00Z \
+           NETDIAG_MON_NETWORK_ID=wifi:mac=00:11:22:33:44:55 \
+           NETDIAG_MON_RULES='SOCK-1 ' NETDIAG_MON_PREV_RULES='' \
+           NETDIAG_MON_DNS_LOCAL_FAIL=1 NETDIAG_MON_DNS_LOCAL_BIND=EADDRNOTAVAIL \
+           NETDIAG_MON_DNS_UDP_SOCKETS=16000 NETDIAG_MON_DNS_TCP_DNS_OK=1 \
+           NETDIAG_MON_DNS_UDP_HOLDERS=$'Chatty App|4242|15000'
+  [ "$status" -eq 0 ]
+  python3 - "$journal" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+assert len(rows) == 1, rows
+r = rows[0]
+assert r["kind"] == "rule-fired" and r["to"] == "SOCK-1", r
+ev = r["evidence"]
+assert ev["udp_bind"] == "EADDRNOTAVAIL" and ev["udp_sockets"] == 16000, ev
+assert ev["top_holders"] == [{"process": "Chatty App", "pid": 4242, "sockets": 15000}], ev
+assert ev["tcp_dns_ok"] is True, ev
+PY
+  # Any other rule's line carries no evidence key.
+  local other="$BATS_TEST_TMPDIR/other.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$other" NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_RULES='D1 ' NETDIAG_MON_PREV_RULES=''
+  python3 - "$other" <<'PY'
+import json, sys
+r = [json.loads(l) for l in open(sys.argv[1]) if l.strip()][0]
+assert r["to"] == "D1" and "evidence" not in r, r
+PY
 }
 
 @test "parity: an active VPN is VPN-1 on both" {

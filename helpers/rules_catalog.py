@@ -795,6 +795,52 @@ RULES: list[dict[str, object]] = [
         "fix_target": "you",
     },
     {
+        "id": "D6",
+        "title": "A better DNS server is available",
+        "category": "dns",
+        "severity": "info",
+        "scope": "scan",
+        "blurb": (
+            "The DNS server your router hands out is failing or slow, "
+            "while public ones answered fine in the same check. The report "
+            "explains how to switch to a public DNS server and what that "
+            "can cost you, with encrypted DNS as an optional extra. Hopwatch "
+            "only explains; it never changes your DNS settings itself."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#d6--guided-switch-to-a-better-dns",
+        "fix": (
+            "Try restarting your router first. If the problem keeps coming "
+            "back, add 1.1.1.1 and 8.8.8.8 under System Settings, Wi-Fi, "
+            "Details, DNS. That is not encrypted, and it applies to every "
+            "Wi-Fi network you join until you remove it. Secure DNS in "
+            "your browser is an optional extra for privacy."
+        ),
+        "fix_target": "you",
+    },
+    {
+        "id": "SOCK-1",
+        "title": "This Mac cannot open new network connections",
+        "category": "dns",
+        "severity": "critical",
+        "scope": "both",
+        "blurb": (
+            "This Mac has run out of room to make new network connections, "
+            "so it cannot look up website names. The fault is on this Mac "
+            "itself, not in your Wi-Fi, router or internet service, so "
+            "restarting the router will not help. Rules that blame the DNS "
+            "server stay quiet while this one is firing."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#sock-1--this-mac-cannot-open-new-network-connections",
+        "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
+                    "vpn": "broken", "browsing": "broken"},
+        "fix": (
+            "Quit the app the report names as holding the connections "
+            "open, or restart this Mac. A restart is the only reliable "
+            "cure when no app is named."
+        ),
+        "fix_target": "you",
+    },
+    {
         "id": "EDNS-1",
         "title": "Encrypted DNS profile active",
         "category": "dns",

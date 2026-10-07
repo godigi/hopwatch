@@ -106,7 +106,9 @@ public enum HopAttributionResolver {
 
     // MARK: - Rule Classifications
 
-    private static let macCriticalRules: Set<String> = []
+    // SOCK-1: this Mac cannot open a UDP socket. The fault is on the Mac, so
+    // it must not fall through to blaming the router or the ISP.
+    private static let macCriticalRules: Set<String> = ["SOCK-1"]
     private static let macWarningRules: Set<String> = ["BR-1", "CK-1", "EDNS-1"]
 
     private static let wifiCriticalRules: Set<String> = ["G1", "WD-1"]
@@ -321,8 +323,10 @@ public enum HopAttributionResolver {
             bufferbloatInet: snapshot.bufferbloat.inetDeltaMs,
             recentRoamed: recentRoamed
         )
-        if rules.contains("BR-1"),
-           let brDiag = snapshot.diagnosis.first(where: { $0.rule == "BR-1" }),
+        // The CLI's own sentence for these two is the explanation; the
+        // resolver only decides who is to blame.
+        if let ruleID = ["BR-1", "SOCK-1"].first(where: { rules.contains($0) }),
+           let brDiag = snapshot.diagnosis.first(where: { $0.rule == ruleID }),
            res.culprit == .mac {
             res = Result(
                 culprit: res.culprit,

@@ -342,6 +342,63 @@ diagnosis_run() {
     fi
   fi
 
+  # SOCK-1 — this Mac cannot open a UDP socket, so it cannot ask any DNS
+  # server anything. Decided before D1/D2/D5 because it voids them: every
+  # one of those rules reads "the resolver did not answer" off an empty
+  # dig, and with no socket an empty dig says nothing about the resolver.
+  # On 2026-10-07 that produced "your DNS server is flaky, restart your
+  # router" for over an hour, advice that could not work. dns_probe
+  # (lib/common.sh) sets DNS_LOCAL_FAIL only after the kernel refuses a
+  # bind or dig says so itself, so a merely silent resolver never lands
+  # here. The same check runs in lib/monitor.sh.
+  local _sock_fault=0
+  if [ "${DNS_LOCAL_FAIL:-0}" -eq 1 ]; then
+    _sock_fault=1
+    local _sock_name="" _sock_n="" _sock_clause=" Restart this Mac." _sock_tech _sock_tcp
+    IFS='|' read -r _sock_name _ _sock_n <<<"$(printf '%s\n' "${DNS_UDP_HOLDERS:-}" | head -1)"
+    # Name an app only when it holds enough of the sockets to be the cause
+    # (THRESH_SOCK_HOLDER_SHARE_PCT). A system process the user cannot see
+    # may be the real holder; lsof without root shows only their own.
+    if [ -n "$_sock_name" ] && is_numeric "${DNS_UDP_TOP_SHARE_PCT:-}" \
+       && [ "$DNS_UDP_TOP_SHARE_PCT" -ge "$THRESH_SOCK_HOLDER_SHARE_PCT" ]; then
+      _sock_clause=" Quit ${_sock_name} (it is holding ${_sock_n} connections open), or restart this Mac."
+    fi
+    case "${DNS_TCP_DNS_OK:-}" in
+      1) _sock_tcp="; lookups over TCP still work" ;;
+      0) _sock_tcp="; lookups over TCP failed too" ;;
+      *) _sock_tcp="" ;;
+    esac
+    _sock_tech="technical: the system refused a new UDP socket (${DNS_LOCAL_BIND:-dig reported a bind error}); ${DNS_UDP_SOCKETS:-an unknown number of} UDP sockets are open${_sock_tcp}"
+    add_diag critical SOCK-1 "This Mac has run out of room to make new network connections, so it can't look up website names. That is a fault on this Mac itself, not in your Wi-Fi, router or internet service, so restarting the router will not help.${_sock_clause} (${_sock_tech})"
+  fi
+
+  # D6 — the router's DNS is failing or slow while a public one works.
+  # Guidance only; Hopwatch never changes DNS (read-only, sudo-free). Each
+  # guard is a way the advice would be wrong:
+  #   SOCK-1            nothing could have answered, switching helps nobody
+  #   encrypted profile the user is already past this (EDNS-1 says so)
+  #   manual override / already a public resolver — it is already their choice
+  # "Slow" is D3's own cutoff, not a second one.
+  local _d6_fires=0 _d6_state="" _d6_ans=0 _d6_line
+  if [ "$_sock_fault" -eq 0 ] && [ -n "$DNS_LINES" ] && [ -n "${SYS_RES:-}" ] \
+     && [ "${PATH_ENCRYPTED_DNS:-0}" -eq 0 ] \
+     && ! dns_is_public_resolver "$SYS_RES" \
+     && ! dns_is_manual_override "${DHCP_DNS_SERVERS:-}" "${SYS_RES_ALL:-}"; then
+    while IFS= read -r _d6_line; do
+      case "$_d6_line" in
+        1.1.1.1\|*\|OK|8.8.8.8\|*\|OK) _d6_ans=1 ;;
+      esac
+    done <<<"$DNS_LINES"
+    if [ "$_d6_ans" -eq 1 ]; then
+      if [ "${DNS_PRIMARY_FAIL:-0}" -eq 1 ]; then
+        _d6_state="is not answering"
+      elif [ -n "$SYS_RES_MS" ] && is_numeric "$SYS_RES_MS" && [ "$SYS_RES_MS" -gt "$THRESH_DNS_LATENCY_WARN_MS" ]; then
+        _d6_state="is very slow to answer (${SYS_RES_MS} ms)"
+      fi
+      [ -n "$_d6_state" ] && _d6_fires=1
+    fi
+  fi
+
   # D1 / D2 / D5 — name resolution is failing. DNS_LINES proves the check ran;
   # without it a skipped-DNS run would accuse a healthy resolver.
   #
@@ -350,17 +407,35 @@ diagnosis_run() {
   # the total case and requires nothing of the sort — which is the point.
   # D5 handles the specific silent fallback case: primary resolver is dead
   # and secondary answers, causing multi-second timeout delays on every query.
-  if [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 0 ]; then
+  #
+  # All three are skipped under SOCK-1 (see above). When D6 fires as well,
+  # D1 and D5 keep their rule ID, severity and observation but give up their
+  # remedy sentence: D6 carries the only remedy, so the report never tells
+  # the user two different things about the same fault.
+  local _d1_fix=" Restart your router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks, consider Encrypted DNS in your browser."
+  local _d5_fix=" Update your DNS settings or restart your router."
+  local _d3_fix=" Restart your router to refresh its DNS proxy, or enable Encrypted DNS in your browser for noticeably snappier browsing."
+  if [ "$_d6_fires" -eq 1 ]; then
+    _d1_fix=""; _d5_fix=""; _d3_fix=""
+  fi
+  if [ "$_sock_fault" -eq 1 ]; then
+    :
+  elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 0 ]; then
     add_diag warn D2 "No name lookups are working at all — every DNS server your Mac tried failed to answer. On its own that would point at your DNS settings, but nothing else on the internet is reachable either, so this is most likely a symptom rather than the cause. Fix the connection first; if lookups still fail once it's back, restart your router."
   elif [ "${DNS_PRIMARY_FAIL:-0}" -eq 1 ] && [ "${DNS_FALLBACK_OK:-0}" -eq 1 ]; then
-    add_diag warn D5 "Your primary DNS server (${PRIMARY_DNS}) is not responding. macOS is experiencing a multi-second delay waiting for timeouts before silently falling back to secondary DNS (${SECONDARY_DNS:-a secondary resolver}). This causes web pages and links to hesitate for several seconds before opening. Update your DNS settings or restart your router."
+    add_diag warn D5 "Your primary DNS server (${PRIMARY_DNS}) is not responding. macOS is experiencing a multi-second delay waiting for timeouts before silently falling back to secondary DNS (${SECONDARY_DNS:-a secondary resolver}). This causes web pages and links to hesitate for several seconds before opening.${_d5_fix}"
   elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 1 ]; then
-    add_diag warn D1 "The internet works but some name lookups are failing — your DNS server is flaky. Restart your router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks, consider Encrypted DNS in your browser."
+    add_diag warn D1 "The internet works but some name lookups are failing — your DNS server is flaky.${_d1_fix}"
   fi
 
   # D3 — slow DNS resolver (> 250 ms)
   if [ -n "$SYS_RES_MS" ] && is_numeric "$SYS_RES_MS" && [ "$SYS_RES_MS" -gt "$THRESH_DNS_LATENCY_WARN_MS" ] && [ "${DNS_OK:-0}" -eq 1 ]; then
-    add_diag warn D3 "Your DNS server ($SYS_RES) is very slow to respond (${SYS_RES_MS} ms) — every new website or link you click will pause before opening. Restart your router to refresh its DNS proxy, or enable Encrypted DNS in your browser for noticeably snappier browsing."
+    add_diag warn D3 "Your DNS server ($SYS_RES) is very slow to respond (${SYS_RES_MS} ms) — every new website or link you click will pause before opening.${_d3_fix}"
+  fi
+
+  # D6 is emitted after the rules it supplements so it reads as their remedy.
+  if [ "$_d6_fires" -eq 1 ]; then
+    add_diag info D6 "Your Mac asks a DNS server to turn website names into addresses — think of it as a phone book. The one your router hands out ($SYS_RES) ${_d6_state}, while public ones answered fine in the same check, so on this network the phone book is the part that's failing. Restarting your router is worth trying first; if it keeps happening, you can point your Mac at a public one instead: in System Settings → Wi-Fi → Details → DNS, add 1.1.1.1 and 8.8.8.8. Before you switch, know the downsides: names that only exist on your own network (a printer, a work intranet, router.lan) can stop working; some networks block outside DNS entirely, which makes things worse; a hotel or café sign-in page may not appear on some networks until you set DNS back; on a Mac this setting applies to every Wi-Fi network you join, not just this one; and a router's parental or content filter is bypassed. To undo it: System Settings → Wi-Fi → Details → DNS, select the servers you added, press the minus button and click OK. Public DNS set this way is NOT encrypted, so other people on the same network can still see which sites you look up. If you want that privacy as well, turning on Secure DNS in your browser's settings is an optional extra; it does not fix this fault on its own. Hopwatch never changes these settings for you."
   fi
 
   # D4 — DNS hijacking / search redirection
@@ -438,7 +513,9 @@ diagnosis_run() {
   fi
 
   # V6-2 — unresponsive IPv6 DNS resolver causing fallback stalls
-  if [ -n "${IPV6_DNS_FAIL:-}" ] && [ "${DNS_OK:-0}" -eq 1 ]; then
+  # Void under SOCK-1: its evidence is an empty dig, which says nothing
+  # about a resolver when this Mac cannot open a socket.
+  if [ -n "${IPV6_DNS_FAIL:-}" ] && [ "${DNS_OK:-0}" -eq 1 ] && [ "$_sock_fault" -eq 0 ]; then
     add_diag warn V6-2 "Your router gave your Mac an IPv6 DNS server ($IPV6_DNS_FAIL), but it isn't responding. Every website you visit pauses for 2 to 3 seconds while your Mac waits for IPv6 to time out before falling back to IPv4. Restart your router to refresh its IPv6 DNS configuration; no settings changes are needed on your Mac."
   fi
 

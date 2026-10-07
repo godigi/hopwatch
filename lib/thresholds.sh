@@ -220,6 +220,15 @@ THRESH_NTP_DRIFT_WARN_S=1
 # makes every new website and link click noticeably stall before loading.
 THRESH_DNS_LATENCY_WARN_MS=250
 
+# SOCK-1 — name the app holding the UDP sockets only when it plausibly is
+# the cause. The rule itself fires on a failed bind, not on a count, so it
+# needs no cutoff; this one governs only the "quit <app>" clause. Ephemeral
+# exhaustion takes thousands of sockets, so a leaking process holds most of
+# them while an ordinary app holds a handful. Below this share of all UDP
+# sockets the top visible holder is just a busy app, and telling the user
+# to quit it would send them after the wrong thing.
+THRESH_SOCK_HOLDER_SHARE_PCT=50
+
 # ── DHCP ─────────────────────────────────────────────────────────────────
 # DH-1 — warn when the lease has less than 10 minutes left without renewing.
 # Renewal is normally automatic at 50% (T1); under 10 minutes indicates renewal failure.
