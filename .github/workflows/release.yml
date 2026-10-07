@@ -149,6 +149,34 @@ jobs:
             exit 1
           fi
 
+      # Crash reports from the app arrive at Sentry with raw addresses; this
+      # uploads the symbols that turn them into file:line. Sentry matches
+      # debug files to crashes by build UUID, so the release name does not
+      # need to agree. `swift build` leaves DWARF in the .o files rather
+      # than the executable, hence dsymutil.
+      #
+      # Deliberately cannot block a release: a Sentry outage or an expired
+      # token must not stop a shipped build. The cost is that a failed
+      # upload is only a warning annotation, so crashes silently stay
+      # unsymbolicated until someone notices it.
+      - name: Upload debug symbols to Sentry
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          # The DSN's ingest host is us.sentry.io; sentry-cli defaults to
+          # the EU/global host and would 401 against a US-region org.
+          SENTRY_URL: https://us.sentry.io
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ] || [ -z "$SENTRY_PROJECT" ]; then
+            echo "::warning::Sentry symbol upload skipped: SENTRY_AUTH_TOKEN (secret) or SENTRY_ORG / SENTRY_PROJECT (variables) not set"
+            exit 0
+          fi
+          curl -sL https://sentry.io/get-cli/ | bash
+          dsymutil gui/.build/release/HopwatchGUI -o gui/build/HopwatchGUI.dSYM
+          sentry-cli debug-files upload --wait gui/build/HopwatchGUI.dSYM
+
       - name: Create or update the Release
         env:
           GH_TOKEN: ${{ github.token }}

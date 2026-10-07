@@ -6,6 +6,10 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The release workflow now uploads the app's debug symbols to Sentry, so crashes in Hopwatch's own code arrive as file and line instead of raw addresses. The step is inert until `SENTRY_AUTH_TOKEN` (secret) and `SENTRY_ORG` / `SENTRY_PROJECT` (variables) are set, and it cannot block a release: a failed upload is only a warning annotation.
+
 ## [1.10.10] - 2026-10-06
 
 ### Fixed
