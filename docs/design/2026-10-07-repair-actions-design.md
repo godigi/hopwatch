@@ -1,6 +1,6 @@
 # Repair actions — "Fix it" buttons
 
-Status: proposed, not implemented. Written 2026-10-07. Decided with the
+Status: phase 1 implemented (plumbing, `quit-app`, `restart-mac`, `open-sign-in`; `restart-mac` never run live). Everything needing an admin password, `wifi-cycle` and the lasting-change/undo surface are still proposed. Written 2026-10-07. Decided with the
 owner the same day: repairs are wanted, **including ones that ask for an
 admin password**.
 

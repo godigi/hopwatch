@@ -92,6 +92,15 @@ nothing. Two limits are deliberate:
     stopped. One replaced inside the window never had a second sample to
     report with, and is no evidence either way.
 
+## Repairs
+
+`hopwatch --repair=ID` appends a `repair` line (helpers/repair_emit.py) to an
+existing journal when a repair actually runs: what the user did, and whether
+it worked. It is an event like any other (counted in `by_kind`, listed in
+`events`) and nothing more. Episodes pair only `rule-fired` with
+`rule-cleared`, so a repair never opens, closes or extends one: a repair is
+not a fault and does not end one, the monitor clearing the rule does.
+
 ## Observation
 
 Every window reports what fraction of itself was actually watched.
