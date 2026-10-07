@@ -363,6 +363,128 @@ dns_is_manual_override() {
   return 0
 }
 
+# ── DNS probing, and telling "no answer" from "could not ask" ────────────
+# Every DNS probe used to be `dig ... 2>/dev/null` with an empty answer read
+# as "the resolver did not answer". That conflates two different faults. On
+# 2026-10-07 this Mac could not open a UDP socket (`dig: isc_socket_bind:
+# address not available`, ephemeral-port exhaustion), every probe came back
+# empty, and D1 told the user to restart a router that was fine. The shared
+# probe below keeps dig's stderr and, only when an answer is missing, asks
+# the kernel directly whether a UDP socket can be bound (helpers/sockcheck.py)
+# — see SOCK-1 in docs/DIAGNOSIS-RULES.md.
+#
+# Lives here, not in lib/dns.sh, because the scanner (lib/dns.sh) and the
+# monitor (lib/monitor.sh) probe the same way and must reach the same
+# conclusion; neither may depend on the other being sourced.
+#
+# State, all reset by dns_local_reset at the start of a probing pass:
+#   DNS_LOCAL_FAIL   0 = no local fault seen, 1 = this Mac cannot open UDP
+#   DNS_LOCAL_BIND   "" = never checked (the healthy path: every dig
+#                    answered), else `ok` / an errno name / `unavailable`
+#   DNS_UDP_SOCKETS  UDP socket count system-wide (netstat), fault only
+#   DNS_UDP_HOLDERS  "process|pid|count" lines, biggest first (lsof; sudo-
+#                    free, so only the user's own processes are visible)
+#   DNS_UDP_TOP_SHARE_PCT  the top holder's share of DNS_UDP_SOCKETS
+#   DNS_TCP_DNS_OK   1/0 — does DNS over TCP still work (it needs no UDP
+#                    socket, which is what separates this fault from a
+#                    resolver outage)
+dns_local_reset() {
+  DNS_LOCAL_FAIL=0
+  DNS_LOCAL_BIND=""
+  DNS_UDP_SOCKETS=""
+  DNS_UDP_HOLDERS=""
+  DNS_UDP_TOP_SHARE_PCT=""
+  DNS_TCP_DNS_OK=""
+}
+
+# A resolver address that is a well-known public one. Used to tell "the
+# router-supplied resolver" apart from one the user already chose.
+dns_is_public_resolver() {
+  case "$1" in
+    1.1.1.1|1.0.0.1|8.8.8.8|8.8.4.4|9.9.9.9|149.112.112.112) return 0 ;;
+  esac
+  return 1
+}
+
+# Gather what a reboot would erase. Runs once per fault, never on the
+# healthy path. Every command here is read-only and sudo-free.
+# shellcheck disable=SC2034 # the DNS_UDP_* / DNS_TCP_DNS_OK results are read by lib/diagnosis.sh, lib/output.sh and lib/monitor.sh
+dns_capture_socket_evidence() {
+  local raw top_count
+  DNS_UDP_SOCKETS="$(netstat -an -p udp 2>/dev/null | awk '/^udp/{n++} END{print n+0}')"
+  # lsof sees only the caller's own processes without root; a holder that
+  # belongs to the system is simply not in this list, and the summary
+  # says so by dropping the "quit <app>" clause rather than guessing.
+  raw="$(with_timeout 5 lsof -nP -iUDP 2>/dev/null || true)"
+  DNS_UDP_HOLDERS="$(printf '%s\n' "$raw" | awk '
+    NR > 1 && NF >= 2 { name = $1; gsub(/\\x20/, " ", name); c[name "|" $2]++ }
+    END { for (k in c) print k "|" c[k] }' \
+    | sort -t'|' -k3,3 -rn | head -5)"
+  DNS_UDP_TOP_SHARE_PCT=0
+  top_count="$(printf '%s\n' "$DNS_UDP_HOLDERS" | head -1 | awk -F'|' '{print $3+0}')"
+  if is_numeric "$DNS_UDP_SOCKETS" && [ "$DNS_UDP_SOCKETS" -gt 0 ] \
+     && is_numeric "$top_count" && [ "$top_count" -gt 0 ]; then
+    DNS_UDP_TOP_SHARE_PCT="$(awk -v t="$top_count" -v n="$DNS_UDP_SOCKETS" \
+      'BEGIN { p = int(t * 100 / n); if (p > 100) p = 100; print p }')"
+  fi
+  raw="$(with_timeout 4 dig +tcp +time=2 +tries=1 +short @1.1.1.1 apple.com 2>/dev/null \
+         | grep -v '^;;' | head -1 || true)"
+  if [ -n "$raw" ]; then DNS_TCP_DNS_OK=1; else DNS_TCP_DNS_OK=0; fi
+}
+
+# Called with dig's stderr after a probe came back empty. Two independent
+# signals, either of which is enough: the kernel refusing a UDP bind
+# (helpers/sockcheck.py), and dig itself saying so. Idempotent within a
+# pass — the bind is checked once however many probes fail, so a dead
+# resolver costs one extra process, not one per probe.
+dns_local_fault_check() {
+  local err="${1:-}" helper bind=""
+  case "$err" in
+    *socket_bind*|*"address not available"*) DNS_LOCAL_FAIL=1 ;;
+  esac
+  if [ -z "${DNS_LOCAL_BIND:-}" ]; then
+    helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/sockcheck.py"
+    if [ -f "$helper" ]; then
+      bind="$(with_timeout 3 python3 "$helper" 2>/dev/null | head -1 || true)"
+    fi
+    DNS_LOCAL_BIND="${bind:-unavailable}"
+    # An errno name is a refusal by the kernel. `ok`, `error` and
+    # `unavailable` are not evidence of a fault and must never read as one.
+    case "$DNS_LOCAL_BIND" in
+      E[A-Z0-9]*) DNS_LOCAL_FAIL=1 ;;
+    esac
+  fi
+  if [ "${DNS_LOCAL_FAIL:-0}" -eq 1 ] && [ -z "${DNS_UDP_SOCKETS:-}" ]; then
+    dns_capture_socket_evidence
+  fi
+  return 0
+}
+
+# dns_probe RESOLVER NAME — one UDP lookup. Sets DNS_PROBE_ANSWER (first
+# answer line, empty when none). Returns 0 on an answer. Not a $(...) function on purpose: it has to set
+# the local-fault state in the caller's shell.
+#
+# Lines starting `;;` are discarded. BIND 9.10's `+short` prints "connection
+# timed out; no servers could be reached" on *stdout*, so a resolver that
+# never answered used to be recorded as having answered with that sentence.
+dns_probe() {
+  local raw line err=""
+  DNS_PROBE_ANSWER=""
+  raw="$(with_timeout 3 dig +time=2 +tries=1 +short @"$1" "$2" 2>&1 || true)"
+  while IFS= read -r line; do
+    case "$line" in
+      ""|";;"*) ;;
+      "dig:"*|*"isc_"*) err+="${err:+; }$line" ;;
+      *) [ -n "$DNS_PROBE_ANSWER" ] || DNS_PROBE_ANSWER="$line" ;;
+    esac
+  done <<<"$raw"
+  if [ -n "$DNS_PROBE_ANSWER" ]; then
+    return 0
+  fi
+  dns_local_fault_check "$err"
+  return 1
+}
+
 # Pipeline-target replacement for `tee -a "$LOG"`. Writes to log unconditionally;
 # also writes to stdout iff _should_print_stdout would.
 #

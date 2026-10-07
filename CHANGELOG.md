@@ -6,9 +6,20 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `SOCK-1` (critical): this Mac cannot open a UDP socket, so it cannot look up website names. On 2026-10-07 the Mac could not open a UDP socket (`dig: isc_socket_bind: address not available`, system-wide, cured only by a reboot; ephemeral-port exhaustion is the likely cause but was never proven) and Hopwatch reported `D1` "your DNS server is flaky, restart your router" for over an hour. Every DNS probe ran `dig ... 2>/dev/null` and read an empty answer as "the resolver did not answer". The probes now go through one shared `dns_probe` (`lib/common.sh`, used by `lib/dns.sh` and `lib/monitor.sh`) that keeps dig's stderr and, only when an answer is missing, asks the kernel for a UDP socket with the new `helpers/sockcheck.py` (a healthy run pays nothing). A refused bind, or dig saying so itself, fires `SOCK-1` and suppresses `D1`, `D2`, `D5` and `V6-2` for that run, since their evidence is void. The summary names the app holding the sockets only when it holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of them (`lsof` without root sees only your own processes); otherwise it says to restart the Mac.
+- Fault-time evidence for `SOCK-1`, because a reboot erases it: the UDP socket count (`netstat -an -p udp`), the top holders by process (`lsof -nP -iUDP`) and whether DNS over TCP still works. It lands in a new nullable top-level `dns_local` object in `--json`, in the monitor's `dns.local_fail` / `dns.local` fields, and in the `--journal` line that records the fault (`evidence`).
+- `D6` (info): guided switch to a better DNS. Fires when the resolver your router hands out is not answering, or is slower than `D3`'s cutoff, while a public resolver answered in the same scan. It explains what DNS is, then how to switch to plain public DNS (stated as not encrypted), its downsides and how to undo it, with the browser's Secure DNS as an optional extra. Guidance only: Hopwatch never changes DNS. Never fires alongside `SOCK-1`, on a manual or already-public resolver, or when an encrypted DNS profile is active (`EDNS-1`). When `D6` fires, `D1`, `D3` and `D5` keep their rule, severity and observation but drop their own remedy sentence, so the report gives one set of advice, not two.
+- The app registers `SOCK-1` as a fault on the Mac (not the router or ISP) and adds it to the "Websites aren't loading" alert.
+
 ### Changed
 
 - The release workflow now uploads the app's debug symbols to Sentry, so crashes in Hopwatch's own code arrive as file and line instead of raw addresses. The step is inert until `SENTRY_AUTH_TOKEN` (secret) and `SENTRY_ORG` / `SENTRY_PROJECT` (variables) are set, and it cannot block a release: a failed upload is only a warning annotation.
+
+### Fixed
+
+- A resolver that never answered was recorded as having answered. BIND 9.10's `dig +short` prints ";; connection timed out; no servers could be reached" on stdout, and the probes took the first stdout line as the answer, so a dead resolver counted as `OK` and `D1`/`D5` could not fire on a real timeout. `dns_probe` discards dig's `;;` notices.
 
 ## [1.10.10] - 2026-10-06
 

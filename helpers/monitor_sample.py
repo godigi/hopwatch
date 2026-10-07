@@ -247,6 +247,40 @@ def _changes() -> list[dict]:
     return out
 
 
+def _sock_evidence() -> dict | None:
+    """What the Mac was holding when SOCK-1 fired, for the event journal.
+
+    A reboot is the only known cure for ephemeral-port exhaustion and it
+    erases the culprit with it, so the one moment this can be recorded is
+    the cycle in which the rule fires. The same fields ride in the stream's
+    `dns` block; the journal copy exists because the stream is not stored.
+    """
+    if os.environ.get("NETDIAG_MON_DNS_LOCAL_FAIL") != "1":
+        return None
+    return _dns_local_block()
+
+
+def _dns_local_block() -> dict:
+    holders = []
+    for line in (_env("DNS_UDP_HOLDERS") or "").splitlines():
+        parts = line.rsplit("|", 2)
+        if len(parts) != 3:
+            continue
+        name, pid, count = parts
+        holders.append({
+            "process": name,
+            "pid": int(pid) if pid.isdigit() else None,
+            "sockets": int(count) if count.isdigit() else None,
+        })
+    return {
+        "udp_bind": _env("DNS_LOCAL_BIND"),
+        "udp_sockets": _i("DNS_UDP_SOCKETS"),
+        "top_holders": holders,
+        "top_holder_share_pct": _i("DNS_UDP_TOP_SHARE_PCT"),
+        "tcp_dns_ok": _tri("DNS_TCP_DNS_OK"),
+    }
+
+
 def _journal_append(sample: dict, changes: list[dict]) -> None:
     """Append this cycle's transitions to the event journal, if one is set.
 
@@ -313,6 +347,13 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
     for change in _rules_at_start() + changes:
         extra = ({"already_firing": True}
                  if change.get("already_firing") else {})
+        # SOCK-1's evidence goes on the line that records the fault, not in
+        # a separate event: a journal reader pairing the episode should find
+        # the culprit beside the start time without a second lookup.
+        if change.get("id") == "rule-fired" and change.get("to") == "SOCK-1":
+            evidence = _sock_evidence()
+            if evidence is not None:
+                extra["evidence"] = evidence
         lines.append(dict(base, kind=change.get("id"),
                           field=change.get("field"),
                           **{"from": change.get("from")},
@@ -457,6 +498,15 @@ def main() -> None:
             "ok": _tri("DNS_OK"),
             "resolver": _env("DNS_RESOLVER"),
             "elapsed_ms": _f("DNS_MS"),
+            # Could this Mac send the question at all (rule SOCK-1)? null =
+            # the medium tier has not probed yet; false = it probed and a
+            # UDP socket was available; true = the kernel refused one, in
+            # which case `ok: false` says nothing about the resolver.
+            "local_fail": _tri("DNS_LOCAL_FAIL"),
+            # The fault-time evidence, or null when there is no fault.
+            "local": (_dns_local_block()
+                      if os.environ.get("NETDIAG_MON_DNS_LOCAL_FAIL") == "1"
+                      else None),
         },
         "tcp": {
             "any_ok": _tri("TCP_OK"),

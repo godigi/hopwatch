@@ -124,6 +124,46 @@ def build_dns() -> list[dict]:
     return out
 
 
+def build_dns_local() -> dict | None:
+    """Whether this Mac could even send a DNS question (rule SOCK-1).
+
+    `null` means the check never ran, which is the healthy case: lib/common.sh
+    only asks the kernel for a UDP socket after a lookup came back empty, so
+    a run in which every lookup was answered has nothing to report. That is
+    "not measured", not "measured fine" -- an answered lookup proves the bind
+    worked but nothing here recorded it as a separate fact.
+
+    When it did run: `udp_bind` is `ok` or the errno name the kernel gave,
+    `fault` is the verdict input SOCK-1 reads. The remaining fields are the
+    evidence captured at fault time (a reboot erases it) and are `null`
+    unless there was a fault.
+    """
+    bind = _env("DNS_LOCAL_BIND")
+    fault = _bool("DNS_LOCAL_FAIL")
+    if bind is None and not fault:
+        return None
+    holders = []
+    for line in _list_lines("DNS_UDP_HOLDERS"):
+        parts = line.rsplit("|", 2)
+        if len(parts) != 3:
+            continue
+        name, pid, count = parts
+        holders.append({
+            "process": name,
+            "pid": int(pid) if pid.isdigit() else None,
+            "sockets": int(count) if count.isdigit() else None,
+        })
+    tcp = _env("DNS_TCP_DNS_OK")
+    return {
+        "udp_bind": bind,
+        "fault": fault,
+        "udp_sockets": _maybe_int("DNS_UDP_SOCKETS") if fault else None,
+        "top_holders": holders if fault else None,
+        "top_holder_share_pct": _maybe_int("DNS_UDP_TOP_SHARE_PCT") if fault else None,
+        "tcp_dns_ok": (tcp == "1") if (fault and tcp in ("0", "1")) else None,
+    }
+
+
 def build_hops(env_name: str) -> list[dict]:
     """Parse 'n|ip|rtt_ms' (traceroute) or 'n|ip|loss|avg' (per_hop) lines.
 
@@ -536,6 +576,10 @@ def main() -> None:
             "captive_portal": _bool("CAPTIVE_PORTAL"),
         },
         "dns": build_dns(),
+        # Whether this Mac could open a UDP socket to ask those questions
+        # with. Its own key because `dns` is an array of probes and cannot
+        # grow fields without breaking every consumer that iterates it.
+        "dns_local": build_dns_local(),
         "traceroute": {
             "target": "1.1.1.1",
             "hops": build_hops("TRACE_LINES"),

@@ -211,6 +211,10 @@ headline_run() {
   if [ -n "$DNS_LINES" ]; then
     if [ "$DNS_OK" -eq 1 ]; then
       _row ok "DNS" "working"
+    elif [ "${DNS_LOCAL_FAIL:-0}" -eq 1 ]; then
+      # Not the resolvers' fault -- see SOCK-1. "some lookups failing"
+      # would send the reader to the router.
+      _row bad "DNS" "this Mac can't send lookups — see below"
     else
       _row warn "DNS" "some lookups failing"
     fi

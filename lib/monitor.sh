@@ -146,6 +146,16 @@ MON_WIFI_CHAN=""
 MON_DNS_OK=""
 MON_DNS_RESOLVER=""
 MON_DNS_MS=""
+# Whether this Mac could send a DNS question at all (rule SOCK-1). "" = the
+# probe has not run, 0 = it ran and a UDP socket was available, 1 = the
+# kernel refused one. The evidence alongside is captured only on a fault,
+# because that is when a reboot is about to erase it.
+MON_DNS_LOCAL_FAIL=""
+MON_DNS_LOCAL_BIND=""
+MON_DNS_UDP_SOCKETS=""
+MON_DNS_UDP_HOLDERS=""
+MON_DNS_UDP_TOP_SHARE_PCT=""
+MON_DNS_TCP_DNS_OK=""
 MON_TCP_OK=""
 MON_TCP_LINES=""
 # A small HTTPS reachability probe runs with the fast tier. It answers the
@@ -475,15 +485,28 @@ _mon_probe_gateway() {
 
 _mon_probe_dns() {
   MON_DNS_OK=""; MON_DNS_RESOLVER=""; MON_DNS_MS=""
+  MON_DNS_LOCAL_FAIL=""; MON_DNS_LOCAL_BIND=""; MON_DNS_UDP_SOCKETS=""
+  MON_DNS_UDP_HOLDERS=""; MON_DNS_UDP_TOP_SHARE_PCT=""; MON_DNS_TCP_DNS_OK=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
   MON_DNS_RESOLVER="$(scutil --dns 2>/dev/null \
     | awk '/nameserver\[0\]/{print $3; exit}')"
   [ -n "$MON_DNS_RESOLVER" ] || return 0
-  local t0 answer
+  local t0
   t0="$EPOCHREALTIME"
-  answer="$(with_timeout 3 dig +time=2 +tries=1 +short @"$MON_DNS_RESOLVER" cloudflare.com 2>/dev/null | head -1)"
+  # dns_probe (lib/common.sh) shares the scanner's reading of an empty dig:
+  # only after one does it ask the kernel for a UDP socket, so a healthy
+  # cycle pays nothing, and "this Mac could not send the question" is never
+  # mistaken for "the resolver did not answer" (D1).
+  dns_local_reset
+  dns_probe "$MON_DNS_RESOLVER" cloudflare.com || true
   MON_DNS_MS="$(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN{printf "%.0f", (b-a)*1000}')"
-  if [ -n "$answer" ]; then MON_DNS_OK=1; else MON_DNS_OK=0; fi
+  if [ -n "$DNS_PROBE_ANSWER" ]; then MON_DNS_OK=1; else MON_DNS_OK=0; fi
+  MON_DNS_LOCAL_FAIL="$DNS_LOCAL_FAIL"
+  MON_DNS_LOCAL_BIND="$DNS_LOCAL_BIND"
+  MON_DNS_UDP_SOCKETS="$DNS_UDP_SOCKETS"
+  MON_DNS_UDP_HOLDERS="$DNS_UDP_HOLDERS"
+  MON_DNS_UDP_TOP_SHARE_PCT="$DNS_UDP_TOP_SHARE_PCT"
+  MON_DNS_TCP_DNS_OK="$DNS_TCP_DNS_OK"
 }
 
 _mon_probe_tcp() {
@@ -836,8 +859,13 @@ _mon_rules() {
     fi
   fi
 
+  # SOCK-1 — this Mac cannot open a UDP socket, so no lookup can be sent.
+  # Mirrors lib/diagnosis.sh, including the suppression: D1's evidence (an
+  # empty dig) is void when the question never left the machine.
+  if [ "${MON_DNS_LOCAL_FAIL:-}" = "1" ]; then
+    _mon_add_rule critical SOCK-1
   # D1 — resolution failing while the internet itself is reachable.
-  if [ "${MON_DNS_OK:-}" = "0" ] && [ "$_mon_public_ok" = "1" ]; then
+  elif [ "${MON_DNS_OK:-}" = "0" ] && [ "$_mon_public_ok" = "1" ]; then
     _mon_add_rule warn D1
   fi
 
@@ -933,9 +961,14 @@ _mon_rules() {
   [ -n "$MON_CAPTIVE" ] && MON_CLEARABLE_RULES+="CP-1 "
   if [ "$MON_DNS_OK" = "1" ] \
      || { [ "$MON_DNS_OK" = "0" ] && [ "$_mon_public_ok" = "0" ] \
-          && [ -n "$MON_GW_LOSS" ]; }; then
+          && [ -n "$MON_GW_LOSS" ]; } \
+     || [ "${MON_DNS_LOCAL_FAIL:-}" = "1" ]; then
     MON_CLEARABLE_RULES+="D1 "
   fi
+  # SOCK-1 clears only on a cycle whose DNS probe ran and found a socket
+  # available; a cycle that did not probe (""), or a tier that was not due,
+  # says nothing either way.
+  [ "${MON_DNS_LOCAL_FAIL:-}" = "0" ] && MON_CLEARABLE_RULES+="SOCK-1 "
   case " $MON_REFRESHED " in
     *" medium "*) [ "$MON_BROWSER_CHECKED" -eq 1 ] \
                      && MON_CLEARABLE_RULES+="BR-1 " ;;
@@ -949,7 +982,7 @@ _mon_rules() {
     case " $MON_RULES " in *" $prior "*) continue ;; esac
     case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
     case "$prior" in
-      N1|G1|G2|P1|P2|L1) _mon_add_rule critical "$prior" ;;
+      N1|G1|G2|P1|P2|L1|SOCK-1) _mon_add_rule critical "$prior" ;;
       G3|D1|CP-1|L2|BR-1) _mon_add_rule warn "$prior" ;;
       *) _mon_add_rule info "$prior" ;;
     esac
@@ -1050,6 +1083,12 @@ _mon_emit() {
   NETDIAG_MON_DNS_OK="$MON_DNS_OK" \
   NETDIAG_MON_DNS_RESOLVER="$MON_DNS_RESOLVER" \
   NETDIAG_MON_DNS_MS="$MON_DNS_MS" \
+  NETDIAG_MON_DNS_LOCAL_FAIL="$MON_DNS_LOCAL_FAIL" \
+  NETDIAG_MON_DNS_LOCAL_BIND="$MON_DNS_LOCAL_BIND" \
+  NETDIAG_MON_DNS_UDP_SOCKETS="$MON_DNS_UDP_SOCKETS" \
+  NETDIAG_MON_DNS_UDP_HOLDERS="$MON_DNS_UDP_HOLDERS" \
+  NETDIAG_MON_DNS_UDP_TOP_SHARE_PCT="$MON_DNS_UDP_TOP_SHARE_PCT" \
+  NETDIAG_MON_DNS_TCP_DNS_OK="$MON_DNS_TCP_DNS_OK" \
   NETDIAG_MON_TCP_OK="$MON_TCP_OK" \
   NETDIAG_MON_TCP_LINES="$MON_TCP_LINES" \
   NETDIAG_MON_WEB_OK="$MON_WEB_OK" \

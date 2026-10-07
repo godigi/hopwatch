@@ -149,6 +149,12 @@ DNS_PRIMARY_FAIL=0       # 1 = primary configured resolver timed out / failed
 DNS_FALLBACK_OK=0        # 1 = secondary configured resolver answered
 PRIMARY_DNS=""           # address of failing primary DNS resolver
 SECONDARY_DNS=""         # address of responding secondary DNS resolver
+DNS_LOCAL_FAIL=0         # 1 = this Mac cannot open a UDP socket [SOCK-1]
+DNS_LOCAL_BIND=""        # "" = never checked, else ok / errno name / unavailable
+DNS_UDP_SOCKETS=""       # system-wide UDP socket count, captured at fault time
+DNS_UDP_HOLDERS=""       # "process|pid|count" lines, biggest first (own processes)
+DNS_UDP_TOP_SHARE_PCT="" # top holder's share of DNS_UDP_SOCKETS
+DNS_TCP_DNS_OK=""        # 1/0 — DNS over TCP still works despite the UDP fault
 
 # IPv6 (lib/ipv6.sh)
 IPV6_AVAILABLE=0

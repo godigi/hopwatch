@@ -370,9 +370,11 @@ decides a critical diagnosis. It costs ~4 s.
 
 ### D1 — Partial DNS, internet reachable
 
-- Trigger: `dns.ok == false AND public.ok == true`
+- Trigger: `dns.ok == false AND public.ok == true`, and not `SOCK-1`.
 - Severity: `warn`
 - Recommendation: restart the router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks or captive portals, consider Encrypted DNS (DoH) in your browser. Do not hardcode static DNS in macOS network adapter settings.
+- When `D6` also fires, the recommendation is dropped from the summary and `D6` carries the only remedy.
+- **Void under `SOCK-1`.** D1's evidence is an empty `dig`. If this Mac could not open a UDP socket, an empty `dig` says nothing about the resolver, and "restart your router" cannot help. See `SOCK-1`.
 
 ### D2 — No name lookups working at all
 
@@ -402,7 +404,7 @@ paper over this would have been the wrong fix in the wrong file.
 - Trigger: `dns.resolver_ms > 250 AND dns.ok == true`
 - Severity: `warn`
 - Evidence: query response time in ms from primary system resolver.
-- Recommendation: restart the router to clear slow DNS proxying, or enable Encrypted DNS in your browser for snappier browsing without breaking captive portals.
+- Recommendation: restart the router to clear slow DNS proxying, or enable Encrypted DNS in your browser for snappier browsing without breaking captive portals. Dropped from the summary when `D6` fires, which carries the remedy instead.
 - Rationale: High DNS latency stalls initial TCP/TLS connections for every new domain or hyperlink clicked.
 
 ### D4 — DNS hijacking and search redirection
@@ -418,8 +420,35 @@ paper over this would have been the wrong fix in the wrong file.
 - Trigger: `primary_dns_fail AND secondary_dns_ok`
 - Severity: `warn`
 - Evidence: primary resolver failing all queries while secondary resolver responds.
-- Recommendation: remove the unresponsive DNS server from System Settings or restart the router.
+- Recommendation: remove the unresponsive DNS server from System Settings or restart the router. Dropped from the summary when `D6` fires, which carries the remedy instead.
+- Void under `SOCK-1`, for the reason given under `D1`.
 - Rationale: macOS queries resolvers in the order configured. When the primary resolver fails or drops packets, the OS resolver must wait for a 2-to-5 second timeout before retransmitting the query to the secondary resolver. Web browsing and apps suffer constant hesitations and stalls even though lookups eventually succeed.
+
+### D6 — Guided switch to a better DNS
+
+- **Trigger:** all of
+  - the check ran (`DNS_LINES` non-empty) and the router-supplied resolver `SYS_RES` is known;
+  - a public resolver (1.1.1.1 or 8.8.8.8) answered in the same scan;
+  - that resolver is **failing** (`DNS_PRIMARY_FAIL`, every probe of it came back empty) **or slow** (`SYS_RES_MS` above `THRESH_DNS_LATENCY_WARN_MS`, the same cutoff `D3` uses — no second one);
+  - it is not already the user's choice: `dns_is_manual_override` is false, `SYS_RES` is not itself a well-known public resolver, and no encrypted DNS profile is active (`EDNS-1`);
+  - `SOCK-1` is not firing — in that incident switching resolver would not have helped.
+- **Severity:** `info`. It is advice, so it never moves the exit code.
+- **Scope:** scan only. The monitor probes one resolver and has no public one to compare against.
+- **Evidence:** the resolver's address and, when slow, its latency.
+- **What it says:** one plain sentence on what DNS is, then one fix: restart the router, and if it keeps happening add plain public DNS (1.1.1.1 / 8.8.8.8 in System Settings → Wi-Fi → Details → DNS). It lists the downsides the audience will not know: names that exist only on the local network (printers, a work intranet, `router.lan`) stop working; some networks block outside DNS entirely; a hotel or café sign-in page may not appear on some networks; on macOS the manual setting applies to **every** Wi-Fi network; a router's parental or content filter is bypassed. It then says how to undo it, states that this DNS is **not** encrypted, and mentions the browser's Secure DNS as an optional extra that does not fix the fault by itself. Encrypted DNS is not the lead recommendation: a system-wide profile blocks sign-in pages more often than plain DNS does, and a browser setting leaves the rest of the Mac on the failing resolver.
+- **Guidance only.** Changing DNS needs admin rights and writes system network state, and the project is sudo-free and read-only by contract. Hopwatch says so in the summary.
+- **Relationship to `D1`, `D3` and `D5`.** They describe the same fault and used to end in a different remedy (restart the router / update your DNS settings). Two paragraphs telling the user different things is worse than one, and suppressing them would lose a rule ID that history, alerts and the app's attribution key on. So all three still fire, with their rule, severity and observation unchanged, but when `D6` fires they stop at the observation and `D6` carries the only remedy (router restart first, then the switch). When `D6` does not fire, their text is unchanged.
+
+### SOCK-1 — This Mac cannot open new network connections
+
+- **Trigger:** `DNS_LOCAL_FAIL == 1` (scan) / `MON_DNS_LOCAL_FAIL == 1` (monitor). It is set only after a DNS probe came back empty, by either of two independent signals: `helpers/sockcheck.py` could not bind a UDP socket to port 0 (it prints the errno name, e.g. `EADDRNOTAVAIL`), or `dig`'s own stderr said `socket_bind` / `address not available`. A healthy run, in which every lookup is answered, never runs the check.
+- **Severity:** `critical`. Name lookups cannot work at all; new connections of any kind may fail.
+- **Suppresses `D1`, `D2`, `D5`, `V6-2` and `D6`** for that run: their evidence is an empty `dig`, which is void when the question never left the machine. In the monitor it suppresses `D1`.
+- **Why it exists.** On 2026-10-07 the Mac could not open a UDP socket (`dig: isc_socket_bind: address not available`, system-wide, cured only by a reboot; TCP DNS and ping still worked). `D1` told the user their DNS was flaky and to restart the router for over an hour. The likely cause is ephemeral-port exhaustion from a process leaking sockets; this is not proven, because the reboot erased the evidence.
+- **Evidence, captured at the moment of the fault because a reboot erases it:** the UDP socket count (`netstat -an -p udp`); the top holders by process (`lsof -nP -iUDP`, sudo-free, so only the user's own processes are visible); and whether DNS over TCP (`dig +tcp`) still answers. In `--json` these are the `dns_local` object; in the monitor they ride in `dns.local_fail` / `dns.local`, and the `--journal` line that records the fault carries them as `evidence`.
+- **The "quit <app>" clause is conditional.** The summary names the top holder only when it holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of all UDP sockets. Below that it is just a busy app, and a holder that is a system process is invisible without root. In both cases the summary drops the clause and says to restart the Mac. The rule itself fires on a failed bind, not on a count, so it needs no cutoff.
+- **Recommendation:** quit the named app, or restart this Mac. Restarting the router will not help, and the summary says so.
+- **Impact:** every activity `broken`.
 
 ### B1 — Bufferbloat at gateway hop
 

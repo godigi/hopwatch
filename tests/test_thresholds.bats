@@ -68,7 +68,7 @@ setup() {
            THRESH_DHCP_LEASE_WARN_S \
            THRESH_BUFFERBLOAT_FAST_MBPS THRESH_BUFFERBLOAT_CONSTRAINED_MBPS \
            THRESH_AWDL_BASE_RTT_MAX_MS THRESH_AWDL_SPIKE_RTT_MIN_MS \
-           THRESH_AWDL_JITTER_MIN_MS; do
+           THRESH_AWDL_JITTER_MIN_MS THRESH_SOCK_HOLDER_SHARE_PCT; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }
