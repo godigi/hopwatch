@@ -523,9 +523,60 @@ struct RunSnapshot: Decodable, Sendable {
         var rule: String?
         var summary: String = ""
         var action: Action?
+        /// The "Fix it" buttons this finding offers, decided and worded by
+        /// the CLI (lib/repairs.sh) — `nil` when it offers none, which is
+        /// nearly always. Nothing about a repair is invented here: the
+        /// label, the confirmation and the what-next text are all read.
+        var repairs: [Repair]?
         var id: String { "\(rule ?? "?")-\(summary.prefix(24))" }
 
-        enum CodingKeys: String, CodingKey { case severity, rule, summary, action }
+        enum CodingKeys: String, CodingKey { case severity, rule, summary, action, repairs }
+
+        /// One repair a finding offers: docs/JSON-SCHEMA.md `diagnosis[].repairs`.
+        /// Running it is `hopwatch --repair=<id>` with `params` passed back
+        /// untouched — the CLI validates them, this app never interprets
+        /// them.
+        struct Repair: Decodable, Sendable, Identifiable, Equatable {
+            var id: String
+            /// The button text; names the action itself ("Quit Spotify").
+            var label: String
+            /// What the user reads before it runs: what will change.
+            var confirm: String
+            /// Whether it will ask for an admin password. Always false in
+            /// the first phase; rendered anyway so the field is honoured.
+            var admin: Bool
+            /// `now`: re-check straight after, the effect is immediate.
+            /// `later`: the user still has a step to take, so a re-check
+            /// would judge a repair that has not finished happening.
+            var recheck: String
+            /// What to try next if the re-check still shows the fault.
+            var ifUnfixed: String
+            var params: [String: String]
+
+            enum CodingKeys: String, CodingKey {
+                case id, label, confirm, admin, recheck, params
+                case ifUnfixed = "if_unfixed"
+            }
+
+            init(id: String, label: String, confirm: String, admin: Bool = false,
+                 recheck: String = "now", ifUnfixed: String = "",
+                 params: [String: String] = [:]) {
+                self.id = id; self.label = label; self.confirm = confirm
+                self.admin = admin; self.recheck = recheck
+                self.ifUnfixed = ifUnfixed; self.params = params
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                id = try c.decode(String.self, forKey: .id)
+                label = c.lenient(.label, id)
+                confirm = c.lenient(.confirm, "")
+                admin = c.lenient(.admin, false)
+                recheck = c.lenient(.recheck, "now")
+                ifUnfixed = c.lenient(.ifUnfixed, "")
+                params = c.lenient(.params, [:])
+            }
+        }
 
         struct Action: Decodable, Sendable {
             var id: String
@@ -709,6 +760,11 @@ extension RunSnapshot.Diagnosis {
         severity = c.lenient(.severity, "info")
         rule = c.lenient(.rule)
         summary = c.lenient(.summary, "")
+        // Declared, in CodingKeys, and unassigned here on first writing —
+        // the same silent default `wan` and `suitability` once held. Every
+        // finding decoded with no repairs, so no button could ever appear.
+        // --verify's repair case is the check that this stays assigned.
+        repairs = c.lenient(.repairs)
     }
 }
 

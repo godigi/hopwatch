@@ -934,10 +934,41 @@ struct DashboardFindingsPanel: View {
         let explanation: String
         let nextStep: String?
         let isWarning: Bool
+        /// The rule this finding came from, which a repair is judged
+        /// against ("does the re-check still show it?").
+        var ruleID: String? = nil
+        /// The CLI's offers for this finding, already filtered to the
+        /// ones that are current (`HopwatchCoordinator.repairsAreCurrent`).
+        var repairs: [RunSnapshot.Diagnosis.Repair] = []
     }
 
     let checkTime: String?
     let findings: [FindingItem]
+    /// The repair the user last pressed and how it turned out. Shown above
+    /// the findings rather than on one, because a repair that worked has
+    /// removed the finding it was attached to.
+    var outcome: RepairOutcome?
+    var repairsBusy: Bool
+    var onRepair: (FindingItem, RunSnapshot.Diagnosis.Repair) -> Void
+    var onDismissOutcome: () -> Void
+    /// "ruleID|repairID" of the repair whose confirmation is open.
+    @State private var confirming: String?
+
+    init(checkTime: String?,
+         findings: [FindingItem],
+         outcome: RepairOutcome? = nil,
+         repairsBusy: Bool = false,
+         initiallyConfirming: String? = nil,
+         onRepair: @escaping (FindingItem, RunSnapshot.Diagnosis.Repair) -> Void = { _, _ in },
+         onDismissOutcome: @escaping () -> Void = {}) {
+        self.checkTime = checkTime
+        self.findings = findings
+        self.outcome = outcome
+        self.repairsBusy = repairsBusy
+        self.onRepair = onRepair
+        self.onDismissOutcome = onDismissOutcome
+        _confirming = State(initialValue: initiallyConfirming)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -956,6 +987,12 @@ struct DashboardFindingsPanel: View {
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 10)
+
+            if let outcome {
+                RepairOutcomeRow(outcome: outcome, onDismiss: onDismissOutcome)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
 
             if findings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1011,6 +1048,16 @@ struct DashboardFindingsPanel: View {
                                     .padding(.top, 2)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+
+                            if !item.repairs.isEmpty {
+                                RepairControls(
+                                    item: item,
+                                    confirming: $confirming,
+                                    busy: repairsBusy,
+                                    onRun: { onRepair(item, $0) })
+                                    .padding(.leading, 20)
+                                    .padding(.top, 4)
+                            }
                         }
                     }
                 }
@@ -1024,6 +1071,125 @@ struct DashboardFindingsPanel: View {
             RoundedRectangle(cornerRadius: Theme.Radius.routeCard)
                 .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Repair controls
+
+/// The "Fix it" buttons under one finding, and the confirmation that
+/// stands between pressing one and running it.
+///
+/// Inline rather than a system alert: a confirmation dialog raised from a
+/// menu-bar panel is unreliable, and an inline one can be seen by the
+/// gallery harness. Every sentence here is the CLI's — `label` on the
+/// button, `confirm` as the question — except the one line saying a
+/// password will be asked for, which only a repair with `admin` true shows
+/// (none in this first phase).
+private struct RepairControls: View {
+    let item: DashboardFindingsPanel.FindingItem
+    @Binding var confirming: String?
+    let busy: Bool
+    let onRun: (RunSnapshot.Diagnosis.Repair) -> Void
+
+    private func key(_ repair: RunSnapshot.Diagnosis.Repair) -> String {
+        "\(item.ruleID ?? "?")|\(repair.id)"
+    }
+
+    var body: some View {
+        if let open = item.repairs.first(where: { key($0) == confirming }) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(open.confirm)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if open.admin {
+                    Label("This will ask for your Mac's administrator password.",
+                          systemImage: "lock.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.amber)
+                }
+                HStack(spacing: 8) {
+                    Button(open.label) {
+                        confirming = nil
+                        onRun(open)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(busy)
+                    Button("Cancel") { confirming = nil }
+                        .controlSize(.small)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.ColorToken.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Theme.ColorToken.line, lineWidth: 1))
+        } else {
+            HStack(spacing: 8) {
+                ForEach(item.repairs) { repair in
+                    Button(repair.label) { confirming = key(repair) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(busy)
+                }
+            }
+        }
+    }
+}
+
+/// How the repair the user last pressed turned out. The status word is the
+/// app's; the sentence under it is the CLI's.
+struct RepairOutcomeRow: View {
+    let outcome: RepairOutcome
+    let onDismiss: () -> Void
+
+    private var tint: Color {
+        switch outcome.phase {
+        case .fixed:                       return Theme.ColorToken.green
+        case .working, .checking, .done:   return Theme.ColorToken.blue
+        case .didntHelp, .failed:          return Theme.ColorToken.amber
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Group {
+                if outcome.isInFlight {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: outcome.phase == .fixed
+                          ? "checkmark.circle.fill" : "info.circle.fill")
+                        .foregroundStyle(tint)
+                }
+            }
+            .frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(outcome.label): \(outcome.statusText)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                if let detail = outcome.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            if !outcome.isInFlight {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.ColorToken.muted)
+                .help("Dismiss")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -1150,6 +1150,101 @@ final class HopwatchCoordinator {
         scanTask = nil
     }
 
+    // MARK: - Repairs
+
+    /// Where the repair the user last pressed has got to; `nil` once
+    /// dismissed. One at a time: a second repair while one is in flight is
+    /// refused rather than queued.
+    private(set) var repairOutcome: RepairOutcome?
+    private var repairTask: Task<Void, Never>?
+
+    var isRepairing: Bool { repairOutcome?.isInFlight == true }
+
+    /// Whether a finding's repair buttons may be shown. They are for the
+    /// network you are on *now*, so they require a scan from this session
+    /// — never a report hydrated from history, which may be from another
+    /// network and hours old — and, when the monitor has a sample, that the
+    /// monitor still sees the rule firing. A button offering to quit an app
+    /// for a fault that has already cleared is a button that does nothing.
+    func repairsAreCurrent(forRule ruleID: String?) -> Bool {
+        guard let ruleID, latestRun != nil else { return false }
+        if let rules = monitor.latest?.status.rules { return rules.contains(ruleID) }
+        return true
+    }
+
+    func dismissRepairOutcome() {
+        guard !isRepairing else { return }
+        repairOutcome = nil
+    }
+
+    /// Run a repair the user has just confirmed, then find out whether it
+    /// worked. Only ever called from a button the user pressed — never from
+    /// a timer, an arrival or an alert (CLAUDE.md, Read-only).
+    ///
+    /// The repair itself is `hopwatch --repair=…`: this app only invokes
+    /// it. Afterwards, for a repair whose effect is immediate, the existing
+    /// quick depth re-checks (non-saturating, the same depth an arrival
+    /// uses; deliberately not a button), and the answer is whether the
+    /// finding's own rule still fires. A repair the user has to finish
+    /// (sign in) or that ends the session (restart) is not judged: the CLI's
+    /// message is shown, and the monitor keeps watching as it always does.
+    func runRepair(_ repair: RunSnapshot.Diagnosis.Repair, forRule ruleID: String) {
+        guard !isRepairing else { return }
+        repairOutcome = RepairOutcome(ruleID: ruleID, label: repair.label,
+                                      phase: .working, detail: nil)
+        repairTask = Task { [weak self] in
+            await self?.performRepair(repair, forRule: ruleID)
+        }
+    }
+
+    private func performRepair(_ repair: RunSnapshot.Diagnosis.Repair,
+                               forRule ruleID: String) async {
+        func finish(_ phase: RepairOutcome.Phase, _ detail: String? = nil) {
+            repairOutcome = RepairOutcome(ruleID: ruleID, label: repair.label,
+                                          phase: phase, detail: detail)
+        }
+        let result: NetdiagRunner.RepairResult
+        do {
+            result = try await NetdiagRunner.repair(repair)
+        } catch NetdiagError.scriptError(let reason) {
+            finish(.failed, reason)
+            return
+        } catch {
+            finish(.failed, error.localizedDescription)
+            return
+        }
+        eventLog.record(kind: "repair", summary: result.message, ruleID: ruleID,
+                        network: monitor.latest?.network.id)
+        guard result.ok else {
+            finish(.failed, result.message)
+            return
+        }
+        guard repair.recheck == "now" else {
+            finish(.done, result.message)
+            return
+        }
+
+        finish(.checking)
+        // A scan already running is waited out rather than raced: its
+        // result may predate the repair.
+        if isScanning { await scanTask?.value }
+        let startedAt = Date()
+        guard runScan(depth: .quick, reason: "checking whether that helped") else {
+            finish(.failed, "Hopwatch couldn't re-check just now.")
+            return
+        }
+        await scanTask?.value
+        guard lastRunError == nil, let run = latestRun, run.startedAt >= startedAt else {
+            finish(.failed, "Hopwatch couldn't re-check just now.")
+            return
+        }
+        if run.snapshot.diagnosis.contains(where: { $0.rule == ruleID }) {
+            finish(.didntHelp, repair.ifUnfixed)
+        } else {
+            finish(.fixed)
+        }
+    }
+
     // MARK: - Latency test
 
     func stopLatencyTest() { monitor.endBurst() }

@@ -43,6 +43,8 @@ actor CapabilityStore {
         case show
         case rulesCatalog = "rules-catalog"
         case signalScale = "signal-scale"
+        /// `--repair=ID`: the user-started "Fix it" tier.
+        case repair
     }
 
     private var resolvedPath: String?

@@ -102,6 +102,7 @@ private enum VerifyHarness {
         runResolutionFeedbackTests()
         runSnapshots()
         renderArrivalCards()
+        renderRepairPanels()
         print("")
         if failures.isEmpty {
             print("All checks passed.")
@@ -3159,6 +3160,76 @@ private enum VerifyHarness {
                 continue
             }
             writePNG(image, to: "\(dir)/arrival-\(name).png", name: "arrival-\(name)")
+        }
+    }
+
+    /// The repair button, its confirmation, and the two outcomes, rendered
+    /// from the JSON shape the CLI emits (`diagnosis[].repairs`) rather than
+    /// from hand-built models, so the decode is checked on the way. The
+    /// sentences in the fixture are the CLI's (`lib/repairs.sh`); none of
+    /// them exists in the app.
+    private static func renderRepairPanels() {
+        print("Render repair snapshots:")
+        let dir = "/tmp/opencode/verify"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let json = """
+        {"rule":"SOCK-1","severity":"critical",
+         "summary":"This Mac has run out of room to make new network connections, so it can't look up website names. That is a fault on this Mac itself, not in your Wi-Fi, router or internet service, so restarting the router will not help. Quit Spotify (it is holding 9200 connections open), or restart this Mac.",
+         "repairs":[{"id":"quit-app","label":"Quit Spotify",
+           "confirm":"Spotify will be asked to close, the same as choosing Quit from its menu. If it has unsaved work it may ask you what to do first. Nothing else on your Mac is changed.",
+           "admin":false,"recheck":"now",
+           "if_unfixed":"Restart this Mac. Closing Spotify may not have been enough, or something else may be using up the connections. A restart clears all of them.",
+           "params":{"bundle_id":"com.spotify.client"}}]}
+        """
+        let diag: RunSnapshot.Diagnosis
+        do {
+            diag = try JSONDecoder().decode(RunSnapshot.Diagnosis.self, from: Data(json.utf8))
+        } catch {
+            print("  decode error: \(error)")
+            check(false, "repairs: diagnosis[].repairs decodes from the CLI's JSON shape")
+            return
+        }
+        guard let repair = diag.repairs?.first else {
+            check(false, "repairs: diagnosis[].repairs decodes from the CLI's JSON shape")
+            return
+        }
+        check(repair.id == "quit-app" && repair.label == "Quit Spotify"
+              && repair.params["bundle_id"] == "com.spotify.client"
+              && repair.ifUnfixed.hasPrefix("Restart this Mac") && !repair.admin,
+              "repairs: diagnosis[].repairs decodes from the CLI's JSON shape")
+        let bare = try? JSONDecoder().decode(
+            RunSnapshot.Diagnosis.self,
+            from: Data(#"{"rule":"D1","severity":"warn","summary":"x"}"#.utf8))
+        check(bare != nil && (bare?.repairs ?? []).isEmpty,
+              "repairs: a finding with no repairs decodes and offers no button")
+
+        let item = DashboardFindingsPanel.FindingItem(
+            id: "SOCK-1", title: "This Mac can't open new connections",
+            explanation: diag.summary, nextStep: nil, isWarning: false,
+            ruleID: "SOCK-1", repairs: [repair])
+        let fixed = RepairOutcome(ruleID: "SOCK-1", label: repair.label, phase: .fixed, detail: nil)
+        let unfixed = RepairOutcome(ruleID: "SOCK-1", label: repair.label,
+                                    phase: .didntHelp, detail: repair.ifUnfixed)
+        let cases: [(String, DashboardFindingsPanel)] = [
+            ("button", DashboardFindingsPanel(checkTime: "just now", findings: [item])),
+            ("confirm", DashboardFindingsPanel(checkTime: "just now", findings: [item],
+                                               initiallyConfirming: "SOCK-1|quit-app")),
+            ("fixed", DashboardFindingsPanel(checkTime: "just now", findings: [], outcome: fixed)),
+            ("didnt-help", DashboardFindingsPanel(checkTime: "just now", findings: [item],
+                                                  outcome: unfixed)),
+        ]
+        for (name, panel) in cases {
+            // Same harness pins as the arrival cards; see the note there.
+            let view = panel
+                .frame(width: 520).padding(4)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .environment(\.colorScheme, .light)
+            guard let image = renderImage(view, size: NSSize(width: 528, height: 320)) else {
+                print("  \u{2718} repair-\(name) — could not allocate bitmap representation")
+                failures.append("render-repair-\(name)")
+                continue
+            }
+            writePNG(image, to: "\(dir)/repair-\(name).png", name: "repair-\(name)")
         }
     }
 
