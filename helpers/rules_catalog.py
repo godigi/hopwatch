@@ -73,7 +73,14 @@ import sys
 # v4 → v5: added the optional per-rule `impacts` map (see ACTIVITIES /
 # IMPACT_LEVELS) — which activities a fired rule breaks or degrades, for
 # helpers/suitability.py to project without re-judging any metric itself.
-SCHEMA_RULES_CATALOG = 5
+# v5 → v6: added the optional per-rule `repairs` list — the IDs of the
+# "Fix it" repairs (lib/repairs.sh) the rule can offer. Which one a given
+# run actually offers is decided per run, in `diagnosis[].repairs`.
+SCHEMA_RULES_CATALOG = 6
+
+# The repair IDs lib/repairs.sh knows (REPAIR_IDS). A rule's `repairs` list
+# may name only these; tests/test_repairs.bats checks the two lists agree.
+REPAIRS = frozenset({"quit-app", "restart-mac", "open-sign-in"})
 
 # The measurement family each rule judges — the GUI tints a report-card
 # row by this, not by severity, so a "varies"-severity rule like B1 still
@@ -839,6 +846,7 @@ RULES: list[dict[str, object]] = [
             "cure when no app is named."
         ),
         "fix_target": "you",
+        "repairs": ["quit-app", "restart-mac"],
     },
     {
         "id": "EDNS-1",
@@ -1757,6 +1765,7 @@ RULES: list[dict[str, object]] = [
             "network is."
         ),
         "fix_target": "you",
+        "repairs": ["open-sign-in"],
     },
     {
         "id": "ND-1",
@@ -2216,7 +2225,7 @@ _FIELDS = frozenset({"id", "title", "category", "severity", "scope", "blurb",
 # Optional. See `also`'s note at CATEGORIES for what it means and why
 # exactly one is enough, ACTIVITIES / IMPACT_LEVELS above for `impacts`, and
 # FIX_TARGETS / FIX_TARGETS_NEEDING_AWAY above for `fix_away`.
-_OPTIONAL_FIELDS = frozenset({"also", "impacts", "fix_away"})
+_OPTIONAL_FIELDS = frozenset({"also", "impacts", "fix_away", "repairs"})
 _METRIC_FIELDS = frozenset({"key", "label", "help"})
 # Optional, and the only optional field a metric has. Present on a metric
 # whose absence has a knowable cause (a check mode that skips it, a
@@ -2241,9 +2250,17 @@ def _validate(rules: list[dict[str, object]]) -> None:
             f"entry has the wrong field set: {r}"
         )
         for k, v in r.items():
-            if k == "impacts":
+            if k in ("impacts", "repairs"):
                 continue
             assert isinstance(v, str) and v.strip(), f"{r.get('id')}.{k} is empty"
+        if "repairs" in r:
+            rp = r["repairs"]
+            assert isinstance(rp, list) and rp and len(set(rp)) == len(rp), (
+                f"{r['id']}: repairs must be a non-empty list of distinct "
+                f"IDs — omit the key rather than shipping an empty one"
+            )
+            for rid in rp:
+                assert rid in REPAIRS, f"{r['id']}: unknown repair {rid!r}"
         if "impacts" in r:
             imp = r["impacts"]
             assert isinstance(imp, dict) and imp, (

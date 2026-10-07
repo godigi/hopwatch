@@ -56,7 +56,7 @@ SCHEMA_RUN = 2            # no embedded field yet (see docstring)
 SCHEMA_MONITOR = 2        # lib/monitor.sh: NETDIAG_MON_SCHEMA
 SCHEMA_HISTORY = 2        # helpers/history.py main(): "schema"
 SCHEMA_SHOW = 1           # helpers/history.py build_detail(): "schema"
-SCHEMA_RULES_CATALOG = 5  # helpers/rules_catalog.py: SCHEMA_RULES_CATALOG
+SCHEMA_RULES_CATALOG = 6  # helpers/rules_catalog.py: SCHEMA_RULES_CATALOG
 SCHEMA_SIGNAL_SCALE = 1   # helpers/signal_scale.py: SCHEMA_SIGNAL_SCALE
 SCHEMA_PROGRESS = 1       # no embedded field yet (see docstring)
 
@@ -82,6 +82,10 @@ FEATURES = [
     "recorder",
     "rules-catalog",
     "signal-scale",
+    # `--repair=ID`: the user-started "Fix it" tier (lib/repairs.sh). A
+    # consumer checking for "repair" is asking whether a diagnosis's
+    # `repairs` entries can actually be run on this build.
+    "repair",
 ]
 
 

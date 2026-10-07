@@ -706,7 +706,7 @@ _mon_probe_public() {
   # that answers 200 with its login page is invisible in the status alone.
   local captive_raw captive_code captive_body
   captive_raw="$(curl -s -m 3 -w '\n%{http_code}' \
-    http://captive.apple.com/hotspot-detect.html 2>/dev/null || true)"
+    "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
   captive_code="${captive_raw##*$'\n'}"
   captive_body="${captive_raw%$'\n'*}"
   # Same classifier lib/public.sh uses — see lib/common.sh.

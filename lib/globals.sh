@@ -154,6 +154,8 @@ DNS_LOCAL_BIND=""        # "" = never checked, else ok / errno name / unavailabl
 DNS_UDP_SOCKETS=""       # system-wide UDP socket count, captured at fault time
 DNS_UDP_HOLDERS=""       # "process|pid|count" lines, biggest first (own processes)
 DNS_UDP_TOP_SHARE_PCT="" # top holder's share of DNS_UDP_SOCKETS
+DNS_UDP_TOP_APP_BUNDLE=""  # bundle id of the GUI app owning the top holder (quittable), else ""
+DNS_UDP_TOP_APP_NAME=""    # that app's display name
 DNS_TCP_DNS_OK=""        # 1/0 — DNS over TCP still works despite the UDP fault
 
 # IPv6 (lib/ipv6.sh)
@@ -263,6 +265,7 @@ BROWSER_DESYNC_PID=""
 
 # Output / baseline (lib/output.sh)
 DIAGNOSIS_LINES=""       # one "SEV|MSG" per line (SEV ∈ critical/warn/info)
+REPAIR_OFFERS=""         # repairs the findings offer; format in lib/repairs.sh
 BASELINE_JSON=""         # raw JSON from helpers/baseline.py
 MOST_LIKELY_ROOT_CAUSE=""
 

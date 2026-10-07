@@ -15,6 +15,10 @@
 # discredits both.
 
 diagnosis_run() {
+  # Offers are rebuilt every pass, like DIAG. Recording one runs nothing —
+  # see lib/repairs.sh.
+  # shellcheck disable=SC2034 # read by lib/output.sh (build_json), which this file never sources
+  REPAIR_OFFERS=""
   # A failed metadata request is refuted by actual public traffic. Keep
   # the original public/captive evidence for CP-1, whose interception
   # diagnosis takes precedence over the wider-outage rules.
@@ -321,6 +325,11 @@ diagnosis_run() {
     else
       add_diag warn CP-1 "This network is intercepting web requests to show a sign-in or terms page (HTTP ${CAPTIVE_PORTAL_CODE:-?}), even though traffic is currently getting through. Expect connections to break when its session expires — open a browser and complete the page to be safe."
     fi
+    # The one fix for a portal is to complete its page. Guarded because the
+    # bats suite sources this file without lib/repairs.sh.
+    if declare -f repair_offer >/dev/null 2>&1; then
+      repair_offer CP-1 open-sign-in ""
+    fi
   fi
 
   # P1/P2 — public unreachable. The gateway guard was `== 0` exactly until
@@ -355,13 +364,21 @@ diagnosis_run() {
   if [ "${DNS_LOCAL_FAIL:-0}" -eq 1 ]; then
     _sock_fault=1
     local _sock_name="" _sock_n="" _sock_clause=" Restart this Mac." _sock_tech _sock_tcp
+    local _sock_app_bundle="" _sock_app_name=""
     IFS='|' read -r _sock_name _ _sock_n <<<"$(printf '%s\n' "${DNS_UDP_HOLDERS:-}" | head -1)"
     # Name an app only when it holds enough of the sockets to be the cause
-    # (THRESH_SOCK_HOLDER_SHARE_PCT). A system process the user cannot see
-    # may be the real holder; lsof without root shows only their own.
-    if [ -n "$_sock_name" ] && is_numeric "${DNS_UDP_TOP_SHARE_PCT:-}" \
+    # (THRESH_SOCK_HOLDER_SHARE_PCT) AND it resolves to a regular GUI app
+    # the user can quit (dns_resolve_gui_app: lsof's process name is
+    # truncated and is not something an app can be asked to quit by). A
+    # system process the user cannot see may be the real holder; lsof
+    # without root shows only their own. Anything else says "restart", and
+    # offers exactly that below — the sentence and the button must agree.
+    if [ -n "$_sock_name" ] && [ -n "${DNS_UDP_TOP_APP_BUNDLE:-}" ] \
+       && is_numeric "${DNS_UDP_TOP_SHARE_PCT:-}" \
        && [ "$DNS_UDP_TOP_SHARE_PCT" -ge "$THRESH_SOCK_HOLDER_SHARE_PCT" ]; then
-      _sock_clause=" Quit ${_sock_name} (it is holding ${_sock_n} connections open), or restart this Mac."
+      _sock_app_bundle="$DNS_UDP_TOP_APP_BUNDLE"
+      _sock_app_name="${DNS_UDP_TOP_APP_NAME:-$_sock_name}"
+      _sock_clause=" Quit ${_sock_app_name} (it is holding ${_sock_n} connections open), or restart this Mac."
     fi
     case "${DNS_TCP_DNS_OK:-}" in
       1) _sock_tcp="; lookups over TCP still work" ;;
@@ -370,6 +387,13 @@ diagnosis_run() {
     esac
     _sock_tech="technical: the system refused a new UDP socket (${DNS_LOCAL_BIND:-dig reported a bind error}); ${DNS_UDP_SOCKETS:-an unknown number of} UDP sockets are open${_sock_tcp}"
     add_diag critical SOCK-1 "This Mac has run out of room to make new network connections, so it can't look up website names. That is a fault on this Mac itself, not in your Wi-Fi, router or internet service, so restarting the router will not help.${_sock_clause} (${_sock_tech})"
+    if declare -f repair_offer >/dev/null 2>&1; then
+      if [ -n "$_sock_app_bundle" ]; then
+        repair_offer SOCK-1 quit-app "$_sock_app_name" "bundle_id=${_sock_app_bundle}"
+      else
+        repair_offer SOCK-1 restart-mac ""
+      fi
+    fi
   fi
 
   # D6 — the router's DNS is failing or slow while a public one works.
