@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.10.10] - 2026-10-06
+
 ### Fixed
 
 - One network no longer reads as several in the event journal, so one fault stops being cut into pieces. The monitor derived `network.id` afresh every fast cycle from `route` and `arp -n`, and both go quiet exactly when a router is struggling: the default route is withdrawn while Wi-Fi re-associates (no gateway, so no id at all, journaled as `"network": null`), and the gateway's ARP entry is empty until the next reply (so the id fell back to a bare `wifi:gw=…`). Measured on a real 13-day journal: 235 id changes, 230 of them between the MAC form and no id or a gateway address of the same network, 210 inside a single monitor process (only 19 at a restart; 38 were the gateway-address form the report named, the rest the `null` form), against 5 genuine changes between different routers. `helpers/events.py` pairs fires and clears on (network, rule), so a fire under one spelling and the clear under another never met: the fire stayed open until the next restart, and the clear was reported as an end with no beginning. Over that journal's last 72 hours the longest G2 episode was 22,767 s (6.3 h) and G2 totalled 49,132 s; it is now 436 s and 3,948 s, and orphan clears fell from 178 to 51. Fixed at three layers. `lib/monitor.sh` now keeps the router MAC (and the SSID and interface type read with it) while a lookup fails, for at most `THRESH_MON_IDENTITY_HOLD_S` (900 s, `lib/thresholds.sh`), spelled exactly as a fresh read would spell it; a MAC read afterwards, a different gateway address, interface or visible SSID ends the hold at once, so a real network change still changes the id. `helpers/events.py` folds a `null` or bare-gateway line onto the MAC id it sits between, using the existing strong/weak rule (a line between two different MACs is left alone, a gateway address is folded only where exactly one MAC claims it, and nothing folds across a `gap` of the hold or more), keeping the journaled value in `network_journaled`, so journals already written read correctly. In the app, `NetworkEvent.continuesPrevious` no longer treats a `mac:` group against a `gw:` group as a changed network at a restart it caused itself. Not changed: `ActivityEntry.fold` still keys on the stored id, so events stored before this still split until they age out of the event store. `--events` `schema` stays 1; `network_journaled` is additive.
@@ -4119,7 +4121,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.9...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.10...HEAD
+[1.10.10]: https://github.com/godigi/hopwatch/compare/v1.10.9...v1.10.10
 [1.10.9]: https://github.com/godigi/hopwatch/compare/v1.10.8...v1.10.9
 [1.10.8]: https://github.com/godigi/hopwatch/compare/v1.10.7...v1.10.8
 [1.10.7]: https://github.com/godigi/hopwatch/compare/v1.10.6...v1.10.7
