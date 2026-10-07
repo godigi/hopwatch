@@ -94,6 +94,22 @@ MON_IFACE_TYPE=""
 MON_LINK_UP=0
 MON_GATEWAY=""
 MON_GW_MAC=""
+# What the network id is built from: this cycle's gateway MAC, SSID and
+# interface type when it read them, otherwise those of the last cycle that
+# read a MAC on this same network. Kept apart from MON_GW_MAC / MON_SSID /
+# MON_IFACE_TYPE, which report what this cycle's probes actually returned.
+MON_ID_GW_MAC=""
+MON_ID_SSID=""
+MON_ID_IFACE_TYPE=""
+# What the last successful ARP lookup learned, and where and when, for
+# _mon_hold_gw_mac. KNOWN_AT is wall-clock seconds, so a Mac that slept
+# ages it by the sleep.
+MON_KNOWN_GW_MAC=""
+MON_KNOWN_GW=""
+MON_KNOWN_IFACE=""
+MON_KNOWN_SSID=""
+MON_KNOWN_IFACE_TYPE=""
+MON_KNOWN_AT=0
 MON_SSID=""
 MON_BSSID=""
 MON_LOCAL_IP=""
@@ -241,7 +257,69 @@ _mon_probe_link() {
     MON_GW_MAC="$(arp -n "$MON_GATEWAY" 2>/dev/null \
       | awk '/ at /{ if ($4 != "(incomplete)") print $4; exit }')"
   fi
+  _mon_hold_gw_mac "$EPOCHSECONDS"
   _mon_identity
+}
+
+# Which gateway MAC the network id is built from: this cycle's, or — when the
+# lookup came back empty — the one last read on the same network.
+#
+# The id is derived afresh every cycle, and the two things it is derived from
+# go quiet exactly when a router is struggling: the default route is withdrawn
+# while Wi-Fi re-associates (no gateway, so no ARP lookup, so no id at all),
+# and the gateway's ARP entry is gone until the next reply repopulates it (so
+# the id falls back to the bare gateway address). Measured on a real journal,
+# those two accounted for 230 of its 235 id changes, 210 of them inside one
+# monitor process. The journal and the app key every fault on the id, so each
+# flip cut one fault in two. A lookup that fails is absence of evidence, not
+# evidence of a different network.
+#
+# So the MAC is held, but only while nothing contradicts it:
+#   - a MAC read this cycle replaces it outright;
+#   - a different gateway address, interface, or visible SSID ends it for good
+#     (an unreadable SSID is not a different one — macOS hides it without
+#     Location Services, which is the usual case here);
+#   - and it expires THRESH_MON_IDENTITY_HOLD_S after the last MAC read, which
+#     is also what makes a Mac that slept and woke elsewhere start fresh.
+# What this does not do is prove the network is the same. Two networks that
+# both use 192.168.1.1, joined within the hold with the new router's ARP entry
+# still empty, are the same network for as long as that takes the first reply
+# to land — one fast cycle — and then the MAC read corrects it.
+#
+# $1 is the clock, an argument so tests need not wait out the hold.
+_mon_hold_gw_mac() {
+  local now="$1"
+  MON_ID_GW_MAC="$MON_GW_MAC"
+  MON_ID_SSID="$MON_SSID"
+  MON_ID_IFACE_TYPE="$MON_IFACE_TYPE"
+  if [ -n "$MON_GW_MAC" ]; then
+    MON_KNOWN_GW_MAC="$MON_GW_MAC"
+    MON_KNOWN_GW="$MON_GATEWAY"
+    MON_KNOWN_IFACE="$MON_INTERFACE"
+    MON_KNOWN_SSID="$MON_SSID"
+    MON_KNOWN_IFACE_TYPE="$MON_IFACE_TYPE"
+    MON_KNOWN_AT="$now"
+    return 0
+  fi
+  [ -n "$MON_KNOWN_GW_MAC" ] || return 0
+
+  if [ $((now - MON_KNOWN_AT)) -gt "$THRESH_MON_IDENTITY_HOLD_S" ] \
+    || { [ -n "$MON_GATEWAY" ]   && [ "$MON_GATEWAY"   != "$MON_KNOWN_GW" ]; } \
+    || { [ -n "$MON_INTERFACE" ] && [ "$MON_INTERFACE" != "$MON_KNOWN_IFACE" ]; } \
+    || { [ -n "$MON_SSID" ] && [ -n "$MON_KNOWN_SSID" ] \
+         && [ "$MON_SSID" != "$MON_KNOWN_SSID" ]; }; then
+    MON_KNOWN_GW_MAC=""
+    return 0
+  fi
+  MON_ID_GW_MAC="$MON_KNOWN_GW_MAC"
+  # The interface type and SSID are read through the same route, so they go
+  # missing with it: a withdrawn route reads as "wired" (there is no
+  # interface to ask), which would turn `wifi:mac=…` into `lan:mac=…`.
+  # Hold the type whenever there is no interface to read it from; hold the
+  # SSID whenever it comes back unreadable.
+  [ -z "$MON_INTERFACE" ] && MON_ID_IFACE_TYPE="$MON_KNOWN_IFACE_TYPE"
+  [ -z "$MON_SSID" ] && MON_ID_SSID="$MON_KNOWN_SSID"
+  return 0
 }
 
 # Reuse lib/netid.sh rather than reimplementing precedence. Identity has to
@@ -253,10 +331,10 @@ _mon_identity() {
   # dynamic scope, which is exactly the point: the precedence logic stays
   # in one place.
   # shellcheck disable=SC2034
-  local IS_WIFI=0 WIFI_SSID="$MON_SSID" GW_MAC="$MON_GW_MAC" GATEWAY="$MON_GATEWAY"
+  local IS_WIFI=0 WIFI_SSID="$MON_ID_SSID" GW_MAC="$MON_ID_GW_MAC" GATEWAY="$MON_GATEWAY"
   local NETWORK_ID="" NETWORK_LABEL="" NETWORK_GROUP=""
   # shellcheck disable=SC2034
-  [ "$MON_IFACE_TYPE" = "wifi" ] && IS_WIFI=1
+  [ "$MON_ID_IFACE_TYPE" = "wifi" ] && IS_WIFI=1
   netid_run
   MON_NETWORK_ID="$NETWORK_ID"
   MON_NETWORK_LABEL="$NETWORK_LABEL"

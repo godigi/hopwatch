@@ -169,6 +169,17 @@ consumer does not alert on a fault it was already showing. Lines written
 before this existed have no such line; the journal has no schema number and
 none was bumped.
 
+A line's `network` is held, not re-derived from scratch each cycle: a
+monitor that has read the router's MAC keeps naming that network while the
+default route is withdrawn or the ARP entry has not repopulated, for up to
+`THRESH_MON_IDENTITY_HOLD_S`, and lets go at once if a different MAC,
+gateway address, interface or visible SSID turns up (`_mon_hold_gw_mac` in
+`lib/monitor.sh`). The held id is spelled exactly as a fresh read would
+spell it. `network` is still `null` for a monitor that has never read a
+MAC and has no route, and a line from the days before this hold may be
+`null` or `wifi:gw=…` in the middle of a stretch that is otherwise one
+MAC's — which is what `--events` folds, below.
+
 Every line carries its own timestamp and network identity rather than
 inheriting them from a header: the file is appended to by successive
 recorder processes across reboots and is read back by time range. It is
@@ -182,6 +193,18 @@ lines rather than dropping them — which is safe only because the reader
 dedupes on `(t, seq, kind, to)`.
 
 ### `--events[=HOURS]`
+
+Before episodes are paired, each journal line's `network` is folded onto
+the MAC id it sits beside (`fold_identity` in `helpers/events.py`), with
+the same strong/weak rule as `canonical_network_id` and
+`NetworkIdentity.fold`: a `null` or bare-gateway id between two sightings
+of one MAC id is that network's; between two *different* MAC ids it is left
+alone; a gateway address with a sighting on one side only is folded only if
+that pairing has been seen between two sightings elsewhere and exactly one
+MAC claims it; and nothing folds across a `gap` of `THRESH_MON_IDENTITY_HOLD_S`
+or more. A folded line keeps what was journaled in `network_journaled`
+(present only on folded lines), so `events` never silently rewrites the
+record. Episodes then pair on the folded `network`.
 
 ```json
 {

@@ -25,7 +25,8 @@
 #    "no outages in 24 hours" from six hours of watching is a claim the
 #    run never established.
 #
-# Reads:  LOG_DIR, NETWORK_ID, HELPERS_DIR, THRESH_AV_*, THRESH_EV_RESTART_BRIDGE_S
+# Reads:  LOG_DIR, NETWORK_ID, HELPERS_DIR, THRESH_AV_*, THRESH_EV_RESTART_BRIDGE_S,
+#         THRESH_MON_IDENTITY_HOLD_S
 # Writes: AV_MEASURED, AV_WINDOW_HOURS, AV_OUTAGE_COUNT, AV_DOWNTIME_S,
 #         AV_FLAP_COUNT, AV_UNOBSERVED_PCT, AV_LONGEST_S
 # Entry:  availability_run
@@ -59,6 +60,7 @@ availability_run() {
 
   local parsed
   parsed="$(THRESH_EV_RESTART_BRIDGE_S="$THRESH_EV_RESTART_BRIDGE_S" \
+      THRESH_MON_IDENTITY_HOLD_S="$THRESH_MON_IDENTITY_HOLD_S" \
       python3 "$HELPERS_DIR/events.py" \
       --journal "$journal" --hours "$THRESH_AV_WINDOW_HOURS" 2>/dev/null \
     | NETDIAG_AV_NETWORK="$NETWORK_ID" \

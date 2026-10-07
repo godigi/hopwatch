@@ -110,10 +110,18 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# The one definition of what a network id means — which forms are strong
+# (a router MAC), which weak (an SSID, a bare gateway address), and that no
+# id at all is "do not decide", never "a new network". gui/.../
+# NetworkIdentity.swift ports the same rule.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from history import canonical_network_id  # noqa: E402
+
 SCHEMA_EVENTS = 1
 
 
 ENV_BRIDGE = "THRESH_EV_RESTART_BRIDGE_S"
+ENV_IDENTITY_HOLD = "THRESH_MON_IDENTITY_HOLD_S"
 
 
 def require_env_int(name):
@@ -190,6 +198,108 @@ def load(paths):
     rows.sort(key=lambda r: (r["_at"] or datetime.min.replace(
         tzinfo=timezone.utc), r.get("seq") or 0))
     return rows
+
+
+def fold_identity(rows, hold_s):
+    """Give each journal line its network, spelled the way its neighbours do.
+
+    The monitor used to derive the id afresh every cycle, and the two things
+    it is derived from go quiet while a router struggles: with no default
+    route there is no id at all (`"network": null`), and with no ARP entry
+    yet the id is a bare gateway address. One physical network was therefore
+    journaled as its MAC id, then null, then `wifi:gw=…`, then the MAC id
+    again. Episodes are keyed on (network, rule), so a fault that fired under
+    one spelling and cleared under another never paired: the fire stayed open
+    until the next restart or the next fire of the same rule, and the clear
+    stood alone as an end with no beginning. The monitor now holds the id
+    (see `_mon_hold_gw_mac`), but journals already written are full of it.
+
+    The rule is the one history.py and NetworkIdentity.fold already apply to
+    the same forms: a weak or absent id is not a network of its own, it is
+    the strong id it sits beside.
+
+      * A weak line between two sightings of the *same* MAC id is that
+        network's, and so is a line with a sighting on only one side (the
+        journal begins or ends inside the stretch, or a long gap cuts the
+        other side off) when it carries no id at all. A weak line between
+        two *different* MAC ids is left alone: the Mac changed networks
+        somewhere in that stretch and which side each line is on is not
+        something the journal records.
+      * A bare gateway address or SSID with a sighting on one side only is
+        folded onto that MAC only if the pairing has been seen between two
+        sightings elsewhere in the journal, and only if exactly one MAC has
+        claimed it. 192.168.1.1 is every third home network; guessing would
+        merge two of them.
+      * A `gap` of `hold_s` or more is a break, and nothing folds across it:
+        a Mac that slept and woke elsewhere has no claim on where it was.
+
+    The original value stays on the line as `network_journaled`, so nothing
+    is rewritten silently. Rows are changed in place.
+    """
+    n = len(rows)
+    canon = [canonical_network_id(r.get("network")) for r in rows]
+
+    def strong(i):
+        return canon[i] is not None and canon[i].startswith("mac:")
+
+    def breaks(i):
+        return (rows[i].get("kind") == "gap"
+                and (rows[i].get("gap_s") or 0) >= hold_s)
+
+    # Nearest strong line before / after each line, with no break between.
+    prev_strong = [None] * n
+    last = None
+    for i in range(n):
+        if breaks(i):
+            last = None
+        if strong(i):
+            last = i
+        prev_strong[i] = last
+    next_strong = [None] * n
+    last = None
+    for i in range(n - 1, -1, -1):
+        next_strong[i] = last
+        if breaks(i):
+            last = None
+        elif strong(i):
+            last = i
+
+    # Which MAC groups each weak id has been seen inside, and the raw id and
+    # label to write for a group.
+    claims: dict[str, set] = {}
+    spelling: dict[str, tuple] = {}
+    target: dict[int, int] = {}
+    deferred = []
+    for i in range(n):
+        if strong(i):
+            spelling[canon[i]] = (rows[i].get("network"),
+                                  rows[i].get("network_label"))
+            continue
+        before, after = prev_strong[i], next_strong[i]
+        if before is not None and after is not None:
+            if canon[before] == canon[after]:
+                target[i] = before
+                if canon[i] is not None:
+                    claims.setdefault(canon[i], set()).add(canon[before])
+        elif canon[i] is None and (before is not None or after is not None):
+            target[i] = before if before is not None else after
+        elif canon[i] is not None and (before is not None or after is not None):
+            deferred.append(i)
+
+    for i, j in target.items():
+        _refile(rows[i], rows[j].get("network"), rows[j].get("network_label"))
+    for i in deferred:
+        owners = claims.get(canon[i], set())
+        if len(owners) == 1:
+            raw, label = spelling[next(iter(owners))]
+            _refile(rows[i], raw, label)
+    return rows
+
+
+def _refile(row, network, label):
+    row["network_journaled"] = row.get("network")
+    row["network"] = network
+    row["network_label"] = label
 
 
 def in_window(rows, hours, now=None):
@@ -427,6 +537,7 @@ def main() -> int:
     args = ap.parse_args()
 
     bridge_s = require_env_int(ENV_BRIDGE)
+    hold_s = require_env_int(ENV_IDENTITY_HOLD)
 
     archive = args.archive
     if archive is None:
@@ -434,7 +545,9 @@ def main() -> int:
         archive = Path(stem[:-6] + "-archive.jsonl" if stem.endswith(".jsonl")
                        else stem + "-archive.jsonl")
 
-    rows = load([archive, args.journal])
+    # Before the window is cut, so a line at the window's edge can still see
+    # the sighting just outside it.
+    rows = fold_identity(load([archive, args.journal]), hold_s)
     kept, start, end = in_window(rows, args.hours)
 
     by_kind: dict[str, int] = {}

@@ -72,14 +72,22 @@ extension NetworkEvent {
     /// side does not count as different — the first sample can arrive before
     /// the CLI has identified the network, and treating that as a move would
     /// cut the fault in two.
+    ///
+    /// "Known to differ" is read through `NetworkIdentity`, not by comparing
+    /// strings. A MAC group (`mac:…`) against a gateway or SSID group is one
+    /// network seen with and without its router's MAC — the CLI's ARP lookup
+    /// fails while a router is struggling, which is exactly when a fault is
+    /// being tracked — so only two MACs, or two weak forms, can disagree.
     static func continuesPrevious(appRestarted: Bool,
                                   previousNetwork: String?,
                                   currentNetwork: String?) -> Bool {
         guard appRestarted else { return false }
-        if let previousNetwork, let currentNetwork {
-            return previousNetwork == currentNetwork
+        guard let previous = previousNetwork.flatMap(NetworkIdentity.canonical),
+              let current = currentNetwork.flatMap(NetworkIdentity.canonical) else {
+            return true
         }
-        return true
+        if previous == current { return true }
+        return previous.hasPrefix("mac:") != current.hasPrefix("mac:")
     }
 }
 

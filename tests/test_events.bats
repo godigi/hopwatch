@@ -21,7 +21,7 @@ setup() {
   # environment, as bin/hopwatch hands it over, and refuses to run without.
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
-  export THRESH_EV_RESTART_BRIDGE_S
+  export THRESH_EV_RESTART_BRIDGE_S THRESH_MON_IDENTITY_HOLD_S
 }
 
 # One journal line. $1 kind, $2 timestamp, $3 seq, then kind-specific args.
@@ -36,7 +36,11 @@ ev() {
     gap)          extra=",\"gap_s\":$1" ;;
   esac
   local net="${NET:-wifi:mac=aa}"
-  printf '{"t":"%s","seq":%s,"network":"%s","network_label":"Home","kind":"%s","summary":"s"%s}\n' \
+  # NET=- is a journal line written with no identity at all: the monitor's
+  # `"network":null`, which is what it writes when it has no route and so
+  # nothing to derive an id from.
+  if [ "$net" = "-" ]; then net="null"; else net="\"$net\""; fi
+  printf '{"t":"%s","seq":%s,"network":%s,"network_label":"Home","kind":"%s","summary":"s"%s}\n' \
     "$ts" "$seq" "$net" "$kind" "$extra" >> "$J"
 }
 
@@ -858,5 +862,143 @@ assert eps[0]['duration_s'] is None, eps[0]
 "
   eps_for G2 "
 assert len(eps) == 1 and eps[0]['ended_by'] == 'monitor-restart', eps
+"
+}
+
+# ── One network, however the journal happened to spell it ────────────────
+#
+# The monitor derives the network id afresh every cycle, so while a router
+# was dropping packets the same physical network was journaled as its MAC id,
+# then as nothing at all (no route, so no gateway to look up), then as a bare
+# gateway address, then as the MAC again. Episodes are keyed on
+# (network, rule), so a fire under one spelling and the clear under another
+# never met: the fire stayed open until the next restart or the next fire of
+# the same rule — hours later, in the worst case — and the clear showed up as
+# an end with no beginning.
+
+S1="wifi:mac=00:11:22:33:44:55"
+S2="wifi:mac=66:77:88:99:aa:bb"
+
+@test "a clear journaled with no network closes the fault that fired under the MAC id" {
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=$S1 ev rule-fired      2026-10-06T20:10:00Z 5 G2
+  NET=-   ev rule-cleared    2026-10-06T20:12:00Z 6 G2
+  NET=-   ev rule-fired      2026-10-06T20:12:00Z 7 N1
+  NET=$S1 ev rule-cleared    2026-10-06T20:13:00Z 8 N1
+  NET=$S1 ev gap            2026-10-06T20:20:00Z 9 8
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 120, eps[0]
+assert eps[0]['ended_by'] == 'cleared', eps[0]
+assert eps[0]['network'] == '$S1', eps[0]
+assert 'start_unobserved' not in eps[0], eps[0]
+"
+  eps_for N1 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 60, eps[0]
+assert eps[0]['network'] == '$S1', eps[0]
+"
+}
+
+@test "a fire under the gateway-address id and a clear under the MAC id are one episode" {
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=wifi:gw=192.168.1.1 ev rule-fired 2026-10-06T20:10:00Z 5 G2
+  NET=$S1 ev rule-cleared    2026-10-06T20:14:00Z 6 G2
+  NET=$S1 ev gap            2026-10-06T20:20:00Z 7 8
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 240, eps[0]
+assert eps[0]['network'] == '$S1', eps[0]
+"
+}
+
+@test "a fault still open when the journal ends is on the network it was last seen on" {
+  # The outage in progress right now: the route went, the id with it, and no
+  # later line names the network again.
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=-   ev rule-fired      2026-10-06T20:10:00Z 5 N1
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for N1 "
+assert len(eps) == 1, eps
+assert eps[0]['network'] == '$S1', eps[0]
+assert eps[0]['ongoing'] is True or eps[0]['ended_by'] == 'still-open', eps[0]
+"
+}
+
+@test "the original spelling stays on the event, so nothing is rewritten silently" {
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=-   ev rule-fired      2026-10-06T20:10:00Z 5 N1
+  NET=$S1 ev rule-cleared    2026-10-06T20:11:00Z 6 N1
+  run read_events
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ev = [e for e in d['events'] if e['kind'] == 'rule-fired'][0]
+assert ev['network'] == '$S1', ev
+assert ev['network_journaled'] is None, ev
+other = [e for e in d['events'] if e['kind'] == 'monitor-started'][0]
+assert 'network_journaled' not in other, other
+"
+}
+
+@test "two different networks are not folded together by an unknown stretch between them" {
+  # Walked from one router to another with the link down in between. The
+  # stretch with no id belongs to neither, and a clear on the second network
+  # must not close the first network's fault.
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=$S1 ev rule-fired      2026-10-06T20:10:00Z 5 G2
+  NET=-   ev gap            2026-10-06T20:11:00Z 6 8
+  NET=$S2 ev monitor-started 2026-10-06T20:12:00Z 1
+  NET=$S2 ev rule-cleared    2026-10-06T20:13:00Z 2 G2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+nets = sorted(e['network'] for e in eps)
+assert nets == ['$S1', '$S2'], eps
+by = {e['network']: e for e in eps}
+assert by['$S1']['ended_by'] == 'monitor-restart', by['$S1']
+assert by['$S2']['started'] is None, by['$S2']
+"
+}
+
+@test "an unknown stretch is not folded onto a network across a gap longer than the identity hold" {
+  # The machine was away. What it sees on waking is a network we know
+  # nothing about, not the one it was last on.
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=$S1 ev rule-fired      2026-10-06T20:10:00Z 5 G2
+  NET=-   ev gap            2026-10-06T22:10:00Z 6 7200
+  NET=-   ev rule-fired      2026-10-06T22:10:05Z 7 N1
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for N1 "
+assert len(eps) == 1, eps
+assert eps[0]['network'] is None, eps[0]
+"
+}
+
+@test "a lone gateway address folds onto a MAC only where that pairing has been seen" {
+  # 192.168.1.1 is every third home network, so a bare gateway id is only
+  # ever attributed to a MAC that has actually been journaled alongside it —
+  # the rule gui/.../NetworkIdentity.fold applies to the same two forms.
+  # Here .1.1 is seen between two sightings of S1 (a pairing), 10.9.9.1 is
+  # not (a different network that never showed a MAC).
+  NET=$S1 ev monitor-started 2026-10-06T20:00:00Z 1
+  NET=wifi:gw=192.168.1.1 ev rule-fired 2026-10-06T20:05:00Z 4 TCP-1
+  NET=$S1 ev rule-cleared    2026-10-06T20:06:00Z 5 TCP-1
+  NET=wifi:gw=192.168.1.1 ev rule-fired 2026-10-06T20:10:00Z 6 G2
+  NET=wifi:gw=10.9.9.1    ev rule-fired 2026-10-06T20:10:30Z 7 L1
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for G2 "
+assert len(eps) == 1 and eps[0]['network'] == '$S1', eps
+"
+  eps_for L1 "
+assert len(eps) == 1 and eps[0]['network'] == 'wifi:gw=10.9.9.1', eps
 "
 }

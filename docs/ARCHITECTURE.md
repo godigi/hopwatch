@@ -161,6 +161,22 @@ authored:
    rewrote `mac=` forms and not `gw=`, which is precisely how one hotspot
    came to hold three different keys.
 
+   **A network's id is held, not re-derived every cycle.** The monitor
+   builds `network.id` from `route` and `arp -n`, and both go quiet while a
+   router struggles (route withdrawn, ARP entry not repopulated), so the
+   id used to flip between its MAC form, no id, and a bare gateway address
+   *inside one process*; episodes and the app's activity entries are keyed
+   on it, so each flip cut a fault in two (in a measured 13-day journal,
+   230 of 235 id changes were this, and one G2 "episode" ran 6.3 hours
+   because a fire was never paired with its clear). `_mon_hold_gw_mac`
+   (`lib/monitor.sh`) keeps the last MAC while nothing contradicts it, for
+   at most `THRESH_MON_IDENTITY_HOLD_S`; `helpers/events.py`
+   `fold_identity` applies the same strong-beside-weak rule to journals
+   already written; and `NetworkEvent.continuesPrevious` no longer reads a
+   `mac:` group against a `gw:` group as a network change. This adds no
+   fourth notion of identity: all three consult the existing strong/weak
+   forms.
+
 The three depths the app offers — continuous monitoring, the on-demand
 full check, the quick check — are documented as a constraint in
 `CLAUDE.md` rather than here, because they are a contract about product

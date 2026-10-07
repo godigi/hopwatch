@@ -1841,3 +1841,111 @@ assert data['internet']['rtt_jitter_ms'] == 3.42
 assert data['jitter_ms'] == 3.42
 "
 }
+
+# ── The network id survives a lookup that fails ──────────────────────────
+#
+# The id is derived every fast cycle from `route` and `arp -n`. Both go
+# quiet exactly when a router is struggling — the default route is withdrawn
+# while Wi-Fi re-associates, and the gateway's ARP entry is gone until the
+# first reply repopulates it — so the id used to flip, mid-process, between
+# its MAC form, no id at all, and the bare gateway address, and the event
+# journal and the app's activity list (both keyed on it) split one fault into
+# pieces. A monitor that has learned the router's MAC keeps it while it
+# cannot look it up again, and lets go the moment anything contradicts it.
+
+# One fast cycle's probe results, then the id they yield. $1 = clock (s),
+# $2 gateway, $3 interface, $4 SSID, $5 gateway MAC from ARP ("" = lookup failed).
+# Sets MON_NETWORK_ID / MON_NETWORK_GROUP in the test's own shell, because
+# the state being tested lives in MON_KNOWN_* between calls.
+cycle() {
+  MON_GATEWAY="$2" MON_INTERFACE="$3" MON_SSID="$4" MON_GW_MAC="$5"
+  # As _mon_probe_link leaves it: with no interface there is nothing to ask,
+  # and the type stays at its "wired" default.
+  MON_IFACE_TYPE=wifi
+  [ -n "$3" ] || MON_IFACE_TYPE=wired
+  _mon_hold_gw_mac "$1"
+  _mon_identity
+}
+
+@test "a failed ARP lookup keeps the MAC id the monitor already learned" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  [ "$MON_NETWORK_ID" = "wifi:mac=00:11:22:33:44:55" ]
+  cycle 1010 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:mac=00:11:22:33:44:55" ]
+  [ "$MON_NETWORK_GROUP" = "mac:00:11:22:33:44:55" ]
+}
+
+@test "a withdrawn default route keeps it too" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle 1010 "" "" "" ""
+  [ "$MON_NETWORK_ID" = "wifi:mac=00:11:22:33:44:55" ]
+}
+
+@test "the held id is exactly the one a lookup that succeeds produces" {
+  # The id has to join onto what a scan records, so holding must not invent
+  # a spelling of its own.
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  local fresh="$MON_NETWORK_ID" fresh_group="$MON_NETWORK_GROUP"
+  cycle 1010 "" "" "" ""
+  [ "$MON_NETWORK_ID" = "$fresh" ]
+  [ "$MON_NETWORK_GROUP" = "$fresh_group" ]
+  [ "$MON_NETWORK_LABEL" = "WiFi (SSID hidden by macOS)" ]
+}
+
+@test "the hold ends after THRESH_MON_IDENTITY_HOLD_S without a sighting" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle $((1000 + THRESH_MON_IDENTITY_HOLD_S)) 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:mac=00:11:22:33:44:55" ]
+  cycle $((1000 + THRESH_MON_IDENTITY_HOLD_S + 1)) 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=192.168.1.1" ]
+  # And it does not come back by itself once let go.
+  cycle $((1000 + THRESH_MON_IDENTITY_HOLD_S + 2)) 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=192.168.1.1" ]
+}
+
+@test "after the hold, a route that is still gone is an unknown network" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle $((1000 + THRESH_MON_IDENTITY_HOLD_S + 1)) "" "" "" ""
+  [ -z "$MON_NETWORK_ID" ]
+  [ "$MON_NETWORK_LABEL" = "unknown network" ]
+}
+
+@test "a different gateway address is a different network, and the old one is forgotten" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle 1010 10.0.0.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=10.0.0.1" ]
+  # Back on the first gateway address with no MAC to confirm it: not
+  # evidence of the first network any more.
+  cycle 1020 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=192.168.1.1" ]
+}
+
+@test "a different interface ends the hold" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle 1010 192.168.1.1 en7 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=192.168.1.1" ]
+}
+
+@test "a different visible SSID ends the hold, an unreadable one does not" {
+  cycle 1000 192.168.1.1 en0 Home 00:11:22:33:44:55
+  [ "$MON_NETWORK_ID" = "wifi:ssid=Home,mac=00:11:22:33:44:55" ]
+  cycle 1010 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:ssid=Home,mac=00:11:22:33:44:55" ]
+  cycle 1020 192.168.1.1 en0 Cafe ""
+  [ "$MON_NETWORK_ID" = "wifi:ssid=Cafe" ]
+}
+
+@test "a MAC read afterwards always wins over the one held" {
+  cycle 1000 192.168.1.1 en0 "" 00:11:22:33:44:55
+  cycle 1010 192.168.1.1 en0 "" 66:77:88:99:aa:bb
+  [ "$MON_NETWORK_ID" = "wifi:mac=66:77:88:99:aa:bb" ]
+  cycle 1020 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:mac=66:77:88:99:aa:bb" ]
+}
+
+@test "a monitor that has never read a MAC has nothing to hold" {
+  cycle 1000 192.168.1.1 en0 "" ""
+  [ "$MON_NETWORK_ID" = "wifi:gw=192.168.1.1" ]
+  cycle 1010 "" "" "" ""
+  [ -z "$MON_NETWORK_ID" ]
+}

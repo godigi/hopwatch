@@ -1105,6 +1105,21 @@ private enum VerifyHarness {
         check(NetworkEvent.continuesPrevious(
             appRestarted: true, previousNetwork: nil, currentNetwork: "mac:aa"),
               "nor is one with nothing to compare against")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "mac:aa", currentNetwork: "gw:192.168.1.1"),
+              "a MAC group and a bare gateway group are one network read twice")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "gw:192.168.1.1", currentNetwork: "mac:aa"),
+              "in either order")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "wifi:mac=AA", currentNetwork: "mac:aa"),
+              "and the record spelling of an id is the same network as its group")
+        check(!NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "gw:192.168.1.1", currentNetwork: "gw:10.0.0.1"),
+              "two different gateways, with no MAC on either, are still a move")
+        check(NetworkEvent.continuesPrevious(
+            appRestarted: true, previousNetwork: "mac:aa", currentNetwork: "unknown"),
+              "the CLI's unknown sentinel is not a move")
         check(!NetworkEvent.continuesPrevious(
             appRestarted: false, previousNetwork: "mac:aa", currentNetwork: "mac:aa"),
               "a launch, a switch-off and on, or a crash recovery is a boundary")

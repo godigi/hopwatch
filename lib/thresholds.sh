@@ -382,6 +382,25 @@ THRESH_MON_GAP_FACTOR=3
 # raises the tolerance from 30 s to 60 s; a 300 s cadence is unaffected.
 THRESH_MON_GAP_MIN_S=60
 
+# How long a network's identity is held after the monitor last read its
+# router's hardware address, while it cannot read it again — the default
+# route withdrawn while Wi-Fi re-associates, or an ARP entry that has not been
+# repopulated yet. Read by lib/monitor.sh to keep naming the network it knows
+# it is on, and by helpers/events.py to decide how far apart two journal lines
+# can be and still be one network's. Without it the id flipped between its MAC
+# form, no id and a bare gateway address on 230 of 5,021 journal lines'
+# boundaries over 13 days, and every flip split a fault into pieces.
+#
+# 15 minutes. Of 103 stretches the journal shows the id missing or weak, the
+# median was 35 s and the 90th percentile 155 s; those lengths are upper
+# bounds (they run to the next journaled line, not the next sample), so this
+# sits well above them to ride out a router reboot or a long re-association.
+# Longer would let a Mac that moved to another network without sleeping keep
+# the old one's name; anything that contradicts the held network — another
+# MAC, gateway address, interface or visible SSID — ends the hold at once
+# regardless of this number. It bounds absence of evidence, never evidence.
+THRESH_MON_IDENTITY_HOLD_S=900
+
 # ── Bufferbloat grading ──────────────────────────────────────────────────
 # Waveform/DSLReports cutoffs for added latency under load, in ms:
 # A < 5, B < 30, C < 60, D < 200, F ≥ 200. B1/B2 warn at grade C and go

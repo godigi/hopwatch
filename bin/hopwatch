@@ -639,7 +639,7 @@ if [ "$EVENTS" -eq 1 ]; then
   # is acceptable is a verdict that belongs to a rule — AV-1/AV-2.
   # shellcheck source=lib/thresholds.sh
   . "$LIB_DIR/thresholds.sh"
-  export THRESH_EV_RESTART_BRIDGE_S
+  export THRESH_EV_RESTART_BRIDGE_S THRESH_MON_IDENTITY_HOLD_S
   case "$EVENTS_WINDOW_HOURS" in
     ''|*[!0-9]*) printf 'hopwatch: --events expects a window in hours (got: %s)\n' "$EVENTS_WINDOW_HOURS" >&2; exit 3 ;;
   esac
