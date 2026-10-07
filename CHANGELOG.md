@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-07
+
 ### Added
 
 - `SOCK-1` (critical): this Mac cannot open a UDP socket, so it cannot look up website names. On 2026-10-07 the Mac could not open a UDP socket (`dig: isc_socket_bind: address not available`, system-wide, cured only by a reboot; ephemeral-port exhaustion is the likely cause but was never proven) and Hopwatch reported `D1` "your DNS server is flaky, restart your router" for over an hour. Every DNS probe ran `dig ... 2>/dev/null` and read an empty answer as "the resolver did not answer". The probes now go through one shared `dns_probe` (`lib/common.sh`, used by `lib/dns.sh` and `lib/monitor.sh`) that keeps dig's stderr and, only when an answer is missing, asks the kernel for a UDP socket with the new `helpers/sockcheck.py` (a healthy run pays nothing). A refused bind, or dig saying so itself, fires `SOCK-1` and suppresses `D1`, `D2`, `D5` and `V6-2` for that run, since their evidence is void. The summary names the app holding the sockets only when it holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of them (`lsof` without root sees only your own processes); otherwise it says to restart the Mac.
@@ -4136,7 +4138,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.10.10...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.10...v1.11.0
 [1.10.10]: https://github.com/godigi/hopwatch/compare/v1.10.9...v1.10.10
 [1.10.9]: https://github.com/godigi/hopwatch/compare/v1.10.8...v1.10.9
 [1.10.8]: https://github.com/godigi/hopwatch/compare/v1.10.7...v1.10.8
