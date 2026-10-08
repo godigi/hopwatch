@@ -849,6 +849,35 @@ RULES: list[dict[str, object]] = [
         "repairs": ["quit-app", "restart-mac"],
     },
     {
+        "id": "CONN-1",
+        "title": "Some new connections are failing",
+        "category": "dns",
+        "also": "internet",
+        "severity": "warn",
+        "scope": "both",
+        "blurb": (
+            "New connections from this Mac are being refused or dropped, "
+            "while pings to your router and the internet come back clean. "
+            "Name lookups and direct connections to port 443 fail at "
+            "the same time, on resolvers and servers that have nothing in "
+            "common, so the fault is on the way out of this Mac rather than "
+            "at any one of them. The report says what was observed and, "
+            "when one app on this Mac has far more connections open or "
+            "waiting than anything else, names it. Rules that blame the DNS "
+            "server stay quiet while this one is firing."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#conn-1--new-connections-are-being-refused-or-dropped",
+        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
+        "fix": (
+            "If the report names an app, quit it and run the check again. "
+            "Otherwise restart your router, which empties its list of open "
+            "connections. If it keeps happening, check for downloads or "
+            "peer-to-peer apps running on any device on your network."
+        ),
+        "fix_target": "you",
+        "repairs": ["quit-app"],
+    },
+    {
         "id": "EDNS-1",
         "title": "Encrypted DNS profile active",
         "category": "dns",

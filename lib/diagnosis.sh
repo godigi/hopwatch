@@ -396,15 +396,87 @@ diagnosis_run() {
     fi
   fi
 
+  # CONN-1 — new outbound connections are being refused or dropped while
+  # ping is clean. Decided after SOCK-1 and before D6/D1/D5 because it voids
+  # them: on 2026-10-08 this Mac's own torrent client flooded the router with
+  # new flows, UDP DNS to two unrelated resolvers timed out ~10% of the time
+  # and TCP/443 connects were "refused" in 10-40 ms ~60% of the time, with
+  # 0% ping loss throughout. That read as "your DNS server is flaky" one
+  # moment and "port 443 is blocked" the next, each a verdict on one probe of
+  # a single fault, and each naming a cause nobody had measured.
+  #
+  # Fires on either of two observations, both about name lookups that were
+  # *partly* answered (a run in which nothing answered is D1/D2/D5's, not
+  # this rule's):
+  #   * one name went unanswered by independent resolvers at once, or
+  #   * some lookup failed and a TCP/443 connect to a bare IP address did too.
+  # And only while ping is clean to the router and to both internet targets
+  # (an unmeasured internet leg does not count against it, so the quick check
+  # can reach this rule), real traffic is getting through, and neither SOCK-1
+  # nor a captive portal owns the symptom. P1/P2 own "nothing gets through",
+  # G*/L* own lossy links, TCP-1/ICMP-1 own filtered ping.
+  local _conn_fault=0 _cn_total=0 _cn_fail=0 _cn_ok=0 _cn_together=0
+  local _cn_tcp_fail=0 _cn_tcp_total=0
+  if [ "$_sock_fault" -eq 0 ] && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] \
+     && [ -n "$DNS_LINES" ] && [ "$_public_traffic_ok" -eq 1 ] \
+     && loss_below "$GW_LOSS" "$LOSS_WARN_PCT" \
+     && ! loss_at_least "$INET_LOSS" "$LOSS_WARN_PCT" \
+     && ! loss_at_least "$INET_LOSS_ALT" "$LOSS_WARN_PCT"; then
+    read -r _cn_total _cn_fail _cn_ok _cn_together <<<"$(conn_dns_lines_facts "$DNS_LINES")"
+    read -r _cn_tcp_fail _cn_tcp_total <<<"$(conn_tcp_reach_facts "${TCP_REACH_LINES:-}")"
+    if [ "$_cn_fail" -gt 0 ] && [ "$_cn_ok" -gt 0 ] \
+       && { [ "$_cn_together" -eq 1 ] || [ "$_cn_tcp_fail" -gt 0 ]; }; then
+      _conn_fault=1
+    fi
+  fi
+  if [ "$_conn_fault" -eq 1 ]; then
+    local _cn_obs _cn_clause _cn_tech _cn_name="" _cn_flows="" _cn_syn=""
+    local _cn_app_bundle="" _cn_app_name=""
+    _cn_obs="${_cn_fail} of ${_cn_total} name lookups got no answer"
+    [ "$_cn_tcp_total" -gt 0 ] \
+      && _cn_obs+=", and ${_cn_tcp_fail} of ${_cn_tcp_total} direct connections to port 443 were refused or timed out"
+    # What the Mac was doing when this fired, gathered now and only now: the
+    # healthy path never pays for lsof.
+    if declare -f conn_capture_holder_evidence >/dev/null 2>&1; then
+      conn_capture_holder_evidence
+      IFS='|' read -r _cn_name _ _cn_flows _cn_syn <<<"$(printf '%s\n' "${CONN_HOLDERS:-}" | head -1)"
+      # Name an app only when it holds a large enough share of all the
+      # Mac's open and half-open flows AND enough of them in absolute terms
+      # (THRESH_CONN_HOLDER_MIN_FLOWS) AND resolves to a regular GUI app the
+      # user can quit. Anything else names nothing and offers no button: the
+      # sentence and the button must agree, as in SOCK-1.
+      if [ -n "$_cn_name" ] && [ -n "${CONN_HOLDER_APP_BUNDLE:-}" ] \
+         && is_numeric "$_cn_flows" && [ "$_cn_flows" -ge "$THRESH_CONN_HOLDER_MIN_FLOWS" ] \
+         && is_numeric "${CONN_HOLDER_TOP_SHARE_PCT:-}" \
+         && [ "$CONN_HOLDER_TOP_SHARE_PCT" -ge "$THRESH_SOCK_HOLDER_SHARE_PCT" ]; then
+        _cn_app_bundle="$CONN_HOLDER_APP_BUNDLE"
+        _cn_app_name="${CONN_HOLDER_APP_NAME:-$_cn_name}"
+      fi
+    fi
+    if [ -n "$_cn_app_bundle" ]; then
+      _cn_clause=" ${_cn_app_name} has ${_cn_flows} connections open or still trying to connect, far more than anything else on this Mac. A router can only keep track of so many at once, so quitting ${_cn_app_name} is a quick way to find out whether it is the cause."
+    else
+      _cn_clause=" If it keeps happening, restarting your router clears its list of open connections."
+    fi
+    _cn_tech="technical: ${_cn_obs}; packet loss ${GW_LOSS}% to the router and ${INET_LOSS:-not measured}% to the internet"
+    [ -n "$_cn_app_bundle" ] && _cn_tech+="; ${_cn_syn:-0} connections from ${_cn_name} stuck waiting for an answer"
+    add_diag warn CONN-1 "Some of the new connections your Mac tries to open are being refused or dropped, even though your router and internet connection answer pings normally. You would notice it as pages and apps that hang or fail and then work on a second try. This check did not find what is causing it.${_cn_clause} (${_cn_tech})"
+    if declare -f repair_offer >/dev/null 2>&1 && [ -n "$_cn_app_bundle" ]; then
+      repair_offer CONN-1 quit-app "$_cn_app_name" "bundle_id=${_cn_app_bundle}"
+    fi
+  fi
+
   # D6 — the router's DNS is failing or slow while a public one works.
   # Guidance only; Hopwatch never changes DNS (read-only, sudo-free). Each
   # guard is a way the advice would be wrong:
   #   SOCK-1            nothing could have answered, switching helps nobody
+  #   CONN-1            every resolver dropped the same questions, so the
+  #                     router's is not the odd one out
   #   encrypted profile the user is already past this (EDNS-1 says so)
   #   manual override / already a public resolver — it is already their choice
   # "Slow" is D3's own cutoff, not a second one.
   local _d6_fires=0 _d6_state="" _d6_ans=0 _d6_line
-  if [ "$_sock_fault" -eq 0 ] && [ -n "$DNS_LINES" ] && [ -n "${SYS_RES:-}" ] \
+  if [ "$_sock_fault" -eq 0 ] && [ "$_conn_fault" -eq 0 ] && [ -n "$DNS_LINES" ] && [ -n "${SYS_RES:-}" ] \
      && [ "${PATH_ENCRYPTED_DNS:-0}" -eq 0 ] \
      && ! dns_is_public_resolver "$SYS_RES" \
      && ! dns_is_manual_override "${DHCP_DNS_SERVERS:-}" "${SYS_RES_ALL:-}"; then
@@ -432,7 +504,10 @@ diagnosis_run() {
   # D5 handles the specific silent fallback case: primary resolver is dead
   # and secondary answers, causing multi-second timeout delays on every query.
   #
-  # All three are skipped under SOCK-1 (see above). When D6 fires as well,
+  # All three are skipped under SOCK-1 and CONN-1 (see above): the lookups
+  # they read "the resolver did not answer" off are the symptom those two
+  # name, and "your DNS server is flaky" would send the reader to the wrong
+  # box. When D6 fires as well,
   # D1 and D5 keep their rule ID, severity and observation but give up their
   # remedy sentence: D6 carries the only remedy, so the report never tells
   # the user two different things about the same fault.
@@ -442,7 +517,7 @@ diagnosis_run() {
   if [ "$_d6_fires" -eq 1 ]; then
     _d1_fix=""; _d5_fix=""; _d3_fix=""
   fi
-  if [ "$_sock_fault" -eq 1 ]; then
+  if [ "$_sock_fault" -eq 1 ] || [ "$_conn_fault" -eq 1 ]; then
     :
   elif [ -n "$DNS_LINES" ] && [ "$DNS_OK" -eq 0 ] && [ "$_public_traffic_ok" -eq 0 ]; then
     add_diag warn D2 "No name lookups are working at all — every DNS server your Mac tried failed to answer. On its own that would point at your DNS settings, but nothing else on the internet is reachable either, so this is most likely a symptom rather than the cause. Fix the connection first; if lookups still fail once it's back, restart your router."

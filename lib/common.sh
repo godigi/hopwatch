@@ -452,7 +452,40 @@ dns_resolve_gui_app() {
     pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
     depth=$((depth + 1))
   done
-  return 1
+  # The parent walk finds nothing for a helper that outlived its app or was
+  # re-parented to launchd. Fall back to where the executable lives.
+  dns_resolve_app_by_path "$1"
+}
+
+# dns_resolve_app_by_path PID — print "bundle id|display name" for the .app
+# bundle PID's executable sits inside, when that app is running and may be
+# quit; otherwise print nothing and return 1.
+#
+# Stremio is the case this exists for: its torrent engine is a `node`
+# binary at Stremio.app/Contents/MacOS/, and lsof reports "node", which no
+# one can be asked to quit. The bundle's Info.plist knows the app's real id
+# and name. The outermost .app is the one wanted (a helper app inside a
+# bundle is not something the user launched). Running is checked with
+# lsappinfo, so an executable merely *named* like an app never offers to
+# quit one that is not open.
+dns_resolve_app_by_path() {
+  local pid="${1:-}" exe app plist bundle name
+  is_numeric "$pid" && [ "$pid" -gt 1 ] || return 1
+  exe="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+  case "$exe" in
+    *.app/*) app="${exe%%.app/*}.app" ;;
+    *) return 1 ;;
+  esac
+  plist="$app/Contents/Info.plist"
+  [ -f "$plist" ] || return 1
+  bundle="$(plutil -extract CFBundleIdentifier raw -o - "$plist" 2>/dev/null || true)"
+  repair_bundle_quittable "$bundle" || return 1
+  [ -n "$(with_timeout 3 lsappinfo find "bundleid=$bundle" 2>/dev/null || true)" ] || return 1
+  name="$(plutil -extract CFBundleDisplayName raw -o - "$plist" 2>/dev/null \
+          || plutil -extract CFBundleName raw -o - "$plist" 2>/dev/null || true)"
+  [ -n "$name" ] || name="$(basename "$app" .app)"
+  name="$(printf '%s' "$name" | tr -d '[:cntrl:]|' | cut -c1-60)"
+  printf '%s|%s' "$bundle" "${name:-$bundle}"
 }
 
 # A resolver address that is a well-known public one. Used to tell "the
@@ -498,6 +531,85 @@ dns_capture_socket_evidence() {
   raw="$(with_timeout 4 dig +tcp +time=2 +tries=1 +short @1.1.1.1 apple.com 2>/dev/null \
          | grep -v '^;;' | head -1 || true)"
   if [ -n "$raw" ]; then DNS_TCP_DNS_OK=1; else DNS_TCP_DNS_OK=0; fi
+}
+
+# conn_capture_holder_evidence — who on this Mac is opening the most new
+# connections, for rule CONN-1. Runs once per fault, only when CONN-1 is
+# about to fire — never on a healthy path — and is read-only and sudo-free.
+#
+# What a flood of new flows looks like from user space: connections stuck in
+# SYN_SENT (asked to open, not yet answered) and UDP sockets. Both are
+# counted per process with lsof, which without root sees only the caller's
+# own processes; a holder that belongs to the system is simply absent, and
+# the rule then names no app rather than guessing. The denominator is the
+# system-wide count from netstat, which needs no privilege either, so a
+# process's share is of everything, not of what lsof happened to show.
+#
+#   CONN_HOLDERS        "process|pid|flows|syn_sent" lines, biggest first
+#   CONN_FLOWS_TOTAL    system-wide UDP sockets + connections in SYN_SENT
+#   CONN_HOLDER_TOP_SHARE_PCT  the top holder's share of CONN_FLOWS_TOTAL
+#   CONN_HOLDER_APP_BUNDLE / CONN_HOLDER_APP_NAME  the regular GUI app the
+#                       top holder belongs to (dns_resolve_gui_app), or ""
+# shellcheck disable=SC2034 # read by lib/diagnosis.sh
+conn_capture_holder_evidence() {
+  local udp_n syn_n udp_raw syn_raw top_pid top_flows app
+  CONN_HOLDERS=""; CONN_FLOWS_TOTAL=""; CONN_HOLDER_TOP_SHARE_PCT=0
+  CONN_HOLDER_APP_BUNDLE=""; CONN_HOLDER_APP_NAME=""
+  udp_n="$(netstat -an -p udp 2>/dev/null | awk '/^udp/{n++} END{print n+0}')"
+  syn_n="$(netstat -an -p tcp 2>/dev/null | awk '$NF == "SYN_SENT" {n++} END{print n+0}')"
+  CONN_FLOWS_TOTAL=$((udp_n + syn_n))
+  udp_raw="$(with_timeout 5 lsof -nP -iUDP 2>/dev/null || true)"
+  syn_raw="$(with_timeout 5 lsof -nP -iTCP -sTCP:SYN_SENT 2>/dev/null || true)"
+  CONN_HOLDERS="$({
+      printf '%s\n' "$udp_raw" | awk 'NR > 1 && NF >= 2 { print "U\t" $1 "\t" $2 }'
+      printf '%s\n' "$syn_raw" | awk 'NR > 1 && NF >= 2 { print "S\t" $1 "\t" $2 }'
+    } | awk -F'\t' '
+      { name = $2; gsub(/\\x20/, " ", name); gsub(/\|/, "_", name)
+        k = name "|" $3; f[k]++; if ($1 == "S") s[k]++ }
+      END { for (k in f) print k "|" f[k] "|" (s[k] + 0) }' \
+    | sort -t'|' -k3,3 -rn | head -5)"
+  IFS='|' read -r _ top_pid top_flows _ <<<"$(printf '%s\n' "$CONN_HOLDERS" | head -1)"
+  if is_numeric "$CONN_FLOWS_TOTAL" && [ "$CONN_FLOWS_TOTAL" -gt 0 ] \
+     && is_numeric "$top_flows" && [ "$top_flows" -gt 0 ]; then
+    CONN_HOLDER_TOP_SHARE_PCT="$(awk -v t="$top_flows" -v n="$CONN_FLOWS_TOTAL" \
+      'BEGIN { p = int(t * 100 / n); if (p > 100) p = 100; print p }')"
+  fi
+  if app="$(dns_resolve_gui_app "$top_pid")"; then
+    CONN_HOLDER_APP_BUNDLE="${app%%|*}"
+    CONN_HOLDER_APP_NAME="${app#*|}"
+  fi
+  return 0
+}
+
+# conn_dns_lines_facts LINES — "total failed answered together" for the
+# resolver|name|answer|OK-or-FAIL lines dns_run records. `together` is 1 when
+# some one name went unanswered by THRESH_CONN_RESOLVERS_TOGETHER or more
+# different resolvers: independent operators dropping the same question is
+# the signature of the path out of this Mac, not of any one resolver. Shared
+# by lib/diagnosis.sh; the monitor measures the same thing live (a second
+# resolver is asked only after the first fails).
+conn_dns_lines_facts() {
+  printf '%s\n' "${1:-}" | awk -F'|' -v want="${THRESH_CONN_RESOLVERS_TOGETHER:-0}" '
+    NF >= 4 && $1 != "" {
+      total++
+      if ($4 == "OK") ok++
+      else {
+        fail++
+        if (!(($2 SUBSEP $1) in seen)) { seen[$2 SUBSEP $1] = 1; nf[$2]++ }
+        if (want > 0 && nf[$2] >= want) together = 1
+      }
+    }
+    END { printf "%d %d %d %d\n", total + 0, fail + 0, ok + 0, together + 0 }'
+}
+
+# conn_tcp_reach_facts LINES — "failed total" over the TCP-reach lines whose
+# target is an IPv4 literal on port 443. Hostnames are left out on purpose:
+# connecting to github.com:443 resolves github.com first, so a DNS failure
+# would be counted as a refused connection and both legs would be one fault.
+conn_tcp_reach_facts() {
+  printf '%s\n' "${1:-}" | awk -F'|' '
+    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:443$/ { total++; if ($2 == "FAIL") fail++ }
+    END { printf "%d %d\n", fail + 0, total + 0 }'
 }
 
 # Called with dig's stderr after a probe came back empty. Two independent

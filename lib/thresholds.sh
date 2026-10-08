@@ -229,6 +229,41 @@ THRESH_DNS_LATENCY_WARN_MS=250
 # to quit it would send them after the wrong thing.
 THRESH_SOCK_HOLDER_SHARE_PCT=50
 
+# CONN-1 — new outbound connections are being refused or dropped while ping
+# is clean. Three numbers, and none of them is a loss figure (the rule reuses
+# LOSS_WARN_PCT for "ping is clean").
+#
+# THRESH_CONN_RESOLVERS_TOGETHER: how many independent resolvers must fail
+# the same lookup for that alone to be the fault. One resolver silent is
+# D1/D5's territory — it is that resolver. Two unrelated operators (1.1.1.1
+# and 8.8.8.8 share nothing but the Mac's own path to them) failing the same
+# question within seconds points at the path out of this Mac, not at either
+# of them. Measured 2026-10-08: 8 of 11 and 9 of 13 failures coincided.
+#
+# THRESH_MON_CONN_CONFIRM_CYCLES: the monitor holds CONN-1 — and D1 when it
+# would fire alone — for this many consecutive medium-tier samples before
+# announcing it, and holds it for as many clean ones before withdrawing it.
+# The loss rules' THRESH_MON_LOSS_CONFIRM_CYCLES exists because one dropped
+# packet reads as exactly the warn cutoff; this one exists because a single
+# dig (+tries=1) or a single connect is one sample of a thing that fails
+# 10-60% of the time, and the card used to flip between "DNS flaky" and "Web
+# blocked" depending on which probe lost that cycle. Withdrawal waits too,
+# or an intermittent fault would flash on and off with every lucky sample.
+# While a first failure is waiting for its confirmation the monitor
+# re-probes at the fast cadence rather than waiting out the 60 s medium tier.
+#
+# THRESH_CONN_HOLDER_MIN_FLOWS: the floor under THRESH_SOCK_HOLDER_SHARE_PCT
+# when naming the app. SOCK-1 needs no floor because exhausting ephemeral
+# ports takes thousands of sockets; CONN-1 has no such tell, so "holds most of
+# the UDP sockets and half-open connections" is true of any browser on a quiet
+# Mac (a handful of QUIC sockets is most of a handful). A torrent client that
+# floods a router's connection table holds hundreds (measured: 210 UDP
+# sockets and 67 connections stuck in SYN_SENT). Below this the top holder is
+# just a busy app and telling the user to quit it would be a guess.
+THRESH_CONN_RESOLVERS_TOGETHER=2
+THRESH_MON_CONN_CONFIRM_CYCLES=2
+THRESH_CONN_HOLDER_MIN_FLOWS=100
+
 # ── DHCP ─────────────────────────────────────────────────────────────────
 # DH-1 — warn when the lease has less than 10 minutes left without renewing.
 # Renewal is normally automatic at 50% (T1); under 10 minutes indicates renewal failure.
