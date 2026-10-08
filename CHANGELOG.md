@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-07
+
 ### Added
 
 - Repair buttons, phase 1. A finding can now offer one button that fixes it, labelled with the action itself ("Quit Spotify", "Restart this Mac", "Open the sign-in page"). Pressing it shows what will change, runs the repair, re-checks at the quick depth, and says either "Fixed" or "That didn't help" with what to try next. Nothing is ever repaired automatically. These three need no password; repairs that ask for one are designed (`docs/design/2026-10-07-repair-actions-design.md`) and not built.
@@ -4152,7 +4154,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.10...v1.11.0
 [1.10.10]: https://github.com/godigi/hopwatch/compare/v1.10.9...v1.10.10
 [1.10.9]: https://github.com/godigi/hopwatch/compare/v1.10.8...v1.10.9
