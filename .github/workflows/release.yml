@@ -175,7 +175,7 @@ jobs:
           fi
           curl -sL https://sentry.io/get-cli/ | bash
           dsymutil gui/.build/release/HopwatchGUI -o gui/build/HopwatchGUI.dSYM
-          sentry-cli debug-files upload --wait gui/build/HopwatchGUI.dSYM
+          sentry-cli debug-files upload --wait --include-sources gui/build/HopwatchGUI.dSYM
 
       - name: Create or update the Release
         env:
