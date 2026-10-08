@@ -561,7 +561,7 @@ assert all('repairs' not in x for x in d), d
 
 # ── The catalogue agrees with itself ─────────────────────────────────────
 
-@test "--rules-catalog names the repairs SOCK-1, CONN-1 and CP-1 can offer, and only known ones" {
+@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1 and CP-1 can offer, and only known ones" {
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   local known
@@ -576,7 +576,8 @@ for r in d.values():
     for rid in r.get('repairs', []):
         assert rid in known, (r['id'], rid)
 assert d['CONN-1']['repairs'] == ['quit-app'], d['CONN-1']
-assert sum(1 for r in d.values() if 'repairs' in r) == 3
+assert d['HOG-1']['repairs'] == ['quit-app'], d['HOG-1']
+assert sum(1 for r in d.values() if 'repairs' in r) == 4
 " "$known"
 }
 

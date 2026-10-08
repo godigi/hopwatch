@@ -367,11 +367,12 @@ key is absent when it offers none, which is nearly always.
 
 A consumer shows these verbatim and interprets none of them.
 
-Two rules offer `quit-app`: `SOCK-1` (the app holding most of this Mac's UDP
-sockets) and `CONN-1` (the app holding most of its open and half-open
-connections, when it holds hundreds). Both name the app in the summary and
-in `label`, and both hand its bundle id back in `params`. `CONN-1` offers
-nothing when no single app qualifies.
+Three rules offer `quit-app`: `SOCK-1` (the app holding most of this Mac's UDP
+sockets), `CONN-1` (the app holding most of its open and half-open
+connections, when it holds hundreds) and `HOG-1` (the one app moving most of
+the data in a direction, while latency suffers). All name the app in the
+summary and in `label`, and all hand its bundle id back in `params`.
+`CONN-1` and `HOG-1` offer nothing when no single app qualifies.
 
 `hopwatch --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]`
 runs one. With `--json` it prints one object:
@@ -838,6 +839,15 @@ it would accumulate forever.
   its confirmation the monitor takes its next medium-tier sample one fast
   cycle later instead of 60 s later, and a consumer will see `refreshed`
   list `medium` on that cycle.
+- **`HOG-1` in the stream is a rule ID and nothing more.** It is listed in
+  `status.rules` after the monitor has seen latency degrade with clean ping
+  for `THRESH_MON_HOG_CONFIRM_CYCLES` fast cycles and one `nettop` capture
+  (at most one per `THRESH_MON_HOG_RECHECK_S`) found a single app that is
+  not Hopwatch's moving most of the data in a direction. The sample does
+  not say which app: that, and the Quit button, come from the quick scan
+  the app runs when the severity turns `warn`. A capture takes about 7 s,
+  during which that cycle's sample is late; a consumer measuring cadence
+  will see one long cycle, not a stall.
 - **`status.rules`** are rule IDs from
   [`DIAGNOSIS-RULES.md`](./DIAGNOSIS-RULES.md), evaluated in
   `lib/monitor.sh` against the same `lib/thresholds.sh` constants that

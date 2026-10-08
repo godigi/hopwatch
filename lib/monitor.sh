@@ -153,6 +153,20 @@ MON_CONN_ACTIVE=0
 MON_DNS_STREAK=0
 MON_CONN_PENDING=0
 MON_MEDIUM_FRESH=1
+# HOG-1 (THRESH_MON_HOG_CONFIRM_CYCLES, THRESH_MON_HOG_RECHECK_S). Unlike the
+# CONN-1 streaks these count fast-tier cycles, because latency is measured
+# there, and the capture they gate costs ~7 s.
+#   MON_HOG_STREAK        consecutive cycles with latency degraded, ping clean
+#   MON_HOG_CLEAN         consecutive cycles without
+#   MON_HOG_ACTIVE        a capture found one app using up the connection;
+#                         withdrawn by a capture that does not, or by
+#                         MON_HOG_CLEAN reaching the confirmation count
+#   MON_HOG_LAST_CAPTURE  EPOCHSECONDS of the last capture, so a gate that
+#                         stays open costs one capture per recheck interval
+MON_HOG_STREAK=0
+MON_HOG_CLEAN=0
+MON_HOG_ACTIVE=0
+MON_HOG_LAST_CAPTURE=0
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -831,6 +845,53 @@ _mon_conn_observe() {
   return 0
 }
 
+# Forget the HOG-1 state. A link drop or a different network ends it: an app
+# that was filling the old path says nothing about the new one.
+_mon_hog_reset() {
+  MON_HOG_STREAK=0; MON_HOG_CLEAN=0; MON_HOG_ACTIVE=0
+}
+
+# HOG-1 — the monitor's half. It never saturates the link and never names
+# anyone; it notices that latency has gone bad while ping is clean, and only
+# once that has held for THRESH_MON_HOG_CONFIRM_CYCLES fast cycles does it
+# take ONE nettop capture (hog_capture_evidence, the scan's own function) to
+# see whether a single app on this Mac explains it. Hopwatch's own full check
+# is excluded by that capture, so a check the app runs does not accuse
+# itself. The Quit button comes from the quick scan the app runs once the
+# severity turns warn; this function only decides whether the rule is on.
+#
+# It runs after the tiers and before _mon_rules, and only on a cycle whose
+# fast tier ran: latency is carried between cycles otherwise, and a stale
+# reading must not count twice toward a streak. The monitor has no speed-test
+# figure, so hog_judge gets none and uses the absolute stand-in.
+_mon_probe_hog() {
+  [ "$MON_LINK_UP" -eq 1 ] || return 0
+  case " $MON_REFRESHED " in *" fast "*) ;; *) return 0 ;; esac
+  local gate=0 now="$EPOCHSECONDS"
+  if [ "${MON_CAPTIVE:-}" != "1" ] && [ "${MON_DNS_LOCAL_FAIL:-}" != "1" ] \
+     && hog_ping_clean "$MON_GW_LOSS" "$MON_INET_LOSS" "$MON_INET_LOSS_ALT" \
+     && hog_latency_degraded "$MON_GW_RTT" "${MON_GW_JITTER:-}" "${MON_INET_JITTER:-}"; then
+    gate=1
+  fi
+  if [ "$gate" -eq 0 ]; then
+    MON_HOG_STREAK=0
+    MON_HOG_CLEAN=$((MON_HOG_CLEAN + 1))
+    if [ "$MON_HOG_ACTIVE" -eq 1 ] && [ "$MON_HOG_CLEAN" -ge "$THRESH_MON_HOG_CONFIRM_CYCLES" ]; then
+      MON_HOG_ACTIVE=0
+    fi
+    return 0
+  fi
+  MON_HOG_STREAK=$((MON_HOG_STREAK + 1))
+  MON_HOG_CLEAN=0
+  [ "$MON_HOG_STREAK" -ge "$THRESH_MON_HOG_CONFIRM_CYCLES" ] || return 0
+  [ $((now - MON_HOG_LAST_CAPTURE)) -ge "$THRESH_MON_HOG_RECHECK_S" ] || return 0
+  MON_HOG_LAST_CAPTURE="$now"
+  hog_capture_evidence || true
+  hog_judge "" ""
+  MON_HOG_ACTIVE="$HOG_FIRES"
+  return 0
+}
+
 _mon_rules() {
   MON_RULES=""
   # A rule can clear only when this cycle measured the inputs that decide it.
@@ -850,6 +911,7 @@ _mon_rules() {
     MON_GW_LOSS_STREAK=0
     MON_INET_LOSS_STREAK=0
     _mon_conn_reset
+    _mon_hog_reset
     return 0
   fi
 
@@ -969,6 +1031,17 @@ _mon_rules() {
      && ! loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_WARN_PCT"; then
     _mon_conn_fault=1
     _mon_add_rule warn CONN-1
+  fi
+
+  # HOG-1 — one app on this Mac is using up the connection. Held state, set
+  # by _mon_probe_hog from a nettop capture; the same guards as the scan's
+  # (ping clean, real traffic getting through, no portal, no refused socket)
+  # apply every cycle. The scan can name the app and offer to quit it; the
+  # stream only says the rule is on.
+  if [ "$MON_HOG_ACTIVE" -eq 1 ] && [ "$_mon_public_ok" = "1" ] \
+     && [ "${MON_CAPTIVE:-}" != "1" ] && [ "${MON_DNS_LOCAL_FAIL:-}" != "1" ] \
+     && hog_ping_clean "$MON_GW_LOSS" "$MON_INET_LOSS" "$MON_INET_LOSS_ALT"; then
+    _mon_add_rule warn HOG-1
   fi
 
   # SOCK-1 — this Mac cannot open a UDP socket, so no lookup can be sent.
@@ -1091,6 +1164,9 @@ _mon_rules() {
   if [ -n "$MON_DNS_OK" ] && [ -n "$MON_GW_LOSS" ]; then
     MON_CLEARABLE_RULES+="CONN-1 "
   fi
+  # HOG-1's presence is held state, so its absence means recovery whenever
+  # the gateway was measured this cycle (the gate that withdraws it reads it).
+  [ -n "$MON_GW_LOSS" ] && MON_CLEARABLE_RULES+="HOG-1 "
   # SOCK-1 clears only on a cycle whose DNS probe ran and found a socket
   # available; a cycle that did not probe (""), or a tier that was not due,
   # says nothing either way.
@@ -1109,7 +1185,7 @@ _mon_rules() {
     case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
     case "$prior" in
       N1|G1|G2|P1|P2|L1|SOCK-1) _mon_add_rule critical "$prior" ;;
-      G3|D1|CP-1|L2|BR-1|CONN-1) _mon_add_rule warn "$prior" ;;
+      G3|D1|CP-1|L2|BR-1|CONN-1|HOG-1) _mon_add_rule warn "$prior" ;;
       *) _mon_add_rule info "$prior" ;;
     esac
     unresolved=1
@@ -1406,6 +1482,7 @@ monitor_run() {
       # link's recent past — there is no "come back to it later" case.
       [ -n "$MON_NETWORK_ID" ] && _mon_loss_reset
       _mon_conn_reset
+      _mon_hog_reset
     fi
 
     # A dead link means nothing to probe. Skipping the other tiers here is
@@ -1468,6 +1545,7 @@ monitor_run() {
       fi
     fi
 
+    _mon_probe_hog
     _mon_rules
     # A failure still waiting for its confirmation is re-probed next cycle
     # rather than after the rest of the 60 s medium interval.

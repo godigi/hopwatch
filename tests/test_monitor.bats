@@ -79,6 +79,7 @@ reset_state() {
   MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
   MON_DNS_ALT_OK="" MON_TCP_LINES="" MON_MEDIUM_FRESH=1
   _mon_conn_reset
+  _mon_hog_reset
   # scanner side
   GATEWAY=192.168.1.1 IS_WIFI=1 GW_LOSS=0 WIFI_RSSI="" WIFI_SNR=""
   DNS_OK=1 DNS_LINES="x|y|z|OK" PUBLIC_OK=1 PUBLIC_CHECKED=1
@@ -108,7 +109,7 @@ monitor_rules_here() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
+MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|HOG-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
@@ -1204,6 +1205,8 @@ assert not any(change["id"] == "rule-cleared" for change in sample.get("changes"
   MON_PREV_RULES="L1 "
   MON_GW_LOSS=0 MON_INET_LOSS="" MON_INET_LOSS_ALT=""
   MON_WEB_OK=1 MON_PUBLIC_OK=1 MON_TCP_OK=0 MON_DNS_OK=0
+  # D1 waits for THRESH_MON_CONN_CONFIRM_CYCLES failed lookups in a row.
+  MON_DNS_STREAK="$THRESH_MON_CONN_CONFIRM_CYCLES"
   _mon_rules
   [[ " $MON_RULES " == *" D1 "* && " $MON_RULES " == *" L1 "* ]]
   [ "$MON_SEVERITY" = "critical" ]

@@ -264,6 +264,53 @@ THRESH_CONN_RESOLVERS_TOGETHER=2
 THRESH_MON_CONN_CONFIRM_CYCLES=2
 THRESH_CONN_HOLDER_MIN_FLOWS=100
 
+# HOG-1 — one app on this Mac is using up the connection. Judged from a
+# `nettop` capture (see lib/common.sh, hog_capture_evidence), and only after
+# the cheap gate below says latency has degraded while ping loss is clean.
+#
+# The latency gate (THRESH_HOG_GW_RTT_MS, THRESH_HOG_JITTER_MS) is defined
+# below, after the two values it is taken from.
+
+# The capture: THRESH_HOG_SNAPSHOTS cumulative nettop snapshots
+# THRESH_HOG_SAMPLE_S seconds apart give THRESH_HOG_SNAPSHOTS-1 intervals,
+# and the app must qualify on EVERY one of them, so one burst never fires
+# the rule. Three at two seconds is ~4 s of watching; nettop's own ~3 s
+# startup dominates the wall clock either way.
+THRESH_HOG_SAMPLE_S=2
+THRESH_HOG_SNAPSHOTS=3
+
+# How big. Below THRESH_HOG_MIN_MBPS in a direction an app cannot be what is
+# filling any link we would want to say so about; an idle Mac measures
+# 0.02-0.05 (see THRESH_TRAFFIC_BUSY_MBPS). With a measured speed for that
+# direction (a full check) the test is relative: the app must hold at least
+# THRESH_HOG_LINK_SHARE_PCT of the link, taking the link to be what the app
+# uses plus what the speed test found left over, because a speed test run
+# beside a hog measures the leftovers (TR-1). Without one (--quick, and the
+# monitor, which never saturates the link to measure it) there is no
+# capacity to be relative to, so an absolute rate stands in:
+# THRESH_HOG_UNKNOWN_CAPACITY_MBPS, comfortably under a cable uplink and
+# well over a video call, which is what the rule must not confuse with a
+# backup.
+THRESH_HOG_MIN_MBPS=2
+THRESH_HOG_LINK_SHARE_PCT=50
+THRESH_HOG_UNKNOWN_CAPACITY_MBPS=10
+
+# "One app": the app must account for at least this share of everything
+# non-Hopwatch moving in that direction. Under it, several things share the
+# link and naming one would be a guess. Also what keeps a VPN daemon, which
+# carries the same bytes the apps do, from being read as a hog.
+THRESH_HOG_DOMINANCE_PCT=60
+
+# The monitor. THRESH_MON_HOG_CONFIRM_CYCLES consecutive fast-tier cycles
+# with the latency gate open before it spends a capture (the same two-cycle
+# rule as G3/L2: one cycle of spread is a blip), and no more than one
+# capture per THRESH_MON_HOG_RECHECK_S while the gate stays open, which is
+# also how often an active HOG-1 is re-checked. A capture costs ~7 s and
+# ~2 s of CPU; this bounds it at once a minute, and only while latency is
+# already bad.
+THRESH_MON_HOG_CONFIRM_CYCLES=2
+THRESH_MON_HOG_RECHECK_S=60
+
 # ── DHCP ─────────────────────────────────────────────────────────────────
 # DH-1 — warn when the lease has less than 10 minutes left without renewing.
 # Renewal is normally automatic at 50% (T1); under 10 minutes indicates renewal failure.
@@ -348,6 +395,17 @@ THRESH_SPEED_CONFIRM_RUNS=2
 # split the data actually supports, so 25 replaces the 50 ms starting
 # point.
 THRESH_BASELINE_GW_RTT_FLOOR_MS=25
+
+# The latency gate. Both cutoffs are values the project already judged on
+# other evidence, referenced rather than copied so they cannot drift apart.
+# THRESH_HOG_GW_RTT_MS is the BL-1 gateway-RTT floor: the 25 ms that data
+# showed separates ordinary Wi-Fi from a genuinely congested moment.
+# THRESH_HOG_JITTER_MS is the presentation cutoff for ping spread. Spread is
+# used for the internet leg because, unlike the router, no absolute RTT is
+# "normal" there: it depends on where the resolver is. A queue filling up is
+# what makes round-trip times spread out, whatever the baseline.
+THRESH_HOG_GW_RTT_MS="$THRESH_BASELINE_GW_RTT_FLOOR_MS"
+THRESH_HOG_JITTER_MS="$THRESH_LATENCY_JITTER_WARN_MS"
 
 # SP-1 — when a measured download is close enough to the Wi-Fi link's own
 # PHY rate that the *wireless* leg, not the internet plan, is the cap.
