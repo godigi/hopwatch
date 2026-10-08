@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-08
+
 ### Added
 
 - `HOG-1` (warn): one app on this Mac is using up the connection. When pings are slow or uneven while none are lost, and a single app is sending or receiving most of the data moving on this Mac on every interval of a short `nettop` capture, the report says how fast it is going and what the pings are doing, names the app when it can, and offers the existing "Quit <app>" button. It replaces "latency is high" or a bufferbloat grade with no culprit. The capture runs only once the cheap latency gate passes (in `--quick` too) and never on a healthy cycle. Hopwatch's own processes (descendants of the run, anything under a `hopwatch`/`netdiag` command line, the probe tools) are never the answer, and their own traffic voids the direction, so the speed test is never accused. A process that is not a quittable GUI app (a system daemon, a command-line tool) yields the finding with no name and no button. With a speed figure (a full check) the app must hold `THRESH_HOG_LINK_SHARE_PCT` of the line; without one, `THRESH_HOG_UNKNOWN_CAPACITY_MBPS`. Mirrored in the monitor, which waits `THRESH_MON_HOG_CONFIRM_CYCLES` cycles and takes at most one capture per `THRESH_MON_HOG_RECHECK_S`. New `helpers/hog.py`; design in `docs/design/2026-10-08-upload-hog-design.md`.
@@ -4172,7 +4174,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/godigi/hopwatch/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/godigi/hopwatch/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.10...v1.11.0
