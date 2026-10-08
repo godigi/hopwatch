@@ -182,6 +182,15 @@ struct ConnectionStability: Sendable, Equatable {
         }
     }
 
+    /// There is no link, so there is nothing to rate. Not "Unknown /
+    /// Waiting for latency measurements": nothing is on its way.
+    static let noLink = ConnectionStability(
+        level: .unstable,
+        label: "No link",
+        description: "No network connection",
+        icon: "wifi.slash"
+    )
+
     /// Evaluates stability index combining realistic internet thresholds (Option A)
     /// and decoupling link stability from baseline distance latency (Option B):
     /// - Optimal (green): Loss <= 1.0%, Jitter <= 15ms, RTT <= 75ms (flawless, rock-solid stability)

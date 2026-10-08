@@ -236,6 +236,12 @@ struct DashboardRouteView: View {
     var isWiFi: Bool = true
     var macStatusGood: Bool = true
     var isWifiLaggy: Bool = false
+    /// The newest sample says there is no link. The router and internet
+    /// hops render as unknown (grey, no badge, no flag, no invented gateway
+    /// address or ISP) and the Mac hop as down; the caller supplies "—"
+    /// for the readings. Neither "fine" nor "faulty" has been established
+    /// for a hop nothing can reach.
+    var linkDown: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -269,7 +275,7 @@ struct DashboardRouteView: View {
                         path.addLine(to: CGPoint(x: x2 - 28, y: lineY))
                     }
                     .stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle((routerWarn || isWifiLaggy) ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6))
+                    .foregroundStyle(linkDown ? Theme.ColorToken.line : ((routerWarn || isWifiLaggy) ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
 
                     // Dashed line hop2 -> hop3
                     Path { path in
@@ -277,16 +283,16 @@ struct DashboardRouteView: View {
                         path.addLine(to: CGPoint(x: x3 - 28, y: lineY))
                     }
                     .stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle(internetWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6))
+                    .foregroundStyle(linkDown ? Theme.ColorToken.line : (internetWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
 
                     // Intermediate labels
-                    let firstLink = isWiFi ? (isWifiLaggy ? "Wi-Fi (laggy) · local connection" : "Wi-Fi · local connection") : "Wired · local connection"
+                    let firstLink = linkDown ? NoLinkCopy.nodeDetail : (isWiFi ? (isWifiLaggy ? "Wi-Fi (laggy) · local connection" : "Wi-Fi · local connection") : "Wired · local connection")
                     Text(firstLink)
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(isWifiLaggy ? Theme.ColorToken.amber : Theme.ColorToken.muted)
                         .position(x: (x1 + x2) / 2.0, y: lineY + 14)
 
-                    Text("Broadband · internet connection")
+                    Text(linkDown ? "" : "Broadband · internet connection")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(Theme.ColorToken.muted)
                         .position(x: (x2 + x3) / 2.0, y: lineY + 14)
@@ -296,7 +302,7 @@ struct DashboardRouteView: View {
                     // Hop 1: This Mac
                     VStack(spacing: 3) {
                         VStack(spacing: 2) {
-                            Text(isWiFi ? "Wi-Fi signal" : "Interface link")
+                            Text(linkDown ? "Network link" : (isWiFi ? "Wi-Fi signal" : "Interface link"))
                                 .font(.system(size: 10))
                                 .foregroundStyle(Theme.ColorToken.muted)
                             HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -314,11 +320,12 @@ struct DashboardRouteView: View {
 
                         let isMacCulprit = culpritHop == "wifi" || culpritHop == "mac"
                         hopNode(
-                            icon: isWiFi ? "laptopcomputer" : "cable.connector",
+                            icon: (isWiFi || linkDown) ? "laptopcomputer" : "cable.connector",
                             isWarning: !macStatusGood || isWifiLaggy,
                             flag: nil,
-                            isCulprit: isMacCulprit,
-                            isCritical: isCritical
+                            isCulprit: isMacCulprit && !linkDown,
+                            isCritical: isCritical,
+                            state: linkDown ? .down : .normal
                         )
 
                         Text("This Mac")
@@ -359,14 +366,21 @@ struct DashboardRouteView: View {
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "network", isWarning: routerWarn, flag: nil, isCulprit: culpritHop == "router", isCritical: isCritical)
+                        hopNode(icon: "network", isWarning: routerWarn && !linkDown, flag: nil,
+                                isCulprit: culpritHop == "router" && !linkDown, isCritical: isCritical,
+                                state: linkDown ? .unknown : .normal)
 
                         Text("Router")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 7)
 
-                        if routerWarn, let detail = routerDetailText, !detail.isEmpty {
+                        if linkDown {
+                            Text(NoLinkCopy.nodeDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        } else if routerWarn, let detail = routerDetailText, !detail.isEmpty {
                             Text(detail)
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber)
@@ -397,7 +411,7 @@ struct DashboardRouteView: View {
                                 .lineLimit(1)
                         }
 
-                        if let delta = routerLoadedDelta {
+                        if !linkDown, let delta = routerLoadedDelta {
                             Text("Load: \(delta)")
                                 .font(.system(size: 9))
                                 .foregroundStyle(Theme.ColorToken.quiet)
@@ -424,14 +438,21 @@ struct DashboardRouteView: View {
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "globe", isWarning: internetWarn, flag: countryFlag, isCulprit: culpritHop == "internet", isCritical: isCritical)
+                        hopNode(icon: "globe", isWarning: internetWarn && !linkDown, flag: linkDown ? nil : countryFlag,
+                                isCulprit: culpritHop == "internet" && !linkDown, isCritical: isCritical,
+                                state: linkDown ? .unknown : .normal)
 
                         Text("Internet")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                             .padding(.top, 7)
 
-                        if internetWarn, let detail = internetDetailText, !detail.isEmpty {
+                        if linkDown {
+                            Text(NoLinkCopy.nodeDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        } else if internetWarn, let detail = internetDetailText, !detail.isEmpty {
                             Text(detail)
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber)
@@ -463,7 +484,7 @@ struct DashboardRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                         }
 
-                        if let delta = internetLoadedDelta {
+                        if !linkDown, let delta = internetLoadedDelta {
                             Text("Load: \(delta)")
                                 .font(.system(size: 9))
                                 .foregroundStyle(Theme.ColorToken.quiet)
@@ -553,7 +574,7 @@ struct DashboardRouteView: View {
                 Spacer()
 
                 HStack(spacing: 16) {
-                    if let publicIP, !publicIP.isEmpty {
+                    if !linkDown, let publicIP, !publicIP.isEmpty {
                         HStack(spacing: 4) {
                             Text("Public IP")
                                 .foregroundStyle(Theme.ColorToken.muted)
@@ -589,34 +610,43 @@ struct DashboardRouteView: View {
         )
     }
 
-    private func hopNode(icon: String, isWarning: Bool, flag: String?, isCulprit: Bool, isCritical: Bool = false) -> some View {
+    /// `.unknown` and `.down` exist for the no-link state only.
+    private enum HopState { case normal, unknown, down }
+
+    private func hopNode(icon: String, isWarning: Bool, flag: String?, isCulprit: Bool, isCritical: Bool = false,
+                         state: HopState = .normal) -> some View {
         let culpritTint = isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         let culpritWash = isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash
 
         return ZStack {
             Circle()
-                .fill(isCulprit ? culpritWash : (isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground))
+                .fill(state == .down ? Theme.ColorToken.redWash : (isCulprit ? culpritWash : (isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground)))
                 .frame(width: 44, height: 44)
                 .overlay(
                     Circle()
-                        .strokeBorder(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.line), lineWidth: isCulprit ? 2 : 1)
+                        .strokeBorder(state == .down ? Theme.ColorToken.red.opacity(0.6) : (isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.line)), lineWidth: isCulprit ? 2 : 1)
                 )
                 .shadow(color: isCulprit ? culpritTint.opacity(0.15) : Color.black.opacity(0.04), radius: isCulprit ? 5 : 3, y: 1)
 
             Image(systemName: icon)
                 .font(.system(size: 20))
-                .foregroundStyle(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
+                .foregroundStyle(state == .unknown ? Theme.ColorToken.muted
+                                 : state == .down ? Theme.ColorToken.red
+                                 : (isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green)))
 
-            // Status Check or Warning Badge
-            Circle()
-                .fill(isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green))
-                .frame(width: 15, height: 15)
-                .overlay(
-                    Image(systemName: (isWarning || isCulprit) ? "exclamationmark" : "checkmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white)
-                )
-                .offset(x: 16, y: 16)
+            // Status Check or Warning Badge. None for a hop that has not
+            // been reached: a check says "verified", a "!" says "faulty".
+            if state != .unknown {
+                Circle()
+                    .fill(state == .down ? Theme.ColorToken.red : (isCulprit ? culpritTint : (isWarning ? Theme.ColorToken.amber : Theme.ColorToken.green)))
+                    .frame(width: 15, height: 15)
+                    .overlay(
+                        Image(systemName: state == .down ? "xmark" : ((isWarning || isCulprit) ? "exclamationmark" : "checkmark"))
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+                    .offset(x: 16, y: 16)
+            }
 
             // Optional Culprit Banner
             if isCulprit {

@@ -327,12 +327,18 @@ struct MenuBarLabel: View {
     @MainActor
     private static var dotCache: [String: NSImage] = [:]
 
+    // The three readings below fall back to the last scan's snapshot when the
+    // live sample has none. With no link the live sample has none by
+    // definition, which used to put the last network's flag, public IP and
+    // ping beside a red dot.
     private var countryISO: String? {
-        coordinator.monitor.latest?.publicInfo.countryISO
+        if coordinator.linkIsDown { return nil }
+        return coordinator.monitor.latest?.publicInfo.countryISO
             ?? coordinator.latestRun?.snapshot.publicInfo.countryISO
     }
 
     private var publicIP: String? {
+        if coordinator.linkIsDown { return nil }
         let ip = coordinator.monitor.latest?.publicInfo.ip
             ?? coordinator.latestRun?.snapshot.publicInfo.ip
         guard let ip, !ip.isEmpty else { return nil }
@@ -348,7 +354,8 @@ struct MenuBarLabel: View {
     }
 
     private var pingString: String? {
-        Self.formatPing(
+        if coordinator.linkIsDown { return nil }
+        return Self.formatPing(
             internetRtt: coordinator.monitor.latest?.internet.rttAvgMs
                 ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs,
             gatewayRtt: coordinator.monitor.latest?.gateway.rttAvgMs

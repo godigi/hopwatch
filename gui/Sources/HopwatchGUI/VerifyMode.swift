@@ -64,6 +64,7 @@ private enum VerifyHarness {
         NSApp?.setActivationPolicy(.accessory)
         runStageTests()
         runHealthResolverTests()
+        runNoLinkTests()
         runAlertAttributionTests()
         runAlertSettleTests()
         runEventAlertDwellTests()
@@ -152,6 +153,220 @@ private enum VerifyHarness {
         check(Health.paused.symbol != Health.healthy.symbol,
               "paused is distinguishable from healthy without colour")
         print("")
+    }
+
+    // MARK: - No link
+
+    /// The Mac had no network, the newest monitor sample said so
+    /// (`link.up == false`, rule N1), and the menu-bar dot was yellow with a
+    /// card header reading "Monitoring off". Yellow is `HealthResolver`'s
+    /// answer for "supposed to be monitoring and isn't"; it was checked
+    /// *before* the sample, so a monitor that was between children (killed,
+    /// restarting, backing off) hid a fresh "no link" sample behind a
+    /// generic warning. A dead link is the app's loudest fact and does not
+    /// depend on whether the process that reported it is still alive.
+    static func runNoLinkTests() {
+        print("No link")
+        // The original failure, first: a critical (link-down) sample with the
+        // monitor not running. Before the fix this case was written without
+        // `linkDown:` — the only inputs the resolver had — and read
+        // "got warning, want critical".
+        equal(HealthResolver.resolve(.init(isScanning: false, monitoringEnabled: true,
+                                           isPausedForAnyReason: false, monitorRunning: false,
+                                           sampleHealth: .critical, runHealth: nil,
+                                           linkDown: true)),
+              .critical, "link-down sample + monitor not running → critical, not the generic warning")
+        runForceRefreshTests()
+
+        // ── HealthResolver: link-down precedence ──────────────────────────
+        func dot(monitorRunning: Bool = true, alertRank: Int? = nil, scanning: Bool = false,
+                 paused: Bool = false, enabled: Bool = true,
+                 sampleHealth: Health? = .critical, linkDown: Bool = true) -> Health {
+            HealthResolver.resolve(.init(
+                isScanning: scanning, monitoringEnabled: enabled,
+                isPausedForAnyReason: paused, monitorRunning: monitorRunning,
+                activeAlert: alertRank.map {
+                    StageResolver.AlertSnapshot(title: "t", body: "b", raisedAt: Date(),
+                                                rules: ["X"], severityRank: $0)
+                },
+                sampleHealth: sampleHealth, runHealth: .healthy, linkDown: linkDown))
+        }
+        equal(dot(monitorRunning: false), .critical, "no link + monitor not running → critical")
+        equal(dot(monitorRunning: false, sampleHealth: .healthy), .critical,
+              "no link wins over whatever the sample's own health says")
+        equal(dot(alertRank: 2), .critical, "no link + a warn-ranked alert → critical, not amber")
+        equal(dot(alertRank: 0), .critical, "no link + an unranked alert (catalog not loaded) → critical")
+        equal(dot(alertRank: 2, scanning: true), .critical, "no link while scanning → critical")
+        equal(dot(paused: true), .paused, "paused still wins over no link: nobody is looking")
+        equal(dot(monitorRunning: false, enabled: false), .paused, "switched off still wins over no link")
+        equal(dot(monitorRunning: false, linkDown: false), .warning,
+              "a dead monitor with no fresh no-link sample stays the generic warning")
+
+        // ── LinkState: only a fresh sample's word counts ──────────────────
+        check(LinkState.isDown(linkUp: false, sampleAge: 3), "link.up == false, 3 s old → down")
+        check(!LinkState.isDown(linkUp: true, sampleAge: 3), "link.up == true → not down")
+        check(!LinkState.isDown(linkUp: nil, sampleAge: nil), "no sample yet → not down (don't know)")
+        check(LinkState.isDown(linkUp: false, sampleAge: 100),
+              "link.up == false, 100 s old → still down (outlasts a 60 s restart backoff)")
+        check(!LinkState.isDown(linkUp: false, sampleAge: 600),
+              "link.up == false, 10 min old → not believed (the monitor never came back)")
+        check(LinkState.isDown(linkUp: false, sampleAge: 400, cadenceS: 120),
+              "a slow configured cadence widens the window (4 cadences)")
+        if let down = try? JSONDecoder().decode(MonitorSample.self, from: Data(linkDownLine.utf8)) {
+            check(LinkState.isDown(sample: down, now: down.timestamp.addingTimeInterval(5)),
+                  "the real link-down line is down 5 s after its timestamp")
+            check(!LinkState.isDown(sample: down, now: down.timestamp.addingTimeInterval(3600)),
+                  "…and not an hour later")
+            check(down.gateway.rttAvgMs == nil && down.internet.lossPct == nil && down.liveJitterMs == nil,
+                  "the real link-down line carries null measurements")
+            equal(down.health, .critical, "the real link-down line is critical on its own")
+            equal(down.status.rules, ["N1"], "…and names rule N1")
+            equal(down.link.type, "wired", "…and its link.type is the CLI's default 'wired' with no interface")
+        } else {
+            check(false, "the real link-down line decodes")
+        }
+
+        // ── StageResolver: the no-link stage ──────────────────────────────
+        let alert = StageResolver.AlertSnapshot(title: "Slow", body: "", raisedAt: Date(),
+                                                rules: ["BL-1"], severityRank: 2)
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false)), .noLink,
+              "link down + critical severity → noLink, not 'Connection is unstable'")
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false, measurementState: "link-down")), .noLink,
+              "link down + measurement 'link-down' → noLink (not .checking)")
+        equal(StageResolver.resolve(inputs(severity: "warn", linkUp: false, activeAlert: alert)), .noLink,
+              "link down precedes an older active alert")
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false, monitorRunning: false)), .noLink,
+              "link down + monitor between children → noLink, not .checking")
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false, isScanning: true)), .testing,
+              "scanning still precedes noLink")
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false, isPausedForAnyReason: true,
+                                           pauseReason: "display sleeping")),
+              .paused("display sleeping"), "paused still precedes noLink")
+        equal(StageResolver.resolve(inputs(severity: "critical", linkUp: false,
+                                           lastError: "cli too old", monitorRunning: false)),
+              .skewed("cli too old"), "a skewed CLI still precedes noLink")
+
+        // ── The readings that went stale ──────────────────────────────────
+        check(ConnectionStability.noLink.label == "No link"
+              && ConnectionStability.noLink.label != "Stable"
+              && ConnectionStability.noLink.level == .unstable,
+              "stability reads 'No link', never a stable rating")
+        check(NoLinkCopy.unknownValue == "—" && NoLinkCopy.nodeDetail == "No link",
+              "unknown readings are a dash and 'No link'")
+        runNoLinkCoordinatorTests()
+        print("")
+    }
+
+    /// The coordinator-level figures that used to fall back to older
+    /// samples and to the last scan. Built from the real link-down line
+    /// plus a run of healthy samples before it, which is exactly what is in
+    /// `monitor.recent` the moment a link drops. Constructing a coordinator
+    /// starts nothing (`start()` does that), as the gallery relies on.
+    static func runNoLinkCoordinatorTests() {
+        guard let down = try? JSONDecoder().decode(MonitorSample.self, from: Data(linkDownLine.utf8)) else {
+            check(false, "link-down fixture decodes"); return
+        }
+        func healthy(_ i: Int) -> MonitorSample {
+            var s = down
+            s.link = .init(up: true, interface: "en0", type: "wifi", ip: "192.168.1.9",
+                           gateway: "192.168.1.1", gatewayMAC: nil, ssid: "Home", bssid: nil)
+            s.gateway = .init(lossPct: 10, rttAvgMs: 3 + Double(i % 3), rttJitterMs: 1)
+            s.internet = .init(lossPct: 0, rttAvgMs: 20 + Double(i % 5), rttJitterMs: 2)
+            s.publicInfo = .init(ok: true, ip: "198.51.100.7", isp: "ISP", asn: nil, city: "Rio",
+                                 country: "Brazil", countryISO: "BR", captivePortal: false)
+            s.status = .init(severity: "ok", measurement: "measured", rules: [], icmpFiltered: false,
+                             degraded: false, paused: false, cadenceS: 10)
+            return s
+        }
+        var latest = down
+        latest.ts = ISO8601DateFormatter().string(from: Date())   // fresh
+        let coordinator = HopwatchCoordinator()
+        coordinator.monitor.adoptGallerySample(latest, historical: (0..<30).map(healthy) + [latest])
+        check(coordinator.linkIsDown, "coordinator: newest sample link.up == false → linkIsDown")
+        check(coordinator.currentJitter == nil,
+              "coordinator: jitter is nil with no link (was the moving average of the healthy samples before it)")
+        check(coordinator.effectiveLoss == nil, "coordinator: loss is nil with no link")
+        equal(coordinator.currentStability, ConnectionStability.noLink, "coordinator: stability is 'No link'")
+        coordinator.monitor.stop()   // keeps `latest`, as a dead monitor does
+        equal(coordinator.currentHealth == .critical || !Defaults.monitoringEnabled, true,
+              "coordinator: dot is critical with the monitor stopped (unless monitoring is switched off in prefs)")
+        check(!coordinator.monitor.isRunning, "coordinator: monitor reads as not running")
+        check(coordinator.linkIsDown, "coordinator: still down after the monitor stops")
+        // And a recovered link goes back to normal.
+        var up = healthy(1)
+        up.ts = ISO8601DateFormatter().string(from: Date())
+        coordinator.monitor.adoptGallerySample(up, historical: [up])
+        check(!coordinator.linkIsDown, "coordinator: link back up → not down")
+        check(coordinator.currentJitter != nil, "coordinator: jitter returns with the link")
+    }
+
+    /// A real `--monitor` line captured with no default route: every
+    /// measurement null, `status.measurement` "link-down", rule N1, and
+    /// `link.type` still "wired" (the CLI's default when there is no
+    /// interface to ask).
+    static let linkDownLine = #"{"schema":2,"version":"1.13.0","ts":"2026-10-08T17:43:46Z","seq":1,"gap_s":null,"refreshed":["fast"],"link":{"up":false,"interface":null,"type":"wired","ip":null,"gateway":null,"gateway_mac":null,"ssid":null,"bssid":null},"network":{"id":null,"label":"unknown network","group_id":null},"vpn":{"active":false,"type":null,"name":null},"gateway":{"loss_pct":null,"rtt_avg_ms":null,"rtt_jitter_ms":null},"internet":{"loss_pct":null,"rtt_avg_ms":null,"rtt_jitter_ms":null},"jitter_ms":null,"wifi":null,"dns":{"ok":null,"resolver":null,"elapsed_ms":null,"local_fail":null,"local":null},"tcp":{"any_ok":null,"targets":[]},"public":{"ok":null,"ip":null,"isp":null,"asn":null,"city":null,"country":null,"country_iso":null,"captive_portal":null},"status":{"severity":"critical","rules":["N1"],"measurement":"link-down","icmp_filtered":false,"degraded":true,"paused":false,"cadence_s":5}}"#
+
+    private static func spin(_ seconds: Double, until done: () -> Bool = { false }) {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end && !done() {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    /// The mechanism that leaves `isRunning` false after a link drop.
+    ///
+    /// The real monitor installs its SIGALRM trap only inside `monitor_run`,
+    /// after the bash 5 re-exec and sourcing lib/; until then SIGALRM's
+    /// default disposition kills it (measured against bin/hopwatch: exit 142
+    /// when signalled within ~30 ms of spawn). `forceRefresh()` — called from
+    /// every CoreWLAN callback — used to signal unconditionally. The stand-in
+    /// child below has the same shape: no trap for 0.6 s, then a trap that
+    /// records delivery, then link-down samples.
+    static func runForceRefreshTests() {
+        let dir = NSTemporaryDirectory() + "hopwatch-verify-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let script = dir + "/fake-monitor"
+        let flag = dir + "/alrm-seen"
+        let body = """
+        #!/bin/bash
+        parent=$PPID
+        sleep 0.6
+        trap 'echo seen > "\(flag)"' ALRM
+        while kill -0 "$parent" 2>/dev/null; do
+          printf '%s\\n' '\(linkDownLine)'
+          sleep 0.25 & wait $!
+        done
+        """
+        try? body.write(toFile: script, atomically: true, encoding: .utf8)
+        chmod(script, 0o755)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let stream = MonitorStream()
+        stream.useBinaryForTesting(script)
+        stream.start()
+        spin(1.0, until: { stream.isRunning })
+        check(stream.isRunning, "stand-in monitor child started")
+        // A link drop: CoreWLAN callbacks land while the child is still
+        // starting (here: well inside its 0.6 s trap-less window).
+        stream.forceRefresh()
+        stream.forceRefresh()
+        // Watched continuously, not read once at the end: a killed child is
+        // restarted by `scheduleRestart` after its backoff, so a single
+        // late read of `isRunning` can see the replacement and miss the
+        // stretch where the dot read "monitor dead".
+        var sawStopped = false
+        spin(2.5, until: {
+            if !stream.isRunning { sawStopped = true }
+            return FileManager.default.fileExists(atPath: flag)
+        })
+        check(!sawStopped,
+              "forceRefresh during child start-up does not kill the monitor (isRunning never drops)")
+        check(stream.latest != nil, "the link-down line decodes into a sample")
+        check(stream.latest?.link.up == false, "decoded sample says link.up == false")
+        equal(stream.latest?.health ?? .healthy, .critical, "a link-down sample's own health is critical")
+        check(FileManager.default.fileExists(atPath: flag),
+              "the refresh was deferred, not dropped: delivered once the child proved its traps")
+        stream.stop()
     }
 
     // MARK: - Alert attribution
@@ -2224,7 +2439,7 @@ private enum VerifyHarness {
         // is happening but it is fine", so it must not light the card up.
         equal(StageResolver.resolve(inputs(severity: "ok")), .healthy, "ok severity → healthy")
         equal(StageResolver.resolve(inputs(severity: "info")), .healthy, "info severity → healthy (VPN/ICMP-filter is not a fault)")
-        equal(StageResolver.resolve(inputs(severity: "ok", linkUp: false)), .watching(severity: .critical), "link down → watching critical even with ok severity")
+        equal(StageResolver.resolve(inputs(severity: "ok", linkUp: false)), .noLink, "link down → noLink even with ok severity")
 
         // The core reactivity guarantee: warn and critical land on .watching
         // immediately, before any alert dwell. This is the case that used to
@@ -2268,7 +2483,7 @@ private enum VerifyHarness {
         equal(StageResolver.resolve(inputs(severity: "ok", activeAlert: alert, activeResolution: res)),
               .alerted(alert), "active alert precedes resolved")
         equal(StageResolver.resolve(inputs(severity: "ok", linkUp: false, activeResolution: res)),
-              .watching(severity: .critical), "link down precedes resolved")
+              .noLink, "link down precedes resolved")
 
         // Precedence: each earlier guard beats the later ones. Testing each
         // guard with every later signal live proves the order is load-bearing,
@@ -2985,6 +3200,10 @@ private enum VerifyHarness {
                 content(icon: "checkmark.circle.fill", tint: .green,
                         title: "All good — watching", tertiary: "Nothing has changed in 3h 12m")
                     .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .noLink:
+                content(icon: NoLinkCopy.icon, tint: .red,
+                        title: NoLinkCopy.headline, tertiary: "")
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             case .watching(let sev):
                 let critical = sev == .critical
                 content(icon: critical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
@@ -3078,6 +3297,7 @@ private enum VerifyHarness {
             ("degraded",          .degraded(.init(headline: "Unstable for calls & gaming", subtitle: "4% packet loss · 56ms jitter to router", isCritical: true)), "4% packet loss · 56ms jitter to router"),
             ("watching-warn",     .watching(severity: .warn),                "You're losing a few packets to your router."),
             ("watching-critical", .watching(severity: .critical),            "Your Mac has no internet connection at all."),
+            ("no-link",           .noLink,                                   "Nothing is joined: no WiFi network is associated and no ethernet cable is carrying a link."),
             // `.alerted` is deliberately absent: it is rendered above from
             // the real `AlertStageCard`, once per severity band.
             ("paused",            .paused("display sleeping"),               "Monitoring is off while the display sleeps."),

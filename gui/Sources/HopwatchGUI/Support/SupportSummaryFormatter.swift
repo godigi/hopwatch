@@ -131,7 +131,9 @@ enum SupportSummaryFormatter {
         if let wifi = sample.wifi {
             if let rssi = wifi.rssi { sigParts.append("\(rssi) dBm") }
             if let snr = wifi.snr { sigParts.append("SNR \(snr) dB") }
-        } else if sample.link.type == "wired" {
+        } else if sample.link.up && sample.link.type == "wired" {
+            // `up` matters: a down sample's type is the CLI's default
+            // "wired", and "Wired Ethernet link" is not what it has.
             sigParts.append("Wired Ethernet link")
         }
         let signalStr = sigParts.isEmpty ? nil : sigParts.joined(separator: ", ")

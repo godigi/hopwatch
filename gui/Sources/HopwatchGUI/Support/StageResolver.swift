@@ -34,6 +34,12 @@ enum StageResolver {
         /// probe has produced a result yet. This is intentionally neutral:
         /// Wi-Fi association alone is not an all-clear.
         case checking
+        /// The newest sample says there is no link at all. Its own stage
+        /// rather than `.watching(.critical)`: "Connection is unstable"
+        /// describes a link that exists and is misbehaving, and read, over
+        /// "Your Mac has no network connection at all", as two sentences
+        /// contradicting each other. The card's prose is the CLI's N1 text.
+        case noLink
         /// The CLI sees a problem but no alert has crossed its dwell yet.
         /// `critical` reads red, `warn` reads amber; the card carries the
         /// CLI's own blurb for the worst firing rule (the same source
@@ -130,6 +136,8 @@ enum StageResolver {
         /// `status.severity`. "info" (VPN on, ICMP filtered) is not a
         /// problem and reads healthy.
         let severity: String
+        /// False when the newest sample says there is no link and is recent
+        /// enough to believe (`LinkState.isDown`). Callers pass `!linkIsDown`.
         let linkUp: Bool
         let measurementState: String
         let activeResolution: ResolutionSnapshot?
@@ -160,7 +168,7 @@ enum StageResolver {
 
     /// The order of the guards is load-bearing and matches the precedence
     /// the dropdown has always had: a scan in progress, then a user pause,
-    /// then a skewed CLI, then an already-active alert. An arrival check
+    /// then a skewed CLI, then no link at all, then an already-active alert. An arrival check
     /// takes the scanning guard's place rather than a slot of its own —
     /// it *is* a scan in progress, and demoting it below the pause guards
     /// would put "Monitoring paused" over a running progress bar. Only after a live
@@ -172,8 +180,12 @@ enum StageResolver {
         if !i.monitoringEnabled { return .paused(nil) }
         if i.isPausedForAnyReason { return .paused(i.pauseReason) }
         if let error = i.lastError, !i.monitorRunning { return .skewed(error) }
+        // Ahead of the alert: with no link, the live sample is the most
+        // specific fact the app has, and an older alert (a warn that was
+        // active when the link dropped) would otherwise keep its own card.
+        // The N1 alert itself says the same thing the CLI's N1 text does.
+        if !i.linkUp { return .noLink }
         if let alert = i.activeAlert { return .alerted(alert) }
-        if !i.linkUp { return .watching(severity: .critical) }
         if !i.monitorRunning || i.measurementState != "measured" {
             return .checking
         }

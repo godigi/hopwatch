@@ -147,11 +147,14 @@ struct MainWindow: View {
     }
 
     private var sidebarNetworkCard: some View {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let name = coordinator.wifiDisplayName
+        // `linkIsWiFi` rather than the sample's `link.type`: with no link
+        // that is only the CLI's default ("wired"), which drew a cable icon
+        // beside "Disconnected" on a Wi-Fi Mac. And no stale scan SSID.
+        let isWiFi = coordinator.linkIsWiFi
+        let name = coordinator.linkIsDown ? "Disconnected" : (coordinator.wifiDisplayName
             ?? coordinator.monitor.latest?.link.ssid
             ?? coordinator.latestRun?.snapshot.wifi?.ssid
-            ?? "Disconnected"
+            ?? "Disconnected")
 
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {

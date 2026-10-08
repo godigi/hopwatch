@@ -606,6 +606,13 @@ struct ConnectionRouteView: View {
     let jitterWarn: Bool
     let jitterDescription: String
 
+    /// The newest sample says there is no link. The router and internet
+    /// nodes render as unknown — grey, no badge, no flag — rather than as
+    /// "fine" (a green check) or as "a fault in that hop" (an amber one):
+    /// with no link, nothing about either hop has been learned. The Mac
+    /// node renders as down. The caller supplies the placeholder text.
+    var linkDown: Bool = false
+
     let vpnActive: Bool
     let vpnName: String?
     let vpnFreshness: String
@@ -696,7 +703,8 @@ struct ConnectionRouteView: View {
                             icon: macIcon,
                             isWarning: !macStatusGood,
                             statusGood: macStatusGood,
-                            flag: nil
+                            flag: nil,
+                            state: linkDown ? .down : .normal
                         )
 
                         Text("This Mac")
@@ -725,7 +733,8 @@ struct ConnectionRouteView: View {
                             icon: "network",
                             isWarning: routerWarn,
                             statusGood: routerStatusGood,
-                            flag: nil
+                            flag: nil,
+                            state: linkDown ? .unknown : .normal
                         )
 
                         Text("Router")
@@ -771,7 +780,8 @@ struct ConnectionRouteView: View {
                             icon: "globe",
                             isWarning: internetWarn,
                             statusGood: internetStatusGood,
-                            flag: countryFlag
+                            flag: linkDown ? nil : countryFlag,
+                            state: linkDown ? .unknown : .normal
                         )
 
                         Text("Internet")
@@ -897,34 +907,51 @@ struct ConnectionRouteView: View {
         .lineLimit(1)
     }
 
-    private func hopNode(icon: String, isWarning: Bool, statusGood: Bool, flag: String?) -> some View {
+    private func nodeIconTint(state: HopState, isWarning: Bool, statusGood: Bool) -> Color {
+        switch state {
+        case .unknown: return Theme.ColorToken.muted
+        case .down:    return .red
+        case .normal:  return isWarning ? Theme.ColorToken.amber : (statusGood ? Theme.ColorToken.green : Theme.ColorToken.muted)
+        }
+    }
+
+    /// `.unknown` and `.down` exist for the no-link state; `.normal` is the
+    /// good/warning pair every other state has always used.
+    private enum HopState { case normal, unknown, down }
+
+    private func hopNode(icon: String, isWarning: Bool, statusGood: Bool, flag: String?,
+                         state: HopState = .normal) -> some View {
         ZStack {
             Circle()
-                .fill(isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground)
+                .fill(state == .down ? Theme.ColorToken.redWash : (isWarning ? Theme.ColorToken.amberWash : Theme.ColorToken.nodeBackground))
                 .frame(width: 56, height: 56)
                 .shadow(color: Color.black.opacity(0.04), radius: 3, y: 1)
                 .overlay(
                     Circle()
-                        .strokeBorder(isWarning ? Color(red: 0xe9/255.0, green: 0xc4/255.0, blue: 0x86/255.0) : Theme.ColorToken.line, lineWidth: 1)
+                        .strokeBorder(state == .down ? Theme.ColorToken.red.opacity(0.5) : (isWarning ? Color(red: 0xe9/255.0, green: 0xc4/255.0, blue: 0x86/255.0) : Theme.ColorToken.line), lineWidth: 1)
                 )
 
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .medium))
-                .foregroundStyle(isWarning ? Theme.ColorToken.amber : (statusGood ? Theme.ColorToken.green : Theme.ColorToken.muted))
+                .foregroundStyle(nodeIconTint(state: state, isWarning: isWarning, statusGood: statusGood))
 
-            // Status badge bottom-right
-            Circle()
-                .fill(statusGood ? Theme.ColorToken.green : Theme.ColorToken.amber)
-                .frame(width: 17, height: 17)
-                .overlay(
-                    Circle().strokeBorder(Color.white, lineWidth: 2)
-                )
-                .overlay(
-                    Text(statusGood ? "✓" : "!")
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundStyle(.white)
-                )
-                .offset(x: 20, y: 20)
+            // Status badge bottom-right. An unknown hop has no badge at all:
+            // a green check says "verified fine" and an amber "!" says
+            // "something is wrong here", and neither has been established.
+            if state != .unknown {
+                Circle()
+                    .fill(state == .down ? Color.red : (statusGood ? Theme.ColorToken.green : Theme.ColorToken.amber))
+                    .frame(width: 17, height: 17)
+                    .overlay(
+                        Circle().strokeBorder(Color.white, lineWidth: 2)
+                    )
+                    .overlay(
+                        Text(state == .down ? "✕" : (statusGood ? "✓" : "!"))
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundStyle(.white)
+                    )
+                    .offset(x: 20, y: 20)
+            }
 
             // Country flag badge top-right
             if let flag {

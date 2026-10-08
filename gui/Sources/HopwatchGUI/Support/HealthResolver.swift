@@ -37,11 +37,15 @@ enum HealthResolver {
         let sampleHealth: Health?
         /// `RunSnapshot.worstSeverity` for the newest live run, if any.
         let runHealth: Health?
+        /// The newest monitor sample says there is no link, and is recent
+        /// enough to believe (`LinkState.isDown`).
+        let linkDown: Bool
 
         init(isScanning: Bool, monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, monitorRunning: Bool,
              activeAlert: StageResolver.AlertSnapshot? = nil,
-             sampleHealth: Health?, runHealth: Health?) {
+             sampleHealth: Health?, runHealth: Health?,
+             linkDown: Bool = false) {
             self.isScanning = isScanning
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
@@ -49,6 +53,7 @@ enum HealthResolver {
             self.activeAlert = activeAlert
             self.sampleHealth = sampleHealth
             self.runHealth = runHealth
+            self.linkDown = linkDown
         }
     }
 
@@ -56,6 +61,7 @@ enum HealthResolver {
         // A scan is the app looking harder, not looking away. Hold the last
         // reading rather than greying out for its duration.
         if i.isScanning {
+            if i.linkDown { return .critical }
             if let alert = i.activeAlert {
                 return alert.severityRank >= 3 ? .critical : .warning
             }
@@ -65,6 +71,16 @@ enum HealthResolver {
         // the pause signal. Either can last indefinitely, and while it does
         // the app has no current opinion to report.
         if !i.monitoringEnabled || i.isPausedForAnyReason { return .paused }
+        // No link is a fact the newest sample already established, and it
+        // does not stop being true because the process that reported it is
+        // between restarts. Placed ahead of the dead-monitor and alert
+        // branches below: before this, a monitor that died as the link
+        // dropped (or was restarting for the investigation burst the drop
+        // triggers) turned the dot amber, and a lower-ranked active alert
+        // (say a stale warn) did the same — a red situation drawn amber.
+        // Freshness is `LinkState`'s call, so a "no link" sample left behind
+        // by a monitor that never came back still degrades to the warning.
+        if i.linkDown { return .critical }
         // Supposed to be monitoring and isn't: a dead or unstartable
         // monitor child. `.warning`, never the stale sample it left behind
         // — that is exactly how a crashed monitor came to read as a quiet

@@ -133,7 +133,8 @@ struct HomeView: View {
                     isCritical: isStageCritical,
                     isWiFi: isConnectedToWiFi,
                     macStatusGood: routeWarning.macStatusGood,
-                    isWifiLaggy: routeWarning.isWifiLaggy
+                    isWifiLaggy: routeWarning.isWifiLaggy,
+                    linkDown: linkDown
                 )
 
                 // 6. Main 2-Column Dashboard Grid (Ping Chart, Findings & Recent Activity vs Graded Check Details)
@@ -192,7 +193,7 @@ struct HomeView: View {
                         interface: interfaceDetailText,
                         publicCountry: publicCountryDetailText,
                         localIP: macIPString,
-                        publicIP: publicIPString ?? "Checking…",
+                        publicIP: linkDown ? NoLinkCopy.unknownValue : (publicIPString ?? "Checking…"),
                         gatewayIP: routerGatewayIP ?? "—",
                         ispName: ispNameText,
                         dnsServer: dnsServerText,
@@ -281,7 +282,7 @@ struct HomeView: View {
                     id: $0.id)
             },
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
-            linkUp: coordinator.monitor.latest?.link.up ?? true,
+            linkUp: !linkDown,
             measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
             activeResolution: coordinator.activeResolution?.snapshot,
             degradedExperience: degraded
@@ -324,6 +325,20 @@ struct HomeView: View {
                 statusPillText: "Resolved",
                 statusPillTint: Theme.ColorToken.green,
                 statusPillBackground: Theme.ColorToken.greenWash
+            )
+        case .noLink:
+            // Headline and glyph state the observable fact; the subtitle is
+            // the CLI's N1 text (`coordinator.headline`).
+            DashboardStatusHeroView(
+                iconName: NoLinkCopy.icon,
+                iconTint: Theme.ColorToken.red,
+                iconBackground: Theme.ColorToken.redWash,
+                headline: NoLinkCopy.headline,
+                subtitle: coordinator.headline,
+                statusPillText: "Offline",
+                statusPillTint: Theme.ColorToken.red,
+                statusPillBackground: Theme.ColorToken.redWash,
+                detectedTime: "Live"
             )
         case .watching(let sev):
             let isCritical = sev == .critical
@@ -867,7 +882,16 @@ struct HomeView: View {
         return resolved.isEmpty ? nil : resolved
     }
 
+    /// The newest monitor sample says there is no link. While it holds, no
+    /// live reading below may come from that sample, an older one, or the
+    /// last scan: a down link has no router ping, no jitter, no public IP.
+    private var linkDown: Bool { coordinator.linkIsDown }
+
     private var isConnectedToWiFi: Bool {
+        // With no link the sample's `link.type` is only the CLI's default
+        // ("wired" — there is no interface to ask), which is how a Wi-Fi
+        // Mac came to be captioned "Ethernet". `linkIsWiFi` asks the radio.
+        if linkDown { return coordinator.linkIsWiFi }
         if let live = coordinator.monitor.latest?.link.isWiFi {
             return live
         }
@@ -899,6 +923,7 @@ struct HomeView: View {
     }
 
     private var wifiSignalText: String {
+        if linkDown { return NoLinkCopy.linkReading }
         if !isConnectedToWiFi { return "Ethernet" }
         guard let rssi = resolvedRSSI else { return "—" }
         let base = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
@@ -911,12 +936,14 @@ struct HomeView: View {
     }
 
     private var wifiSignalDetail: String {
+        if linkDown { return "" }
         if !isConnectedToWiFi { return "1 Gbps wired" }
         guard let rssi = resolvedRSSI else { return "No reading" }
         return "\(rssi) dBm"
     }
 
     private var wifiSignalTint: Color {
+        if linkDown { return Theme.ColorToken.red }
         if !isConnectedToWiFi { return Theme.ColorToken.green }
         guard let rssi = resolvedRSSI else { return Theme.ColorToken.muted }
         if isWifiLaggy {
@@ -930,12 +957,14 @@ struct HomeView: View {
     }
 
     private var macIPString: String {
-        coordinator.monitor.latest?.link.ip
+        if linkDown { return NoLinkCopy.unknownValue }
+        return coordinator.monitor.latest?.link.ip
             ?? coordinator.latestRun?.snapshot.interfaceInfo.ip
             ?? "192.168.1.24"
     }
 
     private var routerPingText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
         let loss = coordinator.monitor.latest?.gateway.lossPct
             ?? coordinator.latestRun?.snapshot.gateway.lossPct
@@ -948,6 +977,8 @@ struct HomeView: View {
 
     private var isStageCritical: Bool {
         switch stage {
+        case .noLink:
+            return true
         case .watching(let sev):
             return sev == .critical
         case .degraded(let deg):
@@ -960,6 +991,7 @@ struct HomeView: View {
     }
 
     private var routerPingTint: Color {
+        if linkDown { return Theme.ColorToken.muted }
         if routerWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -976,6 +1008,13 @@ struct HomeView: View {
     }
 
     private var routeWarningResult: RouteWarningResolver.Result {
+        // With no link nothing about either hop has been learned. The
+        // inputs below fall back to the last scan's numbers, which would
+        // otherwise colour a hop amber for a fault from an hour ago.
+        if linkDown {
+            return .init(isWifiLaggy: false, macStatusGood: false,
+                         routerWarn: false, internetWarn: false)
+        }
         let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
         let linkUp = coordinator.monitor.latest?.link.up ?? true
         let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? coordinator.latestRun?.snapshot.internetLatency.lossPct ?? 0
@@ -1013,12 +1052,14 @@ struct HomeView: View {
     }
 
     private var routerGatewayIP: String? {
-        coordinator.monitor.latest?.link.gateway
+        if linkDown { return nil }
+        return coordinator.monitor.latest?.link.gateway
             ?? coordinator.latestRun?.snapshot.gateway.ip
             ?? coordinator.hydratedReport?.run.gateway.ip
     }
 
     private var routerLossText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         let loss = coordinator.monitor.latest?.gateway.lossPct
             ?? coordinator.latestRun?.snapshot.gateway.lossPct
             ?? 0
@@ -1036,6 +1077,7 @@ struct HomeView: View {
     }
 
     private var routerJitterText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         let jitter = coordinator.monitor.latest?.gateway.rttJitterMs
             ?? coordinator.latestRun?.snapshot.gateway.rttJitterMs
             ?? 1.0
@@ -1043,6 +1085,7 @@ struct HomeView: View {
     }
 
     private var internetPingText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
         let measuredRtt = coordinator.monitor.latest?.internet.rttAvgMs
             ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs
@@ -1056,6 +1099,7 @@ struct HomeView: View {
     }
 
     private var internetPingTint: Color {
+        if linkDown { return Theme.ColorToken.muted }
         if internetWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -1069,6 +1113,7 @@ struct HomeView: View {
     }
 
     private var routerDetailText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         if lossFiltering.filters(.gateway) {
             return "Ping blocked"
         }
@@ -1104,6 +1149,7 @@ struct HomeView: View {
     }
 
     private var internetDetailText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         let loss = coordinator.monitor.latest?.internet.lossPct
             ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
             ?? 0
@@ -1149,7 +1195,8 @@ struct HomeView: View {
     }
 
     private var countryFlagEmoji: String? {
-        Flag.emoji(forISOCode: countryISO)
+        if linkDown { return nil }
+        return Flag.emoji(forISOCode: countryISO)
     }
 
     private var countryISO: String? {
@@ -1159,12 +1206,14 @@ struct HomeView: View {
     }
 
     private var countryNameString: String? {
-        coordinator.monitor.latest?.publicInfo.country
+        if linkDown { return nil }
+        return coordinator.monitor.latest?.publicInfo.country
             ?? coordinator.latestRun?.snapshot.publicInfo.country
             ?? coordinator.hydratedReport?.run.publicInfo.country
     }
 
     private var internetLossText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         let loss = coordinator.monitor.latest?.internet.lossPct
             ?? coordinator.latestRun?.snapshot.internetLatency.lossPct
             ?? 0
@@ -1172,6 +1221,7 @@ struct HomeView: View {
     }
 
     private var internetJitterText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         let jitter = coordinator.monitor.latest?.internet.rttJitterMs
             ?? coordinator.latestRun?.snapshot.internetLatency.rttJitterMs
             ?? coordinator.currentJitter
@@ -1180,6 +1230,7 @@ struct HomeView: View {
     }
 
     private var bandChannelText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         let band = currentRunResult?.snapshot.wifiScan?.currentBand ?? "5 GHz"
         let channel = coordinator.monitor.latest?.wifi?.channel
             ?? currentRunResult?.snapshot.wifi?.channel
@@ -1231,6 +1282,7 @@ struct HomeView: View {
     // MARK: - Network Details Key-Values
 
     private var interfaceDetailText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         let iface = coordinator.monitor.latest?.link.interface
             ?? coordinator.latestRun?.snapshot.interfaceInfo.name
             ?? "en0"
@@ -1238,6 +1290,7 @@ struct HomeView: View {
     }
 
     private var publicCountryDetailText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         if let flag = countryFlagEmoji, let name = countryNameString {
             return "\(flag) \(name)"
         } else if let name = countryNameString {
@@ -1247,13 +1300,15 @@ struct HomeView: View {
     }
 
     private var ispNameText: String {
-        coordinator.monitor.latest?.publicInfo.isp
+        if linkDown { return NoLinkCopy.unknownValue }
+        return coordinator.monitor.latest?.publicInfo.isp
             ?? coordinator.latestRun?.snapshot.publicInfo.isp
             ?? "Local ISP"
     }
 
     private var dnsServerText: String {
-        coordinator.monitor.latest?.link.gateway ?? routerGatewayIP ?? "192.168.1.1"
+        if linkDown { return NoLinkCopy.unknownValue }
+        return coordinator.monitor.latest?.link.gateway ?? routerGatewayIP ?? "192.168.1.1"
     }
 
     private var vpnDetailText: String {

@@ -205,7 +205,7 @@ struct DropdownView: View {
                     id: $0.id)
             },
             severity: coordinator.monitor.latest?.status.severity ?? "ok",
-            linkUp: coordinator.monitor.latest?.link.up ?? true,
+            linkUp: !linkDown,
             measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
             activeResolution: coordinator.activeResolution?.snapshot,
             degradedExperience: degraded
@@ -238,6 +238,16 @@ struct DropdownView: View {
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: res.title,
                 subtitle: res.message
+            )
+        case .noLink:
+            // The subtitle is the CLI's N1 text (`coordinator.headline`);
+            // the headline and glyph state the one observable fact.
+            MenuStatusHeroView(
+                iconName: NoLinkCopy.icon,
+                iconTint: .red,
+                iconBackground: Color.red.opacity(0.12),
+                headline: NoLinkCopy.headline,
+                subtitle: coordinator.headline
             )
         case .watching(let sev):
             let isCritical = sev == .critical
@@ -348,9 +358,15 @@ struct DropdownView: View {
 
     // MARK: - 4. Connection Route Section
 
+    /// The newest monitor sample says there is no link. Every reading
+    /// below that comes from the sample, an older sample or the last scan
+    /// is void while this holds — a down link has no router ping, no
+    /// internet ping, no jitter and no public-IP country.
+    private var linkDown: Bool { coordinator.linkIsDown }
+
     private var routeWarningResult: RouteWarningResolver.Result {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let linkUp = coordinator.monitor.latest?.link.up ?? true
+        let isWiFi = coordinator.linkIsWiFi
+        let linkUp = !linkDown
         let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
         let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
         let inetJitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
@@ -400,6 +416,7 @@ struct DropdownView: View {
     }
 
     private var macDetailText: String {
+        if linkDown { return NoLinkCopy.macDetail }
         let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
         guard isWiFi else {
             return coordinator.monitor.latest?.link.ip ?? "Ethernet"
@@ -423,40 +440,41 @@ struct DropdownView: View {
     }
 
     private var connectionRouteSection: some View {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let linkUp = coordinator.monitor.latest?.link.up ?? true
+        let isWiFi = coordinator.linkIsWiFi
+        let linkUp = !linkDown
         let cadence = coordinator.monitor.latest?.status.cadenceS ?? Defaults.fastInterval
 
         return ConnectionRouteView(
-            wifiReadingLabel: isWiFi ? "Wi-Fi signal" : "Interface link",
-            wifiReadingValue: isWiFi ? wifiCell.value : (linkUp ? "Connected" : "Down"),
-            wifiReadingTint: isWiFi ? wifiCell.tint : (linkUp ? Theme.ColorToken.green : .red),
-            macIcon: isWiFi ? "laptopcomputer" : "cable.connector",
+            wifiReadingLabel: !linkUp ? "Network link" : (isWiFi ? "Wi-Fi signal" : "Interface link"),
+            wifiReadingValue: !linkUp ? NoLinkCopy.linkReading : (isWiFi ? wifiCell.value : "Connected"),
+            wifiReadingTint: !linkUp ? .red : (isWiFi ? wifiCell.tint : Theme.ColorToken.green),
+            macIcon: !linkUp ? "laptopcomputer" : (isWiFi ? "laptopcomputer" : "cable.connector"),
             macStatusGood: macStatusGood,
             macDetail: macDetailText,
             routerPingValue: routerPingText,
             routerPingTint: routerPingTint,
-            routerStatusGood: !routerWarn,
+            routerStatusGood: !linkDown && !routerWarn,
             routerDetail: routerDetailText,
-            routerWarn: routerWarn,
+            routerWarn: !linkDown && routerWarn,
             internetPingValue: internetPingText,
             internetPingTint: internetPingTint,
-            internetStatusGood: !internetWarn,
+            internetStatusGood: !linkDown && !internetWarn,
             countryFlag: countryFlagEmoji,
             countryName: countryNameString,
-            publicIP: publicIP,
+            publicIP: linkDown ? nil : publicIP,
             internetDetail: internetDetailText,
-            internetWarn: internetWarn,
-            firstLinkLabel: isWiFi ? "Wi-Fi" : "Wired",
-            secondLinkLabel: "Broadband",
-            wifiWarning: isWiFi && isWifiLaggy,
-            isWifiLaggy: isWiFi && isWifiLaggy,
-            routerAdminURL: routerAdminURL,
-            routerAdminAvailable: coordinator.routerAdminAvailable,
+            internetWarn: !linkDown && internetWarn,
+            firstLinkLabel: !linkUp ? NoLinkCopy.nodeDetail : (isWiFi ? "Wi-Fi" : "Wired"),
+            secondLinkLabel: !linkUp ? "" : "Broadband",
+            wifiWarning: !linkDown && isWiFi && isWifiLaggy,
+            isWifiLaggy: !linkDown && isWiFi && isWifiLaggy,
+            routerAdminURL: linkDown ? nil : routerAdminURL,
+            routerAdminAvailable: !linkDown && coordinator.routerAdminAvailable,
             jitterLabel: jitterLabel,
-            jitterMs: currentJitter,
-            jitterWarn: (currentJitter ?? 0) >= 30.0 || (isGatewayJitterDominant && (currentJitter ?? 0) >= 20.0),
+            jitterMs: linkDown ? nil : currentJitter,
+            jitterWarn: !linkDown && (currentJitter ?? 0) >= 30.0 || (isGatewayJitterDominant && (currentJitter ?? 0) >= 20.0),
             jitterDescription: jitterDescriptionText,
+            linkDown: linkDown,
             vpnActive: vpnActive,
             vpnName: vpnName,
             vpnFreshness: "Checked just now",
@@ -467,6 +485,7 @@ struct DropdownView: View {
     }
 
     private var routerPingText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning,
               let sample = coordinator.monitor.latest else { return "—" }
         guard let rtt = sample.gateway.rttAvgMs else {
@@ -477,6 +496,7 @@ struct DropdownView: View {
     }
 
     private var routerPingTint: Color {
+        if linkDown { return Theme.ColorToken.muted }
         let rtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
         if routerWarn || rtt >= 25.0 {
             return Theme.ColorToken.amber
@@ -485,6 +505,7 @@ struct DropdownView: View {
     }
 
     private var internetPingText: String {
+        if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
         if PingReadout.internetShowsTCPOk(rtt: coordinator.monitor.latest?.internet.rttAvgMs,
                                           filtering: lossFiltering) { return "TCP ok" }
@@ -496,6 +517,7 @@ struct DropdownView: View {
     }
 
     private var internetPingTint: Color {
+        if linkDown { return Theme.ColorToken.muted }
         if internetWarn {
             return Theme.ColorToken.amber
         }
@@ -511,6 +533,7 @@ struct DropdownView: View {
     }
 
     private var routerDetailText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         if lossFiltering.filters(.gateway) {
             return "Ping blocked"
         }
@@ -539,6 +562,7 @@ struct DropdownView: View {
     }
 
     private var internetDetailText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         let loss = coordinator.monitor.latest?.internet.lossPct ?? 0
         let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
         let ping = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
@@ -573,16 +597,19 @@ struct DropdownView: View {
     }
 
     private var countryFlagEmoji: String? {
-        Flag.emoji(forISOCode: countryISO)
+        if linkDown { return nil }
+        return Flag.emoji(forISOCode: countryISO)
     }
 
     private var countryNameString: String? {
-        coordinator.monitor.latest?.publicInfo.country
+        if linkDown { return nil }
+        return coordinator.monitor.latest?.publicInfo.country
             ?? coordinator.latestRun?.snapshot.publicInfo.country
             ?? coordinator.hydratedReport?.run.publicInfo.country
     }
 
     private var jitterDescriptionText: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         guard let j = currentJitter else { return "Checking…" }
         if j >= 30.0 {
             return "Uneven response times"
@@ -710,14 +737,17 @@ struct DropdownView: View {
     }
 
     private var currentNetworkDisplayName: String? {
-        coordinator.wifiDisplayName
+        // No link: no interface, so no "Ethernet" either. The monitor's
+        // `link.type` in a down sample is only the CLI's default.
+        if linkDown { return coordinator.wifiDisplayName }
+        return coordinator.wifiDisplayName
             ?? (coordinator.monitor.latest?.link.isWiFi == false
                 ? (coordinator.monitor.latest?.link.interface ?? "Ethernet")
                 : nil)
     }
 
     private var isWiFiConnection: Bool {
-        coordinator.monitor.latest?.link.isWiFi ?? true
+        coordinator.linkIsWiFi
     }
 
     private func toggleMonitoring() {

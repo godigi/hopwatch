@@ -790,6 +790,29 @@ final class HopwatchCoordinator {
     }
 
 
+    /// Gallery fixture for the no-link state (`--gallery-no-link`): the
+    /// newest sample says `link.up == false` while still *carrying* the last
+    /// healthy sample's measurements — stale router loss, jitter, public
+    /// country, and the CLI's default `type: "wired"` — over a rolling
+    /// window of healthy samples. That is the worst case the GUI has to
+    /// survive whatever the monitor emits (a CLI that nulls a down sample
+    /// makes it easier, never harder), and it is what the original
+    /// screenshots showed.
+    func adoptGalleryNoLinkSample() {
+        guard var down = monitor.latest else { return }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        down.ts = formatter.string(from: Date())
+        down.seq = (down.seq ?? 0) + 1
+        down.link = .init(up: false, interface: nil, type: "wired", ip: nil, gateway: nil,
+                          gatewayMAC: nil, ssid: nil, bssid: nil)
+        down.gateway.lossPct = 10
+        down.gateway.rttJitterMs = 3
+        down.status = .init(severity: "critical", measurement: "link-down", rules: ["N1"],
+                            icmpFiltered: false, degraded: true, paused: false, cadenceS: 5)
+        monitor.adoptGallerySample(down, historical: monitor.recent + [down])
+    }
+
     /// What the app is about to do on its own about an unchecked network.
     ///
     /// Exists because "unchecked" alone cannot tell a user whether to wait
@@ -999,7 +1022,21 @@ final class HopwatchCoordinator {
         // loop is up to a cadence behind. The monitor is the fallback, not
         // the primary detector — so nudge it to resample now rather than
         // letting the flag and public IP sit stale for ten seconds.
-        if case .pathChanged(let satisfied, _) = event, !satisfied { return }
+        //
+        // A path going unsatisfied is the loudest of these and used to be
+        // the one that returned early, so a disconnect waited for the next
+        // monitor tick (5 s degraded, 10 s otherwise) before the dot and
+        // the card changed. The resample is local and cheap, so it happens
+        // for every event. What stays skipped when the path is gone is the
+        // part that needs a network: the history reload and the update
+        // check. The alert engine's grace window is not touched here — it
+        // is opened by `NetworkEventWatcher.emit` before this handler runs —
+        // so the resample cannot make a disconnect alert fire early.
+        if case .pathChanged(let satisfied, _) = event, !satisfied {
+            log.debug("network path lost — forcing monitor refresh")
+            monitor.forceRefresh()
+            return
+        }
         log.debug("network event — refreshing history and forcing monitor refresh")
         monitor.forceRefresh()
         Task { await history.load() }
@@ -1476,7 +1513,11 @@ final class HopwatchCoordinator {
     /// A leg the CLI says ping cannot measure (TCP-1 / `icmp_filtered` for the
     /// gateway, ICMP-1 for the internet) is excluded — see `EffectiveLoss`.
     var effectiveLoss: Double? {
-        EffectiveLoss.compute(
+        // No link: neither the null probes in the sample nor the last scan's
+        // figures say anything about the link now. The `latestRun` fallbacks
+        // below are how a router "10% packet loss" survived a disconnect.
+        if linkIsDown { return nil }
+        return EffectiveLoss.compute(
             internetLoss: monitor.latest?.internet.lossPct
                 ?? latestRun?.snapshot.internetLatency.lossPct
                 ?? currentRunResult?.snapshot.internetLatency.lossPct,
@@ -1501,8 +1542,29 @@ final class HopwatchCoordinator {
         )
     }
 
+    /// The newest monitor sample says there is no link, and is recent enough
+    /// to believe. The one answer the dot, both stage cards and every tile
+    /// read — see `LinkState`.
+    var linkIsDown: Bool { LinkState.isDown(sample: monitor.latest) }
+
+    /// Whether the Mac's connection is Wi-Fi, for icons and captions.
+    /// With no link the monitor's `link.type` is only the CLI's default
+    /// ("wired" when there is no interface to ask), so it is not read; the
+    /// question falls through to whether the Wi-Fi radio is on, which is what
+    /// a person on Wi-Fi who lost their network would expect it to say.
+    var linkIsWiFi: Bool {
+        if linkIsDown { return CWWiFiClient.shared().interface()?.powerOn() ?? true }
+        return monitor.latest?.link.isWiFi ?? true
+    }
+
     /// Effective instantaneous or moving RFC 3550 jitter.
+    ///
+    /// Nil with no link. The fallback below averages `monitor.recent`, which
+    /// at the moment of a drop is made entirely of samples from before it —
+    /// so the dropdown said "Jitter 3 ms · Stable response times" over a
+    /// card reading "no network connection".
     var currentJitter: Double? {
+        if linkIsDown { return nil }
         if let live = monitor.latest?.liveJitterMs {
             return live
         }
@@ -1511,6 +1573,7 @@ final class HopwatchCoordinator {
 
     /// Overall connection stability rating evaluated from current RTT, jitter, and packet loss.
     var currentStability: ConnectionStability {
+        if linkIsDown { return .noLink }
         let rtt = monitor.latest?.internet.rttAvgMs ?? monitor.latest?.gateway.rttAvgMs
             ?? latestRun?.snapshot.internetLatency.rttAvgMs ?? latestRun?.snapshot.gateway.rttAvgMs
         return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: effectiveLoss)
@@ -1537,7 +1600,8 @@ final class HopwatchCoordinator {
             monitorRunning: monitor.isRunning,
             activeAlert: activeSnapshot,
             sampleHealth: monitor.latest?.health,
-            runHealth: currentRunHealth))
+            runHealth: currentRunHealth,
+            linkDown: linkIsDown))
     }
 
     /// The CLI's severity for one rule ID, ranked so the worst of a set can
@@ -1613,7 +1677,7 @@ final class HopwatchCoordinator {
     /// The guard order below is deliberately the same order
     /// `StageResolver.resolve` uses for the dropdown's stage card: scanning,
     /// then monitoring-off, then paused-for-any-reason, then a skewed
-    /// monitor, then an active alert, then link-down, then
+    /// monitor, then link-down, then an active alert, then
     /// not-yet-measured, then severity. Before this fix the two orders
     /// disagreed — scanning and "paused" were missing here entirely, and
     /// the active-alert check ran ahead of the skewed-monitor check — so
@@ -1638,11 +1702,18 @@ final class HopwatchCoordinator {
         if let error = monitor.lastError, !monitor.isRunning {
             return "The netdiag command needs attention — \(error)"
         }
+        // Ahead of the active alert, like `StageResolver`'s `.noLink`: the
+        // subtitle under "No network connection" must be about the missing
+        // link, not an older alert's body. The sentence is the CLI's own N1
+        // text from the rules catalog; the literal is only the fallback for
+        // a catalog that has not loaded.
+        if linkIsDown {
+            return Self.headlineText(forRulesIn: monitor.latest?.status.rules ?? [],
+                                     catalog: rulesCatalog.catalog)
+                ?? NoLinkCopy.fallbackSubtitle
+        }
         if let alert = alerts.activeSorted.first {
             return alert.body.isEmpty ? alert.title : alert.body
-        }
-        if let sample = monitor.latest, !sample.link.up {
-            return "Your Mac has no network connection at all."
         }
         if !monitor.isRunning {
             return "Reconnecting to the connection monitor…"
