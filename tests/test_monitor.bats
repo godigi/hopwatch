@@ -1205,6 +1205,8 @@ assert not any(change["id"] == "rule-cleared" for change in sample.get("changes"
   MON_PREV_RULES="L1 "
   MON_GW_LOSS=0 MON_INET_LOSS="" MON_INET_LOSS_ALT=""
   MON_WEB_OK=1 MON_PUBLIC_OK=1 MON_TCP_OK=0 MON_DNS_OK=0
+  # D1 waits for THRESH_MON_CONN_CONFIRM_CYCLES failed lookups in a row.
+  MON_DNS_STREAK="$THRESH_MON_CONN_CONFIRM_CYCLES"
   _mon_rules
   [[ " $MON_RULES " == *" D1 "* && " $MON_RULES " == *" L1 "* ]]
   [ "$MON_SEVERITY" = "critical" ]
