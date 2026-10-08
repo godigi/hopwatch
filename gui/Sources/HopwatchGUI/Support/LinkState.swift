@@ -46,6 +46,54 @@ enum LinkState {
     }
 }
 
+/// "Has the monitor stopped reporting?", as one answer every surface shares.
+///
+/// `LinkState` believes a sample *about a down link* for a long time because
+/// that is the app's loudest fact. This is the opposite question: a hung
+/// `ipconfig`, `arp` or `route` inside the monitor freezes its output
+/// without killing the process, so `isRunning` stays true, `latest` keeps
+/// its last (green) sample, and the dot stays green forever. A sample older
+/// than a few of the monitor's own cadences is not a reading of the network
+/// now, whatever it says.
+///
+/// The window is a fact about the observation, not a verdict about the
+/// network, so it is named in `Defaults` rather than in `lib/thresholds.sh`.
+enum SampleFreshness {
+
+    /// How old the newest sample may be before it stops counting as live.
+    static func window(cadenceS: Int?) -> TimeInterval {
+        Double(cadenceS ?? Defaults.assumedMonitorCadenceS)
+            * Double(Defaults.staleSampleMissedCadences)
+            + Defaults.staleSampleMargin
+    }
+
+    /// - Parameters:
+    ///   - sampleAge: Age of the newest sample, counted from the later of
+    ///     its own timestamp and the moment the monitor last (re)started
+    ///     observing (`MonitorStream.awaitingSince`) — a monitor that has
+    ///     only just resumed has not had time to be late. `nil` with no
+    ///     sample: nothing to be stale, that is "not measured yet".
+    ///   - observing: Monitoring is on and not held by any pause. Off and
+    ///     paused have their own states, and a paused monitor is *supposed*
+    ///     to stop reporting.
+    ///   - samplePaused: The sample itself says it is a paused one.
+    static func isStale(sampleAge: TimeInterval?, cadenceS: Int?,
+                        observing: Bool, samplePaused: Bool = false) -> Bool {
+        guard observing, !samplePaused, let sampleAge else { return false }
+        return sampleAge > window(cadenceS: cadenceS)
+    }
+}
+
+/// What the cards say when the monitor has stopped reporting. State-of-the-
+/// app facts, like `NoLinkCopy`: nothing here says what is wrong with the
+/// network.
+enum StaleSampleCopy {
+    static let headline = "Monitor is not reporting"
+    /// A reading slot with nothing believable to read.
+    static let unknownValue = "—"
+    static let subtitle = "Hopwatch has not received a reading from the connection monitor for a while, so it cannot say how your network is doing right now."
+}
+
 /// What the live tiles say when there is no link. State-of-the-app facts
 /// ("there is no link"), not verdicts about a cause: the explanation of
 /// *why* is the CLI's N1 prose, which the hero shows.

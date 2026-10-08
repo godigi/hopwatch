@@ -85,6 +85,8 @@ struct DropdownView: View {
     private var statusPillText: String {
         if coordinator.isScanning { return "Checking" }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
+        // Not a "Watching" over a monitor that has stopped reporting.
+        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
         if coordinator.monitor.latest?.status.severity == "critical" { return "Problem" }
         if coordinator.monitor.latest?.status.severity == "warn" { return "Degraded" }
         return "Watching"
@@ -93,6 +95,7 @@ struct DropdownView: View {
     private var statusPillColor: Color {
         if coordinator.isScanning { return Theme.ColorToken.blue }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
+        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
         if coordinator.monitor.latest?.status.severity == "critical" { return .red }
         if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amber }
         return Theme.ColorToken.green
@@ -179,7 +182,7 @@ struct DropdownView: View {
     private var degradedExperience: StageResolver.DegradedSnapshot? {
         SuitabilityEngine.synthesizeDegradedExperience(
             items: suitabilityItems,
-            monitorSample: coordinator.monitor.latest,
+            monitorSample: coordinator.liveSample,
             currentJitter: coordinator.currentJitter,
             effectiveLoss: coordinator.effectiveLoss,
             lossFiltering: coordinator.lossFiltering
@@ -204,9 +207,11 @@ struct DropdownView: View {
                         .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
                     id: $0.id)
             },
-            severity: coordinator.monitor.latest?.status.severity ?? "ok",
+            severity: coordinator.liveSample?.status.severity ?? "ok",
             linkUp: !linkDown,
-            measurementState: coordinator.monitor.latest?.status.measurement ?? "unknown",
+            sampleStale: coordinator.latestSampleIsStale,
+            // A sample that predates a stop or pause is not a measurement.
+            measurementState: coordinator.liveSample?.status.measurement ?? "unknown",
             activeResolution: coordinator.activeResolution?.snapshot,
             degradedExperience: degraded
         ))
@@ -282,6 +287,14 @@ struct DropdownView: View {
                     }
                 } : nil)
             )
+        case .notReporting:
+            MenuStatusHeroView(
+                iconName: "exclamationmark.triangle",
+                iconTint: Theme.ColorToken.amber,
+                iconBackground: Theme.ColorToken.amberWash,
+                headline: StaleSampleCopy.headline,
+                subtitle: StaleSampleCopy.subtitle
+            )
         case .checking:
             MenuStatusHeroView(
                 iconName: "circle.dashed",
@@ -333,7 +346,7 @@ struct DropdownView: View {
             || alert.rules.contains("CP-1")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
-            || (coordinator.monitor.latest?.publicInfo.captivePortal == true)
+            || (coordinator.liveSample?.publicInfo.captivePortal == true)
     }
 
     private var quietLine: String {
@@ -365,14 +378,20 @@ struct DropdownView: View {
     private var linkDown: Bool { coordinator.linkIsDown }
 
     private var routeWarningResult: RouteWarningResolver.Result {
+        // A monitor that has stopped reporting has no readings to judge; the
+        // zeros below would read as a Wi-Fi fault (see HomeView).
+        if coordinator.latestSampleIsStale && !linkDown {
+            return .init(isWifiLaggy: false, macStatusGood: false,
+                         routerWarn: false, internetWarn: false)
+        }
         let isWiFi = coordinator.linkIsWiFi
         let linkUp = !linkDown
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let inetPing = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
-        let inetJitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
-        let gwLoss = coordinator.monitor.latest?.gateway.lossPct ?? 0
-        let gwPing = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
-        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
+        let inetLoss = coordinator.liveSample?.internet.lossPct ?? 0
+        let inetPing = coordinator.liveSample?.internet.rttAvgMs ?? 0
+        let inetJitter = currentJitter ?? coordinator.liveSample?.internet.rttJitterMs ?? 0
+        let gwLoss = coordinator.liveSample?.gateway.lossPct ?? 0
+        let gwPing = coordinator.liveSample?.gateway.rttAvgMs ?? 0
+        let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? 0
 
         return RouteWarningResolver.resolve(
             linkUp: linkUp,
@@ -399,7 +418,7 @@ struct DropdownView: View {
     }
 
     private var resolvedBand: String? {
-        if let band = coordinator.latestRun?.snapshot.wifiScan?.currentBand {
+        if let band = coordinator.currentNetworkRun?.snapshot.wifiScan?.currentBand {
             return band
         }
         if let chStr = coordinator.monitor.latest?.wifi?.channel {
@@ -419,7 +438,7 @@ struct DropdownView: View {
         if linkDown { return NoLinkCopy.macDetail }
         let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
         guard isWiFi else {
-            return coordinator.monitor.latest?.link.ip ?? "Ethernet"
+            return coordinator.liveSample?.link.ip ?? "Ethernet"
         }
         if let rssi = resolvedRSSI {
             if let band = resolvedBand {
@@ -427,11 +446,11 @@ struct DropdownView: View {
             }
             return "\(rssi) dBm"
         }
-        return coordinator.monitor.latest?.link.ip ?? "Wi-Fi link"
+        return coordinator.liveSample?.link.ip ?? "Wi-Fi link"
     }
 
     private var isGatewayJitterDominant: Bool {
-        let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
+        let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? 0
         return gwJitter >= 20.0
     }
 
@@ -449,16 +468,16 @@ struct DropdownView: View {
             wifiReadingValue: !linkUp ? NoLinkCopy.linkReading : (isWiFi ? wifiCell.value : "Connected"),
             wifiReadingTint: !linkUp ? .red : (isWiFi ? wifiCell.tint : Theme.ColorToken.green),
             macIcon: !linkUp ? "laptopcomputer" : (isWiFi ? "laptopcomputer" : "cable.connector"),
-            macStatusGood: macStatusGood,
+            macStatusGood: macStatusGood && !coordinator.latestSampleIsStale,
             macDetail: macDetailText,
             routerPingValue: routerPingText,
             routerPingTint: routerPingTint,
-            routerStatusGood: !linkDown && !routerWarn,
+            routerStatusGood: !linkDown && !routerWarn && !coordinator.latestSampleIsStale,
             routerDetail: routerDetailText,
             routerWarn: !linkDown && routerWarn,
             internetPingValue: internetPingText,
             internetPingTint: internetPingTint,
-            internetStatusGood: !linkDown && !internetWarn,
+            internetStatusGood: !linkDown && !internetWarn && !coordinator.latestSampleIsStale,
             countryFlag: countryFlagEmoji,
             countryName: countryNameString,
             publicIP: linkDown ? nil : publicIP,
@@ -478,16 +497,18 @@ struct DropdownView: View {
             vpnActive: vpnActive,
             vpnName: vpnName,
             vpnFreshness: "Checked just now",
-            cadenceText: coordinator.monitor.isRunning && !coordinator.monitor.isPaused
-                ? "Live · every \(cadence) seconds"
-                : "Monitoring off"
+            cadenceText: coordinator.latestSampleIsStale
+                ? "Not reporting"
+                : (coordinator.monitor.isRunning && !coordinator.monitor.isPaused
+                    ? "Live · every \(cadence) seconds"
+                    : "Monitoring off")
         )
     }
 
     private var routerPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning,
-              let sample = coordinator.monitor.latest else { return "—" }
+              let sample = coordinator.liveSample else { return "—" }
         guard let rtt = sample.gateway.rttAvgMs else {
             if let loss = sample.gateway.lossPct, loss >= 100 { return "no reply" }
             return "—"
@@ -497,7 +518,7 @@ struct DropdownView: View {
 
     private var routerPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
-        let rtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
+        let rtt = coordinator.liveSample?.gateway.rttAvgMs ?? 0
         if routerWarn || rtt >= 25.0 {
             return Theme.ColorToken.amber
         }
@@ -507,10 +528,10 @@ struct DropdownView: View {
     private var internetPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
-        if PingReadout.internetShowsTCPOk(rtt: coordinator.monitor.latest?.internet.rttAvgMs,
+        if PingReadout.internetShowsTCPOk(rtt: coordinator.liveSample?.internet.rttAvgMs,
                                           filtering: lossFiltering) { return "TCP ok" }
-        guard let rtt = coordinator.monitor.latest?.internet.rttAvgMs else {
-            if let loss = coordinator.monitor.latest?.internet.lossPct, loss >= 100 { return "no reply" }
+        guard let rtt = coordinator.liveSample?.internet.rttAvgMs else {
+            if let loss = coordinator.liveSample?.internet.lossPct, loss >= 100 { return "no reply" }
             return "—"
         }
         return "\(Int(rtt.rounded())) ms"
@@ -534,22 +555,23 @@ struct DropdownView: View {
 
     private var routerDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
+        if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         if lossFiltering.filters(.gateway) {
             return "Ping blocked"
         }
-        if coordinator.hasRecentRoam && (coordinator.monitor.latest?.gateway.lossPct ?? 0) < 10.0 {
+        if coordinator.hasRecentRoam && (coordinator.liveSample?.gateway.lossPct ?? 0) < 10.0 {
             return "Wi-Fi roamed"
         }
-        let inetLoss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        if let loss = coordinator.monitor.latest?.gateway.lossPct, loss > 0 {
+        let inetLoss = coordinator.liveSample?.internet.lossPct ?? 0
+        if let loss = coordinator.liveSample?.gateway.lossPct, loss > 0 {
             if inetLoss <= 1.0 && loss < 20.0 {
                 return routerGatewayIP ?? "default gateway"
             }
             return LossFormatter.formatPacketLoss(loss)
         }
         if routerWarn {
-            let gwJitter = coordinator.monitor.latest?.gateway.rttJitterMs ?? 0
-            let gwRtt = coordinator.monitor.latest?.gateway.rttAvgMs ?? 0
+            let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? 0
+            let gwRtt = coordinator.liveSample?.gateway.rttAvgMs ?? 0
             if gwJitter >= 20.0 {
                 return String(format: "±%.0f ms jitter", gwJitter)
             }
@@ -563,9 +585,10 @@ struct DropdownView: View {
 
     private var internetDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        let loss = coordinator.monitor.latest?.internet.lossPct ?? 0
-        let jitter = currentJitter ?? coordinator.monitor.latest?.internet.rttJitterMs ?? 0
-        let ping = coordinator.monitor.latest?.internet.rttAvgMs ?? 0
+        if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        let loss = coordinator.liveSample?.internet.lossPct ?? 0
+        let jitter = currentJitter ?? coordinator.liveSample?.internet.rttJitterMs ?? 0
+        let ping = coordinator.liveSample?.internet.rttAvgMs ?? 0
 
         // Only the filtered leg's hop says "Ping blocked"; its loss figure
         // describes the probe, not the link.
@@ -603,9 +626,8 @@ struct DropdownView: View {
 
     private var countryNameString: String? {
         if linkDown { return nil }
-        return coordinator.monitor.latest?.publicInfo.country
-            ?? coordinator.latestRun?.snapshot.publicInfo.country
-            ?? coordinator.hydratedReport?.run.publicInfo.country
+        return coordinator.liveSample?.publicInfo.country
+            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.country
     }
 
     private var jitterDescriptionText: String {
@@ -629,10 +651,10 @@ struct DropdownView: View {
     }
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = coordinator.latestRun?.snapshot
+        let snap = coordinator.currentNetworkRun?.snapshot
         let inputs = SuitabilityEngine.Inputs(
-            monitorSample: coordinator.monitor.latest,
-            speedTest: snap?.speedtest ?? coordinator.latestSpeedTest,
+            monitorSample: coordinator.liveSample,
+            speedTest: snap?.speedtest ?? coordinator.currentSpeedTest?.speed,
             savedSuitability: snap?.suitability,
             catalog: coordinator.rulesCatalog.catalog,
             firedRules: Array(firedRules),
@@ -742,7 +764,7 @@ struct DropdownView: View {
         if linkDown { return coordinator.wifiDisplayName }
         return coordinator.wifiDisplayName
             ?? (coordinator.monitor.latest?.link.isWiFi == false
-                ? (coordinator.monitor.latest?.link.interface ?? "Ethernet")
+                ? (coordinator.liveSample?.link.interface ?? "Ethernet")
                 : nil)
     }
 
@@ -795,7 +817,7 @@ struct DropdownView: View {
     }
 
     private var resolvedRSSI: Int? {
-        coordinator.monitor.latest?.wifi?.rssi ?? coreWLANRSSI
+        coordinator.liveSample?.wifi?.rssi ?? coreWLANRSSI
     }
 
     private var wifiCell: (value: String, unit: String?, tint: Color) {
@@ -830,7 +852,7 @@ struct DropdownView: View {
 
     private func refreshCoreWLANRSSIIfNeeded() {
         guard coordinator.monitor.latest?.link.isWiFi == true,
-              coordinator.monitor.latest?.wifi?.rssi == nil,
+              coordinator.liveSample?.wifi?.rssi == nil,
               coordinator.locationPermissions.isAuthorized,
               let live = CWWiFiClient.shared().interface()?.rssiValue(),
               live != 0 else {
@@ -841,18 +863,15 @@ struct DropdownView: View {
     }
 
     private var speedValues: (down: String, up: String, age: String?) {
-        if let speed = coordinator.latestSpeedTest {
-            let age = coordinator.latestSpeedTestAt
-                .map { RelativeTime.string(from: $0) }
+        // Already scoped to this network by the coordinator (see
+        // `currentSpeedTest`); the unscoped store lookup that used to follow
+        // took the "newest anywhere" branch whenever no sample had arrived.
+        if let current = coordinator.currentSpeedTest {
+            let speed = current.speed
+            let age = current.at.map { RelativeTime.string(from: $0) }
             return (speed.downMbps.map { String(Int($0.rounded())) } ?? "—",
                     speed.upMbps.map { String(Int($0.rounded())) } ?? "—",
                     age)
-        }
-        if let stored = coordinator.history.latestSpeedTest(
-            for: coordinator.monitor.latest?.network.historyJoinID) {
-            return (String(Int(stored.down.rounded())),
-                    stored.up.map { String(Int($0.rounded())) } ?? "—",
-                    RelativeTime.string(from: stored.date))
         }
         return ("—", "—", nil)
     }
@@ -945,9 +964,8 @@ struct DropdownView: View {
     }
 
     private var routerGatewayIP: String? {
-        coordinator.monitor.latest?.link.gateway
-            ?? coordinator.latestRun?.snapshot.gateway.ip
-            ?? coordinator.hydratedReport?.run.gateway.ip
+        coordinator.liveSample?.link.gateway
+            ?? coordinator.currentNetworkRun?.snapshot.gateway.ip
     }
 
     private var routerAdminURL: URL? {
@@ -966,28 +984,24 @@ struct DropdownView: View {
     }
 
     private var publicIP: String? {
-        let ip = coordinator.monitor.latest?.publicInfo.ip
-            ?? coordinator.latestRun?.snapshot.publicInfo.ip
-            ?? coordinator.hydratedReport?.run.publicInfo.ip
+        let ip = coordinator.liveSample?.publicInfo.ip
+            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.ip
         return (ip?.isEmpty ?? true) ? nil : ip
     }
 
     private var countryISO: String? {
-        coordinator.monitor.latest?.publicInfo.countryISO
-            ?? coordinator.latestRun?.snapshot.publicInfo.countryISO
-            ?? coordinator.hydratedReport?.run.publicInfo.countryISO
+        coordinator.liveSample?.publicInfo.countryISO
+            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.countryISO
     }
 
     private var vpnActive: Bool {
         coordinator.monitor.latest?.vpn.active
-            ?? coordinator.latestRun?.snapshot.vpn.active
-            ?? coordinator.hydratedReport?.run.vpn.active ?? false
+            ?? coordinator.currentNetworkRun?.snapshot.vpn.active ?? false
     }
 
     private var vpnName: String? {
         coordinator.monitor.latest?.vpn.name
-            ?? coordinator.latestRun?.snapshot.vpn.name
-            ?? coordinator.hydratedReport?.run.vpn.name
+            ?? coordinator.currentNetworkRun?.snapshot.vpn.name
     }
 }
 

@@ -130,12 +130,35 @@ enum MonitorSeries {
         return result
     }
 
+    /// The samples that can honestly be averaged together with the newest:
+    /// same network identity, link up, not paused, and no older than
+    /// `SampleFreshness.window` before it. Oldest first, as given.
+    static func contemporaries(of samples: [MonitorSample]) -> [MonitorSample] {
+        guard let newest = samples.last else { return [] }
+        let window = SampleFreshness.window(cadenceS: newest.status.cadenceS)
+        let network = newest.network.historyJoinID
+        let floor = newest.timestamp.addingTimeInterval(-window)
+        return samples.filter {
+            $0.link.up && !$0.status.paused
+                && $0.network.historyJoinID == network
+                && $0.timestamp >= floor
+        }
+    }
+
     /// Computes moving RFC 3550 jitter across a sequence of samples:
     /// D(i-1, i) = |RTT_i - RTT_{i-1}|
     /// J_i = J_{i-1} + (|D| - J_{i-1}) / 16.0
     /// If samples already have measured probe burst jitter, prioritizes the latest sample's
     /// `liveJitterMs`, falling back to the inter-sample RFC 3550 moving estimate.
-    static func movingJitter(samples: [MonitorSample]) -> Double? {
+    ///
+    /// Only samples that describe the link *now* are used: the same network
+    /// as the newest sample, link up, not a paused (carried-over) sample,
+    /// and within `SampleFreshness.window` of the newest. The rolling
+    /// buffer this is handed holds an hour, across networks and link drops
+    /// (`MonitorStream.recent`); averaging it said "jitter 3 ms" in a
+    /// café with the Wi-Fi of the previous one still in the window.
+    static func movingJitter(samples all: [MonitorSample]) -> Double? {
+        let samples = contemporaries(of: all)
         if let latestJitter = samples.reversed().first(where: { $0.liveJitterMs != nil })?.liveJitterMs {
             return latestJitter
         }

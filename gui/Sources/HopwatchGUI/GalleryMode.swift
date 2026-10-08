@@ -233,6 +233,15 @@ enum GalleryMode {
         if CommandLine.arguments.contains("--gallery-no-link") {
             coordinator.adoptGalleryNoLinkSample()
         }
+        // `--gallery-moved`: the monitor is on a network the hydrated report
+        // is not about.
+        if CommandLine.arguments.contains("--gallery-moved") {
+            coordinator.adoptGalleryMovedNetwork()
+        }
+        // `--gallery-stale`: the monitor's newest sample is minutes old.
+        if CommandLine.arguments.contains("--gallery-stale") {
+            coordinator.adoptGalleryStaleSample()
+        }
 
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this

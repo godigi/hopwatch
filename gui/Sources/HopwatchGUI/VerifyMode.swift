@@ -65,6 +65,7 @@ private enum VerifyHarness {
         runStageTests()
         runHealthResolverTests()
         runNoLinkTests()
+        runStaleDataTests()
         runAlertAttributionTests()
         runAlertSettleTests()
         runEventAlertDwellTests()
@@ -300,6 +301,252 @@ private enum VerifyHarness {
         check(coordinator.currentJitter != nil, "coordinator: jitter returns with the link")
     }
 
+    // MARK: - Stale / misleading displays (docs/design/2026-10-08-stale-data-audit.md)
+
+    private static let homeID = "ssid:home"
+    private static let cafeID = "ssid:corner-cafe"
+
+    /// A healthy, fresh, link-up sample on `network`, `ageS` seconds old.
+    /// Built from the real link-down line, like `runNoLinkCoordinatorTests`.
+    private static func liveSample(network: String?, ageS: TimeInterval = 0,
+                                   rtt: Double? = 20, jitter: Double? = nil, loss: Double? = nil,
+                                   cadenceS: Int? = 5, linkUp: Bool = true,
+                                   paused: Bool = false, ip: String? = "198.51.100.7") -> MonitorSample? {
+        guard var s = try? JSONDecoder().decode(MonitorSample.self, from: Data(linkDownLine.utf8)) else { return nil }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        s.ts = f.string(from: Date().addingTimeInterval(-ageS))
+        s.network = .init(id: network.map { "wifi:ssid=\($0)" }, label: network, groupId: network)
+        s.link = .init(up: linkUp, interface: linkUp ? "en0" : nil, type: "wifi", ip: "192.168.1.9",
+                       gateway: "192.168.1.1", gatewayMAC: nil, ssid: nil, bssid: nil)
+        s.jitterMs = jitter
+        s.gateway = .init(lossPct: loss, rttAvgMs: rtt, rttJitterMs: nil)
+        s.internet = .init(lossPct: loss, rttAvgMs: rtt, rttJitterMs: nil)
+        s.publicInfo = ip.map { .init(ok: true, ip: $0, isp: "Live ISP", asn: nil, city: nil,
+                                      country: "Brazil", countryISO: "BR", captivePortal: false) } ?? .init()
+        s.status = .init(severity: "ok", measurement: "measured", rules: [], icmpFiltered: false,
+                         degraded: false, paused: paused, cadenceS: cadenceS)
+        return s
+    }
+
+    /// A scan result for `network`, finished `agoS` seconds ago, carrying
+    /// loss and RTT figures and a public IP that are distinctly *its own*.
+    private static func scanResult(network: String, agoS: TimeInterval) -> RunResult? {
+        let json = """
+        {"network":{"id":"wifi:ssid=\(network)","group_id":"\(network)"},
+         "gateway":{"ip":"10.9.9.1","loss_pct":10,"rtt_avg_ms":3},
+         "internet_latency":{"loss_pct":7,"rtt_avg_ms":6},
+         "public":{"ip":"203.0.113.77","country":"Iceland","country_iso":"IS","isp":"Scan ISP"},
+         "speedtest":{"down_mbps":480,"up_mbps":40}}
+        """
+        guard let snap = try? JSONDecoder().decode(RunSnapshot.self, from: Data(json.utf8)) else { return nil }
+        let end = Date().addingTimeInterval(-agoS)
+        return RunResult(snapshot: snap, rawJSON: json, exitCode: 0,
+                         startedAt: end.addingTimeInterval(-60), finishedAt: end)
+    }
+
+    private static func storedDetail(network: String) -> RunDetail? {
+        guard let r = scanResult(network: network, agoS: 3600),
+              let data = """
+              {"id":"stored-1","run":\(r.rawJSON),"context":{"network_id":"\(network)"}}
+              """.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(RunDetail.self, from: data)
+    }
+
+    /// The audit's critical findings (#2b, #3, #4, #6, #13, #5), asserted on
+    /// the coordinator the views read. Every case here describes a state the
+    /// pre-fix code rendered wrongly: another network's run, speed test, flag,
+    /// loss or RTT; an hour of cross-network jitter; a frozen monitor read as
+    /// live; a sample from before a pause read as live.
+    static func runStaleDataTests() {
+        print("Stale data (scoping, freshness, jitter window)")
+
+        // -- RunScope: the one predicate
+        let plain: (String) -> String = { $0 }
+        check(RunScope.isSameNetwork(run: homeID, live: homeID, canonical: plain), "same id → same network")
+        check(!RunScope.isSameNetwork(run: homeID, live: cafeID, canonical: plain), "different ids → another network")
+        check(RunScope.isSameNetwork(run: homeID, live: nil, canonical: plain),
+              "no live network yet → the run is not provably wrong (cold launch keeps working)")
+        check(RunScope.isSameNetwork(run: nil, live: cafeID, canonical: plain),
+              "a run with no recorded network is not provably wrong")
+        check(RunScope.isSameNetwork(run: homeID, live: cafeID, canonical: { _ in "merged" }),
+              "ids the user has merged are one network")
+
+        guard let homeRun5s = scanResult(network: homeID, agoS: 5),
+              let homeRunOld = scanResult(network: homeID, agoS: 600),
+              let homeStored = storedDetail(network: homeID),
+              let atCafe = liveSample(network: cafeID),
+              let atHome = liveSample(network: homeID),
+              let atCafeNoRTT = liveSample(network: cafeID, rtt: nil, ip: nil) else {
+            check(false, "stale-data fixtures decode"); return
+        }
+
+        // -- A: the one accessor
+        let c = HopwatchCoordinator()
+        c.monitor.adoptGallerySample(atCafeNoRTT, historical: [atCafeNoRTT])
+        c.adoptSessionStateForTesting(latestRun: homeRun5s)
+        check(c.currentNetworkRun == nil, "A: a scan from home is not offered while the monitor is on the café")
+        check(c.currentRunResult == nil, "A: …so Home's check table, panels and findings get no run")
+        check(c.reportSource == nil, "A: …and Home's report source is empty (\"Awaiting check\"), not the living room's report")
+        check(c.currentNetworkRun?.snapshot.publicInfo.ip == nil && c.currentNetworkRun?.snapshot.publicInfo.countryISO == nil,
+              "A: the public IP, flag and ISP chains get nothing from another network's run")
+        check(c.effectiveLoss == nil,
+              "A: effectiveLoss does not fall back to another network's scan (was 10%)")
+        equal(c.currentStability, ConnectionStability.evaluate(rtt: nil, jitter: c.currentJitter, loss: c.effectiveLoss),
+              "A: stability does not borrow another network's RTT")
+
+        c.monitor.adoptGallerySample(atHome, historical: [atHome])
+        c.adoptSessionStateForTesting(latestRun: homeRun5s)
+        if let run = c.currentNetworkRun {
+            check(run.isLive && run.age() >= 5 && run.age() < 15, "A: the same network's scan is offered, with its age (~5 s)")
+        } else { check(false, "A: the same network's scan is offered") }
+        var homeNoLoss = atHome; homeNoLoss.internet.lossPct = nil; homeNoLoss.gateway.lossPct = nil
+        c.monitor.adoptGallerySample(homeNoLoss, historical: [homeNoLoss])
+        check(c.effectiveLoss != nil, "A: a scan of this network from seconds ago may stand in for a missing live loss")
+        c.adoptSessionStateForTesting(latestRun: homeRunOld)
+        check(c.currentNetworkRun != nil && (c.currentNetworkRun?.age() ?? 0) >= 600,
+              "A: a 10-minute-old scan of this network is still its report, with its age")
+        check(c.effectiveLoss == nil,
+              "A: …but is older than the staleness window, so it is not a measurement of the link now")
+
+        c.adoptSessionStateForTesting(hydrated: homeStored)
+        c.monitor.adoptGallerySample(atCafe, historical: [atCafe])
+        check(c.currentNetworkRun == nil && c.currentRunResult == nil,
+              "A: a hydrated report of home is not offered at the café")
+        let cold = HopwatchCoordinator()
+        cold.adoptSessionStateForTesting(hydrated: homeStored)
+        check(cold.currentNetworkRun != nil && !(cold.currentNetworkRun?.isLive ?? true),
+              "A: with no live sample yet, the hydrated report is still offered (cold launch unchanged)")
+
+        // -- B: speed test
+        let speed = RunSnapshot.Speedtest(downMbps: 480, upMbps: 40)
+        c.adoptSessionStateForTesting(speed: speed, speedAt: Date(), speedNetwork: homeID)
+        c.monitor.adoptGallerySample(atCafe, historical: [atCafe])
+        check(c.currentSpeedTest == nil, "B: home's 480/40 is not shown at the café")
+        c.monitor.adoptGallerySample(atHome, historical: [atHome])
+        check(c.currentSpeedTest?.speed.downMbps == 480, "B: …and is shown at home")
+        let fresh = HopwatchCoordinator()
+        fresh.adoptSessionStateForTesting(speed: speed, speedAt: Date(), speedNetwork: homeID)
+        check(fresh.currentSpeedTest != nil, "B: with no live network yet, a figure measured this session is kept")
+
+        // Hydration reads the store scoped to a network, never "newest anywhere".
+        let storedSpeedRuns = [
+            HistoryDocument.Run(ts: "2026-10-01T10:00:00Z", networkID: homeID, runMode: "full",
+                                metrics: ["speed_down_mbps": 480, "speed_up_mbps": 40])]
+        func hydrate(_ id: String?, at network: String) -> HopwatchCoordinator {
+            let co = HopwatchCoordinator()
+            co.history.adoptRunsForTesting(storedSpeedRuns)
+            // A run in memory keeps hydration from opening the CLI.
+            co.adoptSessionStateForTesting(latestRun: scanResult(network: network, agoS: 1))
+            var done = false
+            Task { @MainActor in await co.hydrateFromHistoryIfNeeded(explicitNetworkID: id); done = true }
+            spin(2.0, until: { done })
+            return co
+        }
+        check(hydrate(cafeID, at: cafeID).latestSpeedTest == nil,
+              "B: cold-launch hydration at the café does not adopt home's stored speed test")
+        check(hydrate(homeID, at: homeID).latestSpeedTest?.downMbps == 480, "B: …but does adopt it at home")
+        check(hydrate(nil, at: homeID).latestSpeedTest == nil,
+              "B: with no network identified, hydration adopts no speed test at all")
+
+        // -- C: jitter window
+        let ramp = (0..<30).compactMap { i in
+            liveSample(network: homeID, ageS: 400 - Double(i) * 10, rtt: 20 + Double((i * 37) % 23))
+        }
+        guard let cafeNow = liveSample(network: cafeID, ageS: 0, rtt: 30),
+              let a = liveSample(network: cafeID, ageS: 200, rtt: 20),
+              let b = liveSample(network: cafeID, ageS: 190, rtt: 90),
+              let d1 = liveSample(network: cafeID, ageS: 1, rtt: 40),
+              let d2 = liveSample(network: cafeID, ageS: 0, rtt: 43),
+              let down = liveSample(network: cafeID, ageS: 3, rtt: 500, linkUp: false),
+              let pausedS = liveSample(network: cafeID, ageS: 2, rtt: 500, paused: true) else {
+            check(false, "jitter fixtures"); return
+        }
+        check(MonitorSeries.movingJitter(samples: ramp + [cafeNow]) == nil,
+              "C: jitter ignores samples from another network (one sample left → nothing to average)")
+        let windowed = MonitorSeries.movingJitter(samples: [a, b, d1, d2])
+        check(windowed != nil && abs((windowed ?? 0) - 3.0) < 0.01,
+              "C: jitter uses only samples within the window of the newest (3.0, not the 20→90 swing)")
+        let j = MonitorSeries.movingJitter(samples: [down, pausedS, d1, d2])
+        check(j != nil && abs((j ?? 0) - 3.0) < 0.01, "C: link-down and paused samples are not averaged in")
+        let jc = HopwatchCoordinator()
+        jc.monitor.adoptGallerySample(cafeNow, historical: ramp + [cafeNow])
+        check(jc.currentJitter == nil, "C: coordinator.currentJitter is not the moving average of another network's hour")
+
+        // -- D: the sample-age watchdog
+        equal(SampleFreshness.window(cadenceS: 5), 25.0, "D: window is 3 cadences + 10 s margin (25 s at a 5 s cadence)")
+        equal(SampleFreshness.window(cadenceS: nil), 25.0, "D: a sample with no cadence assumes the named default")
+        check(!SampleFreshness.isStale(sampleAge: 24, cadenceS: 5, observing: true), "D: 24 s old is live")
+        check(SampleFreshness.isStale(sampleAge: 26, cadenceS: 5, observing: true), "D: 26 s old is stale")
+        check(!SampleFreshness.isStale(sampleAge: 600, cadenceS: 5, observing: false), "D: monitoring off/paused is never 'stale'")
+        check(!SampleFreshness.isStale(sampleAge: 600, cadenceS: 5, observing: true, samplePaused: true),
+              "D: a paused sample is not 'stale'")
+        check(!SampleFreshness.isStale(sampleAge: nil, cadenceS: 5, observing: true), "D: no sample is 'not measured', not 'late'")
+        check(!SampleFreshness.isStale(sampleAge: 100, cadenceS: 30, observing: true), "D: a slow cadence widens the window")
+
+        func dot(stale: Bool, linkDown: Bool = false, paused: Bool = false, enabled: Bool = true,
+                 running: Bool = true) -> Health {
+            HealthResolver.resolve(.init(isScanning: false, monitoringEnabled: enabled,
+                                         isPausedForAnyReason: paused, monitorRunning: running,
+                                         sampleHealth: .healthy, runHealth: .healthy,
+                                         linkDown: linkDown, sampleStale: stale))
+        }
+        equal(dot(stale: true), .warning, "D: a stale sample never reads green")
+        equal(dot(stale: false), .healthy, "D: …and a fresh one still does")
+        equal(dot(stale: true, linkDown: true), .critical, "D: a stale-looking no-link sample is still red")
+        equal(dot(stale: true, paused: true), .paused, "D: paused still wins over stale")
+        equal(dot(stale: true, enabled: false), .paused, "D: switched off still wins over stale")
+        equal(StageResolver.resolve(inputs(sampleStale: true)), .notReporting, "D: stale → the card says the monitor is not reporting")
+        equal(StageResolver.resolve(inputs(linkUp: false, sampleStale: true)), .noLink, "D: …but never masks no-link")
+        equal(StageResolver.resolve(inputs(sampleStale: true, isPausedForAnyReason: true)), .paused(nil), "D: …nor the paused card")
+        equal(StageResolver.resolve(inputs(sampleStale: true, isScanning: true)), .testing, "D: …nor a scan in progress")
+        equal(StageResolver.resolve(inputs(sampleStale: false)), .healthy, "D: a fresh sample is unchanged")
+
+        guard let old = liveSample(network: homeID, ageS: 120) else { check(false, "stale fixture"); return }
+        let sc = HopwatchCoordinator()
+        sc.monitor.adoptGallerySample(old, historical: [old])
+        // These read the "monitoring is on" preference; the app default is on.
+        let monitoring = Defaults.monitoringEnabled
+        check(!monitoring || sc.latestSampleIsStale, "D: coordinator: a 2-minute-old sample is stale")
+        check(!monitoring || sc.liveSample == nil, "D: coordinator: …and is not a live sample (ping/route cells read '—')")
+        check(!monitoring || sc.currentHealth == .warning, "D: coordinator: …and the menu-bar dot is amber, not green")
+        check(!monitoring || sc.currentJitter == nil, "D: coordinator: …and reports no jitter")
+        check(!monitoring || sc.headline == StaleSampleCopy.subtitle, "D: coordinator: …and the headline says so")
+        check(!sc.computeSampleIsStale(now: Date().addingTimeInterval(-120 + 5)),
+              "D: coordinator: the same sample was live when it was 5 s old")
+        if let downOld = liveSample(network: homeID, ageS: 60, linkUp: false) {
+            sc.monitor.adoptGallerySample(downOld, historical: [downOld])
+            check(sc.linkIsDown, "D: a minute-old link-down sample is still believed down")
+            check(!monitoring || sc.currentHealth == .critical, "D: …and the stale watchdog does not mask it (dot stays red)")
+        }
+        sc.monitor.adoptGallerySample(old, historical: [old])
+        sc.monitor.pause(reason: "verify")
+        check(!sc.latestSampleIsStale, "D: a paused monitor is not 'stale' (it is meant to be quiet)")
+        sc.monitor.resume(reason: "verify")
+
+        // -- E: nothing from before a stop/pause passes as live
+        let ec = HopwatchCoordinator()
+        ec.monitor.adoptGallerySample(atHome, historical: [atHome])
+        check(ec.liveSample != nil || !monitoring, "E: a fresh sample is live")
+        ec.monitor.pause(reason: "verify")
+        ec.monitor.resume(reason: "verify")
+        check(ec.monitor.isAwaitingFirstSample && ec.monitor.latest != nil, "E: resume keeps `latest` but marks it awaiting")
+        check(ec.liveSample == nil, "E: …so its readings are not live until a fresh sample arrives")
+        check(!monitoring || ec.currentHealth != .healthy, "E: …and the dot is not green on a sample from before the pause")
+        check(ec.currentJitter == nil && ec.effectiveLoss == nil, "E: …and no jitter or loss is read from it")
+        ec.monitor.adoptGallerySample(atHome, historical: [atHome])
+        check(!ec.monitor.isAwaitingFirstSample && (ec.liveSample != nil || !monitoring), "E: a fresh sample clears the wait")
+        ec.monitor.stop()
+        check(ec.monitor.latest != nil && ec.liveSample == nil,
+              "E: stop() keeps `latest` (no-link survives restarts) but it is no longer live")
+        if let ancient = liveSample(network: homeID, ageS: 3600) {
+            ec.monitor.adoptGallerySample(ancient, historical: [ancient])
+            ec.monitor.stop()
+            check(!ec.computeSampleIsStale(now: Date()), "E: a monitor that has only just restarted has not had time to be late")
+        }
+        print("")
+    }
+
     /// A real `--monitor` line captured with no default route: every
     /// measurement null, `status.measurement` "link-down", rule N1, and
     /// `link.type` still "wired" (the CLI's default when there is no
@@ -361,12 +608,15 @@ private enum VerifyHarness {
         })
         check(!sawStopped,
               "forceRefresh during child start-up does not kill the monitor (isRunning never drops)")
+        check(!stream.isAwaitingFirstSample, "a real sample from the child ends the wait for a first sample")
         check(stream.latest != nil, "the link-down line decodes into a sample")
         check(stream.latest?.link.up == false, "decoded sample says link.up == false")
         equal(stream.latest?.health ?? .healthy, .critical, "a link-down sample's own health is critical")
         check(FileManager.default.fileExists(atPath: flag),
               "the refresh was deferred, not dropped: delivered once the child proved its traps")
         stream.stop()
+        check(stream.isAwaitingFirstSample && stream.latest != nil,
+              "stop() keeps the last sample but marks it as awaiting a fresh one")
     }
 
     // MARK: - Alert attribution
@@ -2361,13 +2611,15 @@ private enum VerifyHarness {
         check(unstableJitter.level == .unstable, "jitter > 50ms evaluates to .unstable")
 
         // Moving jitter RFC 3550 fallback
-        let s1 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 20.0))
-        let s2 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 36.0))
+        // Link up: `movingJitter` now averages only samples that describe a
+        // working link (the default `Link()` is down).
+        let s1 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 20.0))
+        let s2 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 36.0))
         let moving = MonitorSeries.movingJitter(samples: [s1, s2])
         check(moving != nil && abs((moving ?? 0) - 16.0) < 0.01, "moving jitter computes RTT delta correctly")
 
         // Live burst jitter priority
-        let sLive = MonitorSample(jitterMs: 4.2)
+        let sLive = MonitorSample(jitterMs: 4.2, link: .init(up: true))
         check(sLive.liveJitterMs == 4.2, "sample exposes top-level jitter_ms via liveJitterMs")
         check(MonitorSeries.movingJitter(samples: [sLive]) == 4.2, "movingJitter prioritizes live burst jitter")
     }
@@ -2402,6 +2654,7 @@ private enum VerifyHarness {
 
     private static func inputs(severity: String = "ok",
                                linkUp: Bool = true,
+                               sampleStale: Bool = false,
                                activeAlert: StageResolver.AlertSnapshot? = nil,
                                isScanning: Bool = false,
                                isArrivalCheck: Bool = false,
@@ -2424,6 +2677,7 @@ private enum VerifyHarness {
             activeAlert: activeAlert,
             severity: severity,
             linkUp: linkUp,
+            sampleStale: sampleStale,
             measurementState: measurementState,
             activeResolution: activeResolution,
             degradedExperience: degradedExperience
@@ -3231,6 +3485,10 @@ private enum VerifyHarness {
                 content(icon: "circle.dashed", tint: .accentColor,
                         title: "Checking a new network", tertiary: "pinging the gateway")
                     .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            case .notReporting:
+                content(icon: "exclamationmark.triangle", tint: .orange,
+                        title: StaleSampleCopy.headline, tertiary: "no recent reading")
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             case .checking:
                 content(icon: "hourglass", tint: .secondary,
                         title: "Checking connection…", tertiary: "waiting for a live reading")

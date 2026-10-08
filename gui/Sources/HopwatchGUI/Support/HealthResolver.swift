@@ -40,12 +40,15 @@ enum HealthResolver {
         /// The newest monitor sample says there is no link, and is recent
         /// enough to believe (`LinkState.isDown`).
         let linkDown: Bool
+        /// The newest sample is older than `SampleFreshness` allows while
+        /// monitoring is on and not paused. Never green.
+        let sampleStale: Bool
 
         init(isScanning: Bool, monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, monitorRunning: Bool,
              activeAlert: StageResolver.AlertSnapshot? = nil,
              sampleHealth: Health?, runHealth: Health?,
-             linkDown: Bool = false) {
+             linkDown: Bool = false, sampleStale: Bool = false) {
             self.isScanning = isScanning
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
@@ -54,6 +57,7 @@ enum HealthResolver {
             self.sampleHealth = sampleHealth
             self.runHealth = runHealth
             self.linkDown = linkDown
+            self.sampleStale = sampleStale
         }
     }
 
@@ -86,6 +90,11 @@ enum HealthResolver {
         // — that is exactly how a crashed monitor came to read as a quiet
         // network.
         if !i.monitorRunning { return .warning }
+        // A sample too old to be a reading: the monitor process is alive but
+        // not reporting. Same answer as a dead one, for the same reason —
+        // what it last said is not the network now. After the no-link
+        // branch above, which has its own (longer) window.
+        if i.sampleStale { return .warning }
         if let alert = i.activeAlert {
             return alert.severityRank >= 3 ? .critical : .warning
         }

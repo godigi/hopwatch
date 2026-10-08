@@ -54,6 +54,25 @@ final class MonitorStream {
     /// when there isn't one. Public so the Live section can say out loud
     /// that what it is drawing is temporary.
     private(set) var burstUntil: Date?
+    /// Set when `latest` stopped being the newest word on the network and a
+    /// fresh sample has not yet replaced it: the monitor was switched off
+    /// (`stop()`) or came back from a pause (`resume()`), and `latest` still
+    /// holds whatever it measured before — possibly on another network, as
+    /// the Mac was carried somewhere else meanwhile. Cleared by the first
+    /// real (non-paused) sample.
+    ///
+    /// Not cleared by `restart()`, which is the app replacing its own child
+    /// for a cadence change or an investigation burst: that child is probing
+    /// the same link, and blanking every reading each time severity turned
+    /// bad would hide exactly the numbers the burst exists to show.
+    ///
+    /// This is why `latest` itself is *not* cleared on stop/start: stopping
+    /// a monitor whose last sample says "no link" must keep that fact (the
+    /// dot stays red between a crash and its replacement), and `restart()`
+    /// is stop-then-start. Readers that draw measurements read
+    /// `HopwatchCoordinator.liveSample`, which honours this flag.
+    private(set) var awaitingSince: Date?
+    var isAwaitingFirstSample: Bool { awaitingSince != nil }
 
     private var process: Process?
     private var readTask: Task<Void, Never>?
@@ -275,6 +294,7 @@ final class MonitorStream {
         process = nil
         isRunning = false
         isPaused = false
+        awaitingSince = Date()
         restartPending = false
         pauseHolders.removeAll()
         pauseReason = nil
@@ -300,7 +320,9 @@ final class MonitorStream {
         let interval = burstInterval
         let until = burstUntil
         let wasRunning = isRunning
+        let wasAwaiting = awaitingSince
         stop()
+        awaitingSince = wasAwaiting
         burstInterval = interval
         burstUntil = until
         restartAttempts = 0
@@ -387,6 +409,10 @@ final class MonitorStream {
             return
         }
         pauseReason = nil
+        // Whatever `latest` holds was measured before the pause, and the
+        // Mac may have moved since (a lid closed in one place and opened
+        // in another). Do not let it pass as live until a sample proves it.
+        if awaitingSince == nil { awaitingSince = Date() }
         guard trapsReady else {
             // Every holder released before the child proved its traps:
             // nothing was ever signaled, so there is nothing to undo.
@@ -477,6 +503,9 @@ final class MonitorStream {
         // A sample proves the process is alive and producing, which is the
         // only evidence that matters for backoff.
         restartAttempts = 0
+        // A paused sample carries values from before the pause; it is the
+        // monitor saying it is not looking, not a reading.
+        if !sample.status.paused { awaitingSince = nil }
         // Backstop for the burst deadline. The timer is the normal path;
         // this catches the case where it was lost with a cancelled task
         // tree, which would otherwise leave the machine sampling every two
@@ -513,6 +542,7 @@ final class MonitorStream {
     /// Populates synthetic sample data for GalleryMode previews without running a child process.
     func adoptGallerySample(_ sample: MonitorSample, historical: [MonitorSample] = []) {
         self.latest = sample
+        self.awaitingSince = nil
         self.isRunning = true
         self.isPaused = false
         self.pauseReason = nil

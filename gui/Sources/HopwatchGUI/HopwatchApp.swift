@@ -333,14 +333,14 @@ struct MenuBarLabel: View {
     // ping beside a red dot.
     private var countryISO: String? {
         if coordinator.linkIsDown { return nil }
-        return coordinator.monitor.latest?.publicInfo.countryISO
-            ?? coordinator.latestRun?.snapshot.publicInfo.countryISO
+        return coordinator.liveSample?.publicInfo.countryISO
+            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.countryISO
     }
 
     private var publicIP: String? {
         if coordinator.linkIsDown { return nil }
-        let ip = coordinator.monitor.latest?.publicInfo.ip
-            ?? coordinator.latestRun?.snapshot.publicInfo.ip
+        let ip = coordinator.liveSample?.publicInfo.ip
+            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.ip
         guard let ip, !ip.isEmpty else { return nil }
         // IPv6 addresses are far too long for a menu bar. Show the last
         // group, which is the part that actually changes.
@@ -356,10 +356,10 @@ struct MenuBarLabel: View {
     private var pingString: String? {
         if coordinator.linkIsDown { return nil }
         return Self.formatPing(
-            internetRtt: coordinator.monitor.latest?.internet.rttAvgMs
-                ?? coordinator.latestRun?.snapshot.internetLatency.rttAvgMs,
-            gatewayRtt: coordinator.monitor.latest?.gateway.rttAvgMs
-                ?? coordinator.latestRun?.snapshot.gateway.rttAvgMs,
+            internetRtt: coordinator.liveSample?.internet.rttAvgMs
+                ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttAvgMs,
+            gatewayRtt: coordinator.liveSample?.gateway.rttAvgMs
+                ?? coordinator.currentNetworkRun?.snapshot.gateway.rttAvgMs,
             filtering: EffectiveLoss.filtering(sample: coordinator.monitor.latest)
         )
     }

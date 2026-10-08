@@ -66,6 +66,14 @@ final class HistoryStore {
         // their way across. Nothing left to do here.
     }
 
+    /// `--verify` only: stand-in stored runs, so scoping can be checked
+    /// without a CLI or a store on disk.
+    func adoptRunsForTesting(_ runs: [HistoryDocument.Run]) {
+        var d = HistoryDocument.empty
+        d.runs = runs
+        document = d
+    }
+
     func load() async {
         isLoading = true
         defer { isLoading = false }

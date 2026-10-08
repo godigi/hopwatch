@@ -40,6 +40,12 @@ enum StageResolver {
         /// "Your Mac has no network connection at all", as two sentences
         /// contradicting each other. The card's prose is the CLI's N1 text.
         case noLink
+        /// The monitor is supposed to be reporting and its newest sample is
+        /// older than a few cadences (`SampleFreshness`) — a hung probe
+        /// inside the monitor, say, which leaves the process alive and its
+        /// last sample green. Neither healthy nor a fault: the app simply
+        /// cannot say, and says so.
+        case notReporting
         /// The CLI sees a problem but no alert has crossed its dwell yet.
         /// `critical` reads red, `warn` reads amber; the card carries the
         /// CLI's own blurb for the worst firing rule (the same source
@@ -139,6 +145,10 @@ enum StageResolver {
         /// False when the newest sample says there is no link and is recent
         /// enough to believe (`LinkState.isDown`). Callers pass `!linkIsDown`.
         let linkUp: Bool
+        /// The newest sample is older than `SampleFreshness` allows while
+        /// monitoring is on and not paused. Callers pass
+        /// `coordinator.latestSampleIsStale`.
+        let sampleStale: Bool
         let measurementState: String
         let activeResolution: ResolutionSnapshot?
         let degradedExperience: DegradedSnapshot?
@@ -147,6 +157,7 @@ enum StageResolver {
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
              activeAlert: AlertSnapshot?, severity: String, linkUp: Bool,
+             sampleStale: Bool = false,
              measurementState: String = "unknown",
              activeResolution: ResolutionSnapshot? = nil,
              degradedExperience: DegradedSnapshot? = nil) {
@@ -160,6 +171,7 @@ enum StageResolver {
             self.activeAlert = activeAlert
             self.severity = severity
             self.linkUp = linkUp
+            self.sampleStale = sampleStale
             self.measurementState = measurementState
             self.activeResolution = activeResolution
             self.degradedExperience = degradedExperience
@@ -185,6 +197,10 @@ enum StageResolver {
         // active when the link dropped) would otherwise keep its own card.
         // The N1 alert itself says the same thing the CLI's N1 text does.
         if !i.linkUp { return .noLink }
+        // After no-link (a fresh "no link" sample is the loudest fact and
+        // is judged on its own, longer, window) and ahead of the alert and
+        // the severity: a sample that old is not evidence of anything.
+        if i.sampleStale { return .notReporting }
         if let alert = i.activeAlert { return .alerted(alert) }
         if !i.monitorRunning || i.measurementState != "measured" {
             return .checking
