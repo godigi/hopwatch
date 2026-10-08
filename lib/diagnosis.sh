@@ -466,6 +466,70 @@ diagnosis_run() {
     fi
   fi
 
+  # HOG-1 — one app on this Mac is using up the connection, and latency has
+  # suffered for it. The finding that turns "your latency is high" or a
+  # bufferbloat grade into a name and a Quit button, when the traffic that
+  # fills the link is this Mac's own. Design: docs/design/2026-10-08-upload-hog-design.md.
+  #
+  # Two stages, so a healthy scan never pays for the second:
+  #   1. a gate made of numbers this scan already has: latency degraded, ping
+  #      loss clean (a hog fills the queue, it does not drop pings), real
+  #      traffic getting through, and — when the full check's traffic sample
+  #      exists — that sample saw the link busy, so the latency and the
+  #      traffic are about the same minute;
+  #   2. only past the gate, one nettop capture (~5 s) and hog_judge: one app
+  #      holding most of a direction on every interval, big enough to
+  #      matter. Hopwatch's own processes are never the answer, and when
+  #      they or anything unreadable were moving data themselves the latency
+  #      has another explanation and the rule stays silent.
+  # This is TR-1's finer sibling, not its replacement: TR-1 qualifies the
+  # numbers of a full check by process name; this names a quittable app.
+  local _hog_gate=0
+  HOG_FIRES=0
+  if [ "$_sock_fault" -eq 0 ] && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] \
+     && [ "$_public_traffic_ok" -eq 1 ] \
+     && hog_ping_clean "$GW_LOSS" "${INET_LOSS:-}" "${INET_LOSS_ALT:-}" \
+     && hog_latency_degraded "${GW_LATENCY:-}" "${GW_JITTER:-}" "${INET_RTT_JITTER:-}"; then
+    _hog_gate=1
+    if [ "${TRAFFIC_MEASURED:-0}" -eq 1 ] && ! traffic_at_least "$THRESH_HOG_MIN_MBPS"; then
+      _hog_gate=0
+    fi
+  fi
+  if [ "$_hog_gate" -eq 1 ] && declare -f hog_capture_evidence >/dev/null 2>&1; then
+    hog_capture_evidence || true
+    hog_judge "${SPEEDTEST_UP_MBPS:-}" "${SPEEDTEST_DOWN_MBPS:-}"
+    # The full check's own earlier sample must agree on the direction.
+    if [ "$HOG_FIRES" -eq 1 ] && [ "${TRAFFIC_MEASURED:-0}" -eq 1 ]; then
+      if [ "$HOG_DIR" = up ]; then
+        awk -v v="${TRAFFIC_UP_MBPS:-0}" -v t="$THRESH_HOG_MIN_MBPS" 'BEGIN{exit !(v + 0 >= t + 0)}' || HOG_FIRES=0
+      else
+        awk -v v="${TRAFFIC_DOWN_MBPS:-0}" -v t="$THRESH_HOG_MIN_MBPS" 'BEGIN{exit !(v + 0 >= t + 0)}' || HOG_FIRES=0
+      fi
+    fi
+  fi
+  if [ "$_hog_gate" -eq 1 ] && [ "$HOG_FIRES" -eq 1 ]; then
+    local _hg_verb _hg_noun _hg_rate _hg_who _hg_tech _hg_clause _hg_app=""
+    if [ "$HOG_DIR" = up ]; then _hg_verb=uploading; _hg_noun=sending; else _hg_verb=downloading; _hg_noun=receiving; fi
+    _hg_rate="$(awk -v r="$HOG_RATE" 'BEGIN{printf (r + 0 >= 10 ? "%.0f" : "%.1f"), r}')"
+    # The sentence and the button must agree, as in SOCK-1 and CONN-1: a
+    # name only when there is a quittable app behind it.
+    if [ -n "$HOG_APP_BUNDLE" ]; then
+      _hg_app="${HOG_APP_NAME:-$HOG_APP_BUNDLE}"
+      _hg_who="${_hg_app} is ${_hg_verb} about ${_hg_rate} Mbps, which is most of what this Mac is ${_hg_noun}, while ${HOG_LAT_CLAUSE}."
+      _hg_clause=" Quitting ${_hg_app} is a quick way to find out whether it is the cause; it will pick up again when you start it."
+    else
+      _hg_who="Something on this Mac is ${_hg_verb} about ${_hg_rate} Mbps, which is most of what this Mac is ${_hg_noun}, while ${HOG_LAT_CLAUSE}. This check could not tell which app it is."
+      _hg_clause=" Pausing any backup, sync or large transfer running on this Mac is a quick way to find out whether it is the cause."
+    fi
+    _hg_tech="technical: ${HOG_PROC:-unknown process} ${_hg_rate} Mbps ${HOG_DIR}, ${HOG_DOM_PCT}% of this Mac's ${HOG_DIR}load (not counting Hopwatch)"
+    [ -n "$HOG_SHARE_PCT" ] && _hg_tech+="; about ${HOG_SHARE_PCT}% of the line's measured ${HOG_DIR}load capacity"
+    _hg_tech+="; packet loss ${GW_LOSS}% to the router"
+    add_diag warn HOG-1 "${_hg_who} A busy ${HOG_DIR}load can make everything else on the connection feel slow, including calls and web pages.${_hg_clause} (${_hg_tech})"
+    if declare -f repair_offer >/dev/null 2>&1 && [ -n "$_hg_app" ]; then
+      repair_offer HOG-1 quit-app "$_hg_app" "bundle_id=${HOG_APP_BUNDLE}"
+    fi
+  fi
+
   # D6 — the router's DNS is failing or slow while a public one works.
   # Guidance only; Hopwatch never changes DNS (read-only, sudo-free). Each
   # guard is a way the advice would be wrong:

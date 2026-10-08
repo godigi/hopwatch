@@ -612,6 +612,181 @@ conn_tcp_reach_facts() {
     END { printf "%d %d\n", fail + 0, total + 0 }'
 }
 
+# ── HOG-1: one app is using up the connection ──────────────────────────────
+# Shared by lib/diagnosis.sh (the scan) and lib/monitor.sh (the stream), so
+# the two cannot disagree about what a hog is. Design and the reasons behind
+# every cutoff: docs/design/2026-10-08-upload-hog-design.md.
+
+# hog_ping_clean GW_LOSS INET_LOSS INET_LOSS_ALT — the same "ping is clean"
+# test CONN-1 uses: the router measured and under the warn cutoff, an
+# unmeasured internet leg not counting against it. A hog fills the queue; it
+# does not drop pings, and a link that drops them belongs to the loss rules.
+hog_ping_clean() {
+  loss_below "${1:-}" "$LOSS_WARN_PCT" \
+    && ! loss_at_least "${2:-}" "$LOSS_WARN_PCT" \
+    && ! loss_at_least "${3:-}" "$LOSS_WARN_PCT"
+}
+
+# hog_latency_degraded GW_RTT_MS GW_JITTER_MS INET_JITTER_MS — true when
+# pings are slow or uneven; HOG_LAT_CLAUSE then holds what was measured, in
+# words ("pings to your router are taking about 84 ms"). Nothing unmeasured
+# is ever put in the clause.
+# shellcheck disable=SC2034 # HOG_LAT_CLAUSE is read by lib/diagnosis.sh and lib/monitor.sh
+hog_latency_degraded() {
+  local rtt="${1:-}" gj="${2:-}" ij="${3:-}"
+  HOG_LAT_CLAUSE=""
+  if is_numeric "$rtt" && awk -v v="$rtt" -v t="$THRESH_HOG_GW_RTT_MS" 'BEGIN{exit !(v + 0 >= t + 0)}'; then
+    HOG_LAT_CLAUSE="pings to your router are taking about $(awk -v v="$rtt" 'BEGIN{printf "%.0f", v}') ms"
+  elif is_numeric "$gj" && awk -v v="$gj" -v t="$THRESH_HOG_JITTER_MS" 'BEGIN{exit !(v + 0 >= t + 0)}'; then
+    HOG_LAT_CLAUSE="pings to your router vary by about $(awk -v v="$gj" 'BEGIN{printf "%.0f", v}') ms from one to the next"
+  elif is_numeric "$ij" && awk -v v="$ij" -v t="$THRESH_HOG_JITTER_MS" 'BEGIN{exit !(v + 0 >= t + 0)}'; then
+    HOG_LAT_CLAUSE="pings to the internet vary by about $(awk -v v="$ij" 'BEGIN{printf "%.0f", v}') ms from one to the next"
+  else
+    return 1
+  fi
+  return 0
+}
+
+# hog_capture_evidence — who on this Mac is moving the most data right now,
+# for rule HOG-1. Runs once per fault, only when the cheap gate (latency
+# degraded, ping clean) already passed — never on a healthy path — and is
+# read-only and sudo-free. Any failure (no nettop, no output, one snapshot, no
+# python) leaves HOG_MEASURED=0 and returns 1: the rule then stays silent.
+#
+# nettop reports every process's cumulative bytes; helpers/hog.py differences
+# consecutive snapshots into rates, leaves out Hopwatch's own processes (see
+# its header) and says how much it left out. The biggest processes are then
+# resolved to the GUI app they belong to, and folded together by app, because
+# an app is not one process: Dropbox, a browser and Stremio's engine are each
+# several, and the Quit button quits an app.
+#
+# For D in UP, DOWN (the direction of the data, as seen from this Mac):
+#   HOG_D_RATE / HOG_D_MIN   the top app's Mb/s over the whole window / in its
+#                            slowest interval
+#   HOG_D_DOM_PCT            its share of everything not Hopwatch's, 0-100
+#   HOG_D_PROC               the biggest process behind it, by nettop's name
+#   HOG_D_BUNDLE / _NAME     the quittable GUI app it belongs to, or ""
+#   HOG_D_TOTAL              all non-Hopwatch Mb/s in that direction
+#   HOG_D_EXCLUDED           Hopwatch's own plus unreadable Mb/s there
+# shellcheck disable=SC2034 # read by hog_judge and lib/diagnosis.sh
+hog_capture_evidence() {
+  local d
+  HOG_MEASURED=0
+  for d in UP DOWN; do
+    printf -v "HOG_${d}_RATE" '%s' 0;   printf -v "HOG_${d}_MIN" '%s' 0
+    printf -v "HOG_${d}_DOM_PCT" '%s' 0; printf -v "HOG_${d}_PROC" '%s' ""
+    printf -v "HOG_${d}_BUNDLE" '%s' ""; printf -v "HOG_${d}_NAME" '%s' ""
+    printf -v "HOG_${d}_TOTAL" '%s' 0;  printf -v "HOG_${d}_EXCLUDED" '%s' 0
+  done
+  command -v nettop >/dev/null 2>&1 || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  local secs="$THRESH_HOG_SAMPLE_S" snaps="$THRESH_HOG_SNAPSHOTS" raw parsed
+  raw="$(with_timeout $((secs * snaps + 12)) \
+    nettop -P -L "$snaps" -s "$secs" -J bytes_in,bytes_out 2>/dev/null || true)"
+  [ -n "$raw" ] || return 1
+  parsed="$(printf '%s\n' "$raw" | python3 "$HELPERS_DIR/hog.py" "$secs" "$$" 2>/dev/null || true)"
+  local head n_snaps tdown tup edown eup
+  head="$(printf '%s\n' "$parsed" | sed -n '1p')"
+  case "$head" in M\|*) ;; *) return 1 ;; esac
+  IFS='|' read -r _ n_snaps tdown tup edown eup <<<"$head"
+  is_numeric "$n_snaps" && [ "$n_snaps" -ge 2 ] || return 1
+  is_numeric "$tdown" && is_numeric "$tup" && is_numeric "$edown" && is_numeric "$eup" || return 1
+  HOG_MEASURED=1
+  HOG_UP_TOTAL="$tup";     HOG_DOWN_TOTAL="$tdown"
+  HOG_UP_EXCLUDED="$eup";  HOG_DOWN_EXCLUDED="$edown"
+
+  # Resolve the processes big enough to matter to the app they belong to,
+  # then fold by app. Bash 3.2 has no associative arrays, so awk does it.
+  local line pid name dav dmin uav umin big app bundle appname annotated=""
+  while IFS= read -r line; do
+    case "$line" in P\|*) ;; *) continue ;; esac
+    IFS='|' read -r _ pid name dav dmin uav umin <<<"$line"
+    if ! { is_numeric "$pid" && is_numeric "$dav" && is_numeric "$dmin" \
+           && is_numeric "$uav" && is_numeric "$umin"; }; then
+      continue
+    fi
+    big="$(awk -v a="$dav" -v b="$uav" -v t="$THRESH_HOG_MIN_MBPS" \
+      'BEGIN{print ((a + 0 >= t + 0 || b + 0 >= t + 0) ? 1 : 0)}')"
+    bundle=""; appname=""
+    if [ "$big" -eq 1 ] && app="$(dns_resolve_gui_app "$pid")"; then
+      bundle="${app%%|*}"; appname="${app#*|}"
+    fi
+    annotated+="${pid}|${name}|${dav}|${dmin}|${uav}|${umin}|${bundle}|${appname}"$'\n'
+  done <<<"$parsed"
+
+  for d in UP DOWN; do
+    local col_avg col_min best
+    if [ "$d" = UP ]; then col_avg=5; col_min=6; else col_avg=3; col_min=4; fi
+    # key|avg|min|proc|bundle|appname — the app's members summed, the process
+    # shown being the biggest member.
+    best="$(printf '%s' "$annotated" | awk -F'|' -v ca="$col_avg" -v cm="$col_min" '
+      NF >= 8 && $ca + 0 > 0 {
+        k = ($7 != "") ? $7 : "proc:" $2
+        a[k] += $ca; m[k] += $cm
+        if ($ca + 0 > top[k] + 0) { top[k] = $ca; proc[k] = $2; app[k] = $8 }
+        bun[k] = $7
+      }
+      END {
+        for (k in a) if (a[k] > bestv) { bestv = a[k]; bk = k }
+        if (bk != "") printf "%s|%.3f|%.3f|%s|%s|%s\n", bk, a[bk], m[bk], proc[bk], bun[bk], app[bk]
+      }')"
+    [ -n "$best" ] || continue
+    local _k rate rmin proc _b _n total dom
+    IFS='|' read -r _k rate rmin proc _b _n <<<"$best"
+    eval "total=\$HOG_${d}_TOTAL"
+    dom="$(awk -v r="$rate" -v t="$total" \
+      'BEGIN{ p = (t + 0 > 0) ? int(r * 100 / t) : 0; if (p > 100) p = 100; print p }')"
+    printf -v "HOG_${d}_RATE" '%s' "$rate";   printf -v "HOG_${d}_MIN" '%s' "$rmin"
+    printf -v "HOG_${d}_DOM_PCT" '%s' "$dom"; printf -v "HOG_${d}_PROC" '%s' "$proc"
+    printf -v "HOG_${d}_BUNDLE" '%s' "$_b";   printf -v "HOG_${d}_NAME" '%s' "$_n"
+  done
+  return 0
+}
+
+# hog_judge CAP_UP_MBPS CAP_DOWN_MBPS — decide from the evidence whether one
+# app is using up the connection. The capacities are the speed test's
+# measured figures, or "" when there are none (--quick, the monitor).
+#
+# Sets HOG_FIRES (0/1) and, when 1, HOG_DIR (up/down), HOG_RATE, HOG_DOM_PCT,
+# HOG_PROC, HOG_APP_BUNDLE, HOG_APP_NAME and HOG_SHARE_PCT ("" when the link's
+# capacity was not measured). Picks the direction with the bigger rate among
+# those that qualify.
+# shellcheck disable=SC2034 # the HOG_* results are read by lib/diagnosis.sh and lib/monitor.sh
+hog_judge() {
+  local cap_up="${1:-}" cap_down="${2:-}" d best_d="" best_rate=0
+  HOG_FIRES=0; HOG_DIR=""; HOG_RATE=""; HOG_DOM_PCT=""; HOG_PROC=""
+  HOG_APP_BUNDLE=""; HOG_APP_NAME=""; HOG_SHARE_PCT=""
+  [ "${HOG_MEASURED:-0}" -eq 1 ] || return 0
+  for d in UP DOWN; do
+    local rate rmin dom excl cap share
+    eval "rate=\$HOG_${d}_RATE rmin=\$HOG_${d}_MIN dom=\$HOG_${d}_DOM_PCT excl=\$HOG_${d}_EXCLUDED"
+    if [ "$d" = UP ]; then cap="$cap_up"; else cap="$cap_down"; fi
+    # Traffic that is Hopwatch's, or that nobody could vouch for, as big as
+    # the floor: the latency has an explanation that is not this app.
+    awk -v e="$excl" -v t="$THRESH_HOG_MIN_MBPS" 'BEGIN{exit !(e + 0 >= t + 0)}' && continue
+    # Sustained: the slowest interval, not the average, must clear the bar.
+    # With a measured capacity the bar is the app's share of the link;
+    # without one it is the absolute stand-in.
+    share=""
+    if is_numeric "$cap" && awk -v c="$cap" 'BEGIN{exit !(c + 0 > 0)}'; then
+      awk -v r="$rmin" -v t="$THRESH_HOG_MIN_MBPS" 'BEGIN{exit !(r + 0 >= t + 0)}' || continue
+      share="$(awk -v r="$rate" -v c="$cap" 'BEGIN{printf "%d", r * 100 / (r + c)}')"
+      [ "$share" -ge "$THRESH_HOG_LINK_SHARE_PCT" ] || continue
+    else
+      awk -v r="$rmin" -v t="$THRESH_HOG_UNKNOWN_CAPACITY_MBPS" 'BEGIN{exit !(r + 0 >= t + 0)}' || continue
+    fi
+    [ "$dom" -ge "$THRESH_HOG_DOMINANCE_PCT" ] || continue
+    if awk -v r="$rate" -v b="$best_rate" 'BEGIN{exit !(r + 0 > b + 0)}'; then
+      best_d="$d"; best_rate="$rate"; HOG_SHARE_PCT="$share"
+    fi
+  done
+  [ -n "$best_d" ] || { HOG_SHARE_PCT=""; return 0; }
+  HOG_FIRES=1
+  if [ "$best_d" = UP ]; then HOG_DIR=up; else HOG_DIR=down; fi
+  eval "HOG_RATE=\$HOG_${best_d}_RATE HOG_DOM_PCT=\$HOG_${best_d}_DOM_PCT HOG_PROC=\$HOG_${best_d}_PROC HOG_APP_BUNDLE=\$HOG_${best_d}_BUNDLE HOG_APP_NAME=\$HOG_${best_d}_NAME"
+  return 0
+}
+
 # Called with dig's stderr after a probe came back empty. Two independent
 # signals, either of which is enough: the kernel refusing a UDP bind
 # (helpers/sockcheck.py), and dig itself saying so. Idempotent within a

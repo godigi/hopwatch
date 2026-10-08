@@ -163,6 +163,18 @@ CONN_HOLDER_TOP_SHARE_PCT="" # top holder's share of CONN_FLOWS_TOTAL
 CONN_HOLDER_APP_BUNDLE=""    # bundle id of the quittable GUI app owning the top holder, else ""
 CONN_HOLDER_APP_NAME=""      # that app's display name
 
+# HOG-1 — one app is using up the connection (hog_capture_evidence / hog_judge
+# in lib/common.sh). Per direction D in UP, DOWN, as seen from this Mac.
+HOG_MEASURED=0           # 1 = nettop gave at least two snapshots to difference
+HOG_LAT_CLAUSE=""        # what was measured about latency, in words
+HOG_UP_RATE=0; HOG_UP_MIN=0; HOG_UP_DOM_PCT=0; HOG_UP_PROC=""
+HOG_UP_BUNDLE=""; HOG_UP_NAME=""; HOG_UP_TOTAL=0; HOG_UP_EXCLUDED=0
+HOG_DOWN_RATE=0; HOG_DOWN_MIN=0; HOG_DOWN_DOM_PCT=0; HOG_DOWN_PROC=""
+HOG_DOWN_BUNDLE=""; HOG_DOWN_NAME=""; HOG_DOWN_TOTAL=0; HOG_DOWN_EXCLUDED=0
+HOG_FIRES=0              # hog_judge's verdict, and the direction it chose
+HOG_DIR=""; HOG_RATE=""; HOG_DOM_PCT=""; HOG_PROC=""
+HOG_APP_BUNDLE=""; HOG_APP_NAME=""; HOG_SHARE_PCT=""
+
 # IPv6 (lib/ipv6.sh)
 IPV6_AVAILABLE=0
 IPV6_GLOBAL_ADDR=""

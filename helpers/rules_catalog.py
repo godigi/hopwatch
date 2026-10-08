@@ -878,6 +878,35 @@ RULES: list[dict[str, object]] = [
         "repairs": ["quit-app"],
     },
     {
+        "id": "HOG-1",
+        "title": "One app is using up your connection",
+        "category": "load",
+        "also": "internet",
+        "severity": "warn",
+        "scope": "both",
+        "blurb": (
+            "Pings are slow or uneven while none are being lost, and one "
+            "app on this Mac is sending or receiving most of the data "
+            "that is moving. A busy upload or download can make "
+            "everything else on the connection feel slow, including calls "
+            "and web pages. The report says how fast the app is going, "
+            "what the pings are doing, and names the app when it can be "
+            "told which one it is. Hopwatch's own checks are never "
+            "counted. It does not say the app is the whole cause, only "
+            "that quitting it is a quick way to find out."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#hog-1--one-app-is-using-up-the-connection",
+        "impacts": {"calls": "degraded", "gaming": "degraded", "vpn": "degraded"},
+        "fix": (
+            "If the report names an app, quit it and run the check "
+            "again; it will pick up where it left off when you start it. "
+            "Otherwise pause any backup, cloud sync, photo upload or "
+            "large download running on this Mac."
+        ),
+        "fix_target": "you",
+        "repairs": ["quit-app"],
+    },
+    {
         "id": "EDNS-1",
         "title": "Encrypted DNS profile active",
         "category": "dns",

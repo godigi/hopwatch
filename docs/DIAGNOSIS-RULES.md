@@ -471,6 +471,28 @@ paper over this would have been the wrong fix in the wrong file.
 - **Known false positive:** a network that drops outbound DNS to public resolvers *and* refuses direct 443 connections to their addresses, while the router's own resolver works, reads as `CONN-1`. The sentence is still true to what was observed; it does not claim a cause.
 - **Impact:** calls, streaming and browsing `degraded`.
 
+### HOG-1 — One app is using up the connection
+
+- **Trigger (scan):** all of
+  - the latency gate: gateway RTT at or above `THRESH_HOG_GW_RTT_MS` (the `BL-1` gateway floor), or ping jitter at or above `THRESH_HOG_JITTER_MS` on the router leg or the internet leg;
+  - ping is clean: the same test `CONN-1` uses (gateway loss measured and below `LOSS_WARN_PCT`, neither internet leg at or above it);
+  - real traffic is getting through, there is no captive portal (`CP-1`), and `SOCK-1` is not firing;
+  - when the full check took its `TR-1` traffic sample (`--quick` does not), that sample saw the link busy (`THRESH_HOG_MIN_MBPS` in either direction) and, after the capture below, in the same direction as the app. Latency measured in one minute is not explained by traffic from another;
+  - then one `nettop` capture of `THRESH_HOG_SNAPSHOTS` snapshots `THRESH_HOG_SAMPLE_S` seconds apart finds a top app group, folded by resolved app bundle, in one direction that
+    - holds at least `THRESH_HOG_DOMINANCE_PCT` of everything that is not Hopwatch's, in that direction ("one app");
+    - is sustained, on **every** interval of the capture, not on average;
+    - is big enough. **Capacity known** (a full check measured a speed in that direction): the app's rate is at least `THRESH_HOG_MIN_MBPS` and at least `THRESH_HOG_LINK_SHARE_PCT` of `rate + measured speed`, because a speed test run beside a hog measures what is left over (`TR-1`). **Capacity unknown** (`--quick`, the monitor): the slowest interval is at least `THRESH_HOG_UNKNOWN_CAPACITY_MBPS`.
+- **Trigger (monitor):** the same gate, evaluated every fast cycle, held for `THRESH_MON_HOG_CONFIRM_CYCLES` consecutive cycles before the monitor spends a capture; at most one capture per `THRESH_MON_HOG_RECHECK_S` while the gate stays open. A capture that finds an app turns `HOG-1` on; a capture that does not turns it off; so does the gate staying shut for the confirmation count. The monitor never has a speed figure, so it always judges as capacity-unknown, and a later full check, which does, may decline a finding the monitor raised. The monitor does not name the app; the quick scan the app runs when the severity turns `warn` does, and its diagnosis carries the Quit button.
+- **Severity:** `warn`.
+- **Hopwatch's own traffic is never the answer.** A full check saturates the link on purpose (`bufferbloat_run`, the speed test), so while one runs its `curl`s and `speedtest` are the biggest talkers on the Mac, and the monitor is a different process from the check. `helpers/hog.py` reads one `ps` table and counts as Hopwatch's: this process and its descendants; any process with a `hopwatch` or `netdiag` command line (run directly or as a shell's script) among its ancestors, which is how a check run by the app, a terminal or the launchd watcher is recognised from outside; and the probe tools only Hopwatch runs here (`speedtest`, `mtr`, `ping`, `traceroute`, `dig`, `sntp`, `gping`, `nettop`). A pid that `nettop` reported and `ps` no longer lists cannot be shown to be anyone's and is treated the same way. Hopwatch's own or unverifiable traffic of `THRESH_HOG_MIN_MBPS` or more in a direction **voids that direction**: the latency has an explanation that is not the candidate, and naming a bystander would be a guess.
+- **Naming and the button.** The app is resolved with `dns_resolve_gui_app`, as in `SOCK-1` and `CONN-1`. A process that does not resolve to a quittable regular GUI app (a system daemon such as `bird` or `nsurlsessiond`, a root process, a command-line tool, a VPN daemon, Hopwatch itself, Finder) gives the finding without a name and without a button; the process name appears only in the technical clause. Rates, not lifetime counters, decide, so a daemon with a large counter and no current traffic (`mDNSResponder`) is never a candidate.
+- **Repair offered:** `quit-app`, only when an app was named.
+- **What it says:** what was measured (the app's rate, that it is most of what the Mac is sending or receiving, what the pings are doing) and that quitting it is a quick way to find out whether it is the cause. It never claims a cause it did not measure, and says it could not tell which app when it could not.
+- **Cost.** Nothing on a healthy cycle. When the gate passes, one capture: ~5 s of wall clock and ~2 s of CPU. The scan pays it once; the monitor at most once a minute, and only while latency is already bad.
+- **Relationship to `TR-1`.** `TR-1` says the Mac was using the link while a full check measured it and names the busiest process, so every figure can be read with that in mind; it has no pid, so it cannot offer a button. `HOG-1` is the finding with a name and a button, gated on the latency actually suffering. Both can appear on the same report and say compatible things.
+- **Known limits.** A VPN carries the same bytes as the apps inside it, so the daemon and the app each show roughly half the total and neither reaches `THRESH_HOG_DOMINANCE_PCT`: the rule stays silent. An app that talks only through a system daemon (an `nsurlsessiond` upload) is unnamed. `nettop` cuts names at 15 characters; the app name shown comes from the bundle, not from `nettop`.
+- **Impact:** calls, gaming and VPN `degraded`.
+
 ### B1 — Bufferbloat at gateway hop
 
 - Trigger: `bufferbloat.gw_grade ∈ {C, D, F}`
