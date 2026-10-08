@@ -6,7 +6,8 @@
 # Writes: DNS_OK, DNS_LINES, SYS_RES, SYS_RES_ALL, SYS_RES_MS, DNS_NXDOMAIN_HIJACK_IP, IPV6_DNS_FAIL,
 #         DNS_PRIMARY_FAIL, DNS_FALLBACK_OK, PRIMARY_DNS, SECONDARY_DNS,
 #         DNS_LOCAL_FAIL, DNS_LOCAL_BIND, DNS_UDP_SOCKETS, DNS_UDP_HOLDERS,
-#         DNS_UDP_TOP_SHARE_PCT, DNS_TCP_DNS_OK (see dns_probe in lib/common.sh)
+#         DNS_UDP_TOP_SHARE_PCT, DNS_UDP_TOP_APP_BUNDLE, DNS_UDP_TOP_APP_NAME,
+#         DNS_TCP_DNS_OK (see dns_probe in lib/common.sh)
 # Entry:  dns_run
 #
 # Safe to run in parallel — does not contend on the WAN link.
@@ -138,6 +139,8 @@ dns_run() {
     setvar DNS_UDP_SOCKETS "$DNS_UDP_SOCKETS"
     setvar DNS_UDP_HOLDERS "$DNS_UDP_HOLDERS"
     setvar DNS_UDP_TOP_SHARE_PCT "$DNS_UDP_TOP_SHARE_PCT"
+    setvar DNS_UDP_TOP_APP_BUNDLE "$DNS_UDP_TOP_APP_BUNDLE"
+    setvar DNS_UDP_TOP_APP_NAME "$DNS_UDP_TOP_APP_NAME"
     setvar DNS_TCP_DNS_OK "$DNS_TCP_DNS_OK"
   fi
 }

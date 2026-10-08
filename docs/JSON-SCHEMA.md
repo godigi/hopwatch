@@ -337,6 +337,57 @@ asleep tells the same lie with a number instead of a line. Every window
 says what fraction of itself was actually watched, and every episode
 carries the `unobserved_s` that elapsed inside it.
 
+## `diagnosis[].repairs` and `--repair`
+
+A finding may carry a `repairs` array: the "Fix it" buttons it offers. The
+key is absent when it offers none, which is nearly always.
+
+```json
+{"rule": "SOCK-1", "severity": "critical", "summary": "…",
+ "repairs": [{
+   "id": "quit-app",
+   "label": "Quit Spotify",
+   "confirm": "Spotify will be asked to close, the same as choosing Quit from its menu. …",
+   "admin": false,
+   "recheck": "now",
+   "if_unfixed": "Restart this Mac. …",
+   "params": {"bundle_id": "com.spotify.client"}
+ }]}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Which repair: `quit-app`, `restart-mac`, `open-sign-in`. |
+| `label` | The button text. Names the action; never a generic "Fix". |
+| `confirm` | Shown before it runs: what will change. |
+| `admin` | Whether it will ask for an admin password. Always `false` today. |
+| `recheck` | `now` when a re-check straight afterwards can tell whether it worked (an app closing). `later` when it cannot — the user still has to sign in, or the Mac is about to restart — so a consumer must not report "that didn't help". |
+| `if_unfixed` | What to try next if the fault is still there. |
+| `params` | String pairs to hand back to `--repair-param` untouched. |
+
+A consumer shows these verbatim and interprets none of them.
+
+`hopwatch --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]`
+runs one. With `--json` it prints one object:
+
+```json
+{"id": "quit-app", "ok": true, "dry_run": false,
+ "ran": ["lsappinfo find bundleid=com.apple.calculator",
+         "osascript -e 'tell application id \"com.apple.calculator\" to quit'"],
+ "message": "Calculator has quit."}
+```
+
+Exit `0` done (or a dry run), `1` the repair ran and failed, `3` an unknown
+repair or a refused parameter — in which case nothing ran and nothing is
+printed on stdout. `quit-app` requires `bundle_id` matching
+`^[A-Za-z0-9][A-Za-z0-9.-]*$` and refuses Finder, Dock, loginwindow,
+SystemUIServer and Hopwatch itself.
+
+A repair that really runs appends one line to the event journal, if a
+journal already exists (it never creates one): `kind` and `field` are
+`repair`, `to` is the repair id, `summary` its message, plus `ok` and
+`params`. `--events` does not pair it into an episode.
+
 ## `run_mode`
 
 Which shape of run produced this record. The CLI currently emits:

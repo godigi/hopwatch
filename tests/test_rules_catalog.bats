@@ -61,17 +61,18 @@ assert d['version'] == sys.argv[1], d['version']
 " "$VERSION"
 }
 
-@test "schema is 5" {
+@test "schema is 6" {
   # 1 -> 2 added the `metrics` glossary; 2 -> 3 added the optional
   # per-rule `also` category; 3 -> 4 added the optional per-metric
   # `why_absent` field plus 16 new metrics entries; 4 -> 5 added the
-  # optional per-rule `impacts` map. All additive, per this schema's own
-  # promise in docs/JSON-SCHEMA.md.
+  # optional per-rule `impacts` map; 5 -> 6 added the optional per-rule
+  # `repairs` list. All additive, per this schema's own promise in
+  # docs/JSON-SCHEMA.md.
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
 import json, sys
-assert json.load(sys.stdin)['schema'] == 5
+assert json.load(sys.stdin)['schema'] == 6
 "
 }
 
@@ -176,12 +177,12 @@ import json, sys
 d = json.load(sys.stdin)
 required = {'id', 'title', 'category', 'severity', 'scope', 'blurb', 'doc',
             'fix', 'fix_target'}
-optional = {'also', 'impacts', 'fix_away'}
+optional = {'also', 'impacts', 'fix_away', 'repairs'}
 for r in d['rules']:
     keys = set(r.keys())
     assert keys - optional == required, (r.get('id'), sorted(keys))
     for k, v in r.items():
-        if k == 'impacts':
+        if k in ('impacts', 'repairs'):
             continue
         assert isinstance(v, str) and v.strip(), (r.get('id'), k, v)
 "

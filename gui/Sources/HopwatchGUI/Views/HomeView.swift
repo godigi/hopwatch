@@ -161,7 +161,13 @@ struct HomeView: View {
 
                         DashboardFindingsPanel(
                             checkTime: checkTimeSubtitle,
-                            findings: activeFindings
+                            findings: activeFindings,
+                            outcome: coordinator.repairOutcome,
+                            repairsBusy: coordinator.isRepairing || coordinator.isScanning,
+                            onRepair: { item, repair in
+                                coordinator.runRepair(repair, forRule: item.ruleID ?? "")
+                            },
+                            onDismissOutcome: { coordinator.dismissRepairOutcome() }
                         )
 
                         DashboardRecentActivityPanel(
@@ -544,12 +550,18 @@ struct HomeView: View {
                 let isWarn = diag.severity == "warn" || diag.severity == "critical"
                 let rule = diag.rule.flatMap { coordinator.rulesCatalog.catalog?[$0] }
                 let advice = rule?.fix ?? rule?.fixAway ?? diag.action?.label ?? diag.action?.hint
+                // Buttons only for the network you are on now: see
+                // `repairsAreCurrent` for why a stored report never gets any.
+                let repairs = coordinator.repairsAreCurrent(forRule: diag.rule)
+                    ? (diag.repairs ?? []) : []
                 items.append(.init(
                     id: "diag-\(idx)-\(diag.summary)",
                     title: diag.summary,
                     explanation: "",
                     nextStep: advice,
-                    isWarning: isWarn
+                    isWarning: isWarn,
+                    ruleID: diag.rule,
+                    repairs: repairs
                 ))
             }
         }

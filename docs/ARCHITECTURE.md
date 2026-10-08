@@ -118,6 +118,29 @@ a default:
    `lib/availability.sh`) evaluate against complete, real transition history
    whether full checks are triggered from the GUI or the terminal.
 
+## The repair tier
+
+Everything above reads. One thing writes: `hopwatch --repair=ID`
+(`lib/repairs.sh`), reached only from a button the user pressed.
+
+- **`lib/diagnosis.sh` decides which finding offers which repair**, by
+  calling `repair_offer` straight after the `add_diag` it belongs to. The
+  label, the confirmation and the what-next text are written in
+  `lib/repairs.sh` and travel in `diagnosis[].repairs`.
+- **The CLI runs it.** The app holds no repair mechanism: it shows the
+  button, shows the confirmation, calls `--repair` with the `params` it was
+  given, then re-checks at the quick depth and reports whether the finding's
+  own rule still fires. The two status words ("Fixed", "That didn't help")
+  are the app's; every sentence is the CLI's.
+- **Buttons are only for the network you are on now.** The app shows them
+  for a scan from this session whose rule the monitor still sees firing,
+  never for a report loaded from history.
+- **Parameters are refused, not sanitised**, and nothing that arrived from
+  the network reaches a command line.
+- **Repairs that need an admin password are not built.** When they are, root
+  must not execute this user-writable checkout; see
+  `docs/design/2026-10-07-repair-actions-design.md`.
+
 ## Arrival state lives in the GUI, not the CLI (v0.14.0)
 
 "Have I checked this network before?" is a question about *this install's

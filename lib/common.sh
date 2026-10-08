@@ -385,6 +385,12 @@ dns_is_manual_override() {
 #   DNS_UDP_HOLDERS  "process|pid|count" lines, biggest first (lsof; sudo-
 #                    free, so only the user's own processes are visible)
 #   DNS_UDP_TOP_SHARE_PCT  the top holder's share of DNS_UDP_SOCKETS
+#   DNS_UDP_TOP_APP_BUNDLE / DNS_UDP_TOP_APP_NAME  the regular GUI app the
+#                    top holder belongs to (its bundle id and the name the
+#                    user knows it by), or empty when the top holder is not
+#                    an app the user can quit. lsof gives a truncated
+#                    process name and a pid, which is not enough to ask an
+#                    app to quit; see dns_resolve_gui_app.
 #   DNS_TCP_DNS_OK   1/0 — does DNS over TCP still work (it needs no UDP
 #                    socket, which is what separates this fault from a
 #                    resolver outage)
@@ -394,7 +400,59 @@ dns_local_reset() {
   DNS_UDP_SOCKETS=""
   DNS_UDP_HOLDERS=""
   DNS_UDP_TOP_SHARE_PCT=""
+  DNS_UDP_TOP_APP_BUNDLE=""
+  DNS_UDP_TOP_APP_NAME=""
   DNS_TCP_DNS_OK=""
+}
+
+# A bundle id Hopwatch will put into an AppleScript string. Reverse-DNS
+# names are letters, digits, dots and hyphens; anything else is refused
+# rather than cleaned up. It must start with a letter or digit so it can
+# never be read as an option.
+repair_bundle_id_valid() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] && [ "${#1}" -le 255 ]
+}
+
+# Whether a repair may ask this app to quit. Not the pieces of macOS the
+# desktop is built from — quitting those is not "freeing a socket", it is
+# breaking the session — and not Hopwatch itself, which would end the very
+# flow that asked.
+repair_bundle_quittable() {
+  repair_bundle_id_valid "${1:-}" || return 1
+  case "$1" in
+    com.apple.finder|com.apple.loginwindow|com.apple.dock|com.apple.systemuiserver|com.godigi.hopwatch)
+      return 1 ;;
+  esac
+  return 0
+}
+
+# dns_resolve_gui_app PID — print "bundle id|display name" for the regular
+# GUI app that process PID belongs to, or print nothing and return 1.
+#
+# lsof reports the process that owns a socket, and for most big apps that is
+# a helper (Chrome's network service, an Electron renderer), which macOS does
+# not know as an app. So: ask about the pid; if it is not a Foreground app,
+# try its parent, a few levels up. `lsappinfo` and `ps` are built in and
+# need no privilege.
+dns_resolve_gui_app() {
+  local pid="${1:-}" depth=0 info type bundle name
+  while is_numeric "$pid" && [ "$pid" -gt 1 ] && [ "$depth" -lt 5 ]; do
+    info="$(with_timeout 3 lsappinfo info -only bundleid,name,ApplicationType "$pid" 2>/dev/null || true)"
+    type="$(printf '%s\n' "$info" | sed -n 's/^"ApplicationType"="\(.*\)"$/\1/p' | head -1)"
+    if [ "$type" = Foreground ]; then
+      bundle="$(printf '%s\n' "$info" | sed -n 's/^"CFBundleIdentifier"="\(.*\)"$/\1/p' | head -1)"
+      name="$(printf '%s\n' "$info" | sed -n 's/^"LSDisplayName"="\(.*\)"$/\1/p' | head -1)"
+      name="$(printf '%s' "$name" | tr -d '[:cntrl:]|' | cut -c1-60)"
+      if repair_bundle_quittable "$bundle"; then
+        printf '%s|%s' "$bundle" "${name:-$bundle}"
+        return 0
+      fi
+      return 1
+    fi
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    depth=$((depth + 1))
+  done
+  return 1
 }
 
 # A resolver address that is a well-known public one. Used to tell "the
@@ -426,6 +484,16 @@ dns_capture_socket_evidence() {
      && is_numeric "$top_count" && [ "$top_count" -gt 0 ]; then
     DNS_UDP_TOP_SHARE_PCT="$(awk -v t="$top_count" -v n="$DNS_UDP_SOCKETS" \
       'BEGIN { p = int(t * 100 / n); if (p > 100) p = 100; print p }')"
+  fi
+  # Which app owns the top holder, when it is one the user can quit. This
+  # is what lets SOCK-1 offer "Quit <app>" with a real bundle id rather than
+  # naming a truncated process.
+  DNS_UDP_TOP_APP_BUNDLE=""; DNS_UDP_TOP_APP_NAME=""
+  local top_pid app
+  top_pid="$(printf '%s\n' "$DNS_UDP_HOLDERS" | head -1 | awk -F'|' '{print $(NF-1)}')"
+  if app="$(dns_resolve_gui_app "$top_pid")"; then
+    DNS_UDP_TOP_APP_BUNDLE="${app%%|*}"
+    DNS_UDP_TOP_APP_NAME="${app#*|}"
   fi
   raw="$(with_timeout 4 dig +tcp +time=2 +tries=1 +short @1.1.1.1 apple.com 2>/dev/null \
          | grep -v '^;;' | head -1 || true)"
@@ -565,6 +633,10 @@ add_diag() {
 # clean, and silence beats a confident wrong answer. Callers already treat
 # unknown as "say nothing".
 CAPTIVE_CANARY_MARKER='<TITLE>Success</TITLE>'
+# The page that probe fetches. One definition, because the repair that opens
+# the sign-in page (lib/repairs.sh) must open the very page detection used.
+# shellcheck disable=SC2034 # read by lib/public.sh, lib/monitor.sh and lib/repairs.sh
+CAPTIVE_CANARY_URL='http://captive.apple.com/hotspot-detect.html'
 captive_portal_classify() {
   local http_status="${1:-}" body="${2:-}"
   case "$http_status" in

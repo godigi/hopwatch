@@ -6,6 +6,20 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Repair buttons, phase 1. A finding can now offer one button that fixes it, labelled with the action itself ("Quit Spotify", "Restart this Mac", "Open the sign-in page"). Pressing it shows what will change, runs the repair, re-checks at the quick depth, and says either "Fixed" or "That didn't help" with what to try next. Nothing is ever repaired automatically. These three need no password; repairs that ask for one are designed (`docs/design/2026-10-07-repair-actions-design.md`) and not built.
+- `hopwatch --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]`: the CLI runs every repair, the app only invokes it. `--dry-run` prints what would run and changes nothing. Exit `0` done, `1` ran and failed, `3` unknown repair or refused parameter.
+  - `quit-app` asks one app to close the way its own Quit menu does. Offered by `SOCK-1` when the top holder of the UDP sockets resolves (via `lsappinfo`, walking up from helper processes) to an app the user can quit. Refuses Finder, Dock, loginwindow, SystemUIServer and Hopwatch itself.
+  - `restart-mac` shows the standard macOS restart window with its cancellable countdown. Offered by `SOCK-1` when no quittable app holds the sockets. **Its live path has never been run** — only the dry run and a compile of the script were tested, because triggering it restarts the machine.
+  - `open-sign-in` opens the network's sign-in page. Offered by `CP-1`. Tested by dry run and stubs only.
+- `diagnosis[].repairs` in `--json`, and a `repairs` list per rule in `--rules-catalog` (catalog schema 6). All button, confirmation and what-next wording is written in `lib/repairs.sh`.
+- A repair that really runs appends one `repair` line to the event journal when a journal already exists. `--events` reads past it; it never opens, closes or extends an episode.
+
+### Fixed
+
+- The app's decoder for a finding assigned `severity`, `rule` and `summary` and nothing else, so a new field on a finding was silently dropped. Caught by the new `--verify` case before release: without the fix no repair button could ever have appeared.
+
 ## [1.11.0] - 2026-10-07
 
 ### Added

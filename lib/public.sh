@@ -42,7 +42,7 @@ public_run() {
   # the evidence.
   local captive_raw captive_code captive_body
   captive_raw="$(curl -s -m 3 -w '\n%{http_code}' \
-    http://captive.apple.com/hotspot-detect.html 2>/dev/null)"
+    "$CAPTIVE_CANARY_URL" 2>/dev/null)"
   captive_code="${captive_raw##*$'\n'}"
   captive_body="${captive_raw%$'\n'*}"
   # One classifier shared with the live monitor — see lib/common.sh — so a

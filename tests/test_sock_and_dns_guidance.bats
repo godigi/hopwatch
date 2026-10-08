@@ -97,6 +97,16 @@ stub_socket_census() {
       for i in $(seq 1 15); do printf 'Chatty\\x20App 4242 me %su IPv4 0x1 0t0 UDP *:%s\n' "$i" $((50000 + i)); done
       printf 'rapportd 646 me 22u IPv6 0x2 0t0 UDP *:3722\n'
     }
+    # SOCK-1 names an app only when lsappinfo says the holder is a regular
+    # GUI app the user can quit (dns_resolve_gui_app); lsof's process name
+    # alone is not enough to ask anything to quit.
+    lsappinfo() {
+      case "$*" in
+        *" 4242") printf '"CFBundleIdentifier"="com.example.chatty"\n"LSDisplayName"="Chatty App"\n"ApplicationType"="Foreground"\n' ;;
+        *)        printf '"CFBundleIdentifier"=[ NULL ]\n"ApplicationType"=[ NULL ]\n' ;;
+      esac
+    }
+    ps() { echo "   1"; }
   else
     lsof() { printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'; }
   fi
@@ -131,6 +141,9 @@ stub_dns_world() {
   [ "$DNS_TCP_DNS_OK" -eq 1 ]
   # The top holder, with its \x20 decoded and its count.
   [ "$(printf '%s\n' "$DNS_UDP_HOLDERS" | head -1)" = "Chatty App|4242|15" ]
+  # ...and the app behind it, which is what a repair is addressed to.
+  [ "$DNS_UDP_TOP_APP_BUNDLE" = com.example.chatty ]
+  [ "$DNS_UDP_TOP_APP_NAME" = "Chatty App" ]
   # Make every router rule's own trigger true, to prove suppression and not
   # a missing input.
   IPV6_DNS_FAIL="fe80::1" DNS_FALLBACK_OK=1 SECONDARY_DNS=8.8.8.8

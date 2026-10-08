@@ -247,6 +247,16 @@ MONITOR_COUNT=0          # >0: emit N samples then exit (tests, one-shots)
 INSTALL_WATCHER=0
 UNINSTALL_WATCHER=0
 WATCH_CHILD=0
+# --repair=ID runs one repair — the "Fix it" tier, the only thing in this
+# tool that may change anything, and only because the person pressed its
+# button. --repair-param KEY=VALUE (repeatable) gives it its parameters;
+# --dry-run prints what would run and changes nothing. See lib/repairs.sh
+# and docs/design/2026-10-07-repair-actions-design.md.
+REPAIR=0
+REPAIR_ID=""
+DRY_RUN=0
+REPAIR_PARAM_ARGS=()
+_take_repair_param=0
 TARGET=""
 _take_value=0
 # Which --monitor-*-interval is awaiting its value, if any. A separate
@@ -274,6 +284,9 @@ while [ "$#" -gt 0 ]; do
   fi
   if [ "$_take_show" -eq 1 ]; then
     SHOW_ID="$1"; _take_show=0; shift; continue
+  fi
+  if [ "$_take_repair_param" -eq 1 ]; then
+    REPAIR_PARAM_ARGS+=("$1"); _take_repair_param=0; shift; continue
   fi
   if [ -n "$_take_monitor" ]; then
     case "$_take_monitor" in
@@ -326,6 +339,11 @@ while [ "$#" -gt 0 ]; do
     --share)          SHARE=1 ;;
     --share=*)        SHARE=1; SHARE_ID="${1#--share=}" ;;
     --monitor)        MONITOR=1 ;;
+    --repair)         REPAIR=1 ;;
+    --repair=*)       REPAIR=1; REPAIR_ID="${1#--repair=}" ;;
+    --repair-param)   _take_repair_param=1 ;;
+    --repair-param=*) REPAIR_PARAM_ARGS+=("${1#--repair-param=}") ;;
+    --dry-run)        DRY_RUN=1 ;;
     --journal)                    _take_monitor=JOURNAL ;;
     --journal=*)                  MONITOR_JOURNAL="${1#*=}" ;;
     --monitor-fast-interval)      _take_monitor=FAST ;;
@@ -464,6 +482,20 @@ Just one check:
   --bufferbloat-only run only the bufferbloat load test
   --ping-only       run only gateway and internet latency / packet loss probes
 
+Repairs (the only thing here that changes anything, and only when you ask):
+  --repair=ID              run one repair: quit-app, restart-mac or
+                           open-sign-in. Nothing runs unless you ask for it;
+                           no scan, timer or alert ever starts one.
+                             --repair-param KEY=VALUE   a parameter, repeatable
+                                (quit-app takes bundle_id=<app's bundle id>)
+                             --dry-run   print exactly what would run and
+                                change nothing
+                             --json      print one result object
+                           Exits 0 if it worked, 1 if it ran and did not, 3
+                           for an unknown repair or a bad parameter (nothing
+                           is run). Findings that offer a repair list it in
+                           --json under diagnosis[].repairs.
+
 Modes (exit after running, don't run the normal check battery):
   --watch[=SEC]            re-run --quick hopwatch every SEC seconds
                            (default 300). Ctrl-C to stop.
@@ -557,6 +589,15 @@ if [ -n "$_take_monitor" ]; then
 fi
 if [ "$_take_show" -eq 1 ]; then
   printf 'hopwatch: --show expects a run id (see --history)\n' >&2; exit 3
+fi
+if [ "$_take_repair_param" -eq 1 ]; then
+  printf 'hopwatch: --repair-param expects KEY=VALUE\n' >&2; exit 3
+fi
+# --dry-run and --repair-param mean nothing without a repair to apply them
+# to. Say so rather than ignore them: a --dry-run that quietly did a real
+# run would be the worst possible failure for that flag.
+if [ "$REPAIR" -eq 0 ] && { [ "$DRY_RUN" -eq 1 ] || [ "${#REPAIR_PARAM_ARGS[@]}" -gt 0 ]; }; then
+  printf 'hopwatch: --dry-run and --repair-param only apply to --repair=ID\n' >&2; exit 3
 fi
 # Section bodies stream out as each module runs — before later modules have
 # discovered everything that needs masking. Rather than emit a partially
@@ -662,6 +703,41 @@ fi
 # the boundary with a usage/tooling error instead of silently producing a
 # partial report when a minimal installation has no python3.
 _require_python3 || exit 3
+
+# ── Repair (exit after handling) ───────────────────────────────────────────
+# The only mode that may change anything, and it runs one named repair and
+# nothing else: no scan, no log, no history. Every parameter is checked in
+# lib/repairs.sh before anything executes, and a bad one exits 3 with
+# nothing run — 3, not 2, because 2 is reserved for a diagnosis.
+if [ "$REPAIR" -eq 1 ]; then
+  if [ -z "$REPAIR_ID" ]; then
+    printf 'hopwatch: --repair expects an id, as --repair=ID\n' >&2; exit 3
+  fi
+  LOG=/dev/null
+  # shellcheck source=lib/thresholds.sh
+  . "$LIB_DIR/thresholds.sh"
+  # shellcheck source=lib/common.sh
+  . "$LIB_DIR/common.sh"
+  # shellcheck source=lib/globals.sh
+  . "$LIB_DIR/globals.sh"
+  # shellcheck source=lib/repairs.sh
+  . "$LIB_DIR/repairs.sh"
+  for _kv in "${REPAIR_PARAM_ARGS[@]+"${REPAIR_PARAM_ARGS[@]}"}"; do
+    case "$_kv" in
+      [a-z]*=*) ;;
+      *) printf 'hopwatch: --repair-param expects KEY=VALUE with a lowercase KEY (got: %s)\n' "$_kv" >&2; exit 3 ;;
+    esac
+    _k="${_kv%%=*}"
+    case "$_k" in
+      *[!a-z_]*) printf 'hopwatch: --repair-param expects KEY=VALUE with a lowercase KEY (got: %s)\n' "$_kv" >&2; exit 3 ;;
+    esac
+    REPAIR_PARAM_KEYS+=("$_k")
+    REPAIR_PARAM_VALS+=("${_kv#*=}")
+  done
+  NETDIAG_COMPLETED=1
+  repair_cli "$REPAIR_ID" "$DRY_RUN" "$JSON_MODE"
+  exit $?
+fi
 
 # ── Mode dispatch (exit after handling) ────────────────────────────────────
 if [ "$INSTALL_WATCHER" -eq 1 ] || [ "$UNINSTALL_WATCHER" -eq 1 ] \

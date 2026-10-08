@@ -225,7 +225,53 @@ def build_diagnosis() -> list[dict]:
         else:
             sev, rule, summary = "warn", None, line
         out.append({"severity": sev, "rule": rule, "summary": summary})
+    _attach_repairs(out)
     return out
+
+
+REPAIR_US = "\x1f"   # field separator inside one offer (lib/repairs.sh)
+REPAIR_RS = "\x1e"   # separator between "key=value" parameters
+
+
+def _attach_repairs(diagnoses: list[dict]) -> None:
+    """Give each diagnosis the repairs its rule offered, if any.
+
+    lib/diagnosis.sh records an offer next to the add_diag it belongs to
+    (lib/repairs.sh), one per line: rule, id, label, confirm, admin,
+    recheck, if_unfixed, params. The prose was written there, in bash; this
+    only shapes it. A diagnosis nothing was offered for gets *no* `repairs`
+    key at all, so the common document is byte-for-byte what it was.
+
+    Split on "\\n" rather than splitlines(): the separators above are
+    control characters that str.splitlines() treats as line breaks.
+    """
+    raw = os.environ.get("NETDIAG_REPAIR_OFFERS", "")
+    if not raw:
+        return
+    by_rule: dict[str, list[dict]] = {}
+    for line in raw.split("\n"):
+        f = line.split(REPAIR_US)
+        if len(f) != 8 or not f[0] or not f[1]:
+            continue
+        rule, rid, label, confirm, admin, recheck, if_unfixed, params = f
+        pairs = {}
+        for kv in params.split(REPAIR_RS) if params else []:
+            key, sep, value = kv.partition("=")
+            if sep and key:
+                pairs[key] = value
+        by_rule.setdefault(rule, []).append({
+            "id": rid,
+            "label": label,
+            "confirm": confirm,
+            "admin": admin == "1",
+            "recheck": recheck,
+            "if_unfixed": if_unfixed,
+            "params": pairs,
+        })
+    for d in diagnoses:
+        offered = by_rule.pop(d.get("rule") or "", None)
+        if offered:
+            d["repairs"] = offered
 
 
 def measured_families(data: dict) -> set[str]:

@@ -34,6 +34,11 @@
        deliver network grouping, so this only buys back real names. -->
   <key>NSLocationUsageDescription</key>
   <string>Hopwatch uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
+  <!-- Shown by macOS the first time a repair asks another app to quit
+       ("Quit Spotify"). Hopwatch sends that one request, only when the
+       person presses the button, and reads nothing from the app. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Hopwatch asks an app to quit only when you press the button that says so, to free up network connections. It does not read anything from the app.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>Hopwatch uses your location permission only to read the name of the Wi-Fi network you are on. macOS hides Wi-Fi names from apps without it. Nothing about your location is stored or sent anywhere.</string>
 </dict>

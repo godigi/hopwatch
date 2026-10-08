@@ -443,6 +443,7 @@ paper over this would have been the wrong fix in the wrong file.
 
 - **Trigger:** `DNS_LOCAL_FAIL == 1` (scan) / `MON_DNS_LOCAL_FAIL == 1` (monitor). It is set only after a DNS probe came back empty, by either of two independent signals: `helpers/sockcheck.py` could not bind a UDP socket to port 0 (it prints the errno name, e.g. `EADDRNOTAVAIL`), or `dig`'s own stderr said `socket_bind` / `address not available`. A healthy run, in which every lookup is answered, never runs the check.
 - **Severity:** `critical`. Name lookups cannot work at all; new connections of any kind may fail.
+- **Repair offered:** `quit-app` when the top holder of the UDP sockets holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of them and resolves to an app the user can quit (`lsappinfo`, walking up the parent chain because helper processes such as Chrome's do not resolve on their own); otherwise `restart-mac`. The summary's "Quit <app>" clause and the button always name the same app.
 - **Suppresses `D1`, `D2`, `D5`, `V6-2` and `D6`** for that run: their evidence is an empty `dig`, which is void when the question never left the machine. In the monitor it suppresses `D1`.
 - **Why it exists.** On 2026-10-07 the Mac could not open a UDP socket (`dig: isc_socket_bind: address not available`, system-wide, cured only by a reboot; TCP DNS and ping still worked). `D1` told the user their DNS was flaky and to restart the router for over an hour. The likely cause is ephemeral-port exhaustion from a process leaking sockets; this is not proven, because the reboot erased the evidence.
 - **Evidence, captured at the moment of the fault because a reboot erases it:** the UDP socket count (`netstat -an -p udp`); the top holders by process (`lsof -nP -iUDP`, sudo-free, so only the user's own processes are visible); and whether DNS over TCP (`dig +tcp`) still answers. In `--json` these are the `dns_local` object; in the monitor they ride in `dns.local_fail` / `dns.local`, and the `--journal` line that records the fault carries them as `evidence`.
@@ -1200,6 +1201,8 @@ see the comment at the top of `lib/monitor.sh::_mon_rules` — on whichever
 inputs a between-scans sample actually has.
 
 ### CP-1 — Captive portal blocking real access
+
+- **Repair offered:** `open-sign-in`, which opens the same page the probe fetches, so the network's sign-in page appears. It is not re-checked straight away: the user still has to sign in.
 
 - **Trigger:** the probe to `http://captive.apple.com/hotspot-detect.html`
   comes back intercepted rather than answered — a redirect (3xx), a 511

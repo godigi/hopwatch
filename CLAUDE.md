@@ -84,6 +84,7 @@ netdiag --monitor [--journal PATH]
                   [--monitor-count N]
 netdiag --install-watcher | --uninstall-watcher
 netdiag --install-recorder | --uninstall-recorder
+netdiag --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]
 ```
 
 `--history`, `--show` and `--monitor` exist for the GUI (see below) but are
@@ -105,6 +106,15 @@ entirely — so there is no redacted stored copy to read, and sharing a past
 run has to redact at read time. `--share=-` reads one run's JSON on stdin,
 which is how netdiag.app shares the report already on screen without
 re-running anything.
+
+`--repair` is the repair tier, and the only thing in the CLI that changes
+anything. It runs one named repair (`quit-app`, `restart-mac`,
+`open-sign-in`) and is only ever reached from a button the user pressed, or
+typed by hand — never from a scan, the monitor, an arrival or an alert.
+Which finding offers which repair, and every word the user reads about it,
+is decided in `lib/repairs.sh` and travels in `diagnosis[].repairs`; the app
+renders it and calls the CLI back. Parameters are validated and refused, not
+sanitised, and nothing that arrived from the network reaches a command line.
 
 `--events` is the read side of the event journal, and the reason the
 project has one: a stored run is a snapshot with one timestamp, so
