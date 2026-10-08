@@ -1,0 +1,13 @@
+# HOG-1: one app is using up the connection
+
+Status: implemented on `feat/upload-hog-finding`. The plan step, written before the code.
+
+**Goal.** When one app on this Mac is saturating the link, name it and offer the existing Quit button, instead of a bufferbloat grade with no culprit. Evidence: `nettop -P -L N -s S -J bytes_in,bytes_out`, per-process cumulative counters, sudo-free. Rows are `name.pid,in,out,`; names hold spaces and dots (pid is after the last dot), are cut at 15 characters, and a time column appears or not.
+
+**Prior art.** `TR-1` reports machine-wide traffic by process *name* with no pid, so it cannot offer a button. `HOG-1` is the latency-gated, nameable sibling and leaves `TR-1` alone. The ID is `HOG-1`, not `UL-1`: it covers download too.
+
+1. **Own traffic.** `helpers/hog.py` reads one `ps` table. Hopwatch's own: descendants of this process (`$$`); anything with a `hopwatch`/`netdiag` command line among its ancestors, which recognises a full check run by the app or a terminal from the monitor's side; and a few probe-tool names. A pid `ps` no longer lists cannot be vouched for. Own or unverifiable traffic at or above `THRESH_HOG_MIN_MBPS` voids that direction, because the latency then has another explanation and naming a bystander would be a guess.
+2. **Depth.** The scan decides and names. Its capture runs only past a cheap gate (latency degraded, ping clean), in `--quick` too, because the quick scan the monitor triggers is how the app gets the button. The monitor never saturates: after `THRESH_MON_HOG_CONFIRM_CYCLES` gated fast cycles it takes one capture, at most one per `THRESH_MON_HOG_RECHECK_S`, and lists the rule. A negative capture withdraws it.
+3. **Trigger.** Gate: router RTT at/above `THRESH_HOG_GW_RTT_MS`, or jitter at/above `THRESH_HOG_JITTER_MS`, loss below `LOSS_WARN_PCT`. Then the top app group (folded by bundle) must hold `THRESH_HOG_DOMINANCE_PCT` of non-Hopwatch traffic in a direction on every interval of the capture. Size: with a measured speed, its share of the link (`rate / (rate + leftover)`) at least `THRESH_HOG_LINK_SHARE_PCT`; without one, `THRESH_HOG_UNKNOWN_CAPACITY_MBPS`. The monitor never has a speed figure, so a full check may decline what the monitor raised.
+4. **Naming.** `dns_resolve_gui_app`. Unresolvable (daemon, CLI tool) gives the finding without a name or button; the process appears only in the technical clause. Rates, not lifetime counters, decide, so `mDNSResponder` never qualifies.
+5. **Wording.** Measured values only; Quit button plus "it will pick up again when you start it". Severity `warn`.
