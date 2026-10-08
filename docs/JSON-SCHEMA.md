@@ -367,6 +367,12 @@ key is absent when it offers none, which is nearly always.
 
 A consumer shows these verbatim and interprets none of them.
 
+Two rules offer `quit-app`: `SOCK-1` (the app holding most of this Mac's UDP
+sockets) and `CONN-1` (the app holding most of its open and half-open
+connections, when it holds hundreds). Both name the app in the summary and
+in `label`, and both hand its bundle id back in `params`. `CONN-1` offers
+nothing when no single app qualifies.
+
 `hopwatch --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]`
 runs one. With `--json` it prints one object:
 
@@ -821,6 +827,17 @@ it would accumulate forever.
   `--journal` line that records `SOCK-1` firing carries the same object as
   `evidence`, because the stream is not stored and a reboot erases the
   culprit.
+- **`CONN-1` and `D1` in the stream are confirmed, not instant.** Both rest
+  on `dns.ok` and `tcp.any_ok`, which are single samples of something that
+  can fail 10-60% of the time without the resolver or port 443 being at
+  fault. The monitor holds each for `THRESH_MON_CONN_CONFIRM_CYCLES`
+  consecutive medium-tier samples before listing it in `status.rules`, and
+  holds `CONN-1` for as many clean ones before withdrawing it. A consumer
+  must therefore read the rule, not decide "web blocked" or "DNS failing"
+  from one `dns.ok` / `tcp.any_ok` sample. While a first failure waits for
+  its confirmation the monitor takes its next medium-tier sample one fast
+  cycle later instead of 60 s later, and a consumer will see `refreshed`
+  list `medium` on that cycle.
 - **`status.rules`** are rule IDs from
   [`DIAGNOSIS-RULES.md`](./DIAGNOSIS-RULES.md), evaluated in
   `lib/monitor.sh` against the same `lib/thresholds.sh` constants that

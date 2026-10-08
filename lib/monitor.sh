@@ -128,6 +128,31 @@ MON_GW_RTT=""
 # `set -u` and the very first cycle reads them before ever writing them.
 MON_GW_LOSS_STREAK=0
 MON_INET_LOSS_STREAK=0
+# CONN-1 / D1 confirmation (THRESH_MON_CONN_CONFIRM_CYCLES). Unlike the loss
+# streaks these count *medium-tier* samples — DNS and TCP are only probed
+# there — so they advance only on a cycle that took one (MON_MEDIUM_FRESH),
+# and hold their value across the fast cycles between. Declared here for the
+# same `set -u` reason as the loss streaks.
+#   MON_CONN_STREAK   consecutive samples in which any new-connection probe
+#                     (the DNS lookup or a TCP/443 connect) failed
+#   MON_CONN_SAW_*    what failed somewhere in that streak: a lookup, a
+#                     connect, or two resolvers on the same sample
+#   MON_CONN_CLEAN    consecutive samples in which nothing failed
+#   MON_CONN_ACTIVE   CONN-1 is confirmed; held until MON_CONN_CLEAN confirms
+#                     recovery, so an intermittent fault does not flash
+#   MON_DNS_STREAK    consecutive samples in which the lookup alone failed
+#   MON_CONN_PENDING  a failure is waiting for its confirmation; the main
+#                     loop re-probes at the fast cadence instead of waiting
+#                     out the 60 s medium tier
+MON_CONN_STREAK=0
+MON_CONN_SAW_DNS=0
+MON_CONN_SAW_TCP=0
+MON_CONN_SAW_PAIR=0
+MON_CONN_CLEAN=0
+MON_CONN_ACTIVE=0
+MON_DNS_STREAK=0
+MON_CONN_PENDING=0
+MON_MEDIUM_FRESH=1
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -144,6 +169,9 @@ MON_WIFI_NOISE=""
 MON_WIFI_SNR=""
 MON_WIFI_CHAN=""
 MON_DNS_OK=""
+# The same question put to a second, unrelated resolver, asked only after the
+# first went unanswered (rule CONN-1). "" = not asked.
+MON_DNS_ALT_OK=""
 MON_DNS_RESOLVER=""
 MON_DNS_MS=""
 # Whether this Mac could send a DNS question at all (rule SOCK-1). "" = the
@@ -484,7 +512,7 @@ _mon_probe_gateway() {
 # ── Medium tier ──────────────────────────────────────────────────────────
 
 _mon_probe_dns() {
-  MON_DNS_OK=""; MON_DNS_RESOLVER=""; MON_DNS_MS=""
+  MON_DNS_OK=""; MON_DNS_ALT_OK=""; MON_DNS_RESOLVER=""; MON_DNS_MS=""
   MON_DNS_LOCAL_FAIL=""; MON_DNS_LOCAL_BIND=""; MON_DNS_UDP_SOCKETS=""
   MON_DNS_UDP_HOLDERS=""; MON_DNS_UDP_TOP_SHARE_PCT=""; MON_DNS_TCP_DNS_OK=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
@@ -501,6 +529,17 @@ _mon_probe_dns() {
   dns_probe "$MON_DNS_RESOLVER" cloudflare.com || true
   MON_DNS_MS="$(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN{printf "%.0f", (b-a)*1000}')"
   if [ -n "$DNS_PROBE_ANSWER" ]; then MON_DNS_OK=1; else MON_DNS_OK=0; fi
+  # One lookup that went unanswered is one sample. Ask a second, unrelated
+  # resolver before settling on what it means: both silent at once is the
+  # path out of this Mac (CONN-1), one silent is that resolver (D1). Paid only
+  # after a failure, and not at all when the failure was local (SOCK-1) —
+  # there was no socket to ask with.
+  if [ "$MON_DNS_OK" = "0" ] && [ "${DNS_LOCAL_FAIL:-0}" -ne 1 ]; then
+    local _alt_resolver=1.1.1.1
+    [ "$MON_DNS_RESOLVER" = "1.1.1.1" ] && _alt_resolver=8.8.8.8
+    dns_probe "$_alt_resolver" cloudflare.com || true
+    if [ -n "$DNS_PROBE_ANSWER" ]; then MON_DNS_ALT_OK=1; else MON_DNS_ALT_OK=0; fi
+  fi
   MON_DNS_LOCAL_FAIL="$DNS_LOCAL_FAIL"
   MON_DNS_LOCAL_BIND="$DNS_LOCAL_BIND"
   MON_DNS_UDP_SOCKETS="$DNS_UDP_SOCKETS"
@@ -737,6 +776,61 @@ _mon_add_rule() {
   return 0
 }
 
+# Forget the CONN-1 / D1 streaks. A link drop or a different network ends
+# them: failures seen on the old path say nothing about the new one.
+_mon_conn_reset() {
+  MON_CONN_STREAK=0; MON_CONN_SAW_DNS=0; MON_CONN_SAW_TCP=0
+  MON_CONN_SAW_PAIR=0; MON_CONN_CLEAN=0; MON_CONN_ACTIVE=0
+  MON_DNS_STREAK=0; MON_CONN_PENDING=0
+}
+
+# Fold this cycle's DNS and TCP samples into the CONN-1 / D1 streaks. Runs on
+# a cycle that took a fresh medium-tier sample and nothing else: the fast
+# cycles between reuse the last DNS and TCP result, and counting a stale
+# result again would let one bad sample confirm itself.
+_mon_conn_observe() {
+  MON_CONN_PENDING=0
+  [ "$MON_MEDIUM_FRESH" -eq 1 ] || return 0
+  [ -n "$MON_DNS_OK" ] || return 0
+  local dns_failed=0 tcp_failed=0
+  # A refused UDP bind is SOCK-1's, not a lookup that went unanswered.
+  [ "$MON_DNS_OK" = "0" ] && [ "${MON_DNS_LOCAL_FAIL:-}" != "1" ] && dns_failed=1
+  case "$MON_TCP_LINES" in *"|0|"*) tcp_failed=1 ;; esac
+  [ "${MON_TCP_OK:-}" = "0" ] && tcp_failed=1
+
+  if [ "$dns_failed" -eq 1 ]; then
+    MON_DNS_STREAK=$((MON_DNS_STREAK + 1))
+  else
+    MON_DNS_STREAK=0
+  fi
+  if [ "$dns_failed" -eq 1 ] || [ "$tcp_failed" -eq 1 ]; then
+    MON_CONN_STREAK=$((MON_CONN_STREAK + 1))
+    MON_CONN_CLEAN=0
+    [ "$dns_failed" -eq 1 ] && MON_CONN_SAW_DNS=1
+    [ "$tcp_failed" -eq 1 ] && MON_CONN_SAW_TCP=1
+    [ "$dns_failed" -eq 1 ] && [ "$MON_DNS_ALT_OK" = "0" ] && MON_CONN_SAW_PAIR=1
+  else
+    MON_CONN_STREAK=0
+    MON_CONN_SAW_DNS=0; MON_CONN_SAW_TCP=0; MON_CONN_SAW_PAIR=0
+    MON_CONN_CLEAN=$((MON_CONN_CLEAN + 1))
+  fi
+
+  if [ "$MON_CONN_STREAK" -ge "$THRESH_MON_CONN_CONFIRM_CYCLES" ] \
+     && { [ "$MON_CONN_SAW_PAIR" -eq 1 ] \
+          || { [ "$MON_CONN_SAW_DNS" -eq 1 ] && [ "$MON_CONN_SAW_TCP" -eq 1 ]; }; }; then
+    MON_CONN_ACTIVE=1
+  elif [ "$MON_CONN_ACTIVE" -eq 1 ] \
+       && [ "$MON_CONN_CLEAN" -ge "$THRESH_MON_CONN_CONFIRM_CYCLES" ]; then
+    MON_CONN_ACTIVE=0
+  fi
+  # A first failure is a question, not an answer: ask again soon.
+  if [ "$MON_CONN_STREAK" -gt 0 ] && [ "$MON_CONN_ACTIVE" -eq 0 ] \
+     && [ "$MON_CONN_STREAK" -lt "$THRESH_MON_CONN_CONFIRM_CYCLES" ]; then
+    MON_CONN_PENDING=1
+  fi
+  return 0
+}
+
 _mon_rules() {
   MON_RULES=""
   # A rule can clear only when this cycle measured the inputs that decide it.
@@ -755,6 +849,7 @@ _mon_rules() {
     # drop interrupted is not a streak that held.
     MON_GW_LOSS_STREAK=0
     MON_INET_LOSS_STREAK=0
+    _mon_conn_reset
     return 0
   fi
 
@@ -859,13 +954,36 @@ _mon_rules() {
     fi
   fi
 
+  # CONN-1 — new connections refused or dropped while ping is clean. The
+  # same observation lib/diagnosis.sh makes, with the monitor's addition that
+  # it must hold for THRESH_MON_CONN_CONFIRM_CYCLES samples: one dig and one
+  # connect are each a single sample of something that fails 10-60% of the
+  # time. The ping-clean test is the scan's: the gateway measured and under
+  # the warn cutoff, an unmeasured internet leg not counting against it.
+  _mon_conn_observe
+  local _mon_conn_fault=0
+  if [ "$MON_CONN_ACTIVE" -eq 1 ] && [ "$_mon_public_ok" = "1" ] \
+     && [ "${MON_CAPTIVE:-}" != "1" ] && [ "${MON_DNS_LOCAL_FAIL:-}" != "1" ] \
+     && loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT" \
+     && ! loss_at_least "$MON_INET_LOSS" "$LOSS_WARN_PCT" \
+     && ! loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_WARN_PCT"; then
+    _mon_conn_fault=1
+    _mon_add_rule warn CONN-1
+  fi
+
   # SOCK-1 — this Mac cannot open a UDP socket, so no lookup can be sent.
   # Mirrors lib/diagnosis.sh, including the suppression: D1's evidence (an
   # empty dig) is void when the question never left the machine.
   if [ "${MON_DNS_LOCAL_FAIL:-}" = "1" ]; then
     _mon_add_rule critical SOCK-1
-  # D1 — resolution failing while the internet itself is reachable.
-  elif [ "${MON_DNS_OK:-}" = "0" ] && [ "$_mon_public_ok" = "1" ]; then
+  # CONN-1 owns a lookup that failed alongside other new connections.
+  elif [ "$_mon_conn_fault" -eq 1 ]; then
+    :
+  # D1 — resolution failing while the internet itself is reachable. Held
+  # for the same confirmation as CONN-1: when it would fire alone, it is one
+  # failed lookup until a second one agrees.
+  elif [ "${MON_DNS_OK:-}" = "0" ] && [ "$_mon_public_ok" = "1" ] \
+       && [ "$MON_DNS_STREAK" -ge "$THRESH_MON_CONN_CONFIRM_CYCLES" ]; then
     _mon_add_rule warn D1
   fi
 
@@ -962,8 +1080,16 @@ _mon_rules() {
   if [ "$MON_DNS_OK" = "1" ] \
      || { [ "$MON_DNS_OK" = "0" ] && [ "$_mon_public_ok" = "0" ] \
           && [ -n "$MON_GW_LOSS" ]; } \
-     || [ "${MON_DNS_LOCAL_FAIL:-}" = "1" ]; then
+     || [ "${MON_DNS_LOCAL_FAIL:-}" = "1" ] \
+     || [ "$_mon_conn_fault" -eq 1 ]; then
     MON_CLEARABLE_RULES+="D1 "
+  fi
+  # CONN-1's presence is decided entirely from state held across cycles plus
+  # this cycle's ping, so its absence means recovery whenever both were
+  # measured. A stale DNS result cannot mislead: the held state only moves on
+  # a fresh sample.
+  if [ -n "$MON_DNS_OK" ] && [ -n "$MON_GW_LOSS" ]; then
+    MON_CLEARABLE_RULES+="CONN-1 "
   fi
   # SOCK-1 clears only on a cycle whose DNS probe ran and found a socket
   # available; a cycle that did not probe (""), or a tier that was not due,
@@ -983,7 +1109,7 @@ _mon_rules() {
     case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
     case "$prior" in
       N1|G1|G2|P1|P2|L1|SOCK-1) _mon_add_rule critical "$prior" ;;
-      G3|D1|CP-1|L2|BR-1) _mon_add_rule warn "$prior" ;;
+      G3|D1|CP-1|L2|BR-1|CONN-1) _mon_add_rule warn "$prior" ;;
       *) _mon_add_rule info "$prior" ;;
     esac
     unresolved=1
@@ -1252,6 +1378,7 @@ monitor_run() {
         "$((now - MON_PREV_CYCLE_TS))" "$MON_PREV_CADENCE")"
     fi
     MON_REFRESHED=""
+    MON_MEDIUM_FRESH=0
 
     # Fast tier drives everything: it establishes whether there is a link
     # at all, and the identity the other tiers are scoped to.
@@ -1278,6 +1405,7 @@ monitor_run() {
       # network because the window's whole point is describing *this*
       # link's recent past — there is no "come back to it later" case.
       [ -n "$MON_NETWORK_ID" ] && _mon_loss_reset
+      _mon_conn_reset
     fi
 
     # A dead link means nothing to probe. Skipping the other tiers here is
@@ -1289,6 +1417,7 @@ monitor_run() {
         MON_REFRESHED+="medium "
         _mon_probe_dns
         _mon_probe_tcp
+        MON_MEDIUM_FRESH=1
         _mon_probe_wifi_signal
         _mon_probe_browser
         next_medium=$((now + MONITOR_MEDIUM_INTERVAL))
@@ -1340,6 +1469,9 @@ monitor_run() {
     fi
 
     _mon_rules
+    # A failure still waiting for its confirmation is re-probed next cycle
+    # rather than after the rest of the 60 s medium interval.
+    if [ "$MON_CONN_PENDING" -eq 1 ]; then next_medium=0; fi
 
     cadence="$MONITOR_FAST_INTERVAL"
     [ "$MON_DEGRADED" -eq 1 ] && cadence="$MONITOR_DEGRADED_INTERVAL"

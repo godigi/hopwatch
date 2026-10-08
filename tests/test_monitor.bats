@@ -77,6 +77,8 @@ reset_state() {
   MON_WEB_OK="" MON_MEASUREMENT_STATE="unknown"
   MON_VPN_ACTIVE=0 MON_ICMP_FILTERED=0 MON_DEGRADED=0
   MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
+  MON_DNS_ALT_OK="" MON_TCP_LINES="" MON_MEDIUM_FRESH=1
+  _mon_conn_reset
   # scanner side
   GATEWAY=192.168.1.1 IS_WIFI=1 GW_LOSS=0 WIFI_RSSI="" WIFI_SNR=""
   DNS_OK=1 DNS_LINES="x|y|z|OK" PUBLIC_OK=1 PUBLIC_CHECKED=1
@@ -106,7 +108,7 @@ monitor_rules_here() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
+MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
@@ -336,7 +338,10 @@ scanner_rules() {
 }
 
 @test "parity: DNS failing while the internet is reachable is D1 on both" {
+  # D1 is confirmed in the monitor like G3 (THRESH_MON_CONN_CONFIRM_CYCLES):
+  # one cycle first, so the comparison is against the confirmed state.
   reset_state; MON_DNS_OK=0 DNS_OK=0
+  _mon_rules
   local m; m="$(monitor_rules)"; reset_state; MON_DNS_OK=0 DNS_OK=0
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"D1"* ]] || return 1
@@ -365,6 +370,7 @@ scanner_rules() {
 
 @test "SOCK-1: a silent resolver with a usable socket is still D1 in the monitor" {
   reset_state; MON_DNS_OK=0 MON_DNS_LOCAL_FAIL=0
+  _mon_rules
   monitor_rules_here
   [[ "$MON_RULES_SORTED" == "D1 " ]] || { echo "rules: $MON_RULES_SORTED"; return 1; }
 }

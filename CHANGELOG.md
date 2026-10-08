@@ -6,6 +6,17 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `CONN-1` (warn): new connections from this Mac are being refused or dropped while ping is clean. On 2026-10-08 this Mac's own torrent client flooded the router with new flows: UDP DNS to 1.1.1.1 and 8.8.8.8 timed out about 10% of the time and TCP/443 connects were "refused" in 10-40 ms about 60% of the time, with 0% ping loss, and Hopwatch alternated between "your DNS server is flaky" (`D1`) and, in the app, "Web blocked, port 443 down". Both were verdicts on one probe of a single fault and each named a cause nobody measured. `CONN-1` fires when lookups and direct TCP/443 connects fail together, or two unrelated resolvers fail the same question, while the router and internet pings are clean. It says what was observed and that the cause was not found, and suppresses `D1`, `D5` and `D6`. It does not fire under `SOCK-1`, a captive portal, `P1`/`P2` or any loss rule. Mirrored in the monitor.
+- `CONN-1` names the app responsible when there is one. At the moment it fires (never on a healthy cycle) the scan counts each process's UDP sockets and connections stuck in `SYN_SENT` with user-level `lsof`; an app holding at least `THRESH_SOCK_HOLDER_SHARE_PCT` of all of them and at least `THRESH_CONN_HOLDER_MIN_FLOWS` is named and gets the existing "Quit <app>" button. Apps whose process is a bundled helper that outlived its parent (Stremio's `node`) are now found through the `.app` the executable sits in, for `SOCK-1` too.
+- `THRESH_MON_CONN_CONFIRM_CYCLES`, `THRESH_CONN_RESOLVERS_TOGETHER` and `THRESH_CONN_HOLDER_MIN_FLOWS` in `lib/thresholds.sh`.
+
+### Changed
+
+- The monitor no longer decides `D1` from a single `dig`. `D1` (when it would fire alone) and `CONN-1` wait `THRESH_MON_CONN_CONFIRM_CYCLES` consecutive medium-tier samples, and `CONN-1` is withdrawn only after as many clean ones. While a first failure waits, the next sample comes one fast cycle later rather than 60 s later. After a failed lookup the monitor also asks a second, unrelated resolver, which is the only extra probe it adds.
+- The app's Browsing tile reads `CONN-1` and `D1` from the CLI's rules instead of deciding from one `dns.ok` / `tcp.any_ok` sample, so it can no longer flip between "DNS failing" and "Web blocked" on whichever probe lost the cycle. Those two labels are gone.
+
 ## [1.12.0] - 2026-10-07
 
 ### Added

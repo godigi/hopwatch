@@ -157,6 +157,11 @@ DNS_UDP_TOP_SHARE_PCT="" # top holder's share of DNS_UDP_SOCKETS
 DNS_UDP_TOP_APP_BUNDLE=""  # bundle id of the GUI app owning the top holder (quittable), else ""
 DNS_UDP_TOP_APP_NAME=""    # that app's display name
 DNS_TCP_DNS_OK=""        # 1/0 — DNS over TCP still works despite the UDP fault
+CONN_HOLDERS=""          # "process|pid|flows|syn_sent" lines, biggest first [CONN-1]
+CONN_FLOWS_TOTAL=""      # system-wide UDP sockets + connections in SYN_SENT
+CONN_HOLDER_TOP_SHARE_PCT="" # top holder's share of CONN_FLOWS_TOTAL
+CONN_HOLDER_APP_BUNDLE=""    # bundle id of the quittable GUI app owning the top holder, else ""
+CONN_HOLDER_APP_NAME=""      # that app's display name
 
 # IPv6 (lib/ipv6.sh)
 IPV6_AVAILABLE=0

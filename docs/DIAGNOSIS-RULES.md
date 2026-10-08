@@ -370,11 +370,13 @@ decides a critical diagnosis. It costs ~4 s.
 
 ### D1 — Partial DNS, internet reachable
 
-- Trigger: `dns.ok == false AND public.ok == true`, and not `SOCK-1`.
+- Trigger: `dns.ok == false AND public.ok == true`, and neither `SOCK-1` nor `CONN-1` is firing.
 - Severity: `warn`
+- In the monitor, D1 fires only after the lookup has failed for `THRESH_MON_CONN_CONFIRM_CYCLES` consecutive medium-tier samples. One `dig +tries=1` is one sample of something that can fail without the resolver being at fault. The scan has no streak: it already asks three resolvers two questions each.
 - Recommendation: restart the router to refresh its DNS cache, or toggle Wi-Fi off and on. For secure lookups without breaking local networks or captive portals, consider Encrypted DNS (DoH) in your browser. Do not hardcode static DNS in macOS network adapter settings.
 - When `D6` also fires, the recommendation is dropped from the summary and `D6` carries the only remedy.
 - **Void under `SOCK-1`.** D1's evidence is an empty `dig`. If this Mac could not open a UDP socket, an empty `dig` says nothing about the resolver, and "restart your router" cannot help. See `SOCK-1`.
+- **Void under `CONN-1`.** When other new connections fail alongside the lookups (see `CONN-1`), "your DNS server is flaky" names a cause nobody measured and sends the reader to the wrong box.
 
 ### D2 — No name lookups working at all
 
@@ -421,7 +423,7 @@ paper over this would have been the wrong fix in the wrong file.
 - Severity: `warn`
 - Evidence: primary resolver failing all queries while secondary resolver responds.
 - Recommendation: remove the unresponsive DNS server from System Settings or restart the router. Dropped from the summary when `D6` fires, which carries the remedy instead.
-- Void under `SOCK-1`, for the reason given under `D1`.
+- Void under `SOCK-1` and `CONN-1`, for the reasons given under `D1`.
 - Rationale: macOS queries resolvers in the order configured. When the primary resolver fails or drops packets, the OS resolver must wait for a 2-to-5 second timeout before retransmitting the query to the secondary resolver. Web browsing and apps suffer constant hesitations and stalls even though lookups eventually succeed.
 
 ### D6 — Guided switch to a better DNS
@@ -431,7 +433,8 @@ paper over this would have been the wrong fix in the wrong file.
   - a public resolver (1.1.1.1 or 8.8.8.8) answered in the same scan;
   - that resolver is **failing** (`DNS_PRIMARY_FAIL`, every probe of it came back empty) **or slow** (`SYS_RES_MS` above `THRESH_DNS_LATENCY_WARN_MS`, the same cutoff `D3` uses — no second one);
   - it is not already the user's choice: `dns_is_manual_override` is false, `SYS_RES` is not itself a well-known public resolver, and no encrypted DNS profile is active (`EDNS-1`);
-  - `SOCK-1` is not firing — in that incident switching resolver would not have helped.
+  - `SOCK-1` is not firing — in that incident switching resolver would not have helped;
+  - `CONN-1` is not firing — every resolver dropped the same questions, so the router's is not the odd one out.
 - **Severity:** `info`. It is advice, so it never moves the exit code.
 - **Scope:** scan only. The monitor probes one resolver and has no public one to compare against.
 - **Evidence:** the resolver's address and, when slow, its latency.
@@ -450,6 +453,23 @@ paper over this would have been the wrong fix in the wrong file.
 - **The "quit <app>" clause is conditional.** The summary names the top holder only when it holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of all UDP sockets. Below that it is just a busy app, and a holder that is a system process is invisible without root. In both cases the summary drops the clause and says to restart the Mac. The rule itself fires on a failed bind, not on a count, so it needs no cutoff.
 - **Recommendation:** quit the named app, or restart this Mac. Restarting the router will not help, and the summary says so.
 - **Impact:** every activity `broken`.
+
+### CONN-1 — New connections are being refused or dropped
+
+- **Trigger (scan):** all of
+  - the DNS check ran and was *partly* answered: at least one lookup failed and at least one succeeded (a run in which nothing answered belongs to `D1`/`D2`/`D5`);
+  - **either** one name went unanswered by `THRESH_CONN_RESOLVERS_TOGETHER` or more different resolvers (unrelated operators dropping the same question), **or** a direct TCP/443 connect to a bare IPv4 address in the TCP-reach panel failed too (hostnames are ignored: connecting to one resolves it first, so a lookup failure would count twice);
+  - ping is clean: gateway loss is measured and below `LOSS_WARN_PCT`, and neither internet leg is at or above it (an unmeasured internet leg does not count against the rule, so `--quick` can reach it);
+  - real traffic is getting through (the same test `P1`/`P2` use), there is no captive portal (`CP-1`), and `SOCK-1` is not firing.
+- **Trigger (monitor):** the same observation, built from the medium tier: the first resolver's lookup failed, with a second unrelated resolver (1.1.1.1, or 8.8.8.8 when the first is 1.1.1.1) asked only after that failure, and/or a TCP/443 probe failed. It fires after `THRESH_MON_CONN_CONFIRM_CYCLES` consecutive samples with a failure in which either both resolvers failed on the same sample, or a lookup failed in one sample and a connect in another. While a first failure waits for confirmation the monitor re-probes at its fast cadence rather than waiting out the 60 s medium tier. Once confirmed the rule is held until the same number of consecutive clean samples, so an intermittent fault does not flash on and off.
+- **Severity:** `warn`.
+- **Why it exists.** On 2026-10-08 this Mac's own torrent client (Stremio's bundled `node` server, 210 UDP sockets and 67 connections stuck in `SYN_SENT`) flooded the router with new flows. UDP DNS to 1.1.1.1 and 8.8.8.8 timed out about 10% of the time and TCP/443 connects were "refused" in 10-40 ms about 60% of the time, while ping to the router and to the internet showed 0% loss throughout. Hopwatch said "your DNS server is flaky" one moment and "port 443 is blocked" the next: two verdicts on two probes of one fault, each naming a cause nobody had measured. Quitting the app took every failure to 0 of 120. See `docs/investigations/2026-10-08-flaky-dns-vs-web-blocked.md`.
+- **What it says:** what was observed (new connections refused or dropped while pings are fine, and how many lookups and connects failed) and that this check did not find the cause. It never claims a firewall, a resolver or a router fault.
+- **Evidence for the app, gathered only once the rule is about to fire:** per process, the UDP sockets (`lsof -nP -iUDP`) and connections in `SYN_SENT` (`lsof -nP -iTCP -sTCP:SYN_SENT`), against the system-wide counts from `netstat`. User-level `lsof` only; a holder that belongs to the system is invisible, and then no app is named.
+- **Repair offered:** `quit-app`, when the top holder holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of all those flows **and** at least `THRESH_CONN_HOLDER_MIN_FLOWS` of them, and resolves to a regular GUI app (`dns_resolve_gui_app`: parent chain first, then the `.app` bundle the executable sits in, which is how Stremio's `node` is found). The floor exists because "most of the flows" is true of any browser on a quiet Mac; a flood is hundreds. Without a named app the summary suggests restarting the router and offers no button.
+- **Suppresses `D1`, `D5` and `D6`** (and their remedy text) in the scan; `D1` in the monitor. Does not fire under `SOCK-1`, `CP-1`, `P1`/`P2` (nothing gets through), `G*`/`L*`/`TCP-1`/`ICMP-1` (ping is not clean).
+- **Known false positive:** a network that drops outbound DNS to public resolvers *and* refuses direct 443 connections to their addresses, while the router's own resolver works, reads as `CONN-1`. The sentence is still true to what was observed; it does not claim a cause.
+- **Impact:** calls, streaming and browsing `degraded`.
 
 ### B1 — Bufferbloat at gateway hop
 
