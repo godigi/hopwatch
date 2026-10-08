@@ -541,23 +541,34 @@ import Testing
     }
 
     @Test func browsingDifferentiatesDnsFailureHttpBlockingLossAndLatency() {
-        // 1. DNS failure
+        // 1. One failed lookup, or one failed connect, is a single probe and not
+        //    this tile's to judge: it neither breaks the tile nor claims a cause.
         var sampleDNSFail = MonitorSample()
-        sampleDNSFail.dns = .init(ok: false, resolver: "1.1.1.1", elapsedMs: nil)
+        sampleDNSFail.dns = .init(ok: false, resolver: "1.1.1.1", elapsedMs: 2100)
         let inputsDNS = SuitabilityEngine.Inputs(monitorSample: sampleDNSFail, isLinkUp: true)
         let browsingDNS = SuitabilityEngine.evaluateBrowsing(inputsDNS)
-        #expect(browsingDNS.verdict == .broken)
-        #expect(browsingDNS.status == "DNS failing")
-        #expect(browsingDNS.metric == "Lookup failed")
+        #expect(browsingDNS.verdict != .broken)
+        #expect(browsingDNS.status != "DNS failing")
+        #expect(browsingDNS.status != "Slow lookups")
 
-        // 2. Web / Port 443 blocked
         var sampleTCPFail = MonitorSample()
         sampleTCPFail.tcp = .init(anyOk: false, targets: [])
         let inputsTCP = SuitabilityEngine.Inputs(monitorSample: sampleTCPFail, isLinkUp: true)
         let browsingTCP = SuitabilityEngine.evaluateBrowsing(inputsTCP)
-        #expect(browsingTCP.verdict == .broken)
-        #expect(browsingTCP.status == "Web blocked")
-        #expect(browsingTCP.metric == "Port 443 down")
+        #expect(browsingTCP.verdict != .broken)
+        #expect(browsingTCP.status != "Web blocked")
+        #expect(browsingTCP.metric == "Rechecking")
+
+        // 2. A confirmed CONN-1 from the CLI shows the CLI's own title.
+        let catalogJSON = #"{"schema":6,"rules":[{"id":"CONN-1","title":"Some new connections are failing","severity":"warn","blurb":"New connections from this Mac are being refused or dropped. Pings are clean.","impacts":{"browsing":"degraded"}}]}"#
+        let catalog = try? JSONDecoder().decode(RulesCatalog.self, from: Data(catalogJSON.utf8))
+        let inputsConn = SuitabilityEngine.Inputs(
+            monitorSample: sampleDNSFail, catalog: catalog, firedRules: ["CONN-1"], isLinkUp: true, effectiveLoss: 0)
+        let browsingConn = SuitabilityEngine.evaluateBrowsing(inputsConn)
+        #expect(browsingConn.verdict == .degraded)
+        #expect(browsingConn.status == "Some new connections are failing")
+        #expect(browsingConn.metric == "0% loss")
+        #expect(browsingConn.ruleID == "CONN-1")
 
         // 3. High packet loss (15%) -> Pages stall
         var sampleLoss = MonitorSample()

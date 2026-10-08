@@ -2742,6 +2742,36 @@ private enum VerifyHarness {
         let cpRate = sample(gw: 40, inet: 0, rtt: 12, jitter: 2, filtered: false, rules: [])
         check(effective(cpRate) == 0, "clean internet: gateway loss is control-plane rate limiting")
 
+        // Browsing no longer decides from one dns.ok / tcp.anyOk sample. On
+        // 2026-10-08 a flood of new flows made the tile alternate between
+        // "DNS failing" and "Web blocked" on whichever probe lost the cycle.
+        var oneLost = sample(gw: 0, inet: 0, rtt: 60, jitter: 2, filtered: false, rules: [])
+        oneLost.dns.ok = false
+        oneLost.dns.elapsedMs = 2100
+        oneLost.tcp.anyOk = false
+        let oneLostBrowsing = tile(tiles(oneLost), "browsing")
+        check(oneLostBrowsing?.verdict != .broken, "browsing: one lost lookup and one refused connect do not break the tile")
+        check(oneLostBrowsing?.status != "DNS failing" && oneLostBrowsing?.status != "Web blocked",
+              "browsing: the old single-probe labels are gone")
+        check(oneLostBrowsing?.status != "Slow lookups", "browsing: a failed lookup's timeout is not 'slow DNS'")
+        let connCatalogJSON = #"{"schema":6,"rules":[{"id":"CONN-1","title":"Some new connections are failing","severity":"warn","blurb":"New connections from this Mac are being refused or dropped. Pings are clean.","impacts":{"browsing":"degraded"}}]}"#
+        let connCatalog = try? JSONDecoder().decode(RulesCatalog.self, from: Data(connCatalogJSON.utf8))
+        var connSample = oneLost
+        connSample.status.rules = ["CONN-1"]
+        let connItems = SuitabilityEngine.evaluateAll(.init(
+            monitorSample: connSample, catalog: connCatalog, firedRules: ["CONN-1"],
+            currentJitter: 2, effectiveLoss: 0, lossFiltering: EffectiveLoss.filtering(sample: connSample)))
+        let connBrowsing = tile(connItems, "browsing")
+        check(connBrowsing?.verdict == .degraded, "CONN-1: browsing is degraded, not broken (new connections fail intermittently)")
+        check(connBrowsing?.status == "Some new connections are failing", "CONN-1: the tile shows the CLI's own title")
+        check(connBrowsing?.metric == "0% loss", "CONN-1: the tile's number is the clean ping figure")
+        check(connBrowsing?.consequence == "New connections from this Mac are being refused or dropped.",
+              "CONN-1: the consequence line is the first sentence of the CLI's blurb")
+        let connSub = SuitabilityEngine.synthesizeDegradedExperience(
+            items: connItems, monitorSample: connSample, currentJitter: 2,
+            effectiveLoss: 0, lossFiltering: EffectiveLoss.filtering(sample: connSample))
+        check(connSub?.headline == "Some new connections are failing", "CONN-1: the headline is the CLI's title, not a Swift sentence")
+
         // Subtitle suffix names only activities that are actually good.
         func item(_ id: String, _ v: RunSnapshot.SuitabilityRow.Verdict) -> SuitabilityEngine.Item {
             .init(id: id, title: id, icon: "x", status: "s", metric: "m", tint: Theme.ColorToken.muted, verdict: v)

@@ -14,6 +14,9 @@ enum SuitabilityEngine {
         let verdict: RunSnapshot.SuitabilityRow.Verdict
         let helpText: String?
         let consequence: String
+        /// The CLI rule this tile's status was taken from, when it was (see
+        /// `evaluateBrowsing`). `nil` for every status decided from a number.
+        var ruleID: String?
 
         init(
             id: String,
@@ -704,27 +707,28 @@ enum SuitabilityEngine {
 
         let loss = inputs.resolvedLoss
         let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
+        // A failed lookup or connect in the sample is ONE probe, and it is
+        // not this tile's to judge: the same fault looked like "DNS failing"
+        // on one cycle and "Web blocked" on the next, depending on which
+        // probe lost. The monitor confirms a failure over several samples
+        // and names it (CONN-1, D1, P1/P2) in status.rules, which arrives
+        // here as `firedRules` and through the catalog's `impacts`. The raw
+        // samples are read only for what they can still honestly say: how
+        // long a lookup took when it was answered, and that something is
+        // being rechecked.
         let dnsOk = inputs.monitorSample?.dns.ok
-        let dnsElapsed = inputs.monitorSample?.dns.elapsedMs
+        let dnsElapsed = dnsOk == false ? nil : inputs.monitorSample?.dns.elapsedMs
         let tcpOk = inputs.monitorSample?.tcp.anyOk
         let downMbps = inputs.speedTest?.downMbps
         let impacts = catalogImpacts(for: "browsing", in: inputs)
 
-        // 1. Broken conditions: DNS resolution failure, TCP 443 blocked, extreme packet loss, or diagnostic outage
-        if impacts.contains("broken") || dnsOk == false || tcpOk == false || loss >= 15.0 {
+        // 1. Broken conditions: extreme packet loss, or a rule the CLI says breaks browsing
+        if impacts.contains("broken") || loss >= 15.0 {
             let status: String
             let metric: String
             let help: String
 
-            if dnsOk == false {
-                status = "DNS failing"
-                metric = "Lookup failed"
-                help = "Domain name resolution is failing; web addresses cannot be resolved to IP addresses"
-            } else if tcpOk == false {
-                status = "Web blocked"
-                metric = "Port 443 down"
-                help = "Outbound HTTPS (port 443) traffic is blocked or unreachable; websites cannot load"
-            } else if loss >= 15.0 {
+            if loss >= 15.0 {
                 status = "Pages stall"
                 metric = LossFormatter.formatLoss(loss)
                 help = "Severe packet loss (≥15%) causes TCP connection stalls and failed web page rendering"
@@ -752,10 +756,21 @@ enum SuitabilityEngine {
             let metric: String
             let help: String
 
+            var ruleConsequence: String?
+            var ruleID: String?
             if loss >= 6.0 {
                 status = "Sluggish"
                 metric = LossFormatter.formatLoss(loss)
                 help = "Elevated packet loss (≥6%) causes TCP retransmissions and delayed web page rendering"
+            } else if let rule = catalogRule(impacting: "browsing", in: inputs) {
+                // A confirmed finding (CONN-1, D1, ...): the CLI's own words.
+                // The metric is the ping figure on purpose — it is what makes
+                // "connections failing while pings are fine" visible.
+                status = rule.title ?? rule.id
+                ruleID = rule.id
+                metric = LossFormatter.formatLoss(loss)
+                help = rule.blurb ?? status
+                ruleConsequence = rule.blurb.map(firstSentence)
             } else if let dnsMs = dnsElapsed, dnsMs >= 250.0 {
                 status = "Slow lookups"
                 metric = String(format: "%.0fms DNS", dnsMs)
@@ -774,7 +789,7 @@ enum SuitabilityEngine {
                 help = "Elevated DNS resolution latency causing slow initial page loads"
             }
 
-            return Item(
+            var item = Item(
                 id: "browsing",
                 title: "Browsing",
                 icon: "globe",
@@ -782,14 +797,23 @@ enum SuitabilityEngine {
                 metric: metric,
                 tint: Theme.ColorToken.amber,
                 verdict: .degraded,
-                helpText: help
+                helpText: help,
+                consequence: ruleConsequence
             )
+            item.ruleID = ruleID
+            return item
         }
 
         // 3. Good conditions: fast DNS & responsive TCP/HTTPS
         let metric: String
         let help: String
-        if let dnsMs = dnsElapsed, dnsMs < 60.0 {
+        if dnsOk == false || tcpOk == false {
+            // One failed probe, not yet a finding. Saying "TCP 443 ok" over it
+            // would be false, and saying "blocked" would be a verdict the
+            // monitor has not reached.
+            metric = "Rechecking"
+            help = "One probe failed. The monitor repeats it before reporting a problem."
+        } else if let dnsMs = dnsElapsed, dnsMs < 60.0 {
             metric = String(format: "%.0fms DNS", dnsMs)
             help = "Fast DNS lookups (<60ms) and responsive HTTPS connectivity for snappy web browsing"
         } else if loss > 0 {
@@ -963,19 +987,20 @@ enum SuitabilityEngine {
             }
             subtitle = "\(streaming?.metric ?? "")\(targetSuffix)" + fineSuffix([("Calls", calls), ("web browsing", browsing)])
         } else if browsingBroken || browsingDegraded {
-            let dnsElapsed = monitorSample?.dns.elapsedMs
+            // A lookup that failed took as long as its timeout, which says
+            // nothing about how slow DNS is.
+            let dnsElapsed = monitorSample?.dns.ok == false ? nil : monitorSample?.dns.elapsedMs
             let ping = monitorSample?.internet.rttAvgMs ?? 0.0
 
             if browsingBroken {
-                if browsing?.status == "DNS failing" || monitorSample?.dns.ok == false {
-                    headline = "DNS lookup failure"
-                } else if browsing?.status == "Web blocked" || monitorSample?.tcp.anyOk == false {
-                    headline = "Web traffic blocked (port 443)"
-                } else if loss >= 15.0 {
+                if loss >= 15.0 {
                     headline = "Web pages failing from packet loss"
                 } else {
                     headline = "Websites aren't loading"
                 }
+            } else if let rule = browsing, rule.ruleID != nil {
+                // The CLI's own title for the finding, not a headline written here.
+                headline = rule.status
             } else {
                 if browsing?.status == "Slow lookups" || (dnsElapsed != nil && dnsElapsed! >= 250.0) {
                     headline = "Slow DNS delaying page loads"
@@ -1015,6 +1040,22 @@ enum SuitabilityEngine {
         let head = first.prefix(1).uppercased() + first.dropFirst()
         let named = ([head] + good.dropFirst()).joined(separator: " & ")
         return " · \(named) fine"
+    }
+
+    /// The first fired rule the CLI's catalog says affects `activity`, so the
+    /// tile can show that rule's own title and blurb instead of a verdict
+    /// written here.
+    private static func catalogRule(impacting activity: String, in inputs: Inputs) -> RulesCatalog.Rule? {
+        guard let catalog = inputs.catalog else { return nil }
+        for ruleID in inputs.firedRules {
+            if let rule = catalog[ruleID], rule.impacts?[activity] != nil { return rule }
+        }
+        return nil
+    }
+
+    private static func firstSentence(_ text: String) -> String {
+        guard let end = text.range(of: ". ") else { return text }
+        return String(text[..<end.lowerBound]) + "."
     }
 
     private static func catalogImpacts(for activity: String, in inputs: Inputs) -> [String] {

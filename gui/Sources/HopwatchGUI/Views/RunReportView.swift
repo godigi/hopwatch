@@ -583,7 +583,7 @@ struct RunReportView: View {
         out.append(Row(label: "Name lookups (DNS)",
                        value: s.dns.isEmpty ? absentReason
                             : "\(s.dns.filter(\.ok).count) of \(s.dns.count) resolvers OK",
-                       health: health(["D1", "D2", "D3", "D4", "D5"], "Name lookups (DNS)"),
+                       health: health(["D1", "D2", "D3", "D4", "D5", "CONN-1"], "Name lookups (DNS)"),
                        metricKey: nil,
                        glossaryKey: "dns",
                        medianFormatter: nil))
