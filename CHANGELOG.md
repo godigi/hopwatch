@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-08
+
 ### Added
 
 - `CONN-1` (warn): new connections from this Mac are being refused or dropped while ping is clean. On 2026-10-08 this Mac's own torrent client flooded the router with new flows: UDP DNS to 1.1.1.1 and 8.8.8.8 timed out about 10% of the time and TCP/443 connects were "refused" in 10-40 ms about 60% of the time, with 0% ping loss, and Hopwatch alternated between "your DNS server is flaky" (`D1`) and, in the app, "Web blocked, port 443 down". Both were verdicts on one probe of a single fault and each named a cause nobody measured. `CONN-1` fires when lookups and direct TCP/443 connects fail together, or two unrelated resolvers fail the same question, while the router and internet pings are clean. It says what was observed and that the cause was not found, and suppresses `D1`, `D5` and `D6`. It does not fire under `SOCK-1`, a captive portal, `P1`/`P2` or any loss rule. Mirrored in the monitor.
@@ -4165,7 +4167,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/godigi/hopwatch/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.10...v1.11.0
 [1.10.10]: https://github.com/godigi/hopwatch/compare/v1.10.9...v1.10.10
