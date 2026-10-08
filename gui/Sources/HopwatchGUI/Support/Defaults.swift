@@ -184,6 +184,26 @@ enum Defaults {
     static let latencyTestInterval = 2
     static let latencyTestDuration: TimeInterval = 60
 
+    /// When to stop believing the newest monitor sample (`SampleFreshness`).
+    ///
+    /// These describe the *observation*, not the network, so they are not
+    /// diagnostic thresholds and do not belong in `lib/thresholds.sh`: a
+    /// sample is "stale" when it is older than this many of the monitor's
+    /// own cadences plus a margin for the probe cycle itself (a cycle's
+    /// pings and lookups run for several seconds after the cadence timer
+    /// fires, so the gap between two lines is the cadence plus those).
+    /// Three missed cadences is the point at which "one slow cycle" stops
+    /// being a plausible explanation.
+    static let staleSampleMissedCadences = 3
+    /// Seconds of slack added to the missed cadences above. Ten is a
+    /// generous bound on a cycle's own probe time (gateway 2 s, internet
+    /// 2 s, DNS, TCP and a public lookup run inside the timeouts the CLI
+    /// enforces), chosen so a healthy monitor never trips it.
+    static let staleSampleMargin: TimeInterval = 10
+    /// The cadence assumed when a sample does not say (`status.cadence_s`
+    /// absent): the default fast-tier interval.
+    static let assumedMonitorCadenceS = 5
+
     static var pauseOnDisplaySleep: Bool {
         get { d.bool(forKey: Key.pauseOnDisplaySleep) }
         set { d.set(newValue, forKey: Key.pauseOnDisplaySleep) }

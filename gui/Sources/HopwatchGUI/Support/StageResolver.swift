@@ -34,6 +34,18 @@ enum StageResolver {
         /// probe has produced a result yet. This is intentionally neutral:
         /// Wi-Fi association alone is not an all-clear.
         case checking
+        /// The newest sample says there is no link at all. Its own stage
+        /// rather than `.watching(.critical)`: "Connection is unstable"
+        /// describes a link that exists and is misbehaving, and read, over
+        /// "Your Mac has no network connection at all", as two sentences
+        /// contradicting each other. The card's prose is the CLI's N1 text.
+        case noLink
+        /// The monitor is supposed to be reporting and its newest sample is
+        /// older than a few cadences (`SampleFreshness`) — a hung probe
+        /// inside the monitor, say, which leaves the process alive and its
+        /// last sample green. Neither healthy nor a fault: the app simply
+        /// cannot say, and says so.
+        case notReporting
         /// The CLI sees a problem but no alert has crossed its dwell yet.
         /// `critical` reads red, `warn` reads amber; the card carries the
         /// CLI's own blurb for the worst firing rule (the same source
@@ -130,7 +142,13 @@ enum StageResolver {
         /// `status.severity`. "info" (VPN on, ICMP filtered) is not a
         /// problem and reads healthy.
         let severity: String
+        /// False when the newest sample says there is no link and is recent
+        /// enough to believe (`LinkState.isDown`). Callers pass `!linkIsDown`.
         let linkUp: Bool
+        /// The newest sample is older than `SampleFreshness` allows while
+        /// monitoring is on and not paused. Callers pass
+        /// `coordinator.latestSampleIsStale`.
+        let sampleStale: Bool
         let measurementState: String
         let activeResolution: ResolutionSnapshot?
         let degradedExperience: DegradedSnapshot?
@@ -139,6 +157,7 @@ enum StageResolver {
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
              activeAlert: AlertSnapshot?, severity: String, linkUp: Bool,
+             sampleStale: Bool = false,
              measurementState: String = "unknown",
              activeResolution: ResolutionSnapshot? = nil,
              degradedExperience: DegradedSnapshot? = nil) {
@@ -152,6 +171,7 @@ enum StageResolver {
             self.activeAlert = activeAlert
             self.severity = severity
             self.linkUp = linkUp
+            self.sampleStale = sampleStale
             self.measurementState = measurementState
             self.activeResolution = activeResolution
             self.degradedExperience = degradedExperience
@@ -160,7 +180,7 @@ enum StageResolver {
 
     /// The order of the guards is load-bearing and matches the precedence
     /// the dropdown has always had: a scan in progress, then a user pause,
-    /// then a skewed CLI, then an already-active alert. An arrival check
+    /// then a skewed CLI, then no link at all, then an already-active alert. An arrival check
     /// takes the scanning guard's place rather than a slot of its own —
     /// it *is* a scan in progress, and demoting it below the pause guards
     /// would put "Monitoring paused" over a running progress bar. Only after a live
@@ -172,8 +192,16 @@ enum StageResolver {
         if !i.monitoringEnabled { return .paused(nil) }
         if i.isPausedForAnyReason { return .paused(i.pauseReason) }
         if let error = i.lastError, !i.monitorRunning { return .skewed(error) }
+        // Ahead of the alert: with no link, the live sample is the most
+        // specific fact the app has, and an older alert (a warn that was
+        // active when the link dropped) would otherwise keep its own card.
+        // The N1 alert itself says the same thing the CLI's N1 text does.
+        if !i.linkUp { return .noLink }
+        // After no-link (a fresh "no link" sample is the loudest fact and
+        // is judged on its own, longer, window) and ahead of the alert and
+        // the severity: a sample that old is not evidence of anything.
+        if i.sampleStale { return .notReporting }
         if let alert = i.activeAlert { return .alerted(alert) }
-        if !i.linkUp { return .watching(severity: .critical) }
         if !i.monitorRunning || i.measurementState != "measured" {
             return .checking
         }

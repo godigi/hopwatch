@@ -229,7 +229,7 @@ struct LiveView: View {
                 iconColor: internetTint,
                 label: "Internet (TCP)",
                 value: latestInternet,
-                detail: "Target connect time"
+                detail: linkDown ? NoLinkCopy.nodeDetail : "Target connect time"
             )
 
             gaugeTile(
@@ -283,8 +283,14 @@ struct LiveView: View {
         )
     }
 
+    /// With no link the newest sample has nothing to read, and a stale
+    /// reading carried in it (or an older cycle's) must not be drawn as
+    /// current. See `LinkState`.
+    private var linkDown: Bool { coordinator.linkIsDown }
+
     private var routerMs: Double? {
-        monitor.latest?.gateway.rttAvgMs
+        if linkDown { return nil }
+        return monitor.latest?.gateway.rttAvgMs
     }
 
     private var latestGateway: String {
@@ -300,6 +306,7 @@ struct LiveView: View {
     }
 
     private var routerDetail: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         guard let ms = routerMs else { return "No probe yet" }
         if ms < 4 { return "Normal local link" }
         if ms < 15 { return "Moderate latency" }
@@ -307,6 +314,7 @@ struct LiveView: View {
     }
 
     private var internetMsValue: Double? {
+        if linkDown { return nil }
         guard let sample = monitor.latest else { return nil }
         return Self.internetMs(sample)
     }
@@ -355,6 +363,7 @@ struct LiveView: View {
     }
 
     private var lossDetail: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
         guard let l = currentLossPct else { return "Measuring" }
         if l == 0 { return "0 drops" }
         if l < 1.0 { return "\(LossFormatter.formatPct(l)) loss" }

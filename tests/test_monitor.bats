@@ -824,6 +824,252 @@ ping_summary() {
   [ "$MON_RULES" = "N1 " ]
 }
 
+# A link-down cycle skips the gateway/internet/web probes and the medium and
+# slow tiers, so the MON_* variables they set kept the PREVIOUS cycle's values
+# and went out in the sample: the app showed link Down beside 10% router loss,
+# 3 ms jitter, a green internet tile and the old country. Driven through the
+# real monitor_run, _mon_rules and monitor_sample.py with only the probes
+# stubbed, because the bug lives in what the loop leaves behind, not in any
+# one function.
+#
+# Cycle 1: link up, every probe returns a (deliberately unhealthy-looking)
+# reading. Cycle 2: link down. The fast cadence is 0 and sleep is a no-op, so
+# every cycle runs the fast tier while the medium and slow timers keep their
+# real 60 s / 300 s spacing -- a recovery cycle that refills them has to have
+# forced them, not stumbled on a due timer. The cycles' samples go to $BATS_TEST_TMPDIR/stream.
+drive_link_drop() {
+  _mon_probe_link() {
+    MON_INTERFACE=en0 MON_IFACE_TYPE=wifi MON_NETWORK_ID="wifi:mac=AA:BB:CC:DD:EE:FF"
+    if [ "$MON_SEQ" -eq 0 ] || { [ "${DRIVE_RECOVER:-0}" = 1 ] && [ "$MON_SEQ" -ge 2 ]; }; then
+      MON_LINK_UP=1 MON_GATEWAY=192.168.1.1 MON_LOCAL_IP=192.168.1.20
+      MON_SSID=Home MON_BSSID=aa:bb:cc:00:00:01 MON_GW_MAC=aa:bb:cc:dd:ee:ff
+    else
+      MON_LINK_UP=0 MON_GATEWAY="" MON_LOCAL_IP="" MON_SSID="" MON_BSSID="" MON_GW_MAC=""
+    fi
+  }
+  _mon_probe_vpn() { :; }
+  _mon_probe_browser() { :; }
+  _mon_probe_gateway() { MON_GW_LOSS=10 MON_GW_RTT=4.5 MON_GW_JITTER=3.2; }
+  _mon_probe_internet() {
+    MON_INET_LOSS=2 MON_INET_LOSS_ALT=3 MON_INET_RTT=21.5 MON_INET_JITTER=1.1
+  }
+  _mon_probe_web() { MON_WEB_OK=1; }
+  _mon_probe_dns() {
+    MON_DNS_OK=1 MON_DNS_RESOLVER=1.1.1.1 MON_DNS_MS=12 MON_DNS_LOCAL_FAIL=0
+    MON_DNS_TCP_DNS_OK=1
+  }
+  _mon_probe_tcp() { MON_TCP_OK=1 MON_TCP_LINES=$'1.1.1.1|443|1|20\n'; }
+  _mon_probe_wifi_signal() {
+    MON_WIFI_RSSI=-61 MON_WIFI_NOISE=-92 MON_WIFI_SNR=31 MON_WIFI_CHAN=44
+  }
+  _mon_probe_public() {
+    MON_PUBLIC_OK=1 MON_CAPTIVE=0 MON_PUB_IP=203.0.113.9 MON_PUB_ISP=ExampleNet
+    MON_PUB_ASN=AS64500 MON_PUB_CITY=Lisbon MON_PUB_CC=Portugal MON_PUB_CC_ISO=PT
+  }
+  _mon_sleep() { :; }
+  HELPERS_DIR="$HELPERS" MON_STOP=0 MON_PAUSED=0 MON_SEQ=0
+  MONITOR_COUNT=$((2 + ${DRIVE_RECOVER:-0}))
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0 MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run >"$BATS_TEST_TMPDIR/stream"
+}
+
+@test "a link-down sample carries no measurement from before the drop" {
+  drive_link_drop
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/stream" | tr -d ' ')" -eq 2 ]
+  python3 - "$BATS_TEST_TMPDIR/stream" <<'PY'
+import json, sys
+up, down = [json.loads(l) for l in open(sys.argv[1])]
+
+# Cycle 1 really did carry the readings, so the assertions below prove a
+# clear, not an absence that was never there to begin with.
+assert up["link"]["up"] is True
+assert up["gateway"]["loss_pct"] == 10 and up["gateway"]["rtt_jitter_ms"] == 3.2
+assert up["internet"]["loss_pct"] == 2 and up["public"]["country"] == "Portugal"
+assert up["status"]["measurement"] == "measured", up["status"]
+
+assert down["link"]["up"] is False
+assert down["status"]["measurement"] == "link-down", down["status"]
+assert down["status"]["rules"] == ["N1"], down["status"]
+assert down["gateway"] == {"loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["gateway"]
+assert down["internet"] == {"loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["internet"]
+assert down["jitter_ms"] is None, down["jitter_ms"]
+assert down["dns"]["ok"] is None and down["dns"]["resolver"] is None \
+    and down["dns"]["elapsed_ms"] is None and down["dns"]["local_fail"] is None, down["dns"]
+assert down["tcp"] == {"any_ok": None, "targets": []}, down["tcp"]
+assert down["wifi"] == {"rssi": None, "noise": None, "snr": None, "channel": None}, down["wifi"]
+# The old network's public identity is not this (absent) network's.
+assert down["public"] == {"ok": None, "ip": None, "isp": None, "asn": None,
+                          "city": None, "country": None, "country_iso": None,
+                          "captive_portal": None}, down["public"]
+PY
+}
+
+@test "the cycle the link comes back refills what the drop cleared" {
+  # Same network, so network_changed does not fire; without an explicit
+  # restore the DNS, TCP, Wi-Fi and public readings stay blank until their
+  # 60 s / 300 s timers come due, leaving the internet tile empty on a link
+  # that is already healthy.
+  DRIVE_RECOVER=1 drive_link_drop
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/stream" | tr -d ' ')" -eq 3 ]
+  python3 - "$BATS_TEST_TMPDIR/stream" <<'PY'
+import json, sys
+up, down, back = [json.loads(l) for l in open(sys.argv[1])]
+assert down["status"]["measurement"] == "link-down"
+assert back["link"]["up"] is True
+assert back["status"]["measurement"] == "measured", back["status"]
+assert "medium" in back["refreshed"] and "slow" in back["refreshed"], back["refreshed"]
+assert back["public"]["country"] == "Portugal" and back["public"]["ok"] is True, back["public"]
+assert back["dns"]["ok"] is True and back["tcp"]["any_ok"] is True
+assert back["wifi"]["rssi"] == -61, back["wifi"]
+# The restore is not itself a location change: the country is the one the
+# snapshot kept across the outage.
+assert not [c for c in back.get("changes", []) if c["id"] == "country-changed"], back.get("changes")
+PY
+}
+
+@test "a link drop does not erase the baseline the next sample diffs against" {
+  # Clearing the public fields on link-down must not make a country change
+  # across the outage invisible: the previous-sample snapshot keeps its last
+  # known value (see _mon_snapshot_prev).
+  drive_link_drop
+  [ "$MON_PREV_PUB_CC" = "Portugal" ]
+  [ "$MON_PREV_PUB_IP" = "203.0.113.9" ]
+}
+
+@test "link-down clears every probed measurement, not just the ones the sample shows" {
+  reset_state
+  MON_GW_JITTER=3 MON_INET_JITTER=2 MON_INET_RTT=20 MON_INET_LOSS=1 MON_INET_LOSS_ALT=1
+  MON_DNS_MS=9 MON_DNS_RESOLVER=1.1.1.1 MON_DNS_LOCAL_FAIL=0 MON_DNS_TCP_DNS_OK=1
+  MON_PUB_CC=Portugal MON_PUB_IP=203.0.113.9 MON_PUBLIC_OK=1 MON_CAPTIVE=0
+  MON_WIFI_RSSI=-60 MON_WIFI_NOISE=-90 MON_WIFI_SNR=30 MON_WIFI_CHAN=6
+  MON_LINK_UP=0
+  _mon_rules
+  local v
+  for v in GW_LOSS GW_RTT GW_JITTER INET_LOSS INET_LOSS_ALT INET_RTT INET_JITTER \
+           WEB_OK DNS_OK DNS_ALT_OK DNS_RESOLVER DNS_MS DNS_LOCAL_FAIL DNS_TCP_DNS_OK \
+           TCP_OK TCP_LINES PUBLIC_OK CAPTIVE PUB_IP PUB_ISP PUB_ASN PUB_CITY PUB_CC \
+           PUB_CC_ISO WIFI_RSSI WIFI_NOISE WIFI_SNR WIFI_CHAN; do
+    local name="MON_$v"
+    [ -z "${!name-}" ] || { echo "$name survived a link-down cycle: '${!name}'"; return 1; }
+  done
+}
+
+# ── Stale-data audit: interface type, public info, tier re-arming ────────
+
+# Real _mon_probe_link, with only the system commands it shells out to
+# stubbed. $1 = "up" (Wi-Fi en0 with a route and a gateway MAC) or "down"
+# (route withdrawn).
+probe_link_wifi() {
+  networksetup() { printf 'Hardware Port: Wi-Fi\nDevice: en0\n\nHardware Port: Ethernet\nDevice: en5\n'; }
+  ipconfig() {
+    case "$1" in
+      getifaddr) printf '192.168.1.20\n' ;;
+      getsummary) printf '  SSID : Home\n  BSSID : aa:bb:cc:00:00:01\n' ;;
+    esac
+  }
+  arp() { printf '? (192.168.1.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]\n'; }
+  if [ "$1" = up ]; then
+    route() { printf '   gateway: 192.168.1.1\n  interface: en0\n'; }
+  else
+    route() { return 1; }
+  fi
+  _mon_probe_link
+}
+
+@test "a withdrawn Wi-Fi route keeps reporting Wi-Fi, not wired" {
+  MON_HW_PORTS="" MON_KNOWN_GW_MAC=""
+  probe_link_wifi up
+  [ "$MON_IFACE_TYPE" = "wifi" ]
+  probe_link_wifi down
+  [ "$MON_LINK_UP" -eq 0 ]
+  [ "$MON_IFACE_TYPE" = "wifi" ] || { echo "type was '$MON_IFACE_TYPE'"; return 1; }
+  # And through the emitter: wifi stays an object of nulls (not null) and the
+  # type is not "wired".
+  run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_IFACE_TYPE="$MON_IFACE_TYPE"
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['link']['type'] == 'wifi', d['link']
+assert d['wifi'] is not None
+"
+}
+
+@test "with no held identity a withdrawn route has no interface type, never wired" {
+  MON_HW_PORTS="" MON_KNOWN_GW_MAC=""
+  probe_link_wifi down
+  [ -z "$MON_IFACE_TYPE" ] || { echo "type was '$MON_IFACE_TYPE'"; return 1; }
+  run emit NETDIAG_MON_LINK_UP=0
+  printf '%s' "$output" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['link']['type'] is None, d['link']
+assert d['wifi'] is None
+"
+}
+
+@test "a public lookup that fails does not leave the previous network's identity" {
+  MON_LINK_UP=1
+  MON_PUB_IP=203.0.113.9 MON_PUB_ISP=ExampleNet MON_PUB_ASN=AS64500
+  MON_PUB_CITY=Lisbon MON_PUB_CC=Portugal MON_PUB_CC_ISO=PT
+  curl() { return 22; }
+  _mon_probe_public
+  [ "$MON_PUBLIC_OK" = "0" ]
+  local v name
+  for v in IP ISP ASN CITY CC CC_ISO; do
+    name="MON_PUB_$v"
+    [ -z "${!name}" ] || { echo "$name survived a failed lookup: '${!name}'"; return 1; }
+  done
+}
+
+# Five cycles on one network, link always up, every tier stubbed to a no-op so
+# only the scheduling is under test. The fast cadence is 0 and sleep is a
+# no-op, so the real 60 s / 300 s timers cannot come due: a medium or slow
+# refresh after cycle 0 happened because something forced it.
+#   cycle 0  first sample, every tier runs
+#   cycle 1  nothing changed
+#   cycle 2  VPN connects
+#   cycle 3  roam to another access point on the same network
+#   cycle 4  nothing changed
+drive_rearm() {
+  _mon_probe_link() {
+    MON_LINK_UP=1 MON_INTERFACE=en0 MON_IFACE_TYPE=wifi MON_GATEWAY=192.168.1.1
+    MON_NETWORK_ID="wifi:mac=AA:BB:CC:DD:EE:FF" MON_SSID=Home
+    case "$MON_SEQ" in
+      0|1|2) MON_BSSID=aa:bb:cc:00:00:01 ;;
+      *)     MON_BSSID=aa:bb:cc:00:00:02 ;;
+    esac
+  }
+  _mon_probe_vpn() {
+    if [ "$MON_SEQ" -ge 2 ]; then
+      MON_VPN_ACTIVE=1 MON_VPN_TYPE=utun-route MON_VPN_NAME=utun4
+    else
+      MON_VPN_ACTIVE=0 MON_VPN_TYPE="" MON_VPN_NAME=""
+    fi
+  }
+  local probe
+  for probe in gateway internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_sleep() { :; }
+  HELPERS_DIR="$HELPERS" MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=5
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0 MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run >"$BATS_TEST_TMPDIR/stream"
+}
+
+@test "a VPN toggle pulls the medium and slow tiers forward, a roam only the medium" {
+  drive_rearm
+  python3 - "$BATS_TEST_TMPDIR/stream" <<'PY'
+import json, sys
+r = [json.loads(l)["refreshed"] for l in open(sys.argv[1])]
+assert len(r) == 5, r
+assert r[0] == ["fast", "medium", "slow"], r
+assert r[1] == ["fast"], ("nothing changed, nothing extra", r)
+assert r[2] == ["fast", "medium", "slow"], ("VPN toggle", r)
+assert r[3] == ["fast", "medium"], ("roam: signal and channel only", r)
+assert r[4] == ["fast"], ("nothing changed again", r)
+PY
+}
+
 # ── Unmeasured is not zero ───────────────────────────────────────────────
 
 @test "an unmeasured public reach does not read as an outage" {
@@ -2031,9 +2277,9 @@ assert data['jitter_ms'] == 3.42
 cycle() {
   MON_GATEWAY="$2" MON_INTERFACE="$3" MON_SSID="$4" MON_GW_MAC="$5"
   # As _mon_probe_link leaves it: with no interface there is nothing to ask,
-  # and the type stays at its "wired" default.
+  # so the type is empty (never "wired") until the held identity fills it.
   MON_IFACE_TYPE=wifi
-  [ -n "$3" ] || MON_IFACE_TYPE=wired
+  [ -n "$3" ] || MON_IFACE_TYPE=""
   _mon_hold_gw_mac "$1"
   _mon_identity
 }

@@ -854,7 +854,11 @@ struct RunReportView: View {
     }
 
     private var speedValue: String {
-        guard let speed = snapshot.speedtest ?? coordinator.latestSpeedTest else { return absentReason }
+        // This report's own measurement only. The in-memory speed test is the
+        // current network's, and splicing it into a report that skipped the
+        // test (or is about another network) states a figure the report never
+        // measured.
+        guard let speed = snapshot.speedtest else { return absentReason }
         let parts = [speed.downMbps.map { String(format: "%.0f Mbps down", $0) },
                      speed.upMbps.map { String(format: "%.0f up", $0) }].compactMap { $0 }
         return parts.isEmpty ? absentReason : parts.joined(separator: " · ")

@@ -276,9 +276,15 @@ _mon_probe_link() {
   if [ -z "$MON_HW_PORTS" ]; then
     MON_HW_PORTS="$(networksetup -listallhardwareports 2>/dev/null || true)"
   fi
-  MON_IFACE_TYPE="wired"
+  # No interface means no way to ask what kind it is. "wired" is a claim
+  # about a port we looked at, not a default: with the route withdrawn it
+  # read as "wired" and the app showed "Ethernet" for a dropped Wi-Fi link.
+  # Left empty here; _mon_hold_gw_mac below may fill it from the held
+  # identity, and otherwise it is emitted as null.
+  MON_IFACE_TYPE=""
   MON_SSID=""; MON_BSSID=""
   if [ -n "$MON_INTERFACE" ]; then
+    MON_IFACE_TYPE="wired"
     local hw_port ssid bssid
     hw_port="$(wifi_hw_port_for_device "$MON_INTERFACE" "$MON_HW_PORTS")"
     if wifi_port_is_wireless "$hw_port"; then
@@ -310,6 +316,10 @@ _mon_probe_link() {
       | awk '/ at /{ if ($4 != "(incomplete)") print $4; exit }')"
   fi
   _mon_hold_gw_mac "$EPOCHSECONDS"
+  # What the network id was built from is also the best answer to "what kind
+  # of link was this" when there is no interface to ask: the held type, or
+  # empty (null in the sample) when none is held. Never invented.
+  [ -n "$MON_INTERFACE" ] || MON_IFACE_TYPE="$MON_ID_IFACE_TYPE"
   _mon_identity
 }
 
@@ -740,12 +750,17 @@ _mon_probe_browser() {
 
 _mon_probe_public() {
   MON_PUBLIC_OK=""; MON_CAPTIVE=""
+  # Cleared before the fetch, not only when it returns a body: a lookup that
+  # fails (captive portal, certificate error, timeout) must not leave the
+  # previous network's IP, ISP and country in the sample as if current.
+  # _mon_snapshot_prev keeps the last known values for the change diff.
+  MON_PUB_IP=""; MON_PUB_ISP=""; MON_PUB_ASN=""
+  MON_PUB_CITY=""; MON_PUB_CC=""; MON_PUB_CC_ISO=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
   local out
   out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
   if [ -n "$out" ]; then
     MON_PUBLIC_OK=1
-    MON_PUB_IP="" MON_PUB_ISP="" MON_PUB_ASN="" MON_PUB_CITY="" MON_PUB_CC="" MON_PUB_CC_ISO=""
     [[ "$out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_IP="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ISP="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"asn\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ASN="${BASH_REMATCH[1]}"
@@ -788,6 +803,49 @@ _mon_add_rule() {
     info)     case "$MON_SEVERITY" in ok) MON_SEVERITY="info" ;; esac ;;
   esac
   return 0
+}
+
+# Empty every variable a probe fills and the sample emits, for a cycle in
+# which the link is down.
+#
+# Each probe resets its own outputs only when it is *called*, and a dead link
+# is exactly when the loop does not call them (the fast tier skips the
+# gateway/internet/web probes, and the medium and slow tiers are skipped
+# whole). So the previous cycle's readings sat in these variables and went
+# out in the sample: link Down beside 10% router loss, 3 ms jitter, a green
+# internet tile and the old country. The stream's contract is that null means
+# "not measured this cycle" (docs/JSON-SCHEMA.md); a link-down sample has
+# measured none of this.
+#
+# What is cleared and why, by kind:
+#   - gateway / internet / web / DNS / TCP / captive-portal readings, and the
+#     jitter derived from them: measurements of a path that no longer exists;
+#   - Wi-Fi RSSI/noise/SNR/channel: only ever read in the medium tier, which
+#     is skipped, so after a drop they are the last good link's radio;
+#   - the public IP, ISP, ASN, city and country: a property of the network we
+#     just left. Nulled rather than flagged stale because there is no stale
+#     marker in the schema and a consumer that renders them at all would be
+#     presenting them as current. The change diff is unaffected —
+#     _mon_snapshot_prev keeps the last known value, so a different country
+#     on the far side of the outage still reports "Location changed".
+# Kept: interface, SSID/BSSID, gateway and network id. Those are identity
+# and are already recomputed from this cycle's route table by _mon_probe_link.
+#
+# The probes that refill these are forced to run on the cycle the link comes
+# back (see monitor_run), so clearing here does not leave the tiles blank for
+# up to MONITOR_SLOW_INTERVAL afterwards.
+_mon_clear_measurements() {
+  MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
+  MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
+  MON_WEB_OK=""
+  MON_DNS_OK=""; MON_DNS_ALT_OK=""; MON_DNS_RESOLVER=""; MON_DNS_MS=""
+  MON_DNS_LOCAL_FAIL=""; MON_DNS_LOCAL_BIND=""; MON_DNS_UDP_SOCKETS=""
+  MON_DNS_UDP_HOLDERS=""; MON_DNS_UDP_TOP_SHARE_PCT=""; MON_DNS_TCP_DNS_OK=""
+  MON_TCP_OK=""; MON_TCP_LINES=""
+  MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""
+  MON_PUBLIC_OK=""; MON_CAPTIVE=""
+  MON_PUB_IP=""; MON_PUB_ISP=""; MON_PUB_ASN=""
+  MON_PUB_CITY=""; MON_PUB_CC=""; MON_PUB_CC_ISO=""
 }
 
 # Forget the CONN-1 / D1 streaks. A link drop or a different network ends
@@ -905,7 +963,7 @@ _mon_rules() {
     _mon_add_rule critical N1
     MON_DEGRADED=1
     MON_MEASUREMENT_STATE="link-down"
-    MON_WEB_OK=""
+    _mon_clear_measurements
     # No link means neither leg was probed this cycle — a streak the link
     # drop interrupted is not a streak that held.
     MON_GW_LOSS_STREAK=0
@@ -1383,6 +1441,11 @@ _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
 monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
   local prev_network_id="" network_changed announced_pause=0
+  local link_was_down=0 link_restored
+  # Identity-adjacent state last seen by the fast tier, to notice a VPN
+  # toggle or a roam. Empty until first observed, so the first cycle (which
+  # runs every tier anyway) never counts as a change.
+  local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
   MON_BROWSER_DESYNC_COUNT=0
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
@@ -1455,6 +1518,9 @@ monitor_run() {
     fi
     MON_REFRESHED=""
     MON_MEDIUM_FRESH=0
+    link_restored=0
+    vpn_changed=0
+    roamed=0
 
     # Fast tier drives everything: it establishes whether there is a link
     # at all, and the identity the other tiers are scoped to.
@@ -1462,11 +1528,41 @@ monitor_run() {
       MON_REFRESHED+="fast "
       _mon_probe_link
       _mon_probe_vpn
+      # A VPN toggle moves the public IP/ISP/country, and the DNS and TCP
+      # paths with it; a roam moves RSSI, noise and channel. Left to the
+      # timers those readings stay the old ones for up to 300 s / 60 s, so
+      # either change pulls the tiers that own them forward. Compared against
+      # the last *known* value only (a link-down cycle reads an empty BSSID
+      # and must not look like a roam), and nothing extra runs when nothing
+      # changed.
+      if [ -n "$seen_vpn_active" ] \
+         && { [ "$MON_VPN_ACTIVE" != "$seen_vpn_active" ] \
+              || [ "$MON_VPN_NAME" != "$seen_vpn_name" ]; }; then
+        vpn_changed=1
+      fi
+      seen_vpn_active="$MON_VPN_ACTIVE"; seen_vpn_name="$MON_VPN_NAME"
+      if [ -n "$MON_BSSID" ]; then
+        # Same network only: a different network already forces the tiers
+        # through network_changed, and its first BSSID is not a roam.
+        if [ -n "$seen_bssid" ] && [ "$MON_BSSID" != "$seen_bssid" ] \
+           && [ "$MON_NETWORK_ID" = "$prev_network_id" ]; then
+          roamed=1
+        fi
+        seen_bssid="$MON_BSSID"
+      fi
       if [ "$MON_LINK_UP" -eq 1 ]; then
+        # The cycle after a drop starts with every medium/slow reading
+        # cleared (_mon_clear_measurements); refill them now rather than
+        # leaving DNS, TCP, Wi-Fi signal and the public identity blank until
+        # their timers next come due. Same-network recoveries need this
+        # explicitly: network_changed below only fires when the id moved.
+        [ "$link_was_down" -eq 1 ] && link_restored=1
+        link_was_down=0
         _mon_probe_gateway
         _mon_probe_internet
         _mon_probe_web
       else
+        link_was_down=1
         # No link, no valid window: every packet in it predates the drop.
         _mon_loss_reset
       fi
@@ -1490,7 +1586,9 @@ monitor_run() {
     # rather than battery: a DNS query with no default route cannot
     # succeed, it can only cost four seconds of timeout per cycle.
     if [ "$MON_LINK_UP" -eq 1 ]; then
-      if [ "$now" -ge "$next_medium" ] || [ "$network_changed" -eq 1 ]; then
+      if [ "$now" -ge "$next_medium" ] || [ "$network_changed" -eq 1 ] \
+         || [ "$link_restored" -eq 1 ] || [ "$vpn_changed" -eq 1 ] \
+         || [ "$roamed" -eq 1 ]; then
         MON_REFRESHED+="medium "
         _mon_probe_dns
         _mon_probe_tcp
@@ -1502,7 +1600,8 @@ monitor_run() {
       # The slow tier is the only external call, so it is the only one
       # where being polite matters — but a network change is exactly when
       # its answer has certainly gone stale, so that overrides the timer.
-      if [ "$now" -ge "$next_slow" ] || [ "$network_changed" -eq 1 ]; then
+      if [ "$now" -ge "$next_slow" ] || [ "$network_changed" -eq 1 ] \
+         || [ "$link_restored" -eq 1 ] || [ "$vpn_changed" -eq 1 ]; then
         MON_REFRESHED+="slow "
         _mon_probe_public
         next_slow=$((now + MONITOR_SLOW_INTERVAL))

@@ -147,11 +147,14 @@ struct MainWindow: View {
     }
 
     private var sidebarNetworkCard: some View {
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let name = coordinator.wifiDisplayName
+        // `linkIsWiFi` rather than the sample's `link.type`: with no link
+        // that is only the CLI's default ("wired"), which drew a cable icon
+        // beside "Disconnected" on a Wi-Fi Mac. And no stale scan SSID.
+        let isWiFi = coordinator.linkIsWiFi
+        let name = coordinator.linkIsDown ? "Disconnected" : (coordinator.wifiDisplayName
             ?? coordinator.monitor.latest?.link.ssid
-            ?? coordinator.latestRun?.snapshot.wifi?.ssid
-            ?? "Disconnected"
+            ?? coordinator.currentNetworkRun?.snapshot.wifi?.ssid
+            ?? "Disconnected")
 
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -214,6 +217,8 @@ struct MainWindow: View {
     private var statusPillText: String {
         if coordinator.isScanning { return "Checking" }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
+        // Not a "Watching" over a monitor that has stopped reporting.
+        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
         if coordinator.monitor.latest?.status.severity == "critical" { return "Problem" }
         if coordinator.monitor.latest?.status.severity == "warn" { return "Degraded" }
         return "Watching"
@@ -222,6 +227,7 @@ struct MainWindow: View {
     private var statusPillColor: Color {
         if coordinator.isScanning { return Theme.ColorToken.blue }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
+        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
         if coordinator.monitor.latest?.status.severity == "critical" { return .red }
         if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amber }
         return Theme.ColorToken.green
@@ -230,6 +236,7 @@ struct MainWindow: View {
     private var statusPillBackground: Color {
         if coordinator.isScanning { return Theme.ColorToken.blueWash }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.neutralWash }
+        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amberWash }
         if coordinator.monitor.latest?.status.severity == "critical" { return Theme.ColorToken.redWash }
         if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amberWash }
         return Theme.ColorToken.greenWash

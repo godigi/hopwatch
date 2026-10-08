@@ -54,6 +54,25 @@ final class MonitorStream {
     /// when there isn't one. Public so the Live section can say out loud
     /// that what it is drawing is temporary.
     private(set) var burstUntil: Date?
+    /// Set when `latest` stopped being the newest word on the network and a
+    /// fresh sample has not yet replaced it: the monitor was switched off
+    /// (`stop()`) or came back from a pause (`resume()`), and `latest` still
+    /// holds whatever it measured before — possibly on another network, as
+    /// the Mac was carried somewhere else meanwhile. Cleared by the first
+    /// real (non-paused) sample.
+    ///
+    /// Not cleared by `restart()`, which is the app replacing its own child
+    /// for a cadence change or an investigation burst: that child is probing
+    /// the same link, and blanking every reading each time severity turned
+    /// bad would hide exactly the numbers the burst exists to show.
+    ///
+    /// This is why `latest` itself is *not* cleared on stop/start: stopping
+    /// a monitor whose last sample says "no link" must keep that fact (the
+    /// dot stays red between a crash and its replacement), and `restart()`
+    /// is stop-then-start. Readers that draw measurements read
+    /// `HopwatchCoordinator.liveSample`, which honours this flag.
+    private(set) var awaitingSince: Date?
+    var isAwaitingFirstSample: Bool { awaitingSince != nil }
 
     private var process: Process?
     private var readTask: Task<Void, Never>?
@@ -76,6 +95,15 @@ final class MonitorStream {
     /// A pause requested before `trapsReady` — recorded, and replayed by
     /// `ingest()` on the first sample.
     private var pauseSignalPending = false
+    /// A `forceRefresh()` requested before `trapsReady`, replayed by
+    /// `ingest()` on the first sample. The same no-signal-before-evidence
+    /// rule as the pause: SIGALRM's default disposition *terminates* the
+    /// child, and `lib/monitor.sh` only traps it inside `monitor_run`.
+    private var refreshSignalPending = false
+    /// Test seam (`--verify`): spawn this executable directly instead of the
+    /// resolved CLI, skipping the capability handshake and the journal
+    /// directory. Nil in the app.
+    private var binaryOverrideForTesting: String?
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
     /// Set by `restart()` and consumed by the next `spawn()`: the child about
@@ -103,6 +131,10 @@ final class MonitorStream {
 
     func start() {
         guard !isRunning, startTask == nil else { return }
+        if let override = binaryOverrideForTesting {
+            spawn(binary: override)
+            return
+        }
         // Fail-fast only — the path spawned later is re-resolved after
         // the gate, not this one. See startAfterCapabilityCheck.
         guard BinaryLocator.resolve() != nil else {
@@ -184,7 +216,9 @@ final class MonitorStream {
         } else {
             journalDir = hopwatchDir
         }
-        try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
+        if binaryOverrideForTesting == nil {
+            try? FileManager.default.createDirectory(at: journalDir, withIntermediateDirectories: true)
+        }
         let journalPath = journalDir.appendingPathComponent("events.jsonl").path
         proc.arguments = [
             "--monitor",
@@ -194,7 +228,8 @@ final class MonitorStream {
             "--monitor-medium-interval",   String(Defaults.mediumInterval),
             "--monitor-slow-interval",     String(Defaults.slowInterval),
         ]
-        proc.environment = BinaryLocator.environment()
+        proc.environment = binaryOverrideForTesting == nil
+            ? BinaryLocator.environment() : ProcessInfo.processInfo.environment
 
         let pipe = Pipe()
         proc.standardOutput = pipe
@@ -228,6 +263,7 @@ final class MonitorStream {
         // is the evidence the traps exist.
         trapsReady = false
         pauseSignalPending = !pauseHolders.isEmpty
+        refreshSignalPending = false
         isPaused = false
         log.info("monitor started, pid \(proc.processIdentifier)")
 
@@ -258,11 +294,13 @@ final class MonitorStream {
         process = nil
         isRunning = false
         isPaused = false
+        awaitingSince = Date()
         restartPending = false
         pauseHolders.removeAll()
         pauseReason = nil
         trapsReady = false
         pauseSignalPending = false
+        refreshSignalPending = false
         // Stopping is the end of the test too. A burst cadence that
         // survived into the next `start()` would be a faster sample rate
         // the user never asked for, with nothing on screen to explain it.
@@ -282,7 +320,9 @@ final class MonitorStream {
         let interval = burstInterval
         let until = burstUntil
         let wasRunning = isRunning
+        let wasAwaiting = awaitingSince
         stop()
+        awaitingSince = wasAwaiting
         burstInterval = interval
         burstUntil = until
         restartAttempts = 0
@@ -369,6 +409,10 @@ final class MonitorStream {
             return
         }
         pauseReason = nil
+        // Whatever `latest` holds was measured before the pause, and the
+        // Mac may have moved since (a lid closed in one place and opened
+        // in another). Do not let it pass as live until a sample proves it.
+        if awaitingSince == nil { awaitingSince = Date() }
         guard trapsReady else {
             // Every holder released before the child proved its traps:
             // nothing was ever signaled, so there is nothing to undo.
@@ -384,8 +428,24 @@ final class MonitorStream {
     var isPausedForAnyReason: Bool { !pauseHolders.isEmpty }
 
     /// Sends `SIGALRM` to force an immediate cycle refresh without waiting for timers.
+    ///
+    /// Held back until the child has produced a sample, like the pause
+    /// signals, and for the same reason: before `monitor_run` installs its
+    /// traps SIGALRM kills the child. Measured: a SIGALRM sent 0–30 ms after
+    /// spawn exits the monitor with status 142. Network events arrive in
+    /// bursts exactly when a link drops — CoreWLAN's SSID, BSSID and link
+    /// callbacks within milliseconds of each other — and the drop is also
+    /// what makes `considerInvestigationBurst` restart the child, so this
+    /// is the moment a refresh is most likely to land on a child that has
+    /// not finished starting. The child's death leaves `isRunning` false
+    /// until the restart backoff elapses, which is what the dot and the
+    /// card header ("Monitoring off") read as a dead monitor.
     func forceRefresh() {
         guard let process, process.isRunning, !isPaused else { return }
+        guard trapsReady else {
+            refreshSignalPending = true
+            return
+        }
         kill(process.processIdentifier, SIGALRM)
         log.debug("monitor refresh signaled (SIGALRM)")
     }
@@ -434,10 +494,18 @@ final class MonitorStream {
                 log.debug("monitor paused (deferred until first sample)")
             }
             pauseSignalPending = false
+            if refreshSignalPending, !isPaused, let process, process.isRunning {
+                kill(process.processIdentifier, SIGALRM)
+                log.debug("monitor refresh signaled (deferred until first sample)")
+            }
+            refreshSignalPending = false
         }
         // A sample proves the process is alive and producing, which is the
         // only evidence that matters for backoff.
         restartAttempts = 0
+        // A paused sample carries values from before the pause; it is the
+        // monitor saying it is not looking, not a reading.
+        if !sample.status.paused { awaitingSince = nil }
         // Backstop for the burst deadline. The timer is the normal path;
         // this catches the case where it was lost with a cancelled task
         // tree, which would otherwise leave the machine sampling every two
@@ -468,9 +536,13 @@ final class MonitorStream {
         }
     }
 
+    /// `--verify` only: point this stream at a stand-in executable.
+    func useBinaryForTesting(_ path: String) { binaryOverrideForTesting = path }
+
     /// Populates synthetic sample data for GalleryMode previews without running a child process.
     func adoptGallerySample(_ sample: MonitorSample, historical: [MonitorSample] = []) {
         self.latest = sample
+        self.awaitingSince = nil
         self.isRunning = true
         self.isPaused = false
         self.pauseReason = nil

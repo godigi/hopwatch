@@ -227,6 +227,21 @@ enum GalleryMode {
         // and LiveView render active monitoring instead of checking placeholders.
         let networkName = standIn.map { coordinator.history.displayName(for: $0) } ?? "Home Wi-Fi"
         coordinator.adoptGalleryMonitorSample(networkID: standIn, displayName: networkName)
+        // `--gallery-no-link`: turn that sample into a link-down one that
+        // still carries the healthy sample's stale readings. See
+        // `adoptGalleryNoLinkSample`.
+        if CommandLine.arguments.contains("--gallery-no-link") {
+            coordinator.adoptGalleryNoLinkSample()
+        }
+        // `--gallery-moved`: the monitor is on a network the hydrated report
+        // is not about.
+        if CommandLine.arguments.contains("--gallery-moved") {
+            coordinator.adoptGalleryMovedNetwork()
+        }
+        // `--gallery-stale`: the monitor's newest sample is minutes old.
+        if CommandLine.arguments.contains("--gallery-stale") {
+            coordinator.adoptGalleryStaleSample()
+        }
 
         // `start()` also calls `eventLog.rephraseLegacyRuleEvents` here.
         // Deliberately skipped: it can rewrite `events.json`, and this
