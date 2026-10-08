@@ -118,7 +118,7 @@ def process_table():
     """{pid: (ppid, command)} from one `ps`, or None when it cannot be read."""
     try:
         out = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,command="],
+            ["ps", "-ax", "-ww", "-o", "pid=,ppid=,command="],
             capture_output=True, text=True, timeout=10, check=False,
         ).stdout
     except (OSError, subprocess.SubprocessError):
