@@ -784,6 +784,25 @@ it would accumulate forever.
   swinging the instrument. It resets to `null` on link-down, a network
   change, or an unparseable probe — never silently carries readings
   across a discontinuity.
+- **A `link.up: false` sample carries no measurement.** `gateway.*`,
+  `internet.*`, `jitter_ms`, `dns.*`, `tcp.*`, `wifi.{rssi,noise,snr,channel}`
+  and every `public.*` field (including `ok` and `captive_portal`) are `null`
+  (`tcp.targets` is `[]`), and `status.measurement` is `link-down`. These
+  fields used to repeat the last good cycle's readings until a probe next
+  ran, so a dropped link could be reported beside 10% router loss and a
+  green internet tile. `public.*` is nulled rather than marked stale because
+  the public IP, ISP and country describe the network just left, and any
+  consumer that rendered them would be presenting them as current. What
+  stays is identity, recomputed from the route table each cycle
+  (`link.type` is the type held from the network's identity when the
+  interface is gone, so a dropped Wi-Fi link still reads `wifi`; it is `null`
+  when none is held and is never guessed as `wired`):
+  `link.interface`, `ssid`/`bssid`, `gateway`, and `network.*`. The first
+  sample after the link returns re-runs the medium and slow tiers, so those
+  fields are filled again straight away instead of at their next timer. A
+  `country-changed` / `public-ip-changed` entry is still produced across the
+  outage, because the previous-sample snapshot keeps the last known value
+  (see `changes` below).
 - **`network.group_id` is the `--history` group key** (`mac:…`, `gw:…` or
   `ssid:…` — the same string `--history` reports in `networks[].id`),
   derived by `lib/netid.sh` from the same inputs as `network.id`, with
@@ -916,12 +935,18 @@ it would accumulate forever.
 | Tier | Probes | Default | Flag |
 |---|---|---|---|
 | fast | gateway ping ×10, VPN state, link/SSID, identity | 10 s (5 s when degraded) | `--monitor-fast-interval`, `--monitor-degraded-interval` |
-| medium | DNS resolve, TCP/443 ×2, RSSI/SNR | 60 s | `--monitor-medium-interval` |
+| medium | DNS resolve, TCP/443 ×2, RSSI/SNR | 60 s, **plus immediately on network change, roam or link restore** | `--monitor-medium-interval` |
 | slow | public IP, ISP, ASN, country, captive portal | 300 s, **plus immediately on network change** | `--monitor-slow-interval` |
 
 The slow tier is the only one making an external call, which is why it is
 slow and why a network change overrides its timer — that is exactly when
-its answer has certainly gone stale.
+its answer has certainly gone stale. The same override applies to two
+other changes that make a tier's last answer wrong: a **VPN toggle** (VPN
+active flag or name changes) pulls the medium and slow tiers forward, since
+the public IP/ISP/country and the DNS/TCP paths move with it, and a **roam**
+(BSSID changes on the same network) pulls the medium tier forward, since
+RSSI, noise and channel move with it. Nothing extra runs when neither
+happens.
 
 The gateway probe sends **ten** packets rather than the three a liveness
 check suggests, for quantisation rather than accuracy: at 3 packets the
