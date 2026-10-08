@@ -6,6 +6,16 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-10-08
+
+### Changes
+
+- Merge branch 'fix/no-link-state'
+- fix: scope stale readings to the current network, add sample watchdog
+- docs: audit of other stale or misleading displays (18 findings)
+- fix: no-link state is red, says so, and shows no stale readings
+- fix: monitor stops reporting readings from before a link drop
+
 ## [1.14.0] - 2026-10-08
 
 ### Added
@@ -4174,7 +4184,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/godigi/hopwatch/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/godigi/hopwatch/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/godigi/hopwatch/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
