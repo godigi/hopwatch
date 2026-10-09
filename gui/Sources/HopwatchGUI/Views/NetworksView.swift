@@ -131,7 +131,7 @@ struct NetworksView: View {
         // sample arrives, so the default selection can't find the current
         // network yet and the pane opens on "Select a network". Re-apply
         // on every sample until a selection exists.
-        .onChange(of: coordinator.monitor.latest?.seq) { _, _ in
+        .onChange(of: coordinator.liveSample?.seq) { _, _ in
             selectCurrentNetworkIfNeeded()
         }
         .onChange(of: selectedNetworkID) { old, new in
@@ -291,7 +291,7 @@ struct NetworksView: View {
         let runs = networkRuns(net)
         let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id), runs: runs)
         let comp: NetworkComparison? = {
-            if isCurrent(net), let latest = coordinator.monitor.latest {
+            if isCurrent(net), let latest = coordinator.liveSample {
                 return NetworkHistoryStore.compare(sample: latest, baseline: mem)
             }
             return nil
@@ -750,7 +750,7 @@ struct NetworksView: View {
     /// made, and never re-selects after they deliberately deselect.
     private func selectCurrentNetworkIfNeeded() {
         guard selectedNetworkID == nil, !userDeselected,
-              let currentID = coordinator.monitor.latest?.network.historyJoinID else { return }
+              let currentID = coordinator.liveSample?.network.historyJoinID else { return }
         selectedNetworkID = store.canonicalID(currentID)
     }
 
@@ -784,7 +784,7 @@ struct NetworksView: View {
     }
 
     private func isCurrent(_ net: HistoryDocument.Network) -> Bool {
-        guard let id = coordinator.monitor.latest?.network.historyJoinID else { return false }
+        guard let id = coordinator.liveSample?.network.historyJoinID else { return false }
         return store.canonicalID(id) == net.id
     }
 

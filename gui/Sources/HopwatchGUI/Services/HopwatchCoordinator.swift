@@ -181,6 +181,9 @@ final class HopwatchCoordinator {
 
     private(set) var recentResolutions: [ResolutionEvent] = []
     private var lastSample: MonitorSample?
+    private(set) var connectionGeneration = 0
+    private var connectionChangedAt: Date?
+    private var scanIdentity: (id: String, startedAt: Date, finishedAt: Date)?
     private var lastUnhealthySample: MonitorSample?
     private var previousActiveAlerts: [String: AlertEngine.ActiveAlert] = [:]
 
@@ -422,12 +425,13 @@ final class HopwatchCoordinator {
     ///   always nil there and a strictly-scoped hydration would put the
     ///   empty state in every screenshot.
     func hydrateFromHistoryIfNeeded(explicitNetworkID: String? = nil) async {
+        let generation = connectionGeneration
         // "Nothing to show for this network", not "nothing in memory": after
         // a move, the previous network's report is still held but is out of
         // scope (`currentNetworkRun`), and this is how the new network gets
         // its own stored one rather than an empty Home until the next scan.
         if currentNetworkRun == nil {
-            let current = explicitNetworkID ?? monitor.latest?.network.historyJoinID
+            let current = explicitNetworkID ?? confirmedNetworkID
             let id: String?
             if let current {
                 // Latched on the first attempt that had a network at all,
@@ -456,7 +460,11 @@ final class HopwatchCoordinator {
             }
             if let id {
                 do {
-                    hydratedReport = try await details.detail(for: id)
+                    let detail = try await details.detail(for: id)
+                    guard generation == connectionGeneration,
+                          explicitNetworkID != nil || current.map(history.canonicalID) == confirmedNetworkID.map(history.canonicalID)
+                    else { return }
+                    hydratedReport = detail
                 } catch {
                     log.debug("cold-launch hydration skipped: \(error.localizedDescription, privacy: .public)")
                 }
@@ -533,7 +541,30 @@ final class HopwatchCoordinator {
 
     // MARK: - Samples
 
+    /// A decoded sample is the first positive evidence of an identity change
+    /// when CoreWLAN/NWPath did not deliver an event. Invalidate older async
+    /// work before evaluating this sample, while retaining the sample itself.
+    @discardableResult
+    func reconcileNetworkIdentity(for sample: MonitorSample) -> Bool {
+        guard !sample.status.paused, let id = sample.network.historyJoinID else { return false }
+        guard id != lastNetworkID else { return false }
+        if let previous = lastNetworkID {
+            if history.canonicalID(previous) == history.canonicalID(id) {
+                lastNetworkID = id
+                return false
+            }
+            invalidateCurrentConnection(preserving: sample)
+        }
+        lastNetworkID = id
+        return true
+    }
+
     private func handleSample(_ sample: MonitorSample) {
+        // The CLI's pause marker repeats the last path's identity and
+        // readings; it must not revive them after a connection boundary.
+        guard !sample.status.paused else { return }
+        let previousNetworkID = lastNetworkID
+        let identityChanged = reconcileNetworkIdentity(for: sample)
         refreshLiveWiFi()
         adoptLiveSSIDAsNameIfNeeded()
         alerts.evaluate(sample: sample)
@@ -552,8 +583,8 @@ final class HopwatchCoordinator {
         // silently spanning the restart with a "+" — except where this app
         // restarted its own monitor, which it knows, and the network is not
         // known to have changed. That one is marked and stepped over: it is
-        // no evidence a fault ended. `lastNetworkID` still names the network
-        // of the previous process here; it is advanced further down.
+        // no evidence a fault ended. The captured previous identity names the network
+        // before reconciliation advanced the current connection.
         if sample.seq == 1 {
             eventLog.record(
                 kind: "monitor-started",
@@ -562,7 +593,7 @@ final class HopwatchCoordinator {
                 date: sample.timestamp,
                 continuesPrevious: NetworkEvent.continuesPrevious(
                     appRestarted: monitor.childContinuesPrevious,
-                    previousNetwork: lastNetworkID,
+                    previousNetwork: previousNetworkID,
                     currentNetwork: sample.network.historyJoinID))
         }
 
@@ -579,9 +610,14 @@ final class HopwatchCoordinator {
 
         if let gwIP = sample.link.gateway, gwIP != lastProbedRouterIP {
             lastProbedRouterIP = gwIP
+            routerAdminAvailable = false
+            let generation = connectionGeneration
             Task { [weak self] in
-                let available = await RouterAdminProbeStore.shared.checkAvailability(for: gwIP)
+                let available = await RouterAdminProbeStore.shared.checkAvailability(
+                    for: gwIP, generation: generation)
                 await MainActor.run {
+                    guard self?.connectionGeneration == generation,
+                          self?.liveSample?.link.gateway == gwIP else { return }
                     self?.routerAdminAvailable = available
                 }
             }
@@ -599,8 +635,7 @@ final class HopwatchCoordinator {
             Task { await hydrateFromHistoryIfNeeded() }
         }
 
-        if id != lastNetworkID {
-            lastNetworkID = id
+        if identityChanged {
             // A throughput figure is about one network. Swap it for this
             // network's own stored one (or none) before any view can draw
             // the previous network's under the new name.
@@ -840,6 +875,8 @@ final class HopwatchCoordinator {
                                      speed: RunSnapshot.Speedtest? = nil, speedAt: Date? = nil,
                                      speedNetwork: String? = nil) {
         self.latestRun = latestRun
+        self.scanIdentity = nil
+        if let latestRun { adoptAcceptedScanIdentity(latestRun) }
         self.hydratedReport = hydrated
         self.latestSpeedTest = speed
         self.latestSpeedTestAt = speedAt
@@ -859,6 +896,13 @@ final class HopwatchCoordinator {
         moved.network = .init(id: "wifi:ssid=Corner Cafe", label: "Corner Cafe", groupId: "ssid:corner-cafe")
         moved.link.ssid = "Corner Cafe"
         moved.publicInfo = .init()
+        moved.gateway = .init()
+        moved.internet = .init()
+        moved.jitterMs = nil
+        moved.dns = .init()
+        moved.tcp = .init()
+        moved.wifi = nil
+        moved.status.measurement = "unknown"
         liveSSID = "Corner Cafe"
         monitor.adoptGallerySample(moved, historical: monitor.recent.dropLast() + [moved])
     }
@@ -951,7 +995,8 @@ final class HopwatchCoordinator {
         // `measured == nil` is "the run could not name its network", not
         // "a different network" — treat it as agreeing, since the check
         // did run and refusing it would retry forever.
-        guard measured == nil || measured == id else {
+        guard let measured,
+              history.canonicalID(measured) == history.canonicalID(id) else {
             log.info("arrival check for \(id, privacy: .public) landed after a network change — left unchecked so it retries")
             return
         }
@@ -969,6 +1014,9 @@ final class HopwatchCoordinator {
     /// `.unchecked`, so the next sample retries. That retry is the entire
     /// point of this change.
     private func clearPendingArrival() {
+        if let id = pendingArrivalNetworkID {
+            setArrivalState(.unchecked, for: id)
+        }
         pendingArrivalNetworkID = nil
         pendingArrivalDepth = nil
         pendingArrivalDecline = nil
@@ -1104,6 +1152,8 @@ final class HopwatchCoordinator {
     }
 
     private func handleNetworkEvent(_ event: NetworkEventWatcher.Event) {
+        invalidateCurrentConnection()
+        if Defaults.monitoringEnabled { monitor.restart() }
         // CoreWLAN and NWPathMonitor are near-instant where the monitor
         // loop is up to a cadence behind. The monitor is the fallback, not
         // the primary detector — so nudge it to resample now rather than
@@ -1127,6 +1177,33 @@ final class HopwatchCoordinator {
         monitor.forceRefresh()
         Task { await history.load() }
         updateChecker.performDailyCheck()
+    }
+
+    func invalidateCurrentConnection(preserving sample: MonitorSample? = nil) {
+        if isScanning {
+            cancelScan()
+            clearPendingArrival()
+        }
+        connectionGeneration += 1
+        connectionChangedAt = Date()
+        monitor.invalidateConnection(preserving: sample)
+        hydratedReport = nil
+        latestRun = nil
+        scanIdentity = nil
+        latestSpeedTest = nil
+        latestSpeedTestAt = nil
+        latestSpeedTestNetwork = nil
+        didHydrateForNetwork = false
+        routerAdminAvailable = false
+        lastProbedRouterIP = nil
+        lastSample = nil
+        lastUnhealthySample = nil
+        lastSeverity = "ok"
+        previousActiveAlerts = [:]
+        alerts.invalidateConnection()
+        notifications.clearAnnouncedFaults()
+        dismissActiveResolution()
+        refreshLiveWiFi()
     }
 
     // MARK: - Scans
@@ -1197,6 +1274,8 @@ final class HopwatchCoordinator {
         scanStartedAt = Date()
         lastRunError = nil
         progress.reset()
+        let generation = connectionGeneration
+        let scanNetwork = confirmedNetworkID
 
         // Both halves matter. Pausing the monitor keeps the scan's speed
         // test and bufferbloat probe from poisoning the samples and
@@ -1240,21 +1319,25 @@ final class HopwatchCoordinator {
                     self.clearPendingArrival()
                     return
                 }
+                guard generation == self.connectionGeneration,
+                      let measured = result.snapshot.network.historyJoinID,
+                      scanNetwork == nil || self.history.canonicalID(measured) == scanNetwork.map(self.history.canonicalID)
+                else {
+                    self.clearPendingArrival()
+                    await self.history.load()
+                    return
+                }
+                self.adoptAcceptedScanIdentity(result)
                 if adoptAsReport {
                     self.latestRun = result
                     self.hydratedReport = nil
                     self.alerts.evaluate(run: result.snapshot)
                 }
-                if let st = result.snapshot.speedtest, st.downMbps != nil {
-                    self.latestSpeedTest = st
-                    self.latestSpeedTestAt = result.finishedAt
-                    self.latestSpeedTestNetwork = result.snapshot.network.historyJoinID
-                        ?? self.monitor.latest?.network.historyJoinID
-                }
                 // The run appended itself to baseline.jsonl, so the charts
                 // and the network list are one record out of date until
                 // this reload.
                 await self.history.load()
+                guard generation == self.connectionGeneration else { return }
                 self.finishArrivalIfPending(runID: result.snapshot.runID,
                                             measured: result.snapshot.network.historyJoinID)
                 self.log.info("\(reason, privacy: .public) finished in \(result.duration, format: .fixed(precision: 1))s, exit \(result.exitCode)")
@@ -1273,6 +1356,18 @@ final class HopwatchCoordinator {
     func cancelScan() {
         scanTask?.cancel()
         scanTask = nil
+    }
+
+    /// A successful speed-only check establishes identity even though it
+    /// does not replace the full diagnostic report in `latestRun`.
+    func adoptAcceptedScanIdentity(_ result: RunResult) {
+        guard let id = result.snapshot.network.historyJoinID else { return }
+        scanIdentity = (id, result.startedAt, result.finishedAt)
+        if let speed = result.snapshot.speedtest, speed.downMbps != nil {
+            latestSpeedTest = speed
+            latestSpeedTestAt = result.finishedAt
+            latestSpeedTestNetwork = id
+        }
     }
 
     // MARK: - Repairs
@@ -1455,7 +1550,9 @@ final class HopwatchCoordinator {
         nc.addObserver(forName: NSWorkspace.didWakeNotification,
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
+                self?.invalidateCurrentConnection()
                 self?.monitor.resume(reason: "your Mac is asleep")
+                if Defaults.monitoringEnabled { self?.monitor.restart() }
                 self?.alerts.monitoringPaused = self?.monitor.isPausedForAnyReason ?? false
                 // The world may be entirely different after a wake, and
                 // the monitor's own timers do not know that.
@@ -1578,7 +1675,7 @@ final class HopwatchCoordinator {
     /// not offered, so Home shows its "Awaiting check" state rather than the
     /// living room's report in a café.
     var reportSource: ReportSource? {
-        let live = monitor.latest?.network.historyJoinID
+        let live = confirmedNetworkID
         if let latestRun, runIsForNetwork(latestRun.snapshot.network.historyJoinID, live: live) {
             return .live(latestRun)
         }
@@ -1590,7 +1687,8 @@ final class HopwatchCoordinator {
     }
 
     private func runIsForNetwork(_ runNetwork: String?, live: String?) -> Bool {
-        RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID)
+        guard let runNetwork, let live else { return false }
+        return RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID)
     }
 
     /// The one place a stored or session run becomes "the report for the
@@ -1600,20 +1698,11 @@ final class HopwatchCoordinator {
     /// and RTT) go through.
     ///
     /// Returns the session's scan, else the hydrated report, whichever is
-    /// about the network the monitor's newest sample names (`RunScope`), with
-    /// its age; `nil` when the only run in hand is provably another
-    /// network's. With no live network identified — before the monitor's
-    /// first sample, or monitoring off — the run is returned: it cannot be
-    /// shown to be wrong, hydration scoped it when it could, and Home
-    /// captions a report it cannot confirm (`lastCheckedCaption`).
-    ///
-    /// Identity comes from `monitor.latest` even when that sample is stale:
-    /// a monitor that has gone quiet still last saw *some* network, and
-    /// that is the best evidence there is. (The few seconds after resuming
-    /// on a different network, before the first fresh sample, are the one
-    /// gap — see `liveSample`.)
+    /// about a positively confirmed current network, with its age. Unknown
+    /// identity, including the wake interval, cannot authorize a fallback.
+    /// Saved reports remain available through historical views.
     var currentNetworkRun: CurrentNetworkRun? {
-        let live = monitor.latest?.network.historyJoinID
+        guard let live = confirmedNetworkID else { return nil }
         if let latestRun, runIsForNetwork(latestRun.snapshot.network.historyJoinID, live: live) {
             return CurrentNetworkRun(result: latestRun, isLive: true)
         }
@@ -1636,9 +1725,11 @@ final class HopwatchCoordinator {
     /// so a report from an hour ago, or from this morning's cold launch,
     /// never answers "how is the connection". `currentNetworkRun` is for
     /// things that describe the network (its ISP, its country, its findings).
-    private var freshNetworkRunSnapshot: RunSnapshot? {
+    var freshNetworkRunSnapshot: RunSnapshot? {
+        _ = staleEpoch
         guard let run = currentNetworkRun,
-              run.age() <= SampleFreshness.window(cadenceS: monitor.latest?.status.cadenceS)
+              run.age() <= SampleFreshness.window(cadenceS: monitor.latest?.status.cadenceS),
+              connectionChangedAt.map({ run.result.startedAt >= $0 }) ?? true
         else { return nil }
         return run.snapshot
     }
@@ -1650,19 +1741,34 @@ final class HopwatchCoordinator {
     /// drawn before the first sample of the new network cannot beat it.
     var currentSpeedTest: (speed: RunSnapshot.Speedtest, at: Date?)? {
         guard let speed = latestSpeedTest else { return nil }
-        let live = monitor.latest?.network.historyJoinID
+        guard let live = confirmedNetworkID else { return nil }
         guard runIsForNetwork(latestSpeedTestNetwork, live: live) else { return nil }
         return (speed, latestSpeedTestAt)
     }
 
+    var currentSuitabilitySpeed: RunSnapshot.Speedtest? {
+        if let speed = freshNetworkRunSnapshot?.speedtest { return speed }
+        guard let current = currentSpeedTest, let date = current.at,
+              Date().timeIntervalSince(date) <= SampleFreshness.window(cadenceS: liveSample?.status.cadenceS)
+        else { return nil }
+        return current.speed
+    }
+
+    var currentPublicInfo: MonitorSample.PublicInfo? {
+        guard !linkIsDown else { return nil }
+        if let sample = liveSample, sample.publicInfo.ok != nil {
+            return sample.publicInfo.ok == true ? sample.publicInfo : nil
+        }
+        let info = freshNetworkRunSnapshot?.publicInfo
+        return info?.ok == false ? nil : info
+    }
+
     // MARK: - Sample freshness
 
-    /// Bumped by the watchdog when `latestSampleIsStale` flips, so views
-    /// that read it are invalidated by a *lack* of samples — which, being
-    /// the absence of an event, nothing else would ever notify.
+    /// Bumped by the watchdog so every age-based reading can expire even
+    /// when no monitor sample arrives.
     private(set) var staleEpoch = 0
     private var staleWatchTask: Task<Void, Never>?
-    private var lastObservedStale = false
     /// Gallery fixtures are written once and rendered for as long as the
     /// run takes; they would age past the window mid-render.
     private var stalenessSuspended = false
@@ -1702,30 +1808,64 @@ final class HopwatchCoordinator {
     /// already say so out loud. `MonitorStream.stop()` still keeps `latest`
     /// itself, because a "no link" sample must survive a monitor restart.
     var liveSample: MonitorSample? {
+        _ = staleEpoch
         guard let sample = monitor.latest,
               !monitor.isAwaitingFirstSample,
-              !latestSampleIsStale else { return nil }
+              !sample.status.paused,
+              stalenessSuspended || Date().timeIntervalSince(sample.timestamp)
+                <= SampleFreshness.window(cadenceS: sample.status.cadenceS) else { return nil }
         return sample
+    }
+
+    var confirmedNetworkID: String? {
+        if let sample = liveSample { return sample.network.historyJoinID }
+        // A user-requested scan can establish identity while monitoring is
+        // switched off. It must have begun after every pending boundary.
+        guard let identity = scanIdentity,
+              Date().timeIntervalSince(identity.finishedAt) <= SampleFreshness.window(cadenceS: nil),
+              identity.startedAt >= max(connectionChangedAt ?? .distantPast, monitor.awaitingSince ?? .distantPast)
+        else { return nil }
+        return identity.id
+    }
+
+    var currentSamples: [MonitorSample] {
+        guard liveSample != nil, let id = confirmedNetworkID else { return [] }
+        let canonical = history.canonicalID(id)
+        return monitor.recent.filter {
+            !$0.status.paused && $0.network.historyJoinID.map(history.canonicalID) == canonical
+        }
+    }
+
+    var currentNetworkEvents: [NetworkEvent] {
+        guard let id = confirmedNetworkID else { return [] }
+        let canonical = history.canonicalID(id)
+        return eventLog.within(hours: 24).filter {
+            $0.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
+                || $0.network.map(history.canonicalID) == canonical
+        }
+    }
+
+    var vpnFreshness: String {
+        guard let sample = liveSample else { return "Awaiting reading" }
+        let age = Date().timeIntervalSince(sample.timestamp)
+        return age >= 0 && age < 5 ? "Checked just now"
+            : "Checked \(RelativeTime.string(from: sample.timestamp))"
     }
 
     private func startStaleWatch() {
         staleWatchTask?.cancel()
         staleWatchTask = Task { [weak self] in
-            // A sample not arriving is not an event anything observes, so
-            // something has to look. One main-actor wake every few seconds
-            // that writes only when the answer flips — no existing tick
-            // (the 4-hourly update check aside) wakes the app in between.
+            // Scan freshness and the longer no-link window also expire when
+            // `liveSample` stays nil, so a stale-only transition misses them.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, !Task.isCancelled else { return }
-                let stale = self.computeSampleIsStale(now: Date())
-                if stale != self.lastObservedStale {
-                    self.lastObservedStale = stale
-                    self.staleEpoch += 1
-                }
+                self.tickAgeDrivenState()
             }
         }
     }
+
+    func tickAgeDrivenState() { staleEpoch += 1 }
 
     /// True if any monitor sample in the rolling loss window (~last 10 probes / 100s) recorded a Wi-Fi roam event.
     var hasRecentRoam: Bool {
@@ -1767,16 +1907,19 @@ final class HopwatchCoordinator {
     /// measured".
     var lossFiltering: EffectiveLoss.Filtering {
         EffectiveLoss.filtering(
-            icmpFilteredFlag: monitor.latest?.status.icmpFiltered == true,
-            ruleIDs: (monitor.latest?.status.rules ?? [])
-                + (currentNetworkRun?.snapshot.diagnosis.compactMap(\.rule) ?? [])
+            icmpFilteredFlag: liveSample?.status.icmpFiltered == true,
+            ruleIDs: (liveSample?.status.rules ?? [])
+                + (freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) ?? [])
         )
     }
 
     /// The newest monitor sample says there is no link, and is recent enough
     /// to believe. The one answer the dot, both stage cards and every tile
     /// read — see `LinkState`.
-    var linkIsDown: Bool { LinkState.isDown(sample: monitor.latest) }
+    var linkIsDown: Bool {
+        _ = staleEpoch
+        return LinkState.isDown(sample: monitor.latest)
+    }
 
     /// Whether the Mac's connection is Wi-Fi, for icons and captions.
     /// With no link the monitor's `link.type` is only the CLI's default
@@ -1803,7 +1946,7 @@ final class HopwatchCoordinator {
         // `movingJitter` keeps only samples from this network, link up, not
         // paused and within a few cadences of the newest — not the hour the
         // buffer holds.
-        return MonitorSeries.movingJitter(samples: monitor.recent)
+        return MonitorSeries.movingJitter(samples: currentSamples)
     }
 
     /// Overall connection stability rating evaluated from current RTT, jitter, and packet loss.
@@ -1988,7 +2131,7 @@ final class HopwatchCoordinator {
             let snap = currentNetworkRun?.snapshot
             let items = SuitabilityEngine.evaluateAll(.init(
                 monitorSample: sample,
-                speedTest: snap?.speedtest ?? currentSpeedTest?.speed,
+                speedTest: currentSuitabilitySpeed,
                 savedSuitability: snap?.suitability,
                 catalog: rulesCatalog.catalog,
                 firedRules: sample.status.rules,

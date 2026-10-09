@@ -38,6 +38,7 @@ struct HomeView: View {
                     networkName: currentNetworkName,
                     isWiFi: isConnectedToWiFi,
                     isScanning: coordinator.isScanning,
+                    isLinkDown: linkDown,
                     onRunFullCheck: { coordinator.runFullCheck() },
                     onCancelScan: { coordinator.cancelScan() },
                     onCopyRedacted: { copyShareableReport() },
@@ -106,7 +107,7 @@ struct HomeView: View {
                     routerPingText: routerPingText,
                     routerPingTint: routerPingTint,
                     routerWarn: routeWarning.routerWarn,
-                    routerIP: routerGatewayIP ?? "192.168.1.1",
+                    routerIP: routerGatewayIP ?? "—",
                     routerLossText: routerLossText,
                     routerJitterText: routerJitterText,
                     routerLoadedDelta: currentRunResult?.snapshot.bufferbloat.gwDeltaMs.map { String(format: "+%.0f ms", $0) },
@@ -121,6 +122,7 @@ struct HomeView: View {
                     internetLoadedDelta: currentRunResult?.snapshot.bufferbloat.inetDeltaMs.map { String(format: "+%.0f ms", $0) },
                     bandChannelText: bandChannelText,
                     vpnActive: vpnActive,
+                    vpnKnown: coordinator.liveSample != nil || currentRunResult != nil,
                     vpnProvider: vpnProviderName,
                     publicIP: publicIPString,
                     pingTarget: pingTargetString,
@@ -141,7 +143,7 @@ struct HomeView: View {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(spacing: 16) {
                         DashboardLiveChartPanel(
-                            samples: coordinator.monitor.recent,
+                            samples: coordinator.currentSamples,
                             selectedWindowMinutes: $chartWindowMinutes,
                             isBursting: coordinator.monitor.isBursting,
                             burstUntil: coordinator.monitor.burstUntil,
@@ -163,6 +165,7 @@ struct HomeView: View {
                         DashboardFindingsPanel(
                             checkTime: checkTimeSubtitle,
                             findings: activeFindings,
+                            emptyState: findingsEmptyState,
                             outcome: coordinator.repairOutcome,
                             repairsBusy: coordinator.isRepairing || coordinator.isScanning,
                             onRepair: { item, repair in
@@ -172,7 +175,7 @@ struct HomeView: View {
                         )
 
                         DashboardRecentActivityPanel(
-                            events: ActivityEntry.fold(coordinator.eventLog.events),
+                            events: ActivityEntry.fold(coordinator.currentNetworkEvents),
                             onOpenActivity: { openActivity() }
                         )
                     }
@@ -180,6 +183,7 @@ struct HomeView: View {
 
                     DashboardCheckTable(
                         checkSubtitle: lastCheckedCaption ?? "Awaiting check",
+                        hasSavedResult: currentRunResult != nil,
                         networkSSID: currentNetworkName,
                         vpnActive: vpnActive,
                         rows: checkTableRows
@@ -211,16 +215,16 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
 
                     DashboardTechnicalPanel(
-                        tracerouteHops: currentRunResult?.snapshot.traceroute.hops.count ?? 3,
-                        isIPv6: currentRunResult?.snapshot.ipv6.available ?? false,
-                        isDoubleNAT: currentRunResult?.snapshot.wan.doubleNat.detected ?? false,
+                        tracerouteHops: currentRunResult.flatMap { $0.snapshot.traceroute.hops.isEmpty ? nil : $0.snapshot.traceroute.hops.count },
+                        isIPv6: currentRunResult?.snapshot.measuredIPv6,
+                        isDoubleNAT: currentRunResult?.snapshot.measuredDoubleNAT,
                         wifiBandChannel: bandChannelText,
                         wifiSignal: currentRunResult?.snapshot.wifi?.rssi.map { "\($0) dBm" } ?? "—",
                         wifiNoise: currentRunResult?.snapshot.wifi?.noise.map { "\($0) dBm" } ?? "—",
-                        wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" } ?? "—",
+                        wifiSNR: currentRunResult?.snapshot.wifi?.snr.map { "\($0) dB" },
                         dhcpRemaining: dhcpRemainingText,
-                        ipConflict: !(currentRunResult?.snapshot.duplicateIPs.isEmpty ?? true),
-                        neighborCount: currentRunResult?.snapshot.wifiScan?.neighbourCount ?? 0,
+                        ipConflict: currentRunResult?.snapshot.measuredIPConflict,
+                        neighborCount: currentRunResult?.snapshot.wifiScan?.neighbourCount,
                         loadedRTT: loadedRTTText,
                         appVersion: AppVersion.display,
                         onViewRawJSON: { showRawJSONSheet = true },
@@ -244,7 +248,7 @@ struct HomeView: View {
                 await coordinator.history.load()
             }
         }
-        .task(id: coordinator.monitor.latest?.seq) {
+        .task(id: coordinator.liveSample?.seq) {
             refreshCoreWLANRSSIIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -478,9 +482,9 @@ struct HomeView: View {
 
                 DashboardReliabilityCard(
                     observationSummary: reliabilityObservationSummary,
-                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "0 outages",
-                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "0s",
-                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "No history yet",
+                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "—",
+                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "—"
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -499,9 +503,9 @@ struct HomeView: View {
 
                 DashboardReliabilityCard(
                     observationSummary: reliabilityObservationSummary,
-                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "0 outages",
-                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "0s",
-                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "0s"
+                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "No history yet",
+                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "—",
+                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "—"
                 )
             }
         }
@@ -548,18 +552,18 @@ struct HomeView: View {
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
         let snap = currentRunResult?.snapshot
-        let fired = coordinator.monitor.latest?.status.rules
+        let fired = coordinator.liveSample?.status.rules
             ?? snap?.diagnosis.compactMap(\.rule)
             ?? []
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: coordinator.liveSample,
-            speedTest: snap?.speedtest ?? coordinator.currentSpeedTest?.speed,
+            speedTest: coordinator.currentSuitabilitySpeed,
             savedSuitability: snap?.suitability,
             catalog: coordinator.rulesCatalog.catalog,
             firedRules: fired,
-            isLinkUp: coordinator.monitor.latest?.link.up ?? true,
+            isLinkUp: coordinator.liveSample?.link.up ?? true,
             isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
+            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize,
             vpnActive: vpnActive,
             vpnName: vpnProviderName,
             currentJitter: coordinator.currentJitter,
@@ -570,6 +574,16 @@ struct HomeView: View {
     }
 
     // MARK: - Findings Computation
+
+    private var findingsEmptyState: DashboardFindingsPanel.EmptyState {
+        if !coordinator.isScanning, let live = coordinator.liveSample,
+           live.status.measurement == "measured",
+           live.gateway.rttAvgMs != nil,
+           live.internet.rttAvgMs != nil || live.tcp.anyOk == true {
+            return .liveClear
+        }
+        return currentRunResult == nil ? .awaiting : .savedClear
+    }
 
     private var activeFindings: [DashboardFindingsPanel.FindingItem] {
         var items: [DashboardFindingsPanel.FindingItem] = []
@@ -622,17 +636,20 @@ struct HomeView: View {
 
         var rows: [DashboardCheckTable.Row] = []
 
-        let gwRtt = snap?.gateway.rttAvgMs ?? coordinator.liveSample?.gateway.rttAvgMs
-        let gwLoss = snap?.gateway.lossPct ?? coordinator.liveSample?.gateway.lossPct ?? 0
+        let gwRtt = coordinator.liveSample?.gateway.rttAvgMs ?? snap?.gateway.rttAvgMs
+        let measuredGwLoss = coordinator.liveSample?.gateway.lossPct ?? snap?.gateway.lossPct
+        let gwLoss = measuredGwLoss ?? 0
         let isRoamBlip = coordinator.hasRecentRoam && gwLoss < 10.0
-        let inetRtt = snap?.internetLatency.rttAvgMs ?? coordinator.liveSample?.internet.rttAvgMs
-        let inetJitter = snap?.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
-        let loss1 = snap?.internetLatency.lossPct ?? coordinator.liveSample?.internet.lossPct ?? 0
+        let inetRtt = coordinator.liveSample?.internet.rttAvgMs ?? snap?.internetLatency.rttAvgMs
+        let measuredJitter = coordinator.currentJitter ?? snap?.internetLatency.rttJitterMs
+        let inetJitter = measuredJitter ?? 0
+        let measuredInetLoss = coordinator.liveSample?.internet.lossPct ?? snap?.internetLatency.lossPct
+        let loss1 = measuredInetLoss ?? 0
         let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
         let rssi = resolvedRSSI
         let snr = snap?.wifi?.snr
         let noise = snap?.wifi?.noise
-        let channel = coordinator.monitor.latest?.wifi?.channel
+        let channel = coordinator.liveSample?.wifi?.channel
             ?? snap?.wifi?.channel
             ?? snap?.wifiScan?.currentChannel
 
@@ -813,7 +830,7 @@ struct HomeView: View {
         rows.append(DashboardCheckEvidence.bufferbloat(snapshot: snap))
 
         // 12. Packet size (MTU)
-        let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500
+        let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 0
         let mtuBadge = DashboardCheckTable.GradeBadge(
             label: mtu >= 1400 ? "Standard" : "Reduced",
             tone: mtu >= 1400 ? .good : .warn
@@ -878,15 +895,29 @@ struct HomeView: View {
             isGood: speedDown != nil
         ))
 
-        return rows
+        let evidence: [String: Bool] = [
+            "jitter": measuredJitter != nil,
+            "gw-loss": measuredGwLoss != nil && !coordinator.lossFiltering.gatewayLeg,
+            "wifi-signal": rssi != nil,
+            "router": gwRtt != nil,
+            "internet": inetRtt != nil,
+            "loss": measuredInetLoss != nil && !coordinator.lossFiltering.internetLeg,
+            "mtu": snap?.mtu.effective != nil || snap?.mtu.pathSize != nil,
+            "ipv6": snap != nil,
+            "speed": speedDown != nil
+        ]
+        return rows.map {
+            DashboardCheckEvidence.requiringMeasurement($0, hasMeasurement: evidence[$0.id] ?? true,
+                                                       usual: mem == nil ? "—" : nil)
+        }
     }
 
     // MARK: - Route Properties
 
     private var currentNetworkName: String? {
         coordinator.wifiDisplayName
-            ?? coordinator.monitor.latest?.link.ssid
-            ?? coordinator.currentNetworkRun?.snapshot.wifi?.ssid
+            ?? coordinator.liveSample?.link.ssid
+            ?? coordinator.freshNetworkRunSnapshot?.wifi?.ssid
     }
 
     private var arrivalNetworkName: String? {
@@ -906,7 +937,7 @@ struct HomeView: View {
         // ("wired" — there is no interface to ask), which is how a Wi-Fi
         // Mac came to be captioned "Ethernet". `linkIsWiFi` asks the radio.
         if linkDown { return coordinator.linkIsWiFi }
-        if let live = coordinator.monitor.latest?.link.isWiFi {
+        if let live = coordinator.liveSample?.link.isWiFi {
             return live
         }
         if let run = coordinator.currentNetworkRun {
@@ -931,13 +962,14 @@ struct HomeView: View {
         if hits.contains(where: { $0.severity == "critical" }) { return .red }
         if hits.contains(where: { $0.severity == "warn" }) { return .yellow }
         if hits.contains(where: { $0.severity == "varies" }) {
-            return coordinator.monitor.latest?.status.severity == "critical" ? .red : .yellow
+            return coordinator.liveSample?.status.severity == "critical" ? .red : .yellow
         }
         return nil
     }
 
     private var wifiSignalText: String {
         if linkDown { return NoLinkCopy.linkReading }
+        if coordinator.liveSample == nil && resolvedRSSI == nil { return "—" }
         if !isConnectedToWiFi { return "Ethernet" }
         guard let rssi = resolvedRSSI else { return "—" }
         let base = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
@@ -951,13 +983,15 @@ struct HomeView: View {
 
     private var wifiSignalDetail: String {
         if linkDown { return "" }
-        if !isConnectedToWiFi { return "1 Gbps wired" }
+        if coordinator.liveSample == nil && resolvedRSSI == nil { return "No reading" }
+        if !isConnectedToWiFi { return "Wired connection" }
         guard let rssi = resolvedRSSI else { return "No reading" }
         return "\(rssi) dBm"
     }
 
     private var wifiSignalTint: Color {
         if linkDown { return Theme.ColorToken.red }
+        if coordinator.liveSample == nil && resolvedRSSI == nil { return Theme.ColorToken.muted }
         if !isConnectedToWiFi { return Theme.ColorToken.green }
         guard let rssi = resolvedRSSI else { return Theme.ColorToken.muted }
         if isWifiLaggy {
@@ -973,16 +1007,15 @@ struct HomeView: View {
     private var macIPString: String {
         if linkDown { return NoLinkCopy.unknownValue }
         return coordinator.liveSample?.link.ip
-            ?? coordinator.currentNetworkRun?.snapshot.interfaceInfo.ip
-            ?? "192.168.1.24"
+            ?? coordinator.freshNetworkRunSnapshot?.interfaceInfo.ip
+            ?? "—"
     }
 
     private var routerPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         // A live reading or nothing: the scan's figure is from some other
         // moment and, beside a "Live" card, reads as now.
-        guard !coordinator.monitor.isPaused, !coordinator.isScanning,
-              let sample = coordinator.liveSample else { return "—" }
+        guard let sample = coordinator.liveSample else { return "—" }
         let loss = sample.gateway.lossPct ?? 0
         if loss >= 100 { return "no reply" }
         guard let rtt = sample.gateway.rttAvgMs else { return "—" }
@@ -1006,6 +1039,7 @@ struct HomeView: View {
 
     private var routerPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
+        if routerPingText == "—" { return Theme.ColorToken.muted }
         if routerWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -1013,7 +1047,7 @@ struct HomeView: View {
     }
 
     private var firedRules: Set<String> {
-        Set(coordinator.monitor.latest?.status.rules ?? coordinator.currentNetworkRun?.snapshot.diagnosis.compactMap(\.rule) ?? [])
+        Set(coordinator.liveSample?.status.rules ?? coordinator.freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) ?? [])
     }
 
     private var firedCategories: Set<String> {
@@ -1022,6 +1056,9 @@ struct HomeView: View {
     }
 
     private var routeWarningResult: RouteWarningResolver.Result {
+        guard coordinator.liveSample != nil || coordinator.freshNetworkRunSnapshot != nil else {
+            return .init(isWifiLaggy: false, macStatusGood: false, routerWarn: false, internetWarn: false)
+        }
         // With no link nothing about either hop has been learned. The
         // inputs below fall back to the last scan's numbers, which would
         // otherwise colour a hop amber for a fault from an hour ago.
@@ -1032,14 +1069,14 @@ struct HomeView: View {
             return .init(isWifiLaggy: false, macStatusGood: false,
                          routerWarn: false, internetWarn: false)
         }
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
-        let linkUp = coordinator.monitor.latest?.link.up ?? true
-        let inetLoss = coordinator.liveSample?.internet.lossPct ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct ?? 0
-        let gwLoss = coordinator.liveSample?.gateway.lossPct ?? coordinator.currentNetworkRun?.snapshot.gateway.lossPct ?? 0
-        let inetPing = coordinator.liveSample?.internet.rttAvgMs ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttAvgMs ?? 0
-        let gwPing = coordinator.liveSample?.gateway.rttAvgMs ?? coordinator.currentNetworkRun?.snapshot.gateway.rttAvgMs ?? 0
-        let inetJitter = coordinator.liveSample?.internet.rttJitterMs ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
-        let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? coordinator.currentNetworkRun?.snapshot.gateway.rttJitterMs ?? 0
+        let isWiFi = coordinator.liveSample?.link.isWiFi ?? true
+        let linkUp = coordinator.liveSample?.link.up ?? true
+        let inetLoss = coordinator.liveSample?.internet.lossPct ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct ?? 0
+        let gwLoss = coordinator.liveSample?.gateway.lossPct ?? coordinator.freshNetworkRunSnapshot?.gateway.lossPct ?? 0
+        let inetPing = coordinator.liveSample?.internet.rttAvgMs ?? coordinator.freshNetworkRunSnapshot?.internetLatency.rttAvgMs ?? 0
+        let gwPing = coordinator.liveSample?.gateway.rttAvgMs ?? coordinator.freshNetworkRunSnapshot?.gateway.rttAvgMs ?? 0
+        let inetJitter = coordinator.liveSample?.internet.rttJitterMs ?? coordinator.freshNetworkRunSnapshot?.internetLatency.rttJitterMs ?? coordinator.currentJitter ?? 0
+        let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? coordinator.freshNetworkRunSnapshot?.gateway.rttJitterMs ?? 0
 
         return RouteWarningResolver.resolve(
             linkUp: linkUp,
@@ -1065,28 +1102,28 @@ struct HomeView: View {
     /// ICMP-1 internet). Live sample only: a filter seen in an older run says
     /// nothing about the readings shown here.
     private var lossFiltering: EffectiveLoss.Filtering {
-        EffectiveLoss.filtering(sample: coordinator.monitor.latest)
+        EffectiveLoss.filtering(sample: coordinator.liveSample)
     }
 
     private var routerGatewayIP: String? {
         if linkDown { return nil }
         return coordinator.liveSample?.link.gateway
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.ip
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.ip
     }
 
     private var routerLossText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
-        let loss = coordinator.liveSample?.gateway.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.lossPct
-            ?? 0
+        guard let loss = coordinator.liveSample?.gateway.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.lossPct
+        else { return "—" }
+        if coordinator.lossFiltering.gatewayLeg { return "Not measured" }
         if coordinator.hasRecentRoam && loss < 10.0 {
             return "roamed"
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct
-            ?? 0
-        if inetLoss <= 1.0 && loss < 20.0 {
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
+        if let inetLoss, inetLoss <= 1.0 && loss < 20.0 {
             // Downstream internet is clean; isolated router drop is ICMP rate limiting
             return "0%"
         }
@@ -1096,20 +1133,19 @@ struct HomeView: View {
     private var routerJitterText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
-        let jitter = coordinator.liveSample?.gateway.rttJitterMs
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.rttJitterMs
-            ?? 1.0
+        guard let jitter = coordinator.liveSample?.gateway.rttJitterMs
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.rttJitterMs
+        else { return "—" }
         return "\(Int(round(jitter))) ms"
     }
 
     private var internetPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        guard !coordinator.monitor.isPaused, !coordinator.isScanning,
-              let sample = coordinator.liveSample else { return "—" }
+        guard let sample = coordinator.liveSample else { return "—" }
         let measuredRtt = sample.internet.rttAvgMs
         if PingReadout.internetShowsTCPOk(rtt: measuredRtt, filtering: lossFiltering) { return "TCP ok" }
         let loss = coordinator.liveSample?.internet.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
             ?? 0
         if loss >= 100 { return "no reply" }
         guard let rtt = measuredRtt else { return "—" }
@@ -1118,6 +1154,7 @@ struct HomeView: View {
 
     private var internetPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
+        if internetPingText == "—" { return Theme.ColorToken.muted }
         if internetWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -1126,7 +1163,7 @@ struct HomeView: View {
 
     private var isGatewayJitterDominant: Bool {
         let gwJitter = coordinator.liveSample?.gateway.rttJitterMs
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.rttJitterMs ?? 0
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.rttJitterMs ?? 0
         return gwJitter >= 20.0
     }
 
@@ -1137,13 +1174,13 @@ struct HomeView: View {
             return "Ping blocked"
         }
         let loss = coordinator.liveSample?.gateway.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.lossPct
             ?? 0
         if coordinator.hasRecentRoam && loss < 10.0 {
             return "Wi-Fi roamed"
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
             ?? 0
         if inetLoss <= 1.0 && loss < 20.0 {
             return routerGatewayIP ?? "default gateway"
@@ -1153,9 +1190,9 @@ struct HomeView: View {
         }
         if routerWarn {
             let gwJitter = coordinator.liveSample?.gateway.rttJitterMs
-                ?? coordinator.currentNetworkRun?.snapshot.gateway.rttJitterMs ?? 0
+                ?? coordinator.freshNetworkRunSnapshot?.gateway.rttJitterMs ?? 0
             let gwRtt = coordinator.liveSample?.gateway.rttAvgMs
-                ?? coordinator.currentNetworkRun?.snapshot.gateway.rttAvgMs ?? 0
+                ?? coordinator.freshNetworkRunSnapshot?.gateway.rttAvgMs ?? 0
             if gwJitter >= 20.0 {
                 return String(format: "±%.0f ms jitter", gwJitter)
             }
@@ -1170,15 +1207,19 @@ struct HomeView: View {
     private var internetDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        guard coordinator.liveSample?.internet.lossPct != nil
+                || coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct != nil else {
+            return coordinator.liveSample?.tcp.anyOk == true ? "Web reachable" : "Checking…"
+        }
         let loss = coordinator.liveSample?.internet.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
             ?? 0
         let jitter = coordinator.currentJitter
             ?? coordinator.liveSample?.internet.rttJitterMs
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttJitterMs
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.rttJitterMs
             ?? 0
         let ping = coordinator.liveSample?.internet.rttAvgMs
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttAvgMs
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.rttAvgMs
             ?? 0
 
         // Only the filtered leg's hop says "Ping blocked"; its loss figure
@@ -1207,7 +1248,7 @@ struct HomeView: View {
             }
             return "Connection degraded"
         }
-        return "0% packet loss"
+        return internetLossText == "0%" ? "0% packet loss" : "Checking…"
     }
 
     private var internetWarn: Bool {
@@ -1220,59 +1261,56 @@ struct HomeView: View {
     }
 
     private var countryISO: String? {
-        coordinator.liveSample?.publicInfo.countryISO
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.countryISO
+        coordinator.currentPublicInfo?.countryISO
     }
 
     private var countryNameString: String? {
         if linkDown { return nil }
-        return coordinator.liveSample?.publicInfo.country
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.country
+        return coordinator.currentPublicInfo?.country
     }
 
     private var internetLossText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
-        let loss = coordinator.liveSample?.internet.lossPct
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct
-            ?? 0
+        guard let loss = coordinator.liveSample?.internet.lossPct
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
+        else { return "—" }
+        if coordinator.lossFiltering.internetLeg { return "Not measured" }
         return LossFormatter.formatPct(loss)
     }
 
     private var internetJitterText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
-        let jitter = coordinator.liveSample?.internet.rttJitterMs
-            ?? coordinator.currentNetworkRun?.snapshot.internetLatency.rttJitterMs
+        guard let jitter = coordinator.liveSample?.internet.rttJitterMs
+            ?? coordinator.freshNetworkRunSnapshot?.internetLatency.rttJitterMs
             ?? coordinator.currentJitter
-            ?? 5.0
+        else { return "—" }
         return "\(Int(round(jitter))) ms"
     }
 
     private var bandChannelText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        let band = currentRunResult?.snapshot.wifiScan?.currentBand ?? "5 GHz"
-        let channel = coordinator.monitor.latest?.wifi?.channel
+        let band = currentRunResult?.snapshot.wifiScan?.currentBand
+        let channel = coordinator.liveSample?.wifi?.channel
             ?? currentRunResult?.snapshot.wifi?.channel
             ?? currentRunResult?.snapshot.wifiScan?.currentChannel
-            ?? "44"
         if !isConnectedToWiFi { return "Ethernet wired link" }
-        return "Band \(band) · Channel \(channel)"
+        return [band, channel.map { "Channel \($0)" }].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var vpnActive: Bool {
-        coordinator.monitor.latest?.vpn.active
-            ?? coordinator.currentNetworkRun?.snapshot.vpn.active ?? false
+        coordinator.liveSample?.vpn.active
+            ?? coordinator.freshNetworkRunSnapshot?.vpn.active ?? false
     }
 
     private var vpnProviderName: String? {
-        coordinator.monitor.latest?.vpn.name
-            ?? coordinator.currentNetworkRun?.snapshot.vpn.name
+        coordinator.liveSample?.vpn.name
+            ?? coordinator.freshNetworkRunSnapshot?.vpn.name
     }
 
     private var publicIPString: String? {
-        coordinator.liveSample?.publicInfo.ip
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.ip
+        coordinator.currentPublicInfo?.ip
     }
 
     private var pingTargetString: String? {
@@ -1301,8 +1339,8 @@ struct HomeView: View {
     private var interfaceDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         let iface = coordinator.liveSample?.link.interface
-            ?? coordinator.currentNetworkRun?.snapshot.interfaceInfo.name
-            ?? "en0"
+            ?? coordinator.freshNetworkRunSnapshot?.interfaceInfo.name
+            ?? "—"
         return "\(iface) · \(isConnectedToWiFi ? "Wi-Fi" : "Ethernet")"
     }
 
@@ -1318,29 +1356,30 @@ struct HomeView: View {
 
     private var ispNameText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        return coordinator.liveSample?.publicInfo.isp
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.isp
-            ?? "Local ISP"
+        return coordinator.currentPublicInfo?.isp
+            ?? "—"
     }
 
     private var dnsServerText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        return coordinator.liveSample?.link.gateway ?? routerGatewayIP ?? "192.168.1.1"
+        return coordinator.liveSample?.dns.resolver ?? currentRunResult?.snapshot.dns.first?.resolver ?? "—"
     }
 
     private var vpnDetailText: String {
         if vpnActive {
-            return "On · \(vpnProviderName ?? "WireGuard")"
+            return "On · \(vpnProviderName ?? "VPN tunnel")"
         }
+        guard coordinator.liveSample != nil || currentRunResult != nil else { return "Awaiting reading" }
         return "Off"
     }
 
     private var wifiSecurityText: String {
-        currentRunResult?.snapshot.wifi?.security ?? "WPA2 Personal"
+        currentRunResult?.snapshot.wifi?.security ?? "—"
     }
 
     private var connectionCostText: String {
-        "Not flagged as metered"
+        guard coordinator.liveSample != nil else { return "Awaiting reading" }
+        return coordinator.events.pathIsExpensive ? "Metered connection" : (coordinator.events.pathIsConstrained ? "Low Data Mode" : "Not flagged as metered")
     }
 
     private var speedValues: (down: String, up: String, age: String?) {
@@ -1375,7 +1414,7 @@ struct HomeView: View {
             let hours = secs / 3600
             return "\(hours) hours remaining"
         }
-        return "8 hours remaining"
+        return "Not measured"
     }
 
     private var loadedRTTText: String {
@@ -1472,7 +1511,7 @@ struct HomeView: View {
 
     private var isCaptivePortal: Bool {
         coordinator.liveSample?.publicInfo.captivePortal == true
-            || (coordinator.monitor.latest?.status.rules.contains("CP-1") ?? false)
+            || (coordinator.liveSample?.status.rules.contains("CP-1") ?? false)
             || coordinator.alerts.active["captive-portal"] != nil
     }
 
@@ -1494,8 +1533,8 @@ struct HomeView: View {
     }
 
     private var isNetworkOwned: Bool {
-        coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
-            || (coordinator.monitor.latest?.network.isMine ?? false)
+        coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
+            || (coordinator.liveSample?.network.isMine ?? false)
     }
 
     private var routerAdminURL: URL? {
@@ -1504,11 +1543,12 @@ struct HomeView: View {
     }
 
     private var currentRunResult: RunResult? {
-        coordinator.currentRunResult
+        guard coordinator.freshNetworkRunSnapshot != nil else { return nil }
+        return coordinator.currentRunResult
     }
 
     private var currentNetworkMemory: NetworkMemory? {
-        guard let netID = coordinator.arrivalNetworkID ?? currentRunResult?.snapshot.network.id else { return nil }
+        guard let netID = coordinator.confirmedNetworkID else { return nil }
         let canon = coordinator.history.canonicalID(netID)
         guard let net = coordinator.history.mergedNetworks.first(where: { $0.id == canon }) else {
             return nil

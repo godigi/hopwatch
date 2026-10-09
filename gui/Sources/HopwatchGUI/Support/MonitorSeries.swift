@@ -81,6 +81,9 @@ enum MonitorSeries {
             let now = sample.timestamp
 
             if let previous, let prevTime = previousTime {
+                if previous.network.historyJoinID != sample.network.historyJoinID {
+                    closeSegment()
+                }
                 // If the monitor CLI explicitly emitted a discontinuity via
                 // gap_s (sleep/stall measured on the wall clock by lib/monitor.sh),
                 // use that directly. Otherwise fall back to measuring wall clock

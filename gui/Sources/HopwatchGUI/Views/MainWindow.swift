@@ -152,9 +152,9 @@ struct MainWindow: View {
         // beside "Disconnected" on a Wi-Fi Mac. And no stale scan SSID.
         let isWiFi = coordinator.linkIsWiFi
         let name = coordinator.linkIsDown ? "Disconnected" : (coordinator.wifiDisplayName
-            ?? coordinator.monitor.latest?.link.ssid
-            ?? coordinator.currentNetworkRun?.snapshot.wifi?.ssid
-            ?? "Disconnected")
+            ?? coordinator.liveSample?.link.ssid
+            ?? coordinator.freshNetworkRunSnapshot?.wifi?.ssid
+            ?? (isWiFi ? "Wi-Fi network" : "Ethernet"))
 
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -210,7 +210,7 @@ struct MainWindow: View {
     }
 
     private var updatedAgeText: String {
-        guard let ts = coordinator.monitor.latest?.timestamp else { return "Waiting for first sample" }
+        guard let ts = coordinator.liveSample?.timestamp else { return "Awaiting fresh reading" }
         return "Updated \(RelativeTime.string(from: ts))"
     }
 
@@ -219,8 +219,9 @@ struct MainWindow: View {
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
         // Not a "Watching" over a monitor that has stopped reporting.
         if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
-        if coordinator.monitor.latest?.status.severity == "critical" { return "Problem" }
-        if coordinator.monitor.latest?.status.severity == "warn" { return "Degraded" }
+        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return "Problem" }
+        if coordinator.liveSample?.status.severity == "warn" { return "Degraded" }
+        guard coordinator.liveSample != nil else { return "Checking" }
         return "Watching"
     }
 
@@ -228,8 +229,9 @@ struct MainWindow: View {
         if coordinator.isScanning { return Theme.ColorToken.blue }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
         if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
-        if coordinator.monitor.latest?.status.severity == "critical" { return .red }
-        if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amber }
+        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return .red }
+        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amber }
+        guard coordinator.liveSample != nil else { return Theme.ColorToken.muted }
         return Theme.ColorToken.green
     }
 
@@ -237,8 +239,9 @@ struct MainWindow: View {
         if coordinator.isScanning { return Theme.ColorToken.blueWash }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.neutralWash }
         if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amberWash }
-        if coordinator.monitor.latest?.status.severity == "critical" { return Theme.ColorToken.redWash }
-        if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amberWash }
+        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return Theme.ColorToken.redWash }
+        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amberWash }
+        guard coordinator.liveSample != nil else { return Theme.ColorToken.neutralWash }
         return Theme.ColorToken.greenWash
     }
 

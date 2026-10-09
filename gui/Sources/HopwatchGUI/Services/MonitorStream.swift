@@ -74,6 +74,14 @@ final class MonitorStream {
     private(set) var awaitingSince: Date?
     var isAwaitingFirstSample: Bool { awaitingSince != nil }
 
+    /// A connection boundary invalidates both readings and identity. Retained
+    /// samples are history, never evidence about the newly connected path.
+    func invalidateConnection(preserving sample: MonitorSample? = nil) {
+        latest = sample
+        recent = sample.map { [$0] } ?? []
+        awaitingSince = sample == nil ? Date() : nil
+    }
+
     private var process: Process?
     private var readTask: Task<Void, Never>?
     /// The capability-gate half of `start()`, tracked so `stop()` can
@@ -412,7 +420,10 @@ final class MonitorStream {
         // Whatever `latest` holds was measured before the pause, and the
         // Mac may have moved since (a lid closed in one place and opened
         // in another). Do not let it pass as live until a sample proves it.
-        if awaitingSince == nil { awaitingSince = Date() }
+        // A scan can hold this reason when monitoring is switched off. In
+        // that case there is no child sample to await, and a scan that just
+        // finished is itself the freshest available identity evidence.
+        if process?.isRunning == true, awaitingSince == nil { awaitingSince = Date() }
         guard trapsReady else {
             // Every holder released before the child proved its traps:
             // nothing was ever signaled, so there is nothing to undo.
@@ -460,7 +471,7 @@ final class MonitorStream {
         let handle = pipe.fileHandleForReading
         do {
             for try await line in handle.bytes.lines {
-                if Task.isCancelled { return }
+                if Task.isCancelled || process !== proc { return }
                 guard let data = line.data(using: .utf8) else { continue }
                 guard let sample = try? decoder.decode(MonitorSample.self, from: data) else {
                     // One malformed line must not end the session. Log and
@@ -505,6 +516,7 @@ final class MonitorStream {
         restartAttempts = 0
         // A paused sample carries values from before the pause; it is the
         // monitor saying it is not looking, not a reading.
+        if let awaitingSince, sample.timestamp < awaitingSince { return }
         if !sample.status.paused { awaitingSince = nil }
         // Backstop for the burst deadline. The timer is the normal path;
         // this catches the case where it was lost with a cancelled task
@@ -554,4 +566,3 @@ final class MonitorStream {
         }
     }
 }
-

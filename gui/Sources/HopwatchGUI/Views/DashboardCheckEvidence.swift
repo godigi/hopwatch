@@ -2,11 +2,21 @@ import Foundation
 
 /// Saved-check row preparation shared by the dashboard and its evidence regressions.
 enum DashboardCheckEvidence {
+    /// A missing probe is never a measured zero or a successful verdict.
+    static func requiringMeasurement(_ row: DashboardCheckTable.Row, hasMeasurement: Bool,
+                                     usual: String? = nil) -> DashboardCheckTable.Row {
+        .init(id: row.id, icon: hasMeasurement ? row.icon : "questionmark.circle", label: row.label,
+              measured: hasMeasurement ? row.measured : "—",
+              subvalue: hasMeasurement ? row.subvalue : nil,
+              usual: usual ?? row.usual,
+              badge: hasMeasurement ? row.badge : .init(label: "Not measured", tone: .neutral),
+              isWarning: hasMeasurement && row.isWarning, isGood: hasMeasurement && row.isGood)
+    }
     static func wifiChannel(snapshot snap: RunSnapshot?, channel: String?, fallbackChannel bandChannelText: String) -> DashboardCheckTable.Row {
         let neighborCount = snap?.wifiScan?.currentChannelNeighbours
         let isCrowded = snap?.diagnosis.contains { $0.rule == "WS-1" } ?? false
         let hasVerdict = isCrowded || neighborCount != nil
-        let channelText = channel != nil ? "\(channel!)" : (bandChannelText.isEmpty ? "Connected" : bandChannelText)
+        let channelText = channel != nil ? "\(channel!)" : (bandChannelText.isEmpty ? "—" : bandChannelText)
         let channelBadge = DashboardCheckTable.GradeBadge(
             label: hasVerdict ? (isCrowded ? "Crowded" : "Clear") : "Unknown",
             tone: hasVerdict ? (isCrowded ? .warn : .good) : .neutral

@@ -4,6 +4,18 @@ import Testing
 
 @Suite struct SuitabilityEngineTests {
 
+    @Test func filteredLossWithoutBandwidthIsNotEvidenceForHDStreaming() {
+        var sample = MonitorSample()
+        sample.gateway.lossPct = 100
+        sample.internet.lossPct = 100
+        sample.status.rules = ["TCP-1", "ICMP-1"]
+        sample.dns.ok = true
+        sample.tcp.anyOk = true
+        let inputs = SuitabilityEngine.Inputs(monitorSample: sample)
+        #expect(SuitabilityEngine.evaluateStreaming(inputs).verdict == .unknown)
+        #expect(SuitabilityEngine.evaluateBrowsing(inputs).verdict == .good)
+    }
+
     @Test func streamingWorksFineWithBadPingAndHighBandwidth() {
         // High ping (350ms) and bufferbloat, but 100 Mbps download speed and 0% loss
         var sample = MonitorSample()
@@ -422,6 +434,8 @@ import Testing
 
     @Test func synthesizeDegradedExperienceRubberbandingForGaming() {
         var sample = MonitorSample()
+        sample.dns = .init(ok: true, elapsedMs: 8)
+        sample.tcp = .init(anyOk: true)
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
         sample.internet = .init(lossPct: 2.0, rttAvgMs: 24.0, rttJitterMs: 2.0)
 
@@ -451,6 +465,8 @@ import Testing
 
     @Test func synthesizeDegradedExperienceLagSpikesForGaming() {
         var sample = MonitorSample()
+        sample.dns = .init(ok: true, elapsedMs: 8)
+        sample.tcp = .init(anyOk: true)
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
         sample.internet = .init(lossPct: 0.0, rttAvgMs: 30.0, rttJitterMs: 22.0)
 
@@ -480,6 +496,8 @@ import Testing
 
     @Test func synthesizeDegradedExperienceVideoFreezeForCalls() {
         var sample = MonitorSample()
+        sample.dns = .init(ok: true, elapsedMs: 8)
+        sample.tcp = .init(anyOk: true)
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
         sample.internet = .init(lossPct: 0.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
 
@@ -600,6 +618,7 @@ import Testing
         // 6. Fast DNS (<60ms) -> Fast
         var sampleFast = MonitorSample()
         sampleFast.dns = .init(ok: true, resolver: "1.1.1.1", elapsedMs: 18.0)
+        sampleFast.tcp = .init(anyOk: true)
         sampleFast.internet = .init(lossPct: 0.0, rttAvgMs: 15.0, rttJitterMs: 1.0)
         let inputsFast = SuitabilityEngine.Inputs(monitorSample: sampleFast, isLinkUp: true, effectiveLoss: 0.0)
         let browsingFast = SuitabilityEngine.evaluateBrowsing(inputsFast)
@@ -817,7 +836,7 @@ import Testing
 
         #expect(calls.verdict == .good)
         #expect(gaming.verdict == .good)
-        #expect(vpn.verdict == .good)
+        #expect(vpn.verdict == .unknown) // Relay is not evidence that VPN compatibility was measured.
     }
 
     @Test func subOnePercentLossDisplaysDecimalInMetricsAndSubtitle() {

@@ -8,6 +8,7 @@ struct DashboardHeadingView: View {
     let networkName: String?
     let isWiFi: Bool
     let isScanning: Bool
+    var isLinkDown: Bool = false
     let onRunFullCheck: () -> Void
     let onCancelScan: () -> Void
     let onCopyRedacted: () -> Void
@@ -29,7 +30,7 @@ struct DashboardHeadingView: View {
                     HStack(spacing: 4) {
                         Image(systemName: isWiFi ? "wifi" : "cable.connector")
                             .font(.system(size: 10))
-                        Text(networkName ?? "Disconnected")
+                        Text(isLinkDown ? "Disconnected" : (networkName ?? "Identifying network…"))
                             .fontWeight(.semibold)
                     }
                     .font(.system(size: 11))
@@ -42,12 +43,6 @@ struct DashboardHeadingView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ColorToken.muted)
 
-                    Text("·")
-                        .foregroundStyle(Theme.ColorToken.line)
-
-                    Text("Monitored continuously for 24h")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.ColorToken.muted)
                 }
             }
 
@@ -223,6 +218,7 @@ struct DashboardRouteView: View {
     var internetLoadedDelta: String? = nil
     let bandChannelText: String
     let vpnActive: Bool
+    var vpnKnown: Bool = true
     let vpnProvider: String?
     let publicIP: String?
     let pingTarget: String?
@@ -275,7 +271,7 @@ struct DashboardRouteView: View {
                         path.addLine(to: CGPoint(x: x2 - 28, y: lineY))
                     }
                     .stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle(linkDown ? Theme.ColorToken.line : ((routerWarn || isWifiLaggy) ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
+                    .foregroundStyle(linkDown || routerPingText == "—" ? Theme.ColorToken.line : ((routerWarn || isWifiLaggy) ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
 
                     // Dashed line hop2 -> hop3
                     Path { path in
@@ -283,7 +279,7 @@ struct DashboardRouteView: View {
                         path.addLine(to: CGPoint(x: x3 - 28, y: lineY))
                     }
                     .stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .foregroundStyle(linkDown ? Theme.ColorToken.line : (internetWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
+                    .foregroundStyle(linkDown || internetPingText == "—" ? Theme.ColorToken.line : (internetWarn ? Theme.ColorToken.amber.opacity(0.6) : Theme.ColorToken.green.opacity(0.6)))
 
                     // Intermediate labels
                     let firstLink = linkDown ? NoLinkCopy.nodeDetail : (isWiFi ? (isWifiLaggy ? "Wi-Fi (laggy) · local connection" : "Wi-Fi · local connection") : "Wired · local connection")
@@ -325,7 +321,7 @@ struct DashboardRouteView: View {
                             flag: nil,
                             isCulprit: isMacCulprit && !linkDown,
                             isCritical: isCritical,
-                            state: linkDown ? .down : .normal
+                            state: linkDown ? .down : (!macStatusGood && !isWifiLaggy && !isMacCulprit ? .unknown : .normal)
                         )
 
                         Text("This Mac")
@@ -368,7 +364,7 @@ struct DashboardRouteView: View {
 
                         hopNode(icon: "network", isWarning: routerWarn && !linkDown, flag: nil,
                                 isCulprit: culpritHop == "router" && !linkDown, isCritical: isCritical,
-                                state: linkDown ? .unknown : .normal)
+                                state: linkDown || (routerPingText == "—" && !routerWarn) ? .unknown : .normal)
 
                         Text("Router")
                             .font(.system(size: 12, weight: .semibold))
@@ -440,7 +436,7 @@ struct DashboardRouteView: View {
 
                         hopNode(icon: "globe", isWarning: internetWarn && !linkDown, flag: linkDown ? nil : countryFlag,
                                 isCulprit: culpritHop == "internet" && !linkDown, isCritical: isCritical,
-                                state: linkDown ? .unknown : .normal)
+                                state: linkDown || (internetPingText == "—" && !internetWarn) ? .unknown : .normal)
 
                         Text("Internet")
                             .font(.system(size: 12, weight: .semibold))
@@ -561,7 +557,7 @@ struct DashboardRouteView: View {
                     Image(systemName: "shield.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(vpnActive ? Theme.ColorToken.blue : Theme.ColorToken.muted)
-                    Text(vpnActive ? "VPN on" : "VPN off")
+                    Text(vpnKnown ? (vpnActive ? "VPN on" : "VPN off") : "VPN checking…")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(vpnActive ? Theme.ColorToken.blue : Theme.ColorToken.muted)
                     if let vpnProvider, !vpnProvider.isEmpty {
@@ -958,6 +954,12 @@ struct DashboardLiveChartPanel: View {
 // MARK: - 5. Findings & Next Steps Panel
 
 struct DashboardFindingsPanel: View {
+    enum EmptyState: Equatable {
+        case awaiting
+        case liveClear
+        case savedClear
+    }
+
     struct FindingItem: Identifiable {
         let id: String
         let title: String
@@ -974,6 +976,7 @@ struct DashboardFindingsPanel: View {
 
     let checkTime: String?
     let findings: [FindingItem]
+    let emptyState: EmptyState
     /// The repair the user last pressed and how it turned out. Shown above
     /// the findings rather than on one, because a repair that worked has
     /// removed the finding it was attached to.
@@ -986,6 +989,7 @@ struct DashboardFindingsPanel: View {
 
     init(checkTime: String?,
          findings: [FindingItem],
+         emptyState: EmptyState = .liveClear,
          outcome: RepairOutcome? = nil,
          repairsBusy: Bool = false,
          initiallyConfirming: String? = nil,
@@ -993,6 +997,7 @@ struct DashboardFindingsPanel: View {
          onDismissOutcome: @escaping () -> Void = {}) {
         self.checkTime = checkTime
         self.findings = findings
+        self.emptyState = emptyState
         self.outcome = outcome
         self.repairsBusy = repairsBusy
         self.onRepair = onRepair
@@ -1027,14 +1032,19 @@ struct DashboardFindingsPanel: View {
             if findings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: emptyState == .liveClear ? "checkmark.circle.fill" : "clock")
                             .font(.system(size: 14))
-                            .foregroundStyle(Theme.ColorToken.green)
-                        Text("No active issues detected")
+                            .foregroundStyle(emptyState == .liveClear ? Theme.ColorToken.green : Theme.ColorToken.muted)
+                        Text(emptyState == .liveClear ? "No active issues detected" :
+                             emptyState == .savedClear ? "No findings in the last check" : "Awaiting network check")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                     }
-                    Text("Connection latency and stability are within healthy thresholds.")
+                    Text(emptyState == .liveClear
+                         ? "Current readings are within healthy thresholds."
+                         : emptyState == .savedClear
+                           ? "The saved check found no issues; current conditions may differ."
+                           : "Findings will appear after this network is measured.")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ColorToken.muted)
                         .padding(.leading, 21)
@@ -1281,6 +1291,7 @@ struct DashboardCheckTable: View {
     }
 
     let checkSubtitle: String
+    var hasSavedResult: Bool = true
     let networkSSID: String?
     let vpnActive: Bool
     let rows: [Row]
@@ -1305,7 +1316,7 @@ struct DashboardCheckTable: View {
 
                 Spacer()
 
-                Text("Saved result")
+                Text(hasSavedResult ? "Saved result" : "Awaiting check")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.ColorToken.muted)
                     .padding(.horizontal, 7)
@@ -1394,19 +1405,22 @@ struct DashboardCheckTable: View {
 
             // Check Note Footer
             VStack(alignment: .leading, spacing: 3) {
-                Text("Packet loss covers two destinations. “Usual” is this network’s median from saved checks; VPN and route changes can affect the comparison.")
+                Text(hasSavedResult
+                     ? "Packet loss covers two destinations. “Usual” is this network’s median from saved checks; VPN and route changes can affect the comparison."
+                     : "A check will add measurements and compare them with this network’s saved history.")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.muted)
                     .lineSpacing(2)
 
-                HStack(spacing: 4) {
-                    Text("Saved on \(networkSSID ?? "current network") · \(vpnActive ? "VPN on." : "VPN off.")")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Theme.ColorToken.ink)
-                    Text("Live readings are shown above.")
+                if hasSavedResult {
+                    Text("Saved on \(networkSSID ?? "this network"). Current readings appear above when available.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                } else {
+                    Text("No saved check for this network yet.")
+                        .font(.system(size: 10))
                         .foregroundStyle(Theme.ColorToken.muted)
                 }
-                .font(.system(size: 10))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -2169,16 +2183,16 @@ struct DashboardSuitabilityStrip: View {
 // MARK: - 11. Technical Details Panel
 
 struct DashboardTechnicalPanel: View {
-    let tracerouteHops: Int
-    let isIPv6: Bool
-    let isDoubleNAT: Bool
+    let tracerouteHops: Int?
+    let isIPv6: Bool?
+    let isDoubleNAT: Bool?
     let wifiBandChannel: String
     let wifiSignal: String
     let wifiNoise: String
-    let wifiSNR: String
+    let wifiSNR: String?
     let dhcpRemaining: String
-    let ipConflict: Bool
-    let neighborCount: Int
+    let ipConflict: Bool?
+    let neighborCount: Int?
     let loadedRTT: String
     let appVersion: String
     let onViewRawJSON: () -> Void
@@ -2203,14 +2217,14 @@ struct DashboardTechnicalPanel: View {
 
             // 2-Column Key-Values Grid
             VStack(spacing: 0) {
-                row(k1: "Traceroute Hops", v1: "\(tracerouteHops) hops to target",
-                    k2: "IPv6 Reachability", v2: isIPv6 ? "Dual-stack IPv6" : "IPv4 only (No global v6)")
-                row(k1: "Double NAT Detection", v1: isDoubleNAT ? "Double NAT detected" : "None (Clean single NAT)",
-                    k2: "Wi-Fi Protocol & Channel", v2: wifiBandChannel)
-                row(k1: "Signal / Noise (RSSI)", v1: "\(wifiSignal) / \(wifiNoise)",
-                    k2: "Signal-to-Noise Ratio", v2: "\(wifiSNR) (Strong link)")
+                row(k1: "Traceroute Hops", v1: tracerouteHops.map { "\($0) hops to target" } ?? "Not measured",
+                    k2: "IPv6 Reachability", v2: isIPv6.map { $0 ? "Dual-stack IPv6" : "IPv4 only (No global v6)" } ?? "Not measured")
+                row(k1: "Double NAT Detection", v1: isDoubleNAT.map { $0 ? "Double NAT detected" : "None detected" } ?? "Not measured",
+                    k2: "Wi-Fi Protocol & Channel", v2: wifiBandChannel.isEmpty ? "Not measured" : wifiBandChannel)
+                row(k1: "Signal / Noise (RSSI)", v1: wifiSignal == "—" && wifiNoise == "—" ? "Not measured" : "\(wifiSignal) / \(wifiNoise)",
+                    k2: "Signal-to-Noise Ratio", v2: wifiSNR ?? "Not measured")
                 row(k1: "DHCP Lease Remaining", v1: dhcpRemaining,
-                    k2: "IP Conflicts / Neighbors", v2: ipConflict ? "IP conflict flagged" : "0 duplicates · \(neighborCount) neighbors")
+                    k2: "IP Conflicts / Neighbors", v2: conflictAndNeighborText)
                 row(k1: "Loaded Latency (Bufferbloat)", v1: loadedRTT,
                     k2: "Diagnostic Engine", v2: "netdiag v\(appVersion)")
             }
@@ -2253,6 +2267,12 @@ struct DashboardTechnicalPanel: View {
             RoundedRectangle(cornerRadius: Theme.Radius.routeCard)
                 .strokeBorder(Theme.ColorToken.line, lineWidth: 1)
         )
+    }
+
+    private var conflictAndNeighborText: String {
+        guard let ipConflict else { return "Not measured" }
+        if ipConflict { return "IP conflict flagged" }
+        return neighborCount.map { "0 duplicates · \($0) neighbors" } ?? "0 duplicates · neighbors not measured"
     }
 
     private func row(k1: String, v1: String, k2: String, v2: String) -> some View {

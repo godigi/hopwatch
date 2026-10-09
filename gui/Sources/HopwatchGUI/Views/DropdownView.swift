@@ -61,7 +61,7 @@ struct DropdownView: View {
                 await coordinator.history.load()
             }
         }
-        .task(id: coordinator.monitor.latest?.seq) {
+        .task(id: coordinator.liveSample?.seq) {
             refreshCoreWLANRSSIIfNeeded()
         }
         .onAppear {
@@ -87,8 +87,9 @@ struct DropdownView: View {
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
         // Not a "Watching" over a monitor that has stopped reporting.
         if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
-        if coordinator.monitor.latest?.status.severity == "critical" { return "Problem" }
-        if coordinator.monitor.latest?.status.severity == "warn" { return "Degraded" }
+        if coordinator.liveSample == nil { return "Checking" }
+        if coordinator.liveSample?.status.severity == "critical" { return "Problem" }
+        if coordinator.liveSample?.status.severity == "warn" { return "Degraded" }
         return "Watching"
     }
 
@@ -96,8 +97,9 @@ struct DropdownView: View {
         if coordinator.isScanning { return Theme.ColorToken.blue }
         if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
         if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
-        if coordinator.monitor.latest?.status.severity == "critical" { return .red }
-        if coordinator.monitor.latest?.status.severity == "warn" { return Theme.ColorToken.amber }
+        if coordinator.liveSample == nil { return Theme.ColorToken.muted }
+        if coordinator.liveSample?.status.severity == "critical" { return .red }
+        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amber }
         return Theme.ColorToken.green
     }
 
@@ -351,7 +353,7 @@ struct DropdownView: View {
 
     private var quietLine: String {
         var parts: [String] = []
-        if let since = NetworkEvent.timeSinceLast(coordinator.eventLog.events, now: .now) {
+        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents, now: .now) {
             if since < 60 {
                 parts.append("Nothing has changed in under a minute")
             } else {
@@ -378,6 +380,9 @@ struct DropdownView: View {
     private var linkDown: Bool { coordinator.linkIsDown }
 
     private var routeWarningResult: RouteWarningResolver.Result {
+        guard coordinator.liveSample != nil else {
+            return .init(isWifiLaggy: false, macStatusGood: false, routerWarn: false, internetWarn: false)
+        }
         // A monitor that has stopped reporting has no readings to judge; the
         // zeros below would read as a Wi-Fi fault (see HomeView).
         if coordinator.latestSampleIsStale && !linkDown {
@@ -418,10 +423,10 @@ struct DropdownView: View {
     }
 
     private var resolvedBand: String? {
-        if let band = coordinator.currentNetworkRun?.snapshot.wifiScan?.currentBand {
+        if let band = coordinator.freshNetworkRunSnapshot?.wifiScan?.currentBand {
             return band
         }
-        if let chStr = coordinator.monitor.latest?.wifi?.channel {
+        if let chStr = coordinator.liveSample?.wifi?.channel {
             if chStr.contains("2.4") { return "2.4 GHz" }
             if chStr.contains("5 GHz") || chStr.contains("5GHz") { return "5 GHz" }
             if chStr.contains("6 GHz") || chStr.contains("6GHz") { return "6 GHz" }
@@ -436,7 +441,8 @@ struct DropdownView: View {
 
     private var macDetailText: String {
         if linkDown { return NoLinkCopy.macDetail }
-        let isWiFi = coordinator.monitor.latest?.link.isWiFi ?? true
+        guard coordinator.liveSample != nil else { return "Checking…" }
+        let isWiFi = coordinator.liveSample?.link.isWiFi ?? true
         guard isWiFi else {
             return coordinator.liveSample?.link.ip ?? "Ethernet"
         }
@@ -461,23 +467,24 @@ struct DropdownView: View {
     private var connectionRouteSection: some View {
         let isWiFi = coordinator.linkIsWiFi
         let linkUp = !linkDown
-        let cadence = coordinator.monitor.latest?.status.cadenceS ?? Defaults.fastInterval
+        let cadence = coordinator.liveSample?.status.cadenceS ?? Defaults.fastInterval
 
         return ConnectionRouteView(
             wifiReadingLabel: !linkUp ? "Network link" : (isWiFi ? "Wi-Fi signal" : "Interface link"),
-            wifiReadingValue: !linkUp ? NoLinkCopy.linkReading : (isWiFi ? wifiCell.value : "Connected"),
-            wifiReadingTint: !linkUp ? .red : (isWiFi ? wifiCell.tint : Theme.ColorToken.green),
+            wifiReadingValue: !linkUp ? NoLinkCopy.linkReading : (isWiFi ? wifiCell.value : (coordinator.liveSample == nil ? "—" : "Connected")),
+            wifiReadingTint: !linkUp ? .red : (isWiFi ? wifiCell.tint : (coordinator.liveSample == nil ? Theme.ColorToken.muted : Theme.ColorToken.green)),
             macIcon: !linkUp ? "laptopcomputer" : (isWiFi ? "laptopcomputer" : "cable.connector"),
-            macStatusGood: macStatusGood && !coordinator.latestSampleIsStale,
+            macStatusGood: macStatusGood && coordinator.liveSample != nil,
             macDetail: macDetailText,
             routerPingValue: routerPingText,
             routerPingTint: routerPingTint,
-            routerStatusGood: !linkDown && !routerWarn && !coordinator.latestSampleIsStale,
+            routerStatusGood: !linkDown && !routerWarn && coordinator.liveSample?.gateway.rttAvgMs != nil,
             routerDetail: routerDetailText,
             routerWarn: !linkDown && routerWarn,
             internetPingValue: internetPingText,
             internetPingTint: internetPingTint,
-            internetStatusGood: !linkDown && !internetWarn && !coordinator.latestSampleIsStale,
+            internetStatusGood: !linkDown && !internetWarn &&
+                (coordinator.liveSample?.internet.rttAvgMs != nil || coordinator.liveSample?.tcp.anyOk == true),
             countryFlag: countryFlagEmoji,
             countryName: countryNameString,
             publicIP: linkDown ? nil : publicIP,
@@ -495,11 +502,13 @@ struct DropdownView: View {
             jitterDescription: jitterDescriptionText,
             linkDown: linkDown,
             vpnActive: vpnActive,
+            vpnKnown: coordinator.liveSample != nil,
             vpnName: vpnName,
-            vpnFreshness: "Checked just now",
+            vpnFreshness: coordinator.vpnFreshness,
             cadenceText: coordinator.latestSampleIsStale
                 ? "Not reporting"
-                : (coordinator.monitor.isRunning && !coordinator.monitor.isPaused
+                : (coordinator.monitor.isPausedForAnyReason ? "Monitoring paused"
+                   : coordinator.monitor.isRunning
                     ? "Live · every \(cadence) seconds"
                     : "Monitoring off")
         )
@@ -507,8 +516,7 @@ struct DropdownView: View {
 
     private var routerPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        guard !coordinator.monitor.isPaused, !coordinator.isScanning,
-              let sample = coordinator.liveSample else { return "—" }
+        guard let sample = coordinator.liveSample else { return "—" }
         guard let rtt = sample.gateway.rttAvgMs else {
             if let loss = sample.gateway.lossPct, loss >= 100 { return "no reply" }
             return "—"
@@ -586,6 +594,9 @@ struct DropdownView: View {
     private var internetDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        guard coordinator.liveSample?.internet.lossPct != nil else {
+            return coordinator.liveSample?.tcp.anyOk == true ? "Web reachable" : "Checking…"
+        }
         let loss = coordinator.liveSample?.internet.lossPct ?? 0
         let jitter = currentJitter ?? coordinator.liveSample?.internet.rttJitterMs ?? 0
         let ping = coordinator.liveSample?.internet.rttAvgMs ?? 0
@@ -626,8 +637,7 @@ struct DropdownView: View {
 
     private var countryNameString: String? {
         if linkDown { return nil }
-        return coordinator.liveSample?.publicInfo.country
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.country
+        return coordinator.currentPublicInfo?.country
     }
 
     private var jitterDescriptionText: String {
@@ -651,18 +661,18 @@ struct DropdownView: View {
     }
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = coordinator.currentNetworkRun?.snapshot
+        let snap = coordinator.freshNetworkRunSnapshot
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: coordinator.liveSample,
-            speedTest: snap?.speedtest ?? coordinator.currentSpeedTest?.speed,
+            speedTest: coordinator.currentSuitabilitySpeed,
             savedSuitability: snap?.suitability,
             catalog: coordinator.rulesCatalog.catalog,
             firedRules: Array(firedRules),
-            isLinkUp: coordinator.monitor.latest?.link.up ?? true,
+            isLinkUp: coordinator.liveSample?.link.up ?? true,
             isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
-            vpnActive: coordinator.monitor.latest?.vpn.active ?? snap?.vpn.active ?? false,
-            vpnName: coordinator.monitor.latest?.vpn.name ?? snap?.vpn.name,
+            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize,
+            vpnActive: coordinator.liveSample?.vpn.active ?? snap?.vpn.active ?? false,
+            vpnName: coordinator.liveSample?.vpn.name ?? snap?.vpn.name,
             currentJitter: coordinator.currentJitter,
             effectiveLoss: coordinator.effectiveLoss,
             lossFiltering: coordinator.lossFiltering
@@ -744,6 +754,7 @@ struct DropdownView: View {
     private var footerSection: some View {
         MenuFooterView(
             networkName: currentNetworkDisplayName,
+            linkDown: linkDown,
             isWiFi: isWiFiConnection,
             monitoringEnabled: appSettings.monitoringEnabled,
             onToggleMonitoring: { toggleMonitoring() },
@@ -763,7 +774,7 @@ struct DropdownView: View {
         // `link.type` in a down sample is only the CLI's default.
         if linkDown { return coordinator.wifiDisplayName }
         return coordinator.wifiDisplayName
-            ?? (coordinator.monitor.latest?.link.isWiFi == false
+            ?? (coordinator.liveSample?.link.isWiFi == false
                 ? (coordinator.liveSample?.link.interface ?? "Ethernet")
                 : nil)
     }
@@ -798,7 +809,7 @@ struct DropdownView: View {
     }
 
     private var firedRules: Set<String> {
-        Set(coordinator.monitor.latest?.status.rules ?? [])
+        Set(coordinator.liveSample?.status.rules ?? [])
     }
 
     private var currentJitter: Double? {
@@ -813,7 +824,7 @@ struct DropdownView: View {
     /// paused or scanning, when the cells show "—" rather than a reading.
     private var lossFiltering: EffectiveLoss.Filtering {
         guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return .none }
-        return EffectiveLoss.filtering(sample: coordinator.monitor.latest)
+        return EffectiveLoss.filtering(sample: coordinator.liveSample)
     }
 
     private var resolvedRSSI: Int? {
@@ -821,10 +832,13 @@ struct DropdownView: View {
     }
 
     private var wifiCell: (value: String, unit: String?, tint: Color) {
-        if coordinator.monitor.latest?.link.up == false {
+        guard let sample = coordinator.liveSample else {
+            return ("—", nil, Theme.ColorToken.muted)
+        }
+        if !sample.link.up {
             return ("disconnected", nil, .red)
         }
-        guard coordinator.monitor.latest?.link.isWiFi == true else {
+        guard sample.link.isWiFi else {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
@@ -845,13 +859,13 @@ struct DropdownView: View {
         if hits.contains(where: { $0.severity == "critical" }) { return .red }
         if hits.contains(where: { $0.severity == "warn" }) { return .yellow }
         if hits.contains(where: { $0.severity == "varies" }) {
-            return coordinator.monitor.latest?.status.severity == "critical" ? .red : .yellow
+            return coordinator.liveSample?.status.severity == "critical" ? .red : .yellow
         }
         return nil
     }
 
     private func refreshCoreWLANRSSIIfNeeded() {
-        guard coordinator.monitor.latest?.link.isWiFi == true,
+        guard coordinator.liveSample?.link.isWiFi == true,
               coordinator.liveSample?.wifi?.rssi == nil,
               coordinator.locationPermissions.isAuthorized,
               let live = CWWiFiClient.shared().interface()?.rssiValue(),
@@ -877,15 +891,15 @@ struct DropdownView: View {
     }
 
     private var timelineEvents: [NetworkEvent] {
-        let events = coordinator.eventLog.within(hours: 24)
+        let events = coordinator.currentNetworkEvents
         guard case .alerted(let alert) = stage else { return events }
         return events.filter { !($0.kind == "alert" && $0.summary == alert.title) }
     }
 
     private func copySupportSummary() {
         let text: String
-        let owned = coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
-        if let latestSample = coordinator.monitor.latest {
+        let owned = coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
+        if let latestSample = coordinator.liveSample {
             text = SupportSummaryFormatter.format(
                 sample: latestSample,
                 alert: coordinator.alerts.activeSorted.first.map {
@@ -959,13 +973,13 @@ struct DropdownView: View {
     }
 
     private var isNetworkOwned: Bool {
-        coordinator.history.isOwned(networkID: coordinator.monitor.latest?.network.id)
-            || (coordinator.monitor.latest?.network.isMine ?? false)
+        coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
+            || (coordinator.liveSample?.network.isMine ?? false)
     }
 
     private var routerGatewayIP: String? {
         coordinator.liveSample?.link.gateway
-            ?? coordinator.currentNetworkRun?.snapshot.gateway.ip
+            ?? coordinator.freshNetworkRunSnapshot?.gateway.ip
     }
 
     private var routerAdminURL: URL? {
@@ -984,24 +998,22 @@ struct DropdownView: View {
     }
 
     private var publicIP: String? {
-        let ip = coordinator.liveSample?.publicInfo.ip
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.ip
+        let ip = coordinator.currentPublicInfo?.ip
         return (ip?.isEmpty ?? true) ? nil : ip
     }
 
     private var countryISO: String? {
-        coordinator.liveSample?.publicInfo.countryISO
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.countryISO
+        coordinator.currentPublicInfo?.countryISO
     }
 
     private var vpnActive: Bool {
-        coordinator.monitor.latest?.vpn.active
-            ?? coordinator.currentNetworkRun?.snapshot.vpn.active ?? false
+        coordinator.liveSample?.vpn.active
+            ?? coordinator.freshNetworkRunSnapshot?.vpn.active ?? false
     }
 
     private var vpnName: String? {
-        coordinator.monitor.latest?.vpn.name
-            ?? coordinator.currentNetworkRun?.snapshot.vpn.name
+        coordinator.liveSample?.vpn.name
+            ?? coordinator.freshNetworkRunSnapshot?.vpn.name
     }
 }
 

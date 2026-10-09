@@ -276,7 +276,7 @@ struct MonitorSample: Decodable, Sendable {
         }
     }
 
-    var timestamp: Date { FastISO8601.parse(ts) ?? Date() }
+    var timestamp: Date { FastISO8601.parse(ts) ?? .distantPast }
 
     var health: Health {
         guard link.up else { return .critical }

@@ -1460,7 +1460,12 @@ _mon_on_signal() { MON_STOP=1; }
 # shellcheck disable=SC2317,SC2329
 _mon_on_pause()  { MON_PAUSED=1; }
 # shellcheck disable=SC2317,SC2329
-_mon_on_resume() { MON_PAUSED=0; }
+_mon_on_resume() {
+  MON_PAUSED=0
+  # A scan or sleep can outlast cached DNS/TCP/radio/public evidence.
+  # Refresh every tier before the first post-pause sample is accepted.
+  MON_REFRESH_REQUESTED=1
+}
 # shellcheck disable=SC2317,SC2329
 _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
 
@@ -1547,12 +1552,23 @@ monitor_run() {
     link_restored=0
     vpn_changed=0
     roamed=0
+    network_changed=0
 
     # Fast tier drives everything: it establishes whether there is a link
     # at all, and the identity the other tiers are scoped to.
     if [ "$now" -ge "$next_fast" ]; then
       MON_REFRESHED+="fast "
       _mon_probe_link
+      if [ "$MON_NETWORK_ID" != "$prev_network_id" ]; then
+        network_changed=1
+        prev_network_id="$MON_NETWORK_ID"
+        # Reset before probing: the first packets on this connection must
+        # not be folded into the previous network's rolling windows.
+        _mon_loss_reset
+        MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
+        _mon_conn_reset
+        _mon_hog_reset
+      fi
       _mon_probe_vpn
       # A VPN toggle moves the public IP/ISP/country, and the DNS and TCP
       # paths with it; a roam moves RSSI, noise and channel. Left to the
@@ -1592,19 +1608,6 @@ monitor_run() {
         # No link, no valid window: every packet in it predates the drop.
         _mon_loss_reset
       fi
-    fi
-
-    network_changed=0
-    if [ "$MON_NETWORK_ID" != "$prev_network_id" ]; then
-      network_changed=1
-      prev_network_id="$MON_NETWORK_ID"
-      # A different network is a different path; loss measured on the old
-      # one says nothing about this one. Cleared here rather than keyed per
-      # network because the window's whole point is describing *this*
-      # link's recent past — there is no "come back to it later" case.
-      [ -n "$MON_NETWORK_ID" ] && _mon_loss_reset
-      _mon_conn_reset
-      _mon_hog_reset
     fi
 
     # A dead link means nothing to probe. Skipping the other tiers here is

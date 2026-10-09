@@ -40,6 +40,57 @@ setup() {
   . "$REPO/lib/monitor.sh"
 }
 
+@test "new network resets loss windows and confirmation streaks before its first ping" {
+  _mon_probe_link() {
+    MON_LINK_UP=1 MON_NETWORK_ID="network-$MON_SEQ"
+  }
+  _mon_probe_gateway() {
+    if [ "$MON_SEQ" -eq 1 ]; then
+      printf '%s|%s|%s|%s\n' "$MON_GW_HIST" "$MON_INET_HIST" \
+        "$MON_GW_LOSS_STREAK" "$MON_INET_LOSS_STREAK" > "$BATS_TEST_TMPDIR/before-ping"
+    fi
+  }
+  _mon_emit() {
+    MON_GW_HIST="old-loss" MON_INET_HIST="old-internet-loss"
+    MON_GW_LOSS_STREAK=1 MON_INET_LOSS_STREAK=1
+  }
+  local probe
+  for probe in vpn internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_rules() { :; }
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=2
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run
+  [ "$(cat "$BATS_TEST_TMPDIR/before-ping")" = "||0|0" ]
+}
+
+@test "resume refreshes all probe tiers before emitting reused connection data" {
+  _mon_probe_link() { MON_LINK_UP=1 MON_NETWORK_ID="same-network"; }
+  _mon_emit() {
+    if [ "$MON_SEQ" -eq 1 ]; then
+      _mon_on_resume
+    else
+      printf '%s\n' "$MON_REFRESHED" > "$BATS_TEST_TMPDIR/resumed-tiers"
+    fi
+  }
+  local probe
+  for probe in gateway vpn internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_rules() { :; }
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=2 MON_REFRESH_REQUESTED=0
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run
+  [ "$(cat "$BATS_TEST_TMPDIR/resumed-tiers")" = "fast medium slow " ]
+}
+
 # Every monitor (or monitor-launching shell) a test started, so teardown can
 # kill them even when an assertion failed before the test's own `kill`.
 MON_PIDS=()

@@ -415,8 +415,8 @@ private enum VerifyHarness {
               "A: a hydrated report of home is not offered at the café")
         let cold = HopwatchCoordinator()
         cold.adoptSessionStateForTesting(hydrated: homeStored)
-        check(cold.currentNetworkRun != nil && !(cold.currentNetworkRun?.isLive ?? true),
-              "A: with no live sample yet, the hydrated report is still offered (cold launch unchanged)")
+        check(cold.currentNetworkRun == nil,
+              "A: an unconfirmed cold launch does not label a saved report current")
 
         // -- B: speed test
         let speed = RunSnapshot.Speedtest(downMbps: 480, upMbps: 40)
@@ -427,7 +427,7 @@ private enum VerifyHarness {
         check(c.currentSpeedTest?.speed.downMbps == 480, "B: …and is shown at home")
         let fresh = HopwatchCoordinator()
         fresh.adoptSessionStateForTesting(speed: speed, speedAt: Date(), speedNetwork: homeID)
-        check(fresh.currentSpeedTest != nil, "B: with no live network yet, a figure measured this session is kept")
+        check(fresh.currentSpeedTest == nil, "B: speed is withheld until the current network is confirmed")
 
         // Hydration reads the store scoped to a network, never "newest anywhere".
         let storedSpeedRuns = [
@@ -524,15 +524,19 @@ private enum VerifyHarness {
         check(!sc.latestSampleIsStale, "D: a paused monitor is not 'stale' (it is meant to be quiet)")
         sc.monitor.resume(reason: "verify")
 
-        // -- E: nothing from before a stop/pause passes as live
+        // -- E: actual connection boundaries invalidate all old readings
         let ec = HopwatchCoordinator()
         ec.monitor.adoptGallerySample(atHome, historical: [atHome])
         check(ec.liveSample != nil || !monitoring, "E: a fresh sample is live")
         ec.monitor.pause(reason: "verify")
         ec.monitor.resume(reason: "verify")
-        check(ec.monitor.isAwaitingFirstSample && ec.monitor.latest != nil, "E: resume keeps `latest` but marks it awaiting")
+        check(!ec.monitor.isAwaitingFirstSample && ec.liveSample != nil,
+              "E: releasing a scan pause without a child does not invent a later boundary")
+        ec.invalidateCurrentConnection()
+        check(ec.monitor.isAwaitingFirstSample && ec.monitor.latest == nil,
+              "E: a wake/network boundary discards the old connection sample")
         check(ec.liveSample == nil, "E: …so its readings are not live until a fresh sample arrives")
-        check(!monitoring || ec.currentHealth != .healthy, "E: …and the dot is not green on a sample from before the pause")
+        check(!monitoring || ec.currentHealth != .healthy, "E: …and the dot is not green on a sample from before the boundary")
         check(ec.currentJitter == nil && ec.effectiveLoss == nil, "E: …and no jitter or loss is read from it")
         ec.monitor.adoptGallerySample(atHome, historical: [atHome])
         check(!ec.monitor.isAwaitingFirstSample && (ec.liveSample != nil || !monitoring), "E: a fresh sample clears the wait")
@@ -2099,7 +2103,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.14.3",
+                version: "1.14.5",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -3177,8 +3181,8 @@ private enum VerifyHarness {
         // Gateway filtered, internet not yet measured: unknown, never the raw 100.
         let hotelNoInet = sample(gw: 100, inet: nil, rtt: nil, jitter: nil, filtered: true, rules: ["TCP-1"])
         check(effective(hotelNoInet) == nil, "filtered gateway + no internet figure: effective loss is unknown (nil)")
-        check(tile(tiles(hotelNoInet), "gaming")?.metric == "TCP 443 ok",
-              "filtered gateway + no RTT: Gaming shows the TCP 443 ok item")
+        check(tile(tiles(hotelNoInet), "gaming")?.verdict == .unknown,
+              "filtered gateway + no RTT: Gaming remains unknown")
 
         // ICMP-1: internet pings blocked wholesale, TCP fine. Internet loss is unmeasurable.
         let blocked = sample(gw: 0, inet: 100, rtt: nil, jitter: nil, filtered: false, rules: ["ICMP-1"])
@@ -3186,16 +3190,18 @@ private enum VerifyHarness {
         let blockedItems = tiles(blocked)
         check(tile(blockedItems, "gaming")?.status != "Rubberbanding",
               "ICMP-1: Gaming is not Rubberbanding off the unmeasurable 100%")
-        check(tile(blockedItems, "gaming")?.metric == "TCP 443 ok",
-              "ICMP-1: Gaming shows the TCP 443 ok item")
-        check(tile(blockedItems, "browsing")?.verdict == .good && tile(blockedItems, "streaming")?.verdict == .good,
-              "ICMP-1: Browsing and Streaming do not read the unmeasurable 100% either")
+        check(tile(blockedItems, "gaming")?.verdict == .unknown,
+              "ICMP-1: unmeasured latency cannot establish gaming quality")
+        check(tile(blockedItems, "browsing")?.verdict != .broken && tile(blockedItems, "streaming")?.verdict != .broken,
+              "ICMP-1: unknown loss does not imply browsing or streaming is broken")
         // Engine falls back safely even if a caller passes no effective loss.
         let blockedRaw = SuitabilityEngine.evaluateAll(.init(monitorSample: blocked, firedRules: ["ICMP-1"]))
         check(blockedRaw.allSatisfy { $0.verdict != .broken }, "ICMP-1: no raw-figure fallback when effectiveLoss is nil")
         // Both legs filtered: unknown, not 0 and not the raw figure.
         let both = sample(gw: 100, inet: 100, rtt: nil, jitter: nil, filtered: true, rules: ["TCP-1", "ICMP-1"])
         check(effective(both) == nil, "both legs filtered: effective loss is unknown (nil)")
+        check(tile(tiles(both), "streaming")?.verdict == .unknown,
+              "both legs filtered: streaming needs bandwidth or measurable loss evidence")
 
         // Unfiltered sanity.
         let healthy = sample(gw: 0, inet: 0, rtt: 12, jitter: 2, filtered: false, rules: [])

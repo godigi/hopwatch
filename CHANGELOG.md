@@ -6,6 +6,18 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.14.5] - 2026-10-09
+
+### Fixed
+
+- Reset current connection evidence immediately after wake and network/path changes. Menu, dashboard, live comparisons, charts and activity no longer carry another connection's measurements or unconfirmed stored reports into a newly joined network.
+- Expire old measurements independently of monitoring pause/off; paused samples and invalid timestamps cannot refresh readings. Guard delayed scan, history hydration and router-probe results against connection changes, and leave interrupted arrival checks retryable.
+- Show neutral waiting states for unmeasured latency, loss, jitter, suitability, VPN and reliability. Remove illustrative defaults for IP addresses, DNS servers, Wi-Fi channel/security, ISP and DHCP lease. Unknown Wi-Fi names no longer imply disconnection, and VPN freshness reflects an actual reading.
+- Scope saved throughput to the confirmed current network and keep dated speed results out of current activity suitability. A failed fresh public lookup supersedes earlier country/IP/ISP evidence.
+- Reset CLI rolling loss windows and confirmation streaks before probing the first packets on a changed network, and refresh every probe tier when a scan/sleep pause resumes.
+- Preserve fresh full/speed-only results with monitoring off, expire displayed scan evidence through observable clock updates, and scope router admin caches to the connection generation. Monitor-detected network transitions invalidate previous-visit evidence even without system watcher callbacks.
+- Preserve absent technical-check fields when decoding partial reports; omit fabricated traceroute, IPv6, NAT, SNR and neighbor findings. Network boundaries clear old notification recovery state and retain the correct activity-episode boundary.
+
 ## [1.14.3] - 2026-10-09
 
 ### Changes
@@ -4197,7 +4209,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.5...HEAD
+[1.14.5]: https://github.com/godigi/hopwatch/compare/v1.14.3...v1.14.5
 [1.14.3]: https://github.com/godigi/hopwatch/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/godigi/hopwatch/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/godigi/hopwatch/compare/v1.14.0...v1.14.1

@@ -51,6 +51,11 @@ struct RunSnapshot: Decodable, Sendable {
     var speedtest: Speedtest?
     var ntp: NTP = .init()
     var duplicateIPs: [String] = []
+    // Preserve presence for current technical telemetry: lenient legacy
+    // defaults must not turn an omitted check into a negative finding.
+    var measuredIPv6: Bool?
+    var measuredDoubleNAT: Bool?
+    var measuredIPConflict: Bool?
     var lan: LAN?
     var arpActiveCount: Int? { lan?.arpActiveCount }
     var dhcp: DHCP = .init()
@@ -641,6 +646,11 @@ extension RunSnapshot {
         bufferbloat = c.lenient(.bufferbloat, .init())
         mtu = c.lenient(.mtu, .init())
         ipv6 = c.lenient(.ipv6, .init())
+        let ipv6Fields = try? c.nestedContainer(keyedBy: IPv6.CodingKeys.self, forKey: .ipv6)
+        measuredIPv6 = try? ipv6Fields?.decode(Bool.self, forKey: .available)
+        let wanFields = try? c.nestedContainer(keyedBy: WAN.CodingKeys.self, forKey: .wan)
+        let natFields = try? wanFields?.nestedContainer(keyedBy: WAN.DoubleNAT.CodingKeys.self, forKey: .doubleNat)
+        measuredDoubleNAT = try? natFields?.decode(Bool.self, forKey: .detected)
         // `wan` and `suitability` were declared in CodingKeys, declared as
         // properties, and never assigned here — so both silently held their
         // defaults on every run since they were added. The NAT topology row
@@ -659,6 +669,8 @@ extension RunSnapshot {
         speedtest = c.lenient(.speedtest)
         ntp = c.lenient(.ntp, .init())
         duplicateIPs = c.lenient(.duplicateIPs, [])
+        let conflicts: [String]? = c.lenient(.duplicateIPs)
+        measuredIPConflict = conflicts.map { !$0.isEmpty }
         lan = c.lenient(.lan)
         dhcp = c.lenient(.dhcp, .init())
         mtr = c.lenient(.mtr, .init())

@@ -40,7 +40,7 @@ struct ExpertPanel: View {
                 Spacer()
                 Text(cadenceLabel).font(.caption).foregroundStyle(.secondary)
             }
-            let samples = coordinator.monitor.recent
+            let samples = coordinator.currentSamples
             if samples.count < 2 {
                 Text("Collecting samples…").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -57,7 +57,7 @@ struct ExpertPanel: View {
     }
 
     private var cadenceLabel: String {
-        guard let sample = coordinator.monitor.latest else { return "" }
+        guard let sample = coordinator.liveSample else { return "" }
         let cadence = sample.status.cadenceS.map { "every \($0)s" } ?? ""
         return sample.status.degraded ? "\(cadence) · degraded" : cadence
     }

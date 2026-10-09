@@ -80,31 +80,41 @@ enum IPAddressValidation {
 /// Thread-safe in-memory cache and in-flight deduplicator for router admin page reachability probes.
 actor RouterAdminProbeStore {
     static let shared = RouterAdminProbeStore()
-    private var cache: [String: Bool] = [:]
-    private var inFlight: [String: Task<Bool, Never>] = [:]
+    struct ProbeKey: Hashable {
+        let ip: String
+        let generation: Int
+    }
+    private var cache: [ProbeKey: Bool] = [:]
+    private var inFlight: [ProbeKey: Task<Bool, Never>] = [:]
+    private let probe: @Sendable (URL) async -> Bool
 
-    func checkAvailability(for ip: String?) async -> Bool {
+    init(probe: @escaping @Sendable (URL) async -> Bool = {
+        await IPAddressValidation.probeRouterAdminPage(at: $0)
+    }) {
+        self.probe = probe
+    }
+
+    func checkAvailability(for ip: String?, generation: Int = 0) async -> Bool {
         guard let ip, let url = IPAddressValidation.routerAdminURL(for: ip) else { return false }
         let cleanIP = ip.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let cached = cache[cleanIP] {
+        let key = ProbeKey(ip: cleanIP, generation: generation)
+        if let cached = cache[key] {
             return cached
         }
-        if let existing = inFlight[cleanIP] {
+        if let existing = inFlight[key] {
             return await existing.value
         }
-        let task = Task<Bool, Never> {
-            let available = await IPAddressValidation.probeRouterAdminPage(at: url)
-            return available
-        }
-        inFlight[cleanIP] = task
+        let task = Task<Bool, Never> { await self.probe(url) }
+        inFlight[key] = task
         let result = await task.value
-        cache[cleanIP] = result
-        inFlight.removeValue(forKey: cleanIP)
+        cache[key] = result
+        inFlight.removeValue(forKey: key)
         return result
     }
 
-    func cachedAvailability(for ip: String?) -> Bool? {
+    func cachedAvailability(for ip: String?, generation: Int = 0) -> Bool? {
         guard let ip else { return nil }
-        return cache[ip.trimmingCharacters(in: .whitespacesAndNewlines)]
+        let key = ProbeKey(ip: ip.trimmingCharacters(in: .whitespacesAndNewlines), generation: generation)
+        return cache[key]
     }
 }

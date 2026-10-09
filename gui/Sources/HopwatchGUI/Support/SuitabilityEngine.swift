@@ -137,7 +137,7 @@ enum SuitabilityEngine {
             firedRules: [String] = [],
             isLinkUp: Bool = true,
             isDoubleNat: Bool = false,
-            mtu: Int? = 1500,
+            mtu: Int? = nil,
             vpnActive: Bool = false,
             vpnName: String? = nil,
             currentJitter: Double? = nil,
@@ -145,7 +145,7 @@ enum SuitabilityEngine {
             lossFiltering: EffectiveLoss.Filtering? = nil
         ) {
             self.lossFiltering = lossFiltering
-            self.monitorSample = monitorSample
+            self.monitorSample = monitorSample?.status.paused == true ? nil : monitorSample
             self.speedTest = speedTest
             self.savedSuitability = savedSuitability
             self.catalog = catalog
@@ -168,11 +168,13 @@ enum SuitabilityEngine {
         /// supplied one; otherwise the sample's internet figure, unless that
         /// leg is filtered — a filtered figure is unknown, not its raw value,
         /// and unknown is judged as "no loss evidence" rather than 100%.
-        var resolvedLoss: Double {
+        var measuredLoss: Double? {
             if let effectiveLoss { return effectiveLoss }
-            if filtering.internetLeg { return 0.0 }
-            return monitorSample?.internet.lossPct ?? 0.0
+            guard !filtering.internetLeg else { return nil }
+            return monitorSample?.internet.lossPct
         }
+
+        var resolvedLoss: Double { measuredLoss ?? 0.0 }
     }
 
     static func evaluateAll(_ inputs: Inputs) -> [Item] {
@@ -183,6 +185,12 @@ enum SuitabilityEngine {
             evaluateVPN(inputs),
             evaluateBrowsing(inputs)
         ]
+    }
+
+    static func awaiting(_ id: String, _ title: String, _ icon: String, metric: String = "Not measured") -> Item {
+        Item(id: id, title: title, icon: icon, status: "Checking…",
+             metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown,
+             helpText: "Waiting for measurements from this connection.")
     }
 
     // MARK: - 1. Calls (VoIP / Zoom / Teams / FaceTime)
@@ -294,6 +302,11 @@ enum SuitabilityEngine {
         }
 
         // 3. Good conditions:
+        guard inputs.monitorSample?.internet.rttAvgMs != nil,
+              inputs.currentJitter != nil || inputs.monitorSample?.internet.rttJitterMs != nil,
+              inputs.measuredLoss != nil else {
+            return awaiting("calls", "Calls", "video")
+        }
         // Pristine HD Video tier: upload >= 3.0 Mbps, loss < 1.0%, jitter < 8.0ms, ping < 150.0ms
         // Standard Clear Audio tier: loss < 1.0%, jitter < 15.0ms
         let metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
@@ -430,6 +443,9 @@ enum SuitabilityEngine {
             )
         }
 
+        guard inputs.measuredLoss != nil else {
+            return awaiting("streaming", "Streaming", "play.rectangle")
+        }
         return Item(
             id: "streaming",
             title: "Streaming",
@@ -554,6 +570,11 @@ enum SuitabilityEngine {
         }
 
         // Good conditions:
+        guard !pingFiltered,
+              inputs.currentJitter != nil || inputs.monitorSample?.internet.rttJitterMs != nil,
+              inputs.measuredLoss != nil else {
+            return awaiting("gaming", "Gaming", "gamecontroller")
+        }
         // Ping <= 35ms with jitter < 8ms and loss < 1%: competitive tier ("Responsive")
         // Ping 35-80ms with jitter < 20ms: smooth multiplayer ("Smooth")
         if pingFiltered {
@@ -677,6 +698,7 @@ enum SuitabilityEngine {
             )
         }
 
+        guard inputs.mtu != nil else { return awaiting("vpn", "VPN / Remote", "shield") }
         return Item(
             id: "vpn",
             title: "VPN / Remote",
@@ -685,7 +707,7 @@ enum SuitabilityEngine {
             metric: "Direct route",
             tint: Theme.ColorToken.green,
             verdict: .good,
-            helpText: "Clean path MTU and single NAT — fully compatible with VPN tunnels"
+            helpText: "Measured packet size supports common VPN tunnels"
         )
     }
 
@@ -805,6 +827,10 @@ enum SuitabilityEngine {
         }
 
         // 3. Good conditions: fast DNS & responsive TCP/HTTPS
+        guard dnsOk == true, tcpOk == true else {
+            return awaiting("browsing", "Browsing", "globe",
+                            metric: dnsOk == false || tcpOk == false ? "Rechecking" : "Not measured")
+        }
         let metric: String
         let help: String
         if dnsOk == false || tcpOk == false {

@@ -615,6 +615,7 @@ struct ConnectionRouteView: View {
     var linkDown: Bool = false
 
     let vpnActive: Bool
+    var vpnKnown: Bool = true
     let vpnName: String?
     let vpnFreshness: String
 
@@ -705,7 +706,7 @@ struct ConnectionRouteView: View {
                             isWarning: !macStatusGood,
                             statusGood: macStatusGood,
                             flag: nil,
-                            state: linkDown ? .down : .normal
+                            state: linkDown ? .down : (!macStatusGood && !wifiWarning ? .unknown : .normal)
                         )
 
                         Text("This Mac")
@@ -735,7 +736,7 @@ struct ConnectionRouteView: View {
                             isWarning: routerWarn,
                             statusGood: routerStatusGood,
                             flag: nil,
-                            state: linkDown ? .unknown : .normal
+                            state: linkDown || (!routerStatusGood && !routerWarn) ? .unknown : .normal
                         )
 
                         Text("Router")
@@ -782,7 +783,7 @@ struct ConnectionRouteView: View {
                             isWarning: internetWarn,
                             statusGood: internetStatusGood,
                             flag: linkDown ? nil : countryFlag,
-                            state: linkDown ? .unknown : .normal
+                            state: linkDown || (!internetStatusGood && !internetWarn) ? .unknown : .normal
                         )
 
                         Text("Internet")
@@ -868,7 +869,7 @@ struct ConnectionRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                         }
                     } else {
-                        Text("VPN off")
+                        Text(vpnKnown ? "VPN off" : "VPN checking…")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.ColorToken.muted)
                     }
@@ -1155,7 +1156,7 @@ struct MenuActivitySnippetView: View {
                         .padding(.leading, 15)
                 }
             } else {
-                Text("No changes in the last 24 hours")
+                Text("No recorded activity on this network")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.ColorToken.muted)
                     .padding(.vertical, 2)
@@ -1233,6 +1234,7 @@ struct MenuActionsView: View {
 
 struct MenuFooterView: View {
     let networkName: String?
+    var linkDown: Bool = false
     let isWiFi: Bool
     let monitoringEnabled: Bool
     let onToggleMonitoring: () -> Void
@@ -1247,7 +1249,7 @@ struct MenuFooterView: View {
             HStack(spacing: 5) {
                 Image(systemName: isWiFi ? "wifi" : "cable.connector")
                     .font(.system(size: 11))
-                Text(networkName ?? "DISCONNECTED")
+                Text(networkName ?? (linkDown ? "DISCONNECTED" : (isWiFi ? "Wi-Fi network" : "Ethernet")))
                     .font(.system(size: 10, weight: .semibold))
                     .lineLimit(1)
             }

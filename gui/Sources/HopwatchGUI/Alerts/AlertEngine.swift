@@ -578,6 +578,13 @@ final class AlertEngine {
         }
     }
 
+    func invalidateConnection() {
+        active = [:]
+        conditionSince = [:]
+        pendingTransition = [:]
+        previousSample = nil
+    }
+
     /// Worst first, so the dropdown's one-alert stage always shows the
     /// alert most worth interrupting someone over rather than whichever
     /// happened to fire most recently. Rank comes from the CLI's own

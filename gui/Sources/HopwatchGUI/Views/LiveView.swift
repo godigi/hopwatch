@@ -23,7 +23,7 @@ struct LiveView: View {
 
     private var samples: [MonitorSample] {
         let cutoff = Date().addingTimeInterval(-Self.window)
-        return monitor.recent.filter { $0.timestamp >= cutoff }
+        return coordinator.currentSamples.filter { $0.timestamp >= cutoff }
     }
 
     var body: some View {
@@ -167,8 +167,8 @@ struct LiveView: View {
     }
 
     private var isCaptivePortal: Bool {
-        monitor.latest?.publicInfo.captivePortal == true
-            || (monitor.latest?.status.rules.contains("CP-1") ?? false)
+        coordinator.liveSample?.publicInfo.captivePortal == true
+            || (coordinator.liveSample?.status.rules.contains("CP-1") ?? false)
             || coordinator.alerts.active["captive-portal"] != nil
     }
 
@@ -290,7 +290,7 @@ struct LiveView: View {
 
     private var routerMs: Double? {
         if linkDown { return nil }
-        return monitor.latest?.gateway.rttAvgMs
+        return coordinator.liveSample?.gateway.rttAvgMs
     }
 
     private var latestGateway: String {
@@ -315,7 +315,7 @@ struct LiveView: View {
 
     private var internetMsValue: Double? {
         if linkDown { return nil }
-        guard let sample = monitor.latest else { return nil }
+        guard let sample = coordinator.liveSample else { return nil }
         return Self.internetMs(sample)
     }
 
@@ -375,7 +375,7 @@ struct LiveView: View {
     /// "degraded" is the monitor's own word for its faster tier and carries
     /// no verdict of this app's.
     private var cadenceLabel: String {
-        guard let status = monitor.latest?.status, let cadence = status.cadenceS else {
+        guard let status = coordinator.liveSample?.status, let cadence = status.cadenceS else {
             return monitor.isRunning ? "starting…" : "stopped"
         }
         if monitor.isBursting { return "every \(cadence)s · test" }
@@ -398,7 +398,7 @@ struct LiveView: View {
     /// named hosts when the latest sample has them, else the generic
     /// "well-known hosts".
     private var internetHostsCaption: String {
-        let hosts = monitor.latest?.tcp.targets.compactMap(\.host) ?? []
+        let hosts = coordinator.liveSample?.tcp.targets.compactMap(\.host) ?? []
         let named = hosts.isEmpty ? "well-known hosts" : hosts.joined(separator: ", ")
         return "Currently: \(named)"
     }
