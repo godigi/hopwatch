@@ -63,6 +63,8 @@ struct ActivityEntry: Identifiable, Equatable {
     /// notified. Folded in from the alert's own event rather than left as a
     /// separate row — see `absorbAlerts`.
     var notified: Bool = false
+    var trafficEvidence: [AppTrafficEvidence] = []
+    var attributionIncomplete: Bool = false
 }
 
 extension ActivityEntry {
@@ -96,6 +98,8 @@ extension ActivityEntry {
         /// the log, so the sighting is tracked per episode instead.
         var lastSeen: Date
         var isLowerBound: Bool
+        var trafficEvidence: [AppTrafficEvidence] = []
+        var attributionIncomplete: Bool = false
     }
 
     /// Fold a transition log into episodes, then group same-rule episodes
@@ -140,6 +144,21 @@ extension ActivityEntry {
                 continue
             }
 
+            if event.kind == "rule-updated", let ruleID = event.ruleID {
+                let key = Key(network: event.network, ruleID: ruleID)
+                if let evidence = event.evidence, open[key] != nil {
+                    open[key]?.trafficEvidence.append(evidence)
+                    open[key]?.lastSeen = event.date
+                } else if let evidence = event.evidence {
+                    // The opening event may precede this view's rolling window.
+                    open[key] = Episode(ruleID: ruleID, network: event.network,
+                        kind: "rule-fired", summary: event.summary, start: event.date,
+                        end: nil, lastSeen: event.date, isLowerBound: true,
+                        trafficEvidence: [evidence])
+                }
+                continue
+            }
+
             guard let ruleID = event.ruleID,
                   event.kind == "rule-fired" || event.kind == "rule-cleared" else {
                 // Alerts, VPN drops, interface changes, IP changes: discrete
@@ -157,12 +176,15 @@ extension ActivityEntry {
                     // keep the earlier start, as helpers/events.py does.
                     open[key]?.lastSeen = event.date
                     open[key]?.isLowerBound = true
+                    if let evidence = event.evidence { open[key]?.trafficEvidence.append(evidence) }
                     continue
                 }
                 open[key] = Episode(ruleID: ruleID, network: event.network, kind: event.kind,
                                     summary: event.summary, start: event.date,
                                     end: nil, lastSeen: event.date,
-                                    isLowerBound: false)
+                                    isLowerBound: false,
+                                    trafficEvidence: event.evidence.map { [$0] } ?? [],
+                                    attributionIncomplete: ruleID == "HOG-1" && event.evidence == nil)
             case "rule-cleared":
                 if var existing = open.removeValue(forKey: key) {
                     existing.end = event.date
@@ -190,7 +212,9 @@ extension ActivityEntry {
                         ruleID: ruleID, network: event.network, kind: event.kind,
                         summary: event.summary, start: event.date,
                         end: event.date, lastSeen: event.date,
-                        isLowerBound: false))
+                        isLowerBound: false,
+                        trafficEvidence: event.evidence.map { [$0] } ?? [],
+                        attributionIncomplete: ruleID == "HOG-1" && event.evidence == nil))
                 }
             default:
                 break
@@ -225,6 +249,8 @@ extension ActivityEntry {
             existing.isOngoing = existing.isOngoing || candidate.isOngoing
             existing.durationIsLowerBound =
                 existing.durationIsLowerBound || candidate.durationIsLowerBound
+            existing.trafficEvidence += candidate.trafficEvidence
+            existing.attributionIncomplete = existing.attributionIncomplete || candidate.attributionIncomplete
             // nil + nil stays nil, so a day of never-paired events reports
             // no duration rather than a misleading zero.
             if let extra = candidate.totalDuration {
@@ -260,7 +286,9 @@ extension ActivityEntry {
                 // worth printing; it still counts as an occurrence.
                 totalDuration: duration >= 1 ? duration : nil,
                 isOngoing: episode.end == nil,
-                durationIsLowerBound: episode.isLowerBound))
+                durationIsLowerBound: episode.isLowerBound || (episode.end == nil && seen > episode.start),
+                trafficEvidence: episode.trafficEvidence,
+                attributionIncomplete: episode.attributionIncomplete))
         }
 
         for event in loose {
@@ -273,7 +301,23 @@ extension ActivityEntry {
                 durationIsLowerBound: false))
         }
 
-        return absorbAlerts(entries).values.sorted { $0.latest > $1.latest }
+        return absorbAlerts(entries).values.map { entry in
+            var entry = entry
+            var newest: [String: AppTrafficEvidence] = [:]
+            for evidence in entry.trafficEvidence {
+                let key = evidence.captureKey
+                if let prior = newest[key],
+                   (prior.observedDate ?? .distantPast) > (evidence.observedDate ?? .distantPast) { continue }
+                newest[key] = evidence
+            }
+            entry.trafficEvidence = newest.values.sorted {
+                if $0.observedDate != $1.observedDate {
+                    return ($0.observedDate ?? .distantPast) > ($1.observedDate ?? .distantPast)
+                }
+                return $0.captureKey < $1.captureKey
+            }
+            return entry
+        }.sorted { $0.latest > $1.latest }
     }
 
     /// Fold each alert row into the rule row it is about.
@@ -376,7 +420,18 @@ extension ActivityEntry {
             let formatted = Self.duration(total) + (durationIsLowerBound ? "+" : "")
             parts.append(occurrences > 1 ? "\(formatted) total" : "lasted \(formatted)")
         }
+        if ruleID == "HOG-1", attributionIncomplete { parts.append("App attribution not recorded") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Presentation labels identify observed talkers without claiming causation.
+    var displaySummary: String {
+        guard ruleID == "HOG-1" else { return summary }
+        let names = Set(trafficEvidence.map(\.identity))
+        let prefix = kind == "rule-cleared" ? "Resolved: " : ""
+        if names.count > 1 { return prefix + "High traffic from \(names.count) apps/processes" }
+        if let evidence = trafficEvidence.first { return prefix + "High traffic from \(evidence.name)" }
+        return prefix + "High app traffic with elevated latency"
     }
 
     /// Compact duration: "45s", "4m", "1h 12m". Never zero-padded, never

@@ -167,6 +167,11 @@ MON_HOG_STREAK=0
 MON_HOG_CLEAN=0
 MON_HOG_ACTIVE=0
 MON_HOG_LAST_CAPTURE=0
+MON_HOG_REFRESHED=0
+MON_HOG_OBSERVED_AT=""
+MON_HOG_APP_NAME="" MON_HOG_APP_BUNDLE="" MON_HOG_PROC=""
+MON_HOG_DIR="" MON_HOG_RATE="" MON_HOG_DOM_PCT=""
+MON_HOG_GW_RTT="" MON_HOG_GW_JITTER="" MON_HOG_INET_JITTER=""
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
 # space-separated scalars rather than arrays — this file must run under
@@ -907,22 +912,23 @@ _mon_conn_observe() {
 # that was filling the old path says nothing about the new one.
 _mon_hog_reset() {
   MON_HOG_STREAK=0; MON_HOG_CLEAN=0; MON_HOG_ACTIVE=0
+  MON_HOG_REFRESHED=0; MON_HOG_OBSERVED_AT=""
 }
 
-# HOG-1 — the monitor's half. It never saturates the link and never names
-# anyone; it notices that latency has gone bad while ping is clean, and only
+# HOG-1 — the monitor's half. It never saturates the link; it notices that latency has gone bad while ping is clean, and only
 # once that has held for THRESH_MON_HOG_CONFIRM_CYCLES fast cycles does it
 # take ONE nettop capture (hog_capture_evidence, the scan's own function) to
 # see whether a single app on this Mac explains it. Hopwatch's own full check
 # is excluded by that capture, so a check the app runs does not accuse
 # itself. The Quit button comes from the quick scan the app runs once the
-# severity turns warn; this function only decides whether the rule is on.
+# severity turns warn. Captures also carry attribution into the event stream.
 #
 # It runs after the tiers and before _mon_rules, and only on a cycle whose
 # fast tier ran: latency is carried between cycles otherwise, and a stale
 # reading must not count twice toward a streak. The monitor has no speed-test
 # figure, so hog_judge gets none and uses the absolute stand-in.
 _mon_probe_hog() {
+  MON_HOG_REFRESHED=0
   [ "$MON_LINK_UP" -eq 1 ] || return 0
   case " $MON_REFRESHED " in *" fast "*) ;; *) return 0 ;; esac
   local gate=0 now="$EPOCHSECONDS"
@@ -947,6 +953,15 @@ _mon_probe_hog() {
   hog_capture_evidence || true
   hog_judge "" ""
   MON_HOG_ACTIVE="$HOG_FIRES"
+  if [ "$HOG_FIRES" -eq 1 ]; then
+    MON_HOG_REFRESHED=1
+    MON_HOG_OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    MON_HOG_APP_NAME="$HOG_APP_NAME" MON_HOG_APP_BUNDLE="$HOG_APP_BUNDLE"
+    MON_HOG_PROC="$HOG_PROC" MON_HOG_DIR="$HOG_DIR" MON_HOG_RATE="$HOG_RATE"
+    MON_HOG_DOM_PCT="$HOG_DOM_PCT"
+    MON_HOG_GW_RTT="$MON_GW_RTT" MON_HOG_GW_JITTER="${MON_GW_JITTER:-}"
+    MON_HOG_INET_JITTER="${MON_INET_JITTER:-}"
+  fi
   return 0
 }
 
@@ -1361,6 +1376,17 @@ _mon_emit() {
   NETDIAG_MON_PUB_CC_ISO="$MON_PUB_CC_ISO" \
   NETDIAG_MON_CAPTIVE="$MON_CAPTIVE" \
   NETDIAG_MON_RULES="$MON_RULES" \
+  NETDIAG_MON_HOG_REFRESHED="$MON_HOG_REFRESHED" \
+  NETDIAG_MON_HOG_OBSERVED_AT="$MON_HOG_OBSERVED_AT" \
+  NETDIAG_MON_HOG_APP_NAME="$MON_HOG_APP_NAME" \
+  NETDIAG_MON_HOG_APP_BUNDLE="$MON_HOG_APP_BUNDLE" \
+  NETDIAG_MON_HOG_PROCESS="$MON_HOG_PROC" \
+  NETDIAG_MON_HOG_DIRECTION="$MON_HOG_DIR" \
+  NETDIAG_MON_HOG_RATE_MBPS="$MON_HOG_RATE" \
+  NETDIAG_MON_HOG_DOMINANCE_PCT="$MON_HOG_DOM_PCT" \
+  NETDIAG_MON_HOG_GATEWAY_RTT_MS="$MON_HOG_GW_RTT" \
+  NETDIAG_MON_HOG_GATEWAY_JITTER_MS="$MON_HOG_GW_JITTER" \
+  NETDIAG_MON_HOG_INTERNET_JITTER_MS="$MON_HOG_INET_JITTER" \
   NETDIAG_MON_CLEARABLE_RULES="$MON_CLEARABLE_RULES" \
   NETDIAG_MON_SEVERITY="$MON_SEVERITY" \
   NETDIAG_MON_MEASUREMENT_STATE="$MON_MEASUREMENT_STATE" \

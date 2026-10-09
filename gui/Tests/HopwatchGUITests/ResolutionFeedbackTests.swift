@@ -102,7 +102,7 @@ import Testing
             measurementState: "measured",
             activeResolution: res
         )
-        #expect(StageResolver.resolve(downInputs) == .watching(severity: .critical))
+        #expect(StageResolver.resolve(downInputs) == .noLink)
     }
 
     @Test func resolutionEventLifecycleAndExpiration() {

@@ -2042,10 +2042,12 @@ struct DashboardRecentActivityPanel: View {
                                 .padding(.top, 4)
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.summary)
+                                Text(entry.displaySummary)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(Theme.ColorToken.ink)
                                     .lineLimit(1)
+
+                                AppTrafficEvidenceView(entry: entry, limit: 2)
 
                                 if let detail = entry.detail {
                                     Text(detail)

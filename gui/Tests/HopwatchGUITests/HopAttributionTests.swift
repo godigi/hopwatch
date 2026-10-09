@@ -257,9 +257,9 @@ import Testing
     }
 
     @Test func icmpFilteredDoesNotAccuseISPOfOutage() {
-        // TCP-1 / ICMP-1: Internet ping blocked by policy while TCP works fine
+        // ICMP-1: Internet ping blocked while TCP works; TCP-1 is gateway filtering.
         let result = HopAttributionResolver.resolve(
-            rules: ["TCP-1"],
+            rules: ["ICMP-1"],
             isWifi: true,
             wifiRSSI: -50,
             gatewayRTT: 1.5,

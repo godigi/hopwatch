@@ -879,7 +879,7 @@ RULES: list[dict[str, object]] = [
     },
     {
         "id": "HOG-1",
-        "title": "One app is using up your connection",
+        "title": "High app traffic with elevated latency",
         "category": "load",
         "also": "internet",
         "severity": "warn",

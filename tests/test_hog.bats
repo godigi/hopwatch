@@ -623,7 +623,7 @@ captures() { wc -l <"$BATS_TEST_TMPDIR/captures" | tr -d ' '; }
   [ "$MON_HOG_ACTIVE" -eq 0 ]
 }
 
-@test "monitor: an unresolved top talker still fires the rule (the stream carries no name)" {
+@test "monitor: an unresolved top talker still fires the rule" {
   reset_state; slow_pings
   hog_capture_evidence() {
     HOG_MEASURED=1
@@ -633,6 +633,47 @@ captures() { wc -l <"$BATS_TEST_TMPDIR/captures" | tr -d ' '; }
   }
   _mon_probe_hog; _mon_probe_hog
   [ "$(monitor_rules)" = "HOG-1 " ]
+}
+
+@test "monitor: measured app attribution reaches the stream and event journal" {
+  reset_state; slow_pings; stub_capture
+  _mon_probe_hog; _mon_probe_hog; _mon_rules
+  MON_HAVE_PREV=1 MON_SEQ=2
+  export NETDIAG_MON_JOURNAL="$BATS_TEST_TMPDIR/events.jsonl"
+  run _mon_emit 2
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import sys,json; s=json.load(sys.stdin); e=next(c for c in s["changes"] if c.get("to")=="HOG-1")["evidence"]; assert e["app_name"]=="Backup Pro"; assert e["rate_mbps"]==40; assert e["direction"]=="up"; assert e["observed_at"]; assert e["dominance_pct"]==95'
+  python3 - "$NETDIAG_MON_JOURNAL" <<'PY'
+import sys,json
+rows=[json.loads(s) for s in open(sys.argv[1])]
+e=next(r for r in rows if r.get('to')=='HOG-1')['evidence']
+assert e['app_name']=='Backup Pro'
+PY
+}
+
+@test "monitor: a recapture refreshes attribution without firing the rule again" {
+  reset_state; slow_pings; stub_capture
+  _mon_probe_hog; _mon_probe_hog; _mon_rules
+  _mon_snapshot_prev
+  MON_HOG_LAST_CAPTURE=0
+  _mon_probe_hog; _mon_rules
+  run _mon_emit 2
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import sys,json; c=json.load(sys.stdin)["changes"]; e=next(r for r in c if r["id"]=="rule-updated"); assert e["to"]=="HOG-1"; assert e["evidence"]["app_name"]=="Backup Pro"; assert not any(r["id"]=="rule-fired" for r in c)'
+  _mon_probe_hog
+  run _mon_emit 2
+  printf '%s' "$output" | python3 -c 'import sys,json; assert not any(r["id"]=="rule-updated" for r in json.load(sys.stdin).get("changes",[]))'
+}
+
+@test "monitor: recovery retains the last capture with its original measurement time" {
+  reset_state; slow_pings; stub_capture
+  _mon_probe_hog; _mon_probe_hog; _mon_rules; _mon_snapshot_prev
+  local observed="$MON_HOG_OBSERVED_AT"
+  MON_GW_RTT=3 MON_GW_JITTER=1
+  _mon_probe_hog; _mon_probe_hog; _mon_rules
+  run _mon_emit 2
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import sys,json; e=next(c for c in json.load(sys.stdin)["changes"] if c["id"]=="rule-cleared" and c["from"]=="HOG-1")["evidence"]; assert e["app_name"]=="Backup Pro"; assert e["observed_at"]==sys.argv[1]; assert e["gateway_rtt_ms"]==84' "$observed"
 }
 
 # ── Scan / monitor parity ────────────────────────────────────────────────

@@ -775,6 +775,26 @@ it would accumulate forever.
 
 ## Conventions specific to the stream
 
+HOG-1 changes may contain an optional `evidence` object: `app_name`,
+`app_bundle`, `process`, `direction` (`up`/`down`), `rate_mbps`,
+`dominance_pct` (share of this Mac's non-Hopwatch traffic in that direction),
+`observed_at` (UTC capture timestamp), `gateway_rtt_ms`,
+`gateway_jitter_ms`, and `internet_jitter_ms`. Unknown fields are null.
+These values describe the capture behind the finding, not necessarily the
+time the containing sample was emitted. High traffic with elevated latency
+is correlation, not a proven cause.
+
+A fresh capture while HOG-1 stays active emits a `rule-updated` change with
+`field: "status.rules"`, `from: "HOG-1"`, `to: "HOG-1"` and that evidence.
+It refreshes the existing incident and must not count as a new occurrence
+or a recovery. Both fired and updated evidence are copied into the event
+journal. A clearance can retain the last capture with its original observation
+time, so a rolling history window can show who was last observed before
+recovery; that is not a fresh traffic measurement. No change is emitted merely
+for carrying an older capture forward.
+Older events lack attribution; a later capture must not be used to fill them.
+
+
 - **`gateway.loss_pct` is a rolling-window figure**, not one probe's
   reading: lost×100÷sent accumulated over the last
   `MONITOR_LOSS_WINDOW_PROBES` probes (~100 packets at the defaults,

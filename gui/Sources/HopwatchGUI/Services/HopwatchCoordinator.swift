@@ -573,7 +573,8 @@ final class HopwatchCoordinator {
                 ruleID: change.field == "status.rules"
                     ? (change.to ?? change.from) : nil,
                 network: sample.network.id,
-                date: sample.timestamp)
+                date: sample.timestamp,
+                evidence: change.evidence)
         }
 
         if let gwIP = sample.link.gateway, gwIP != lastProbedRouterIP {
@@ -2095,4 +2096,3 @@ final class HopwatchCoordinator {
 }
 
 typealias NetdiagCoordinator = HopwatchCoordinator
-

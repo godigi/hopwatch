@@ -120,12 +120,34 @@ def build_tcp() -> list[dict]:
     return out
 
 
+def _hog_evidence(require_active: bool = True) -> dict | None:
+    """The capture behind HOG-1, never current traffic substituted for history."""
+    if not _env("HOG_OBSERVED_AT"):
+        return None
+    if require_active and "HOG-1" not in (_env("RULES") or "").split():
+        return None
+    return {
+        "observed_at": _env("HOG_OBSERVED_AT"),
+        "app_name": _env("HOG_APP_NAME"), "app_bundle": _env("HOG_APP_BUNDLE"),
+        "process": _env("HOG_PROCESS"), "direction": _env("HOG_DIRECTION"),
+        "rate_mbps": _f("HOG_RATE_MBPS"), "dominance_pct": _f("HOG_DOMINANCE_PCT"),
+        "gateway_rtt_ms": _f("HOG_GATEWAY_RTT_MS"),
+        "gateway_jitter_ms": _f("HOG_GATEWAY_JITTER_MS"),
+        "internet_jitter_ms": _f("HOG_INTERNET_JITTER_MS"),
+    }
+
+
 def _rule_fired(rid: str) -> dict:
     """The change entry for a rule that is firing and was not before."""
     title = _get_rule_title(rid)
-    return {"id": "rule-fired", "field": "status.rules",
+    entry = {"id": "rule-fired", "field": "status.rules",
             "from": None, "to": rid,
             "summary": title if title else f"Issue {rid} detected"}
+    if rid == "HOG-1":
+        evidence = _hog_evidence()
+        if evidence is not None:
+            entry["evidence"] = evidence
+    return entry
 
 
 def _rules_at_start() -> list[dict]:
@@ -232,6 +254,12 @@ def _changes() -> list[dict]:
     rules_prev = set((_env("PREV_RULES") or "").split())
     for rid in sorted(rules_now - rules_prev):
         out.append(_rule_fired(rid))
+    if "HOG-1" in rules_now & rules_prev and _env("HOG_REFRESHED") == "1":
+        entry = _rule_fired("HOG-1")
+        if "evidence" in entry:
+            entry["id"] = "rule-updated"
+            entry["from"] = "HOG-1"
+            out.append(entry)
     clearable_env = "NETDIAG_MON_CLEARABLE_RULES"
     if clearable_env in os.environ:
         clearable = set((_env("CLEARABLE_RULES") or "").split())
@@ -240,10 +268,15 @@ def _changes() -> list[dict]:
         clearable = rules_prev if _env("MEASUREMENT_STATE") == "measured" else set()
     for rid in sorted((rules_prev - rules_now) & clearable):
         title = _get_rule_title(rid)
-        out.append({"id": "rule-cleared", "field": "status.rules",
+        entry = {"id": "rule-cleared", "field": "status.rules",
                     "from": rid, "to": None,
                     "summary": (f"Resolved: {title}" if title
-                                else f"Issue {rid} cleared")})
+                                else f"Issue {rid} cleared")}
+        if rid == "HOG-1":
+            evidence = _hog_evidence(require_active=False)
+            if evidence is not None:
+                entry["evidence"] = evidence
+        out.append(entry)
     return out
 
 
@@ -347,6 +380,8 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
     for change in _rules_at_start() + changes:
         extra = ({"already_firing": True}
                  if change.get("already_firing") else {})
+        if change.get("evidence") is not None:
+            extra["evidence"] = change["evidence"]
         # SOCK-1's evidence goes on the line that records the fault, not in
         # a separate event: a journal reader pairing the episode should find
         # the culprit beside the start time without a second lookup.

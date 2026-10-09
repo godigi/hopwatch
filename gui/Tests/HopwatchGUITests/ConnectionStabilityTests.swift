@@ -52,9 +52,9 @@ import Testing
     }
 
     @Test func movingJitterCalculation() {
-        let s1 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 20.0))
-        let s2 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 36.0))
-        let s3 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 24.0))
+        let s1 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 20.0))
+        let s2 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 36.0))
+        let s3 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 24.0))
 
         let jitter = MonitorSeries.movingJitter(samples: [s1, s2, s3])
         #expect(jitter != nil)
@@ -66,8 +66,8 @@ import Testing
     }
 
     @Test func prefersLiveJitterOverCalculated() {
-        let s1 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 20.0))
-        let s2 = MonitorSample(internet: .init(lossPct: 0, rttAvgMs: 80.0, rttJitterMs: 3.2))
+        let s1 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 20.0))
+        let s2 = MonitorSample(link: .init(up: true), internet: .init(lossPct: 0, rttAvgMs: 80.0, rttJitterMs: 3.2))
         let jitter = MonitorSeries.movingJitter(samples: [s1, s2])
         #expect(jitter == 3.2)
     }

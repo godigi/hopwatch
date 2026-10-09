@@ -52,10 +52,11 @@ struct MonitorSample: Decodable, Sendable {
         var from: String?
         var to: String?
         var summary: String = ""
+        var evidence: AppTrafficEvidence?
 
         enum CodingKeys: String, CodingKey {
             case kind = "id"
-            case field, from, to, summary
+            case field, from, to, summary, evidence
         }
     }
 
@@ -338,6 +339,7 @@ extension MonitorSample.Change {
         from = c.lenient(.from)
         to = c.lenient(.to)
         summary = c.lenient(.summary, "")
+        evidence = c.lenient(.evidence)
     }
 }
 

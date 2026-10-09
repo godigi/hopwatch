@@ -6,6 +6,13 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.14.3] - 2026-10-09
+
+### Changes
+
+- fix: retain contemporaneous app/process attribution, upload/download rate, traffic share and observation time in activity history and both recent-activity views. Rechecks update one incident and retain changing app identities; old events explicitly state that attribution was not recorded.
+- fix: describe high traffic alongside elevated latency without claiming a proven cause.
+
 ## [1.14.2] - 2026-10-08
 
 ### Changes
@@ -4190,7 +4197,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.3...HEAD
+[1.14.3]: https://github.com/godigi/hopwatch/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/godigi/hopwatch/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/godigi/hopwatch/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/godigi/hopwatch/compare/v1.13.0...v1.14.0

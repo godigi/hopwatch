@@ -337,7 +337,7 @@ struct ActivityRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(entry.summary)
+                    Text(entry.displaySummary)
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -357,6 +357,7 @@ struct ActivityRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                AppTrafficEvidenceView(entry: entry)
             }
 
             if entry.notified {
@@ -1135,7 +1136,7 @@ struct MenuActivitySnippetView: View {
                         Circle()
                             .fill(EventStyle.tint(for: event.kind))
                             .frame(width: 7, height: 7)
-                        Text(event.summary)
+                        Text(event.displaySummary)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.ink)
                             .lineLimit(1)
@@ -1150,6 +1151,8 @@ struct MenuActivitySnippetView: View {
                             .foregroundStyle(Theme.ColorToken.muted)
                             .padding(.leading, 15)
                     }
+                    AppTrafficEvidenceView(entry: event, limit: 2)
+                        .padding(.leading, 15)
                 }
             } else {
                 Text("No changes in the last 24 hours")
@@ -1296,4 +1299,3 @@ struct MenuFooterView: View {
         }
     }
 }
-

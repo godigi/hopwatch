@@ -55,12 +55,27 @@ final class EventStore {
     func record(kind: String, summary: String, ruleID: String? = nil,
                 network: String? = nil,
                 date: Date = .now,
-                continuesPrevious: Bool = false) {
+                continuesPrevious: Bool = false,
+                evidence: AppTrafficEvidence? = nil) {
         guard !summary.isEmpty else { return }
+        if kind == "rule-updated", let evidence {
+            // Keep the opening and each distinct app, but replace repeated
+            // sightings of that app in this episode. Minute-by-minute captures
+            // must not consume the 500-event history in a few hours.
+            for event in events {
+                if event.kind == "monitor-started" && !event.continuesPrevious { break }
+                guard event.network == network, event.ruleID == ruleID else { continue }
+                if event.kind == "rule-cleared" { break }
+                if event.kind == "rule-updated", event.evidence?.captureKey == evidence.captureKey {
+                    events.removeAll { $0.id == event.id }
+                    break
+                }
+            }
+        }
         // A monitor restart is an observation boundary, never a repeat.
         // It must not be coalesced by isRepeat, or a restart within the
         // 10-minute window would lose its restart signal.
-        if kind != "monitor-started" {
+        if kind != "monitor-started" && kind != "rule-fired" && kind != "rule-cleared" && evidence == nil {
             guard !NetworkEvent.isRepeat(kind: kind, summary: summary,
                                          network: network,
                                          date: date, in: events) else {
@@ -71,7 +86,8 @@ final class EventStore {
             events + [NetworkEvent(date: date, kind: kind,
                                    summary: summary, ruleID: ruleID,
                                    network: network,
-                                   continuesPrevious: continuesPrevious)],
+                                   continuesPrevious: continuesPrevious,
+                                   evidence: evidence)],
             cap: Self.cap)
         save()
     }
@@ -104,7 +120,7 @@ final class EventStore {
     /// The newest event describing a network condition, ignoring internal
     /// monitor-started restart markers.
     var latestNetworkEvent: NetworkEvent? {
-        events.first(where: { $0.kind != "monitor-started" })
+        events.first(where: { $0.kind != "monitor-started" && $0.kind != "rule-updated" })
     }
 
     var lastEventDate: Date? { latestNetworkEvent?.date }

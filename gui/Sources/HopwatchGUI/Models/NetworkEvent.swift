@@ -17,6 +17,7 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
     var kind: String = ""
     var summary: String = ""
     var ruleID: String? = nil
+    var evidence: AppTrafficEvidence? = nil
     /// The network this event occurred on (e.g. "wifi:mac=…"), matching
     /// the event journal and helpers/events.py.
     var network: String? = nil
@@ -32,7 +33,7 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
 
     init(id: UUID = UUID(), date: Date, kind: String,
          summary: String, ruleID: String? = nil, network: String? = nil,
-         continuesPrevious: Bool = false) {
+         continuesPrevious: Bool = false, evidence: AppTrafficEvidence? = nil) {
         self.id = id
         self.date = date
         self.kind = kind
@@ -40,6 +41,7 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
         self.ruleID = ruleID
         self.network = network
         self.continuesPrevious = continuesPrevious
+        self.evidence = evidence
     }
 }
 
@@ -53,6 +55,7 @@ extension NetworkEvent {
         ruleID = c.lenient(.ruleID)
         network = c.lenient(.network)
         continuesPrevious = c.lenient(.continuesPrevious, false)
+        evidence = c.lenient(.evidence)
     }
 }
 
@@ -103,7 +106,7 @@ extension NetworkEvent {
     static func timeSinceLast(_ events: [NetworkEvent],
                               now: Date) -> TimeInterval? {
         var newest: Date?
-        for event in events where event.kind != "monitor-started" {
+        for event in events where event.kind != "monitor-started" && event.kind != "rule-updated" {
             if newest == nil || event.date > newest! {
                 newest = event.date
             }
