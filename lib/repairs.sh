@@ -142,6 +142,7 @@ repair_validate() {
   fi
   case "$id" in
     quit-app) allowed=" bundle_id " ;;
+    reconnect-wifi) allowed=" network " ;;
     *)        allowed=" " ;;
   esac
   for i in "${!REPAIR_PARAM_KEYS[@]}"; do
@@ -287,24 +288,41 @@ _repair_do_open_sign_in() {
 }
 
 _repair_do_reconnect_wifi() {
-  local dev=""
+  local dev="" target_net=""
   if type wifi_primary_device >/dev/null 2>&1; then
     dev="$(wifi_primary_device)"
   fi
   [ -n "$dev" ] || dev="en0"
+  target_net="$(repair_param_get network)"
   local off_cmd="networksetup -setairportpower ${dev} off"
   local on_cmd="networksetup -setairportpower ${dev} on"
-  REPAIR_RAN=("$off_cmd" "$on_cmd")
+  if [ -n "$target_net" ]; then
+    REPAIR_RAN=("$off_cmd" "$on_cmd" "networksetup -setairportnetwork ${dev} $(_repair_q "$target_net")")
+  else
+    REPAIR_RAN=("$off_cmd" "$on_cmd")
+  fi
   if [ "$REPAIR_DRY" -eq 1 ]; then
     REPAIR_OK=1
-    REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} off and on. Nothing was changed."
+    if [ -n "$target_net" ]; then
+      REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} and rejoin ${target_net}. Nothing was changed."
+    else
+      REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} off and on. Nothing was changed."
+    fi
     return 0
   fi
   if with_timeout 5 networksetup -setairportpower "$dev" off 2>/dev/null; then
     sleep 1
     if with_timeout 5 networksetup -setairportpower "$dev" on 2>/dev/null; then
+      if [ -n "$target_net" ]; then
+        sleep 2
+        with_timeout 5 networksetup -setairportnetwork "$dev" "$target_net" >/dev/null 2>&1 || true
+      fi
       REPAIR_OK=1
-      REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to prompt macOS to reconnect."
+      if [ -n "$target_net" ]; then
+        REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to reconnect to ${target_net}."
+      else
+        REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to prompt macOS to reconnect."
+      fi
       return 0
     fi
   fi

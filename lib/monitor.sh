@@ -1015,7 +1015,7 @@ _mon_rules() {
   MON_RULES=""
   # A rule can clear only when this cycle measured the inputs that decide it.
   # Link and VPN state are observed every cycle, even when traffic is not.
-  MON_CLEARABLE_RULES="N1 VPN-1 WF-1 WJ-1 "
+  MON_CLEARABLE_RULES="N1 VPN-1 WF-1 WJ-1 DH-3 "
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
@@ -1030,6 +1030,8 @@ _mon_rules() {
       if [ "$down_duration" -ge "$THRESH_WIFI_REJOIN_GRACE_S" ]; then
         _mon_add_rule critical WJ-1
       fi
+    elif [ "$MON_OFFLINE_REASON" = "self-assigned" ] || [ "$MON_OFFLINE_REASON" = "wifi-no-address" ]; then
+      _mon_add_rule critical DH-3
     fi
     MON_DEGRADED=1
     MON_MEASUREMENT_STATE="link-down"

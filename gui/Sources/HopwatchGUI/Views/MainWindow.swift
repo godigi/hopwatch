@@ -5,7 +5,7 @@ import SwiftUI
 /// same shape the old tab-shell's selector type used — so the coordinator
 /// can hold one without the window having to exist yet.
 enum MainDestination: Equatable {
-    case home, live, activity, trends, networks
+    case home, live, activity, trends, networks, settings
     /// Selects Home (see `MainWindow.handle`) with this run pushed onto its
     /// navigation path, rather than a dedicated presentation: a stored run
     /// is a deeper look at "is my network OK?", the question Home already
@@ -13,12 +13,12 @@ enum MainDestination: Equatable {
     case run(RunRoute)
 }
 
-/// The sidebar's five rows. A separate type from `MainDestination` because
+/// The sidebar's rows. A separate type from `MainDestination` because
 /// a destination can also name "a specific run", which isn't a row —
 /// folding the two together would leave `List(selection:)` holding a case
 /// it has no row to represent.
 enum SidebarSection: String, CaseIterable, Identifiable {
-    case home, live, activity, trends, networks
+    case home, live, activity, trends, networks, settings
 
     var id: String { rawValue }
 
@@ -29,6 +29,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .activity: return "Activity"
         case .trends:   return "Trends"
         case .networks: return "Networks"
+        case .settings: return "Settings"
         }
     }
 
@@ -39,6 +40,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .activity: return "bell"
         case .trends:   return "chart.xyaxis.line"
         case .networks: return "wifi"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -111,8 +113,16 @@ struct MainWindow: View {
             .padding(.bottom, 8)
 
             List(selection: $selection) {
-                ForEach(SidebarSection.allCases) { section in
-                    row(section).tag(section)
+                Section {
+                    row(.home).tag(SidebarSection.home)
+                    row(.live).tag(SidebarSection.live)
+                    row(.activity).tag(SidebarSection.activity)
+                    row(.trends).tag(SidebarSection.trends)
+                    row(.networks).tag(SidebarSection.networks)
+                }
+
+                Section {
+                    row(.settings).tag(SidebarSection.settings)
                 }
             }
             .listStyle(.sidebar)
@@ -121,24 +131,6 @@ struct MainWindow: View {
 
             // Mini network card
             sidebarNetworkCard
-
-            // Settings button
-            Button {
-                openWindow(id: WindowID.settings)
-                NSApp.activate(ignoringOtherApps: true)
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 12))
-                    Text("Settings")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(Theme.ColorToken.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
 
             monitoringStatusLine
                 .padding(.horizontal, Theme.Spacing.md)
@@ -331,6 +323,8 @@ struct MainWindow: View {
             // Keeps its own internal NavigationStack (Browse checks →
             // RunDetail) exactly as it was — see NetworksView's header.
             NetworksView()
+        case .settings:
+            SettingsView()
         }
     }
 
@@ -343,6 +337,7 @@ struct MainWindow: View {
         case .activity: selection = .activity
         case .trends:   selection = .trends
         case .networks: selection = .networks
+        case .settings: selection = .settings
         case .run(let route):
             selection = .home
             homePath = NavigationPath([route])

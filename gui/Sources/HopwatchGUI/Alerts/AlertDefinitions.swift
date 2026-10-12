@@ -73,7 +73,7 @@ struct AlertDefinition: Identifiable, Sendable {
     /// True if this alert represents a total network loss or outage rather than
     /// performance degradation (e.g. packet loss or jitter).
     var isOutage: Bool {
-        id == "connection-lost" || rules.contains("P1") || rules.contains("P2") || rules.contains("N1") || rules.contains("N1b") || rules.contains("WF-1") || rules.contains("WJ-1")
+        id == "connection-lost" || rules.contains("P1") || rules.contains("P2") || rules.contains("N1") || rules.contains("N1b") || rules.contains("WF-1") || rules.contains("WJ-1") || rules.contains("DH-3")
     }
 
     /// One mechanism-only sentence for Settings: which category of thing
@@ -110,7 +110,7 @@ struct AlertDefinition: Identifiable, Sendable {
     static let all: [AlertDefinition] = [
         AlertDefinition(
             id: "connection-lost", title: "No internet connection",
-            rules: ["N1", "N1b", "P1", "P2", "WF-1", "WJ-1"],
+            rules: ["N1", "N1b", "P1", "P2", "WF-1", "WJ-1", "DH-3"],
             dwell: 15, cooldown: 300, resolves: true, scanOnly: false,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 15 seconds before alerting, then waits 5 minutes before repeating.",

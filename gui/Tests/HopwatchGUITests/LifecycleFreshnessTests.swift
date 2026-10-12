@@ -100,4 +100,79 @@ import Testing
         #expect(noLinkChange.value)
         #expect(scanChange.value)
     }
+
+    @Test @MainActor func autoReconnectGuardsAgainstManualDisconnectWithoutPrecursor() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.appSettings.autoReconnectWiFi = true
+
+        // 1. Link drops with WJ-1 but NO precursor (user manually disconnected while healthy)
+        var manualDrop = sample("ssid:home", linkUp: false)
+        manualDrop.status.rules = ["N1", "WJ-1"]
+        manualDrop.link.offline = .init(reason: "wifi-not-joined", downSince: nil, downDurationS: 50, lastNetwork: "home", precursor: nil)
+        coordinator.handleSampleForTesting(manualDrop)
+        #expect(!coordinator.hasAutoReconnectedThisOutage)
+
+        // 2. Link drops with WJ-1 WITH involuntary precursor (router reboot or gateway down)
+        var involuntaryDrop = sample("ssid:home", linkUp: false)
+        involuntaryDrop.status.rules = ["N1", "WJ-1"]
+        involuntaryDrop.link.offline = .init(reason: "wifi-not-joined", downSince: nil, downDurationS: 50, lastNetwork: "home", precursor: "router-unreachable")
+        coordinator.handleSampleForTesting(involuntaryDrop)
+        #expect(coordinator.hasAutoReconnectedThisOutage)
+    }
+
+    @Test @MainActor func autoReconnectDHCPExhaustionRetries() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.appSettings.autoReconnectWiFi = true
+
+        // 1. Establish SSID
+        var initial = sample("ssid:home", linkUp: true)
+        initial.link.ssid = "HomeNetwork"
+        coordinator.handleSampleForTesting(initial)
+        #expect(coordinator.lastAssociatedSSID == "HomeNetwork")
+
+        // 2. DH-3 fires
+        var dhcpDrop = sample("ssid:home", linkUp: false)
+        dhcpDrop.status.rules = ["N1", "DH-3"]
+        dhcpDrop.link.offline = .init(reason: "self-assigned", downSince: nil, downDurationS: 10, lastNetwork: "HomeNetwork", precursor: nil)
+        coordinator.handleSampleForTesting(dhcpDrop)
+        #expect(coordinator.dhcpRetryCount == 1)
+
+        // 3. Immediate next sample within 30s doesn't spam retry
+        coordinator.handleSampleForTesting(dhcpDrop)
+        #expect(coordinator.dhcpRetryCount == 1)
+
+        // 4. Link recovers with valid lease -> retry count resets
+        var recovered = sample("ssid:home", linkUp: true)
+        recovered.status.rules = []
+        coordinator.handleSampleForTesting(recovered)
+        #expect(coordinator.dhcpRetryCount == 0)
+    }
+
+    @Test @MainActor func autoReconnectWedgedRouterWithGoodSignal() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.appSettings.autoReconnectWiFi = true
+
+        var wedged = sample("ssid:home", linkUp: true)
+        wedged.link.type = "wifi"
+        wedged.wifi = .init(rssi: -58, noise: -90, snr: 32, channel: "36")
+        wedged.gateway = .init(lossPct: 100, rttAvgMs: nil, rttJitterMs: nil)
+        wedged.status.rules = ["G2", "N1"]
+
+        // First 2 samples should observe and confirm without premature toggle
+        coordinator.handleSampleForTesting(wedged)
+        #expect(!coordinator.hasAutoReconnectedWedgedGateway)
+        coordinator.handleSampleForTesting(wedged)
+        #expect(!coordinator.hasAutoReconnectedWedgedGateway)
+
+        // 3rd sample confirms persistent wedged router and triggers recovery
+        coordinator.handleSampleForTesting(wedged)
+        #expect(coordinator.hasAutoReconnectedWedgedGateway)
+
+        // Gateway recovers cleanly -> resets latch
+        var recovered = sample("ssid:home", linkUp: true)
+        recovered.gateway = .init(lossPct: 0, rttAvgMs: 2.1, rttJitterMs: 0.5)
+        recovered.status.rules = []
+        coordinator.handleSampleForTesting(recovered)
+        #expect(!coordinator.hasAutoReconnectedWedgedGateway)
+    }
 }

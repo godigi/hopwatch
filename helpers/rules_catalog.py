@@ -1659,7 +1659,7 @@ RULES: list[dict[str, object]] = [
         "title": "No address handed out — Mac assigned its own",
         "category": "dhcp",
         "severity": "critical",
-        "scope": "scan",
+        "scope": "both",
         "blurb": (
             "Your Mac is joined to this network but the network never "
             "gave it an address, so it assigned itself a placeholder one "
@@ -1671,6 +1671,7 @@ RULES: list[dict[str, object]] = [
         "doc": "DIAGNOSIS-RULES.md#dh-3--self-assigned-address-dhcp-never-answered",
         "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",
                     "vpn": "broken", "browsing": "broken"},
+        "repairs": ["reconnect-wifi"],
         "fix": (
             "Try rejoining the network first — forgetting and rejoining "
             "WiFi, or unplugging and replugging an ethernet cable — "

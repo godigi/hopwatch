@@ -72,7 +72,7 @@ if [ "$1" = "-getairportpower" ]; then
   echo "Wi-Fi Power (en0): On"
   exit 0
 fi
-if [ "$1" = "-setairportpower" ]; then
+if [ "$1" = "-setairportpower" ] || [ "$1" = "-setairportnetwork" ]; then
   [ -f "$STATE/networksetup-fails" ] && exit 1
   exit 0
 fi
@@ -590,7 +590,7 @@ assert all('repairs' not in x for x in d), d
 
 # ── The catalogue agrees with itself ─────────────────────────────────────
 
-@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1, CP-1, WF-1, WJ-1 can offer, and only known ones" {
+@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1, CP-1, WF-1, WJ-1, DH-3 can offer, and only known ones" {
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   local known
@@ -608,7 +608,8 @@ assert d['CONN-1']['repairs'] == ['quit-app'], d['CONN-1']
 assert d['HOG-1']['repairs'] == ['quit-app'], d['HOG-1']
 assert d['WF-1']['repairs'] == ['reconnect-wifi'], d['WF-1']
 assert d['WJ-1']['repairs'] == ['reconnect-wifi'], d['WJ-1']
-assert sum(1 for r in d.values() if 'repairs' in r) == 6
+assert d['DH-3']['repairs'] == ['reconnect-wifi'], d['DH-3']
+assert sum(1 for r in d.values() if 'repairs' in r) == 7
 " "$known"
 }
 

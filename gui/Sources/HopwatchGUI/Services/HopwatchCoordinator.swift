@@ -54,7 +54,12 @@ final class HopwatchCoordinator {
     }
 
     private var updateCheckTask: Task<Void, Never>?
-    private var hasAutoReconnectedThisOutage = false
+    private(set) var hasAutoReconnectedThisOutage = false
+    private(set) var lastAssociatedSSID: String?
+    private(set) var dhcpRetryCount = 0
+    private var lastDHCPRetryDate: Date?
+    private(set) var hasAutoReconnectedWedgedGateway = false
+    private var wedgedGatewaySampleCount = 0
     private(set) var latestRun: RunResult?
     /// Home's fallback for a session that has not run a scan yet.
     /// See `reportSource` for why this is a separate property rather than
@@ -572,6 +577,13 @@ final class HopwatchCoordinator {
         let identityChanged = reconcileNetworkIdentity(for: sample)
         refreshLiveWiFi()
         adoptLiveSSIDAsNameIfNeeded()
+        if let ssid = sample.link.ssid, !ssid.isEmpty, !ssid.contains("<redacted>"), !ssid.contains("hidden by macOS") {
+            lastAssociatedSSID = ssid
+        } else if let net = sample.link.offline?.lastNetwork, !net.isEmpty, !net.contains("<redacted>"), !net.contains("hidden by macOS") {
+            if lastAssociatedSSID == nil {
+                lastAssociatedSSID = net
+            }
+        }
         alerts.evaluate(sample: sample)
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
@@ -582,19 +594,77 @@ final class HopwatchCoordinator {
         evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
 
-        if sample.link.up {
+        let targetNetwork = lastAssociatedSSID
+        var repairParams: [String: String] = [:]
+        if let targetNetwork, !targetNetwork.isEmpty {
+            repairParams["network"] = targetNetwork
+        }
+
+        if sample.link.up && !sample.status.rules.contains("DH-3") {
             hasAutoReconnectedThisOutage = false
-        } else if appSettings.autoReconnectWiFi && sample.status.rules.contains("WJ-1") && !hasAutoReconnectedThisOutage {
-            hasAutoReconnectedThisOutage = true
-            log.info("Auto-reconnecting Wi-Fi after WJ-1 drop")
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
-                    self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi: \(result.message)", ruleID: "WJ-1",
-                                         network: self.monitor.latest?.network.id)
-                } catch {
-                    self.log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
+            dhcpRetryCount = 0
+            lastDHCPRetryDate = nil
+            if (sample.gateway.lossPct ?? 0) < 10 {
+                hasAutoReconnectedWedgedGateway = false
+                wedgedGatewaySampleCount = 0
+            }
+        }
+
+        if appSettings.autoReconnectWiFi {
+            if sample.status.rules.contains("WJ-1"),
+               !hasAutoReconnectedThisOutage,
+               sample.link.offline?.precursor != nil {
+                hasAutoReconnectedThisOutage = true
+                let precursor = sample.link.offline?.precursor ?? "unknown"
+                log.info("Auto-reconnecting Wi-Fi after WJ-1 drop with involuntary precursor: \(precursor)")
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        let result = try await NetdiagRunner.repair(id: "reconnect-wifi", params: repairParams)
+                        self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi (\(precursor)): \(result.message)", ruleID: "WJ-1",
+                                             network: self.monitor.latest?.network.id)
+                    } catch {
+                        self.log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
+                    }
+                }
+            } else if sample.status.rules.contains("DH-3"), dhcpRetryCount < 4 {
+                let now = Date()
+                if lastDHCPRetryDate == nil || now.timeIntervalSince(lastDHCPRetryDate!) >= 30 {
+                    dhcpRetryCount += 1
+                    lastDHCPRetryDate = now
+                    let attempt = dhcpRetryCount
+                    log.info("Auto-reconnecting Wi-Fi for DH-3 (DHCP self-assigned, attempt \(attempt)/4)")
+                    Task { [weak self] in
+                        guard let self else { return }
+                        do {
+                            let result = try await NetdiagRunner.repair(id: "reconnect-wifi", params: repairParams)
+                            self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi (DHCP retry \(attempt)/4): \(result.message)", ruleID: "DH-3",
+                                                 network: self.monitor.latest?.network.id)
+                        } catch {
+                            self.log.error("Auto-reconnect Wi-Fi for DH-3 failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
+            } else if sample.link.up,
+                      (sample.link.isWiFi || sample.link.interface?.hasPrefix("en") == true),
+                      (sample.wifi?.rssi ?? -50) >= -75,
+                      sample.gateway.lossPct == 100,
+                      !hasAutoReconnectedWedgedGateway {
+                wedgedGatewaySampleCount += 1
+                if wedgedGatewaySampleCount >= 3 {
+                    hasAutoReconnectedWedgedGateway = true
+                    let rssi = sample.wifi?.rssi ?? -50
+                    log.info("Auto-reconnecting Wi-Fi for wedged gateway (100% loss despite RSSI \(rssi) dBm)")
+                    Task { [weak self] in
+                        guard let self else { return }
+                        do {
+                            let result = try await NetdiagRunner.repair(id: "reconnect-wifi", params: repairParams)
+                            self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi (wedged router): \(result.message)", ruleID: "G2",
+                                                 network: self.monitor.latest?.network.id)
+                        } catch {
+                            self.log.error("Auto-reconnect Wi-Fi for wedged router failed: \(error.localizedDescription)")
+                        }
+                    }
                 }
             }
         }
@@ -903,6 +973,10 @@ final class HopwatchCoordinator {
         self.latestSpeedTest = speed
         self.latestSpeedTestAt = speedAt
         self.latestSpeedTestNetwork = speedNetwork
+    }
+
+    func handleSampleForTesting(_ sample: MonitorSample) {
+        handleSample(sample)
     }
 
     /// Gallery fixture for the moved-network state (`--gallery-moved`): the
@@ -1421,25 +1495,30 @@ final class HopwatchCoordinator {
     }
 
     /// Run the reconnect-wifi repair on demand (e.g. from an offline card button).
-    func reconnectWiFi() {
+    func reconnectWiFi(targetSSID: String? = nil, ruleID: String = "WJ-1") {
         guard !isRepairing else { return }
-        repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+        let target = targetSSID ?? lastAssociatedSSID
+        repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                       phase: .working, detail: nil)
         repairTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
-                self.eventLog.record(kind: "repair", summary: result.message, ruleID: "WJ-1",
+                var params: [String: String] = [:]
+                if let target, !target.isEmpty {
+                    params["network"] = target
+                }
+                let result = try await NetdiagRunner.repair(id: "reconnect-wifi", params: params)
+                self.eventLog.record(kind: "repair", summary: result.message, ruleID: ruleID,
                                      network: self.monitor.latest?.network.id)
                 if result.ok {
-                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                    self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                                        phase: .done, detail: result.message)
                 } else {
-                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                    self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                                        phase: .failed, detail: result.message)
                 }
             } catch {
-                self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                                    phase: .failed, detail: error.localizedDescription)
             }
         }
@@ -1647,12 +1726,14 @@ final class HopwatchCoordinator {
             return
         }
         let name = iface.ssid()
-        if let name, !name.isEmpty {
+        if let name, !name.isEmpty, !name.contains("<redacted>"), !name.contains("hidden by macOS") {
             log.debug("wifi: live SSID read OK")
+            liveSSID = name
+            lastAssociatedSSID = name
         } else {
             log.debug("wifi: CoreWLAN interface present but ssid() returned nil — location grant may be provisional or revoked")
+            liveSSID = nil
         }
-        liveSSID = (name?.isEmpty ?? true) ? nil : name
     }
 
     /// Adopt the live SSID as the current network's display name when no

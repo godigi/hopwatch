@@ -150,7 +150,7 @@ enum GalleryMode {
             Screen(name: "networks", size: NSSize(width: 700, height: 680)) {
                 wrap(NetworksView())
             },
-            Screen(name: "settings", size: NSSize(width: 520, height: 560)) {
+            Screen(name: "settings", size: NSSize(width: 900, height: 750)) {
                 wrap(SettingsView())
             },
         ]

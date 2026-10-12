@@ -81,7 +81,7 @@ diagnosis_run() {
     _router_hint="ask the network's owner"
     [ -n "${LINK_DHCP_ROUTER:-}" ] && _router_hint="try http://${LINK_DHCP_ROUTER} in a browser"
     add_diag critical N1c "$_where and it gave your Mac an address, but no way out to the internet. Networks in hotels, airports, cafés and offices usually do this until you open a browser and pass their sign-in or terms page — so start there: $_router_hint. If there's no sign-in page, the network handed out an address without a working route, and only its owner can fix that."
-  elif [ -z "$GATEWAY" ] && [ "${LINK_SELF_ASSIGNED:-0}" -eq 1 ]; then
+  elif [ -z "$GATEWAY" ] && { [ "${LINK_SELF_ASSIGNED:-0}" -eq 1 ] || [ "${OFFLINE_REASON:-}" = "self-assigned" ] || [ "${OFFLINE_REASON:-}" = "wifi-no-address" ] || [ "${MON_OFFLINE_REASON:-}" = "self-assigned" ] || [ "${MON_OFFLINE_REASON:-}" = "wifi-no-address" ]; }; then
     # DH-3 — joined, but nothing answered the request for an address, so
     # macOS made one up. It sits between N1c and N1 and is a third thing
     # from both: N1c has a real lease and no route, N1 has no link at all,
@@ -104,12 +104,21 @@ diagnosis_run() {
       _fix="Unplugging and replugging the cable makes your Mac ask for an address again"
     fi
     add_diag critical DH-3 "$_joined, but the network never gave it an address — so your Mac assigned itself a placeholder one (${LINK_IP:-a self-assigned address}) that can't reach anything. This is almost always the router's address service (DHCP) being down, out of addresses, or still starting up after a reboot. $_fix; if that doesn't work, restart the router. Nothing will work until the network hands out a real address."
+    if declare -f repair_offer >/dev/null 2>&1 && [ "${IS_WIFI:-0}" -eq 1 ]; then
+      repair_offer DH-3 reconnect-wifi "Reconnect Wi-Fi"
+    fi
   elif [ -z "$GATEWAY" ]; then
     add_diag critical N1 "Your Mac has no network connection at all — nothing is joined and no cable is carrying a link. Turn WiFi on and pick a network, or check that the ethernet cable is seated at both ends. Nothing else can be diagnosed until this is fixed."
     if [ "${OFFLINE_REASON:-}" = "wifi-off" ] || [ "${MON_OFFLINE_REASON:-}" = "wifi-off" ]; then
       add_diag critical WF-1 "The Wi-Fi radio on this Mac is switched off while no other network interface carries a connection. Turn Wi-Fi on to reconnect."
+      if declare -f repair_offer >/dev/null 2>&1; then
+        repair_offer WF-1 reconnect-wifi "Reconnect Wi-Fi"
+      fi
     elif [ "${OFFLINE_REASON:-}" = "wifi-not-joined" ] || [ "${MON_OFFLINE_REASON:-}" = "wifi-not-joined" ]; then
       add_diag critical WJ-1 "Your Mac is not connected to any Wi-Fi network even though the Wi-Fi radio is on. Pick a network in Wi-Fi settings or toggle Wi-Fi to prompt it to reconnect."
+      if declare -f repair_offer >/dev/null 2>&1; then
+        repair_offer WJ-1 reconnect-wifi "Reconnect Wi-Fi"
+      fi
     fi
   elif [ "${PUBLIC_CHECKED:-0}" -eq 1 ] && [ "$_public_traffic_ok" -eq 0 ] \
        && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] && [ -z "$GW_LOSS" ]; then
