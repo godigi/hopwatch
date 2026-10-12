@@ -95,9 +95,17 @@ struct MonitorSample: Decodable, Sendable {
         var downDurationS: Int?
         var lastNetwork: String?
         var precursor: String?
+        /// The CLI's sentence about the precursor ("Your router stopped
+        /// responding right before Wi-Fi dropped…"), or nil when it has none
+        /// to say, including when a more specific rule (DH-3) explains the
+        /// outage better. Rendered verbatim; the app holds no copy of it and
+        /// shows nothing when this is nil. Nil from a CLI older than the
+        /// field.
+        var precursorSummary: String?
 
         enum CodingKeys: String, CodingKey {
             case reason, precursor
+            case precursorSummary = "precursor_summary"
             case downSince = "down_since"
             case downDurationS = "down_duration_s"
             case lastNetwork = "last_network"
@@ -111,11 +119,14 @@ struct MonitorSample: Decodable, Sendable {
         /// The network the link was last up on, or nil when the monitor does
         /// not know it. Blank counts as not knowing.
         ///
-        /// The monitor sets `last_network` only when the link is up *in that
-        /// process*, and the app restarts the monitor on every network
-        /// event, which a drop is. So a process that starts already offline
-        /// reports none, and the card must say nothing about a network
-        /// rather than name a wrong or empty one.
+        /// The app restarts the monitor on every network event, which a drop
+        /// is, so the process that reports the outage usually did not see the
+        /// network go. The monitor gets the name back from the app
+        /// (`status.carry_network`) and uses it only when it can show it
+        /// belongs to the network that was lost; otherwise `last_network` is
+        /// null and the card must say nothing about a network rather than
+        /// name a wrong or empty one. It is never a placeholder; that is
+        /// decided in the CLI, not here.
         var knownLastNetwork: String? {
             guard let net = lastNetwork?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !net.isEmpty else { return nil }
@@ -331,6 +342,12 @@ struct MonitorSample: Decodable, Sendable {
         /// and hands it back, unread, to the next monitor process. Nil from a
         /// CLI older than the field.
         var carry: String?
+        /// The name that goes with `carry`: the network the link was last up
+        /// on, or nil when there is none. Opaque in the same way: kept
+        /// verbatim by `MonitorStream` and handed back, unread, in
+        /// `HOPWATCH_MONITOR_LAST_NETWORK`. Nil from a CLI older than the
+        /// field.
+        var carryNetwork: String?
 
         struct AutoReconnect: Decodable, Sendable, Equatable {
             /// `wifi-dropped`, `no-address` or `wedged-gateway`.
@@ -352,6 +369,7 @@ struct MonitorSample: Decodable, Sendable {
             case cadenceS = "cadence_s"
             case autoReconnect = "auto_reconnect"
             case carry
+            case carryNetwork = "carry_network"
         }
     }
 
@@ -451,6 +469,7 @@ extension MonitorSample.OfflineContext {
         downDurationS = c.lenient(.downDurationS)
         lastNetwork = c.lenient(.lastNetwork)
         precursor = c.lenient(.precursor)
+        precursorSummary = c.lenient(.precursorSummary)
     }
 }
 
@@ -553,6 +572,7 @@ extension MonitorSample.Status {
         cadenceS = c.lenient(.cadenceS)
         autoReconnect = c.lenient(.autoReconnect)
         carry = c.lenient(.carry)
+        carryNetwork = c.lenient(.carryNetwork)
     }
 }
 

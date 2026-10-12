@@ -269,8 +269,11 @@ struct DropdownView: View {
                     subtitleParts.append(line)
                 }
 
-                if offline?.precursor == "router-unreachable", !rules.contains("DH-3") {
-                    subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
+                // The CLI's own sentence about what preceded the drop, or
+                // nothing: it also decides when a more specific rule
+                // (DH-3) makes that sentence the wrong one to show.
+                if let summary = offline?.precursorSummary, !summary.isEmpty {
+                    subtitleParts.append(summary)
                 } else {
                     subtitleParts.append(coordinator.headline)
                 }
