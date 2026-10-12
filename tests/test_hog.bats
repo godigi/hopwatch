@@ -462,6 +462,8 @@ monitor_rules() {
 # ── The parser, against what nettop really prints ────────────────────────
 
 @test "hog.py: names with spaces and dots, a time column and a header-less first row all parse" {
+  # The pid must be a live process that is not Hopwatch's: hog.py names only
+  # processes `ps` still lists, so a made-up pid lands in "excluded", unnamed.
   local out
   out="$(printf '%s\n' \
     'time,,bytes_in,bytes_out,' \
