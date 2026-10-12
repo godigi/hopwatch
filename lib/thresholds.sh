@@ -689,3 +689,71 @@ THRESH_WIFI_REJOIN_GRACE_S=45
 # the last flap of the internet case without reaching back to an
 # unrelated afternoon fault.
 THRESH_MON_PRECURSOR_S=120
+
+# ── Automatic Wi-Fi reconnect [DH-3, WJ-1, wedged gateway] ───────────────
+# The one place Hopwatch may repair something without a button press, and
+# only for a user who switched it on (Settings, "Automatically reconnect
+# Wi-Fi"; off by default). The monitor decides *whether and why* and says so
+# in `status.auto_reconnect`; the app only checks its setting and that no
+# repair is already running, then runs `--repair=reconnect-wifi`. Every
+# number that decides it lives here. See CLAUDE.md (Permissions).
+
+# DH-3 — how long a joined Wi-Fi link may sit without a usable address
+# before the monitor calls it a DHCP failure. Associated-but-no-address is
+# the normal state for the first seconds of every join, wake and roam, and
+# some captive and hotel networks take 20 s or more to answer. macOS itself
+# falls back to a 169.254 address only after its own DHCP attempts give up,
+# so a link still addressless after this long is not a join in progress.
+THRESH_DHCP_ADDRESS_GRACE_S=30
+
+# DH-3 retry: a reconnect that did not bring an address back is tried again
+# after this many seconds, at most this many times per outage. An outage
+# ends when the link comes back with a default route. Four tries 30 s apart
+# is two minutes of effort, enough for a router whose DHCP service is
+# restarting, and then the app stops and leaves the finding on screen.
+THRESH_AUTORECONNECT_RETRY_S=30
+THRESH_AUTORECONNECT_MAX_RETRIES=4
+
+# Wedged gateway: the link is up, the signal is fine, and the router has
+# stopped answering anyone. A power cycle clears the Mac's ARP and
+# association state, which is what un-wedges a client bridge or a stuck AP
+# table. Every part is required, because a power cycle drops calls:
+#   * RSSI at or above this floor, from a real reading. Below it the loss
+#     is explained by signal, not by a wedged router, and G1 owns it. Same
+#     figure as THRESH_WIFI_RSSI_WEAK_DBM on purpose: "not weak".
+#   * gateway loss at or above the trigger, i.e. nothing at all got through,
+#   * for this many consecutive samples (about 30 s at the 5 s degraded
+#     cadence, long enough to outlast a roam or a channel change),
+#   * and the loss rules already call it a fault (G2, not TCP-1 filtering):
+#     a gateway that merely ignores ping, as many hotel and office ones do,
+#     must never reach a power cycle.
+# The attempt is spent once per episode; the episode ends when gateway loss
+# falls below the recovery percentage.
+THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM=-75
+THRESH_AUTORECONNECT_WEDGED_LOSS_PCT=100
+THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT=10
+THRESH_AUTORECONNECT_WEDGED_SAMPLES=6
+
+# reconnect-wifi, the repair itself (lib/repairs.sh).
+#   REJOIN_WAIT: after the radio is switched back on, how long to give macOS
+#     to rejoin by itself before forcing a join. If it joins anything in
+#     that time the repair leaves it alone, so a better network macOS chose
+#     is never overridden.
+#   JOIN_TIMEOUT: how long a forced join may take. WPA handshakes finish in
+#     a few seconds but an enterprise network or a slow AP can need more;
+#     5 s was cutting joins off mid-handshake.
+#   POWER_TIMEOUT / SETTLE: the radio switch itself, and the pause between
+#     off and on that lets the interface fully drop.
+THRESH_REPAIR_WIFI_REJOIN_WAIT_S=8
+THRESH_REPAIR_WIFI_JOIN_TIMEOUT_S=20
+THRESH_REPAIR_WIFI_POWER_TIMEOUT_S=5
+THRESH_REPAIR_WIFI_SETTLE_S=1
+
+# The app restarts the monitor on network events and around investigation
+# bursts, and hands the new process the last automatic attempt it made so the
+# counters above survive. An attempt older than this belongs to an outage
+# that has long since ended or been replaced, and is ignored. Ten minutes is
+# comfortably longer than the longest sequence the cutoffs above allow (the
+# DH-3 grace plus every retry, about two and a half minutes) and short enough
+# that an unrelated outage later in the day starts with a clean slate.
+THRESH_AUTORECONNECT_CARRY_S=600

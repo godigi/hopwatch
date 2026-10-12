@@ -661,6 +661,10 @@ All of the below are implemented and can fire.
 - Scope: live monitor (`--monitor`).
 - Evidence: Wi-Fi radio on but unassociated beyond grace period.
 - Recommendation: Reconnect Wi-Fi by toggling the radio off and on to prompt macOS to rejoin known networks, or select your network in Wi-Fi settings.
+- Repair: `reconnect-wifi` — a button on the finding, and, for a user who
+  enabled "Automatically reconnect Wi-Fi", an automatic reconnect under the
+  conservative conditions in
+  [Automatic Wi-Fi reconnect](#automatic-wi-fi-reconnect).
 
 - **ST-1** — Speed regression vs baseline.
 ### NT-1 — System clock drift > 30 s
@@ -1071,14 +1075,26 @@ second, contradictory fix.
 
 ### DH-3 — Self-assigned address, DHCP never answered
 
-- Trigger: no default route, `LINK_SELF_ASSIGNED == 1` — the active
+- Trigger, scan: no default route, `LINK_SELF_ASSIGNED == 1` — the active
   device's only IPv4 address is in `169.254.0.0/16`. Set by
   `lib/linkstate.sh::linkstate_run` via `linkstate_is_link_local`.
+- Trigger, live monitor (`--monitor`): no default route and the Wi-Fi
+  interface is associated but holds either a `169.254.0.0/16` address
+  (offline reason `self-assigned`) or no IPv4 address at all (`wifi-no-address`),
+  continuously for at least `THRESH_DHCP_ADDRESS_GRACE_S` (30 s). The grace
+  matters: associated-but-addressless is the normal state for the first
+  seconds of every join, wake and roam, and the rule must not fire on it.
 - Severity: `critical`.
+- Scope: both.
 - Evidence: the interface, the SSID where there is one, and the
-  self-assigned address itself.
+  self-assigned address itself where there is one.
 - Recommendation: rejoin the network (or replug the cable) so the Mac
   asks again; restart the router if that does not take.
+- Repair: `reconnect-wifi` (Wi-Fi only) — a button on the finding, and,
+  for a user who enabled "Automatically reconnect Wi-Fi", an automatic
+  retry every `THRESH_AUTORECONNECT_RETRY_S` (30 s), at most
+  `THRESH_AUTORECONNECT_MAX_RETRIES` (4) times per outage. See
+  [Automatic Wi-Fi reconnect](#automatic-wi-fi-reconnect).
 
 **Why this is its own rule.** macOS assigns a `169.254` address when it
 asks a network for one and nothing answers. It is the OS reporting the
@@ -1106,6 +1122,27 @@ cable that was fine.
 the first when nothing is configured; with self-assigned addresses now
 reaching that path, the service order's ranking is what decides, since
 it is macOS's own statement of which link the user thinks they are on.
+
+### Automatic Wi-Fi reconnect
+
+Not a rule: a decision the monitor makes about three of them, published as
+`status.auto_reconnect` (see `docs/JSON-SCHEMA.md`). It is the one repair
+that may start without a button press, and only for a user who turned on
+"Automatically reconnect Wi-Fi" (off by default). Whether one is warranted,
+and every number behind it, is decided in `lib/monitor.sh` against
+`lib/thresholds.sh`; the app checks its setting and that no repair is
+already running, then runs `--repair=reconnect-wifi`.
+
+| Situation | Reason | Warranted when | Attempts |
+|---|---|---|---|
+| `WJ-1` | `wifi-dropped` | Wi-Fi on but unjoined for `THRESH_WIFI_REJOIN_GRACE_S`, the router stopped answering within `THRESH_MON_PRECURSOR_S` before the drop (`router-unreachable` only), and the radio was not switched off during the outage | 1 per outage |
+| `DH-3` | `no-address` | the rule is firing (past `THRESH_DHCP_ADDRESS_GRACE_S`) and the radio was not switched off during the outage | every `THRESH_AUTORECONNECT_RETRY_S`, max `THRESH_AUTORECONNECT_MAX_RETRIES` |
+| `G2` | `wedged-gateway` | Wi-Fi link up, real RSSI >= `THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM`, gateway loss >= `THRESH_AUTORECONNECT_WEDGED_LOSS_PCT`, `G2` firing (so not ICMP filtering), for `THRESH_AUTORECONNECT_WEDGED_SAMPLES` consecutive samples | 1 per episode, re-armed when gateway loss falls below `THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT` |
+
+Counters reset when the link returns, the network changes, or the monitor
+saw a gap (sleep, pause). Known limit: a user who picks "Disconnect" in the
+Wi-Fi menu right after the router misbehaved is indistinguishable, to an
+unprivileged process, from the router dropping them.
 
 ## Rules added in v0.3.0 — NAT / WAN topology
 

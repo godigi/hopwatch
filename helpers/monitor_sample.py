@@ -456,6 +456,22 @@ def _journal_prune(path: str) -> None:
         return
 
 
+def _auto_reconnect() -> dict | None:
+    """status.auto_reconnect: the monitor's verdict that an automatic Wi-Fi
+    reconnect is warranted on this very sample, or None. Passed through
+    verbatim: the reason, the rule and the attempt counters are decided in
+    lib/monitor.sh against lib/thresholds.sh and nothing here judges."""
+    reason = _env("AUTO_RECONNECT_REASON")
+    if not reason:
+        return None
+    return {
+        "reason": reason,
+        "rule": _env("AUTO_RECONNECT_RULE"),
+        "attempt": _i("AUTO_RECONNECT_ATTEMPT"),
+        "max_attempts": _i("AUTO_RECONNECT_MAX"),
+    }
+
+
 def main() -> None:
     is_wifi = _env("IFACE_TYPE") == "wifi"
     link_up = os.environ.get("NETDIAG_MON_LINK_UP") == "1"
@@ -586,6 +602,13 @@ def main() -> None:
             # consumer must not plot it or alert on it.
             "paused": os.environ.get("NETDIAG_MON_PAUSED") == "1",
             "cadence_s": _i("CADENCE_S"),
+            # null on every sample that warrants nothing. Present only on
+            # the sample where lib/monitor.sh has decided an automatic
+            # Wi-Fi reconnect is warranted now (and for which rule); the
+            # app runs it if the user enabled the setting. The decision,
+            # its counters and every cutoff are the monitor's — see
+            # docs/JSON-SCHEMA.md.
+            "auto_reconnect": _auto_reconnect(),
         },
     }
 
