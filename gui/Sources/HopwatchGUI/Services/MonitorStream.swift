@@ -113,6 +113,9 @@ final class MonitorStream {
     /// resolved CLI, skipping the capability handshake and the journal
     /// directory. Nil in the app.
     private var binaryOverrideForTesting: String?
+    /// The last automatic reconnect attempt, `RULE:ATTEMPT:EPOCH`, handed to
+    /// the next monitor process so its counters survive a restart.
+    var autoReconnectCarry: String?
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
     /// Set by `restart()` and consumed by the next `spawn()`: the child about
@@ -237,8 +240,18 @@ final class MonitorStream {
             "--monitor-medium-interval",   String(Defaults.mediumInterval),
             "--monitor-slow-interval",     String(Defaults.slowInterval),
         ]
-        proc.environment = binaryOverrideForTesting == nil
+        var childEnv = binaryOverrideForTesting == nil
             ? BinaryLocator.environment() : ProcessInfo.processInfo.environment
+        // The monitor holds the automatic-reconnect counters, and this app
+        // restarts it on every network event (including the ones its own
+        // reconnect causes) and around every investigation burst. Without
+        // this the counters would reset each time and "at most four tries"
+        // would mean four per restart. An opaque pass-through: the monitor
+        // parses it, and ignores it once it is older than its own cutoff.
+        if let carry = autoReconnectCarry {
+            childEnv["HOPWATCH_AUTORECONNECT_CARRY"] = carry
+        }
+        proc.environment = childEnv
 
         let pipe = Pipe()
         stdoutPipe = pipe

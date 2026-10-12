@@ -74,8 +74,8 @@ struct SettingsView: View {
             }
 
             Section("Wi-Fi Recovery") {
-                Toggle("Automatically reconnect Wi-Fi when connection drops", isOn: $appSettings.autoReconnectWiFi)
-                Text("If Wi-Fi drops and macOS fails to reconnect automatically within 45 seconds, Hopwatch toggles Wi-Fi once to prompt macOS to re-join your network.")
+                Toggle("Automatically reconnect Wi-Fi", isOn: $appSettings.autoReconnectWiFi)
+                Text("Off by default. When on, Hopwatch turns Wi-Fi off and on without asking if your router stops answering and Wi-Fi does not come back, if your network never hands your Mac an address, or if the router stops responding despite a strong signal. It does not do this if you switched Wi-Fi off yourself.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

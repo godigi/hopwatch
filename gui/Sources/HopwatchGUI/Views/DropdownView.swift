@@ -251,7 +251,9 @@ struct DropdownView: View {
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
             let rules = coordinator.monitor.latest?.status.rules ?? []
             let headline: String = {
-                if rules.contains("WJ-1") {
+                if rules.contains("DH-3") {
+                    return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
+                } else if rules.contains("WJ-1") {
                     return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? "Wi-Fi dropped and hasn't rejoined"
                 } else if rules.contains("WF-1") {
                     return coordinator.rulesCatalog.catalog?["WF-1"]?.title ?? "Wi-Fi is turned off"
@@ -272,7 +274,7 @@ struct DropdownView: View {
                     subtitleParts.append("Last connected to \(net)")
                 }
 
-                if offline?.precursor == "router-unreachable" {
+                if offline?.precursor == "router-unreachable", !rules.contains("DH-3") {
                     subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
                 } else {
                     subtitleParts.append(coordinator.headline)
@@ -280,9 +282,9 @@ struct DropdownView: View {
 
                 return subtitleParts.joined(separator: "\n")
             }()
-            let hasWJ1 = rules.contains("WJ-1")
-            let actionTitle = hasWJ1 ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
-            let secTitle: String? = hasWJ1 ? "Open Wi-Fi Settings" : nil
+            let canReconnect = rules.contains("WJ-1") || rules.contains("DH-3")
+            let actionTitle = canReconnect ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
+            let secTitle: String? = canReconnect ? "Open Wi-Fi Settings" : nil
 
             MenuStatusHeroView(
                 iconName: NoLinkCopy.icon,
@@ -292,8 +294,8 @@ struct DropdownView: View {
                 subtitle: subtitle,
                 actionTitle: actionTitle,
                 onAction: {
-                    if hasWJ1 {
-                        coordinator.reconnectWiFi()
+                    if canReconnect {
+                        coordinator.reconnectWiFi(ruleID: rules.contains("DH-3") ? "DH-3" : "WJ-1")
                     } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
                         NSWorkspace.shared.open(url)
                     }

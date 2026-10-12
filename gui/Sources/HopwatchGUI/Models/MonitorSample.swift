@@ -291,11 +291,33 @@ struct MonitorSample: Decodable, Sendable {
         /// and an alert must not fire on it.
         var paused: Bool = false
         var cadenceS: Int?
+        /// The monitor's verdict that an automatic Wi-Fi reconnect is
+        /// warranted on this very sample, or nil (the usual case). Decided
+        /// and rate-limited in lib/monitor.sh against lib/thresholds.sh;
+        /// the app only checks its setting and that no repair is running.
+        /// Absent from a CLI older than the field, which reads as "not
+        /// warranted".
+        var autoReconnect: AutoReconnect?
+
+        struct AutoReconnect: Decodable, Sendable, Equatable {
+            /// `wifi-dropped`, `no-address` or `wedged-gateway`.
+            var reason: String
+            /// The rule behind it: `WJ-1`, `DH-3` or `G2`.
+            var rule: String?
+            var attempt: Int?
+            var maxAttempts: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case reason, rule, attempt
+                case maxAttempts = "max_attempts"
+            }
+        }
 
         enum CodingKeys: String, CodingKey {
             case severity, rules, measurement, degraded, paused
             case icmpFiltered = "icmp_filtered"
             case cadenceS = "cadence_s"
+            case autoReconnect = "auto_reconnect"
         }
     }
 
@@ -477,6 +499,7 @@ extension MonitorSample.Status {
         degraded = c.lenient(.degraded, false)
         paused = c.lenient(.paused, false)
         cadenceS = c.lenient(.cadenceS)
+        autoReconnect = c.lenient(.autoReconnect)
     }
 }
 

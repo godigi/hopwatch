@@ -45,16 +45,32 @@ final class HopwatchCoordinator {
     /// rather than `events` because that name is already `events:
     /// NetworkEventWatcher` above, a different thing (CoreWLAN/NWPath
     /// notifications, not stored history).
-    let eventLog = EventStore()
+    let eventLog: EventStore
 
-    init() {
+    /// How a repair is actually run. The default shells out to
+    /// `hopwatch --repair=…`; tests inject a recorder, because the real one
+    /// power-cycles this Mac's Wi-Fi.
+    typealias RepairRunner = @Sendable (_ id: String, _ params: [String: String]) async throws -> NetdiagRunner.RepairResult
+    private let repairRunner: RepairRunner
+
+    init(repairRunner: @escaping RepairRunner = { id, params in
+             try await NetdiagRunner.repair(id: id, params: params)
+         },
+         eventLog: EventStore? = nil) {
+        self.repairRunner = repairRunner
+        self.eventLog = eventLog ?? EventStore()
         locationPermissions.onAuthorizationChange = { [weak self] _ in
             self?.refreshLocationState()
         }
     }
 
     private var updateCheckTask: Task<Void, Never>?
-    private var hasAutoReconnectedThisOutage = false
+    /// The Wi-Fi network this Mac was last seen joined to, as a readable
+    /// name — what a "rejoin" would target. Tied to the network identity:
+    /// cleared when `reconcileNetworkIdentity` sees a different network, so
+    /// a network whose name macOS hides is never answered with the previous
+    /// network's name.
+    private(set) var lastAssociatedSSID: String?
     private(set) var latestRun: RunResult?
     /// Home's fallback for a session that has not run a scan yet.
     /// See `reportSource` for why this is a separate property rather than
@@ -546,6 +562,80 @@ final class HopwatchCoordinator {
 
     // MARK: - Samples
 
+    // MARK: - Automatic Wi-Fi reconnect
+
+    /// A name worth passing to a rejoin: present, and not one of the
+    /// placeholders macOS or the CLI substitutes when it will not say.
+    static func readableSSID(_ name: String?) -> String? {
+        guard let name, !name.isEmpty,
+              !name.contains("<redacted>"),
+              !name.contains("hidden by macOS") else { return nil }
+        return name
+    }
+
+    /// The network a reconnect should rejoin, or nil to cycle the radio and
+    /// let macOS choose. After a drop (WJ-1, WF-1) that is the network that
+    /// was lost. For any other fault the Mac is *still joined*, so the only
+    /// name to trust is the one CoreWLAN reads this instant: a remembered
+    /// name could belong to the network the user left on purpose.
+    func reconnectTarget(forRule ruleID: String) -> String? {
+        switch ruleID {
+        case "WJ-1", "WF-1": return lastAssociatedSSID
+        default:             return liveSSID
+        }
+    }
+
+    /// The app's whole part in an automatic reconnect. Whether one is
+    /// warranted, why, and how many have been tried is the monitor's
+    /// decision (`status.auto_reconnect`, lib/monitor.sh, every cutoff in
+    /// lib/thresholds.sh). All this checks is the user's setting and that no
+    /// repair is already running — an automatic one must never race a
+    /// manual one, or another automatic one — and then it runs the repair
+    /// and records that it did.
+    private func considerAutoReconnect(_ sample: MonitorSample) {
+        guard appSettings.autoReconnectWiFi,
+              let decision = sample.status.autoReconnect,
+              !isRepairing else { return }
+        let ruleID = decision.rule ?? "WJ-1"
+        var params: [String: String] = [:]
+        if let target = reconnectTarget(forRule: ruleID) { params["network"] = target }
+        let attempt = decision.attempt ?? 1
+        let of = decision.maxAttempts.map { "/\($0)" } ?? ""
+        log.info("Auto-reconnecting Wi-Fi: \(decision.reason, privacy: .public) (\(ruleID, privacy: .public), attempt \(attempt)\(of, privacy: .public))")
+        // Handed to the next monitor process if this one is restarted by the
+        // network event the reconnect itself causes — see MonitorStream.
+        monitor.autoReconnectCarry = "\(ruleID):\(attempt):\(Int(Date().timeIntervalSince1970))"
+        repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
+                                      phase: .working, detail: nil)
+        let summary = "Auto-reconnect Wi-Fi (\(decision.reason), attempt \(attempt)\(of))"
+        repairTask = Task { [weak self] in
+            await self?.performAutoReconnect(ruleID: ruleID, params: params, summary: summary)
+        }
+    }
+
+    private func performAutoReconnect(ruleID: String, params: [String: String],
+                                      summary: String) async {
+        do {
+            let result = try await repairRunner("reconnect-wifi", params)
+            eventLog.record(kind: "repair", summary: "\(summary): \(result.message)", ruleID: ruleID,
+                            network: monitor.latest?.network.id)
+            repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
+                                          phase: result.ok ? .done : .failed,
+                                          detail: result.message)
+        } catch {
+            log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
+            eventLog.record(kind: "repair", summary: "\(summary): failed — \(error.localizedDescription)",
+                            ruleID: ruleID, network: monitor.latest?.network.id)
+            repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
+                                          phase: .failed, detail: error.localizedDescription)
+        }
+    }
+
+    /// Lets a test wait for the repair a sample just started.
+    func awaitRepairForTesting() async {
+        await repairTask?.value
+    }
+
     /// A decoded sample is the first positive evidence of an identity change
     /// when CoreWLAN/NWPath did not deliver an event. Invalidate older async
     /// work before evaluating this sample, while retaining the sample itself.
@@ -570,8 +660,16 @@ final class HopwatchCoordinator {
         guard !sample.status.paused else { return }
         let previousNetworkID = lastNetworkID
         let identityChanged = reconcileNetworkIdentity(for: sample)
+        // A different network: whatever name was remembered belonged to the
+        // last one. Cleared before anything below can re-set it, so a
+        // network whose name macOS hides ends up with no name rather than
+        // the previous network's.
+        if identityChanged { lastAssociatedSSID = nil }
         refreshLiveWiFi()
         adoptLiveSSIDAsNameIfNeeded()
+        if let ssid = Self.readableSSID(sample.link.ssid) ?? liveSSID {
+            lastAssociatedSSID = ssid
+        }
         alerts.evaluate(sample: sample)
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
@@ -582,22 +680,7 @@ final class HopwatchCoordinator {
         evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
 
-        if sample.link.up {
-            hasAutoReconnectedThisOutage = false
-        } else if appSettings.autoReconnectWiFi && sample.status.rules.contains("WJ-1") && !hasAutoReconnectedThisOutage {
-            hasAutoReconnectedThisOutage = true
-            log.info("Auto-reconnecting Wi-Fi after WJ-1 drop")
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
-                    self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi: \(result.message)", ruleID: "WJ-1",
-                                         network: self.monitor.latest?.network.id)
-                } catch {
-                    self.log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
-                }
-            }
-        }
+        considerAutoReconnect(sample)
 
         // The first cycle of a monitor process records monitor-started, matching
         // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
@@ -903,6 +986,10 @@ final class HopwatchCoordinator {
         self.latestSpeedTest = speed
         self.latestSpeedTestAt = speedAt
         self.latestSpeedTestNetwork = speedNetwork
+    }
+
+    func handleSampleForTesting(_ sample: MonitorSample) {
+        handleSample(sample)
     }
 
     /// Gallery fixture for the moved-network state (`--gallery-moved`): the
@@ -1421,25 +1508,23 @@ final class HopwatchCoordinator {
     }
 
     /// Run the reconnect-wifi repair on demand (e.g. from an offline card button).
-    func reconnectWiFi() {
+    func reconnectWiFi(ruleID: String = "WJ-1") {
         guard !isRepairing else { return }
-        repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+        var params: [String: String] = [:]
+        if let target = reconnectTarget(forRule: ruleID) { params["network"] = target }
+        repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                       phase: .working, detail: nil)
         repairTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
-                self.eventLog.record(kind: "repair", summary: result.message, ruleID: "WJ-1",
+                let result = try await self.repairRunner("reconnect-wifi", params)
+                self.eventLog.record(kind: "repair", summary: result.message, ruleID: ruleID,
                                      network: self.monitor.latest?.network.id)
-                if result.ok {
-                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
-                                                       phase: .done, detail: result.message)
-                } else {
-                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
-                                                       phase: .failed, detail: result.message)
-                }
+                self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
+                                                   phase: result.ok ? .done : .failed,
+                                                   detail: result.message)
             } catch {
-                self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                                    phase: .failed, detail: error.localizedDescription)
             }
         }
@@ -1473,7 +1558,7 @@ final class HopwatchCoordinator {
         }
         let result: NetdiagRunner.RepairResult
         do {
-            result = try await NetdiagRunner.repair(repair)
+            result = try await repairRunner(repair.id, repair.params)
         } catch NetdiagError.scriptError(let reason) {
             finish(.failed, reason)
             return
@@ -1647,12 +1732,13 @@ final class HopwatchCoordinator {
             return
         }
         let name = iface.ssid()
-        if let name, !name.isEmpty {
+        if let name, !name.isEmpty, !name.contains("<redacted>"), !name.contains("hidden by macOS") {
             log.debug("wifi: live SSID read OK")
+            liveSSID = name
         } else {
             log.debug("wifi: CoreWLAN interface present but ssid() returned nil — location grant may be provisional or revoked")
+            liveSSID = nil
         }
-        liveSSID = (name?.isEmpty ?? true) ? nil : name
     }
 
     /// Adopt the live SSID as the current network's display name when no
@@ -2142,10 +2228,19 @@ final class HopwatchCoordinator {
         // a catalog that has not loaded.
         if linkIsDown {
             let offline = liveSample?.link.offline ?? monitor.latest?.link.offline
-            if let precursor = offline?.precursor, precursor == "router-unreachable" {
+            let firing = monitor.latest?.status.rules ?? []
+            if let precursor = offline?.precursor, precursor == "router-unreachable",
+               !firing.contains("DH-3") {
                 return "Your router stopped responding right before Wi-Fi dropped, which usually means it restarted."
             }
-            return Self.headlineText(forRulesIn: monitor.latest?.status.rules ?? [],
+            // DH-3 and N1 both fire when the Mac is joined without an
+            // address, and N1 would win the tie with "nothing is joined".
+            // The more specific rule's own catalog text leads.
+            if firing.contains("DH-3"),
+               let text = Self.headlineText(forRulesIn: ["DH-3"], catalog: rulesCatalog.catalog) {
+                return text
+            }
+            return Self.headlineText(forRulesIn: firing,
                                      catalog: rulesCatalog.catalog)
                 ?? NoLinkCopy.fallbackSubtitle
         }
