@@ -6,6 +6,12 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-12
+
+### Changes
+
+- feat: embed settings in dashboard tab and redesign settings interface
+
 ## [1.14.6] - 2026-10-12
 
 ### Added
@@ -4226,7 +4232,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.6...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/godigi/hopwatch/compare/v1.14.6...v1.15.0
 [1.14.6]: https://github.com/godigi/hopwatch/compare/v1.14.5...v1.14.6
 [1.14.5]: https://github.com/godigi/hopwatch/compare/v1.14.3...v1.14.5
 [1.14.3]: https://github.com/godigi/hopwatch/compare/v1.14.2...v1.14.3
