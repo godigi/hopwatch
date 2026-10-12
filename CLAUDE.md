@@ -11,10 +11,11 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
 - **Platform:** macOS 14+ (Sonoma/Sequoia/Tahoe), Apple Silicon and Intel. No Linux portability for v1.
 - **Shell:** must work under both zsh (default) and Homebrew bash 5+. Declare bash in the shebang if needed.
 - **Dependencies:** prefer macOS built-ins (`ipconfig`, `networksetup`, `route`, `scutil`, `wdutil`, `dig`, `traceroute`, `ping`, `nc`, `arp`, `log`, `sntp`, `system_profiler`, `curl`). Acceptable Homebrew extras: `mtr`, `gping`, `speedtest` (or `speedtest-cli`), `jq`. Detect missing deps → skip with hint, never hard-fail.
-- **Permissions:** monitoring and diagnosis are 100% sudo-free. Hopwatch never prompts for root to look at a network and never nudges users to cache sudo credentials. All standard diagnostics, latency tests, and monitoring run in user space. The one exception is a **repair** the user starts by pressing its button — see `docs/design/2026-10-07-repair-actions-design.md`. A repair may ask for an admin password, says so before it does, and root never executes anything a user-level process can rewrite.
+- **Permissions:** monitoring and diagnosis are 100% sudo-free. Hopwatch never prompts for root to look at a network and never nudges users to cache sudo credentials. All standard diagnostics, latency tests, and monitoring run in user space. The one exception is a **repair** the user starts by pressing its button — see `docs/design/2026-10-07-repair-actions-design.md`. A repair may ask for an admin password, says so before it does, and root never executes anything a user-level process can rewrite. There is exactly one further exception to *who starts it*, recorded under Read-only below.
 - **Parallelism:** run independent checks concurrently via background jobs + `wait`. Target ≤ 35s for `--no-speed`, ≤ 8s `--quick`. A default run now includes the speed test and is bound by whichever speedtest CLI is installed — measured at ~115s with `speedtest-cli` and ~65s with Ookla's `speedtest`, which is why the installer prefers Ookla. `--no-speed` is the flag to reach for when the run needs to be fast.
   - Two checks must **not** be parallelised, because both measure a property of a quiet link: `internet_ping_run` (packet loss / latency) and `bufferbloat_run` (which saturates the link deliberately). Running the loss probe inside the parallel batch made it report 30% loss on a healthy network.
 - **Read-only:** monitoring and diagnosis never modify routing, DNS, WiFi, or ARP state. Only a user-started repair may, and never automatically: not on a timer, not on arrival, not from an alert. A repair that leaves a lasting change stays visible in the app with an undo.
+  **The one exception: automatic Wi-Fi reconnect.** If the user turns on Settings > "Automatically reconnect Wi-Fi" (**off by default**, so a fresh install never does this), the app may run the `reconnect-wifi` repair, and only that one, without a button press, when the monitor's `status.auto_reconnect` says one is warranted. It runs in user space, never invokes sudo and never asks for an admin password, and nothing else is loosened: no other repair, and no scan, arrival, timer or alert, may start one unattended. The decision and every cutoff behind it live in `lib/monitor.sh` / `lib/thresholds.sh` (the app only checks its setting and that no repair is running), and each attempt is logged to the event journal.
 - **shellcheck-clean** at default severity. `# shellcheck disable=...` only with justification.
 - **Thresholds live in `lib/thresholds.sh`, nowhere else.** Four things now
   judge a network — `lib/diagnosis.sh` (one verdict per scan),
@@ -109,8 +110,10 @@ re-running anything.
 
 `--repair` is the repair tier, and the only thing in the CLI that changes
 anything. It runs one named repair (`quit-app`, `restart-mac`,
-`open-sign-in`) and is only ever reached from a button the user pressed, or
-typed by hand — never from a scan, the monitor, an arrival or an alert.
+`open-sign-in`, `reconnect-wifi`) and is only ever reached from a button the
+user pressed, or typed by hand — never from a scan, the monitor, an arrival
+or an alert — with the single exception of the opt-in automatic Wi-Fi
+reconnect above, which may call `reconnect-wifi` and nothing else.
 Which finding offers which repair, and every word the user reads about it,
 is decided in `lib/repairs.sh` and travels in `diagnosis[].repairs`; the app
 renders it and calls the CLI back. Parameters are validated and refused, not

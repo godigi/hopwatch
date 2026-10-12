@@ -1,6 +1,6 @@
 # Repair actions — "Fix it" buttons
 
-Status: phase 1 implemented (plumbing, `quit-app`, `restart-mac`, `open-sign-in`; `restart-mac` never run live). Everything needing an admin password, `wifi-cycle` and the lasting-change/undo surface are still proposed. Written 2026-10-07. Decided with the
+Status: phase 1 implemented (plumbing, `quit-app`, `restart-mac`, `open-sign-in`; `restart-mac` never run live), plus `reconnect-wifi`. Everything needing an admin password, `wifi-cycle` and the lasting-change/undo surface are still proposed. Written 2026-10-07. Decided with the
 owner the same day: repairs are wanted, **including ones that ask for an
 admin password**.
 
@@ -23,6 +23,20 @@ hold there. The new contract (see `CLAUDE.md`):
   its button. Nothing is ever repaired automatically, on a timer, on arrival,
   or from an alert. A repair may change system state and may ask for an admin
   password, and it says so before it does either.
+- **One recorded exception, added 2026-10-12: automatic Wi-Fi reconnect.** A
+  user who turns on Settings > "Automatically reconnect Wi-Fi" (off by
+  default) lets the app run `reconnect-wifi` — that repair only — without a
+  button press. It needs no admin password. It is not a timer and not an
+  arrival or alert behaviour: the monitor decides, from the network's own
+  state, that a reconnect is warranted (`status.auto_reconnect`; WJ-1 after a
+  router fault, DH-3 past its grace period, or a wedged gateway at good
+  signal), and the cutoffs are in `lib/thresholds.sh`. The app only checks
+  its setting and that no repair is already running. Every attempt is
+  journaled. It is deliberately conservative, and cannot tell a user who
+  chooses "Disconnect" in the Wi-Fi menu from a router that dropped them;
+  that residual is why it is opt-in. Nothing else in this document is
+  loosened: every other repair, and every repair that needs a password,
+  still runs only from a button.
 
 ## Experience
 
@@ -47,6 +61,7 @@ hold there. The new contract (see `CLAUDE.md`):
 | `quit-app` | Asks one named app to quit | No | `SOCK-1`, when a visible app holds the sockets |
 | `restart-mac` | Shows the standard restart dialog | No | `SOCK-1`, when no holder is visible |
 | `wifi-cycle` | Wi-Fi off, then on | Believed no — **untested** | weak-link and gateway-loss rules |
+| `reconnect-wifi` | Wi-Fi off, then on; rejoins a remembered network if macOS has not (shipped as `wifi-cycle`'s implementation) | No password requested by the code; macOS's own behaviour **untested** | `WF-1`, `WJ-1`, `DH-3`; also the opt-in automatic reconnect above |
 | `open-sign-in` | Opens the network's sign-in page | No | the captive-portal finding |
 | `set-public-dns` | Sets 1.1.1.1 and 8.8.8.8 on the Wi-Fi service; records the previous value | Believed yes — **untested** | `D6` |
 | `undo-public-dns` | Restores the recorded value | Same as above | Home, after `set-public-dns` |

@@ -6,6 +6,21 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **DH-3 now fires from the live monitor, and offers a repair.** A Wi-Fi link that is joined but has no usable address (no address at all, or a `169.254` placeholder) for `THRESH_DHCP_ADDRESS_GRACE_S` (30 s) raises DH-3 on the menu-bar and Home hero card with a "Reconnect Wi-Fi" button. The grace period is deliberate: associated-but-addressless is normal for the first seconds of every join, wake and roam. DH-3's catalog title and text no longer claim the Mac "assigned itself" an address, which is false when it has none.
+- **`reconnect-wifi` can rejoin a named network.** `--repair-param network=<name>` is validated and refused, never trimmed (1 to 32 bytes, no leading `-`, no control characters or line breaks) and is joined only if macOS already remembers a network of exactly that name. macOS gets the first chance to rejoin by itself after the radio is switched back on, and a network it chose is never overridden. The result is now honest: `networksetup` reports a failed join on stdout while exiting 0, so its output and the interface's actual association are checked, and a failed or timed-out join is reported as a failure in plain words. Radio and join timeouts are in `lib/thresholds.sh`.
+- **`status.auto_reconnect` in the monitor stream.** The monitor decides, per sample, whether an automatic Wi-Fi reconnect is warranted now and why (`wifi-dropped` for WJ-1, `no-address` for DH-3, `wedged-gateway` for G2), and holds the counters and every cutoff (`lib/thresholds.sh`). Documented in `docs/JSON-SCHEMA.md` and `docs/DIAGNOSIS-RULES.md`.
+
+### Changed
+
+- **Automatic Wi-Fi reconnect is now a recorded, opt-in exception, and its decision lives in the CLI.** Settings > "Automatically reconnect Wi-Fi" is **off by default**; when on, the app may run the `reconnect-wifi` repair, and only that, without a button press, but only when the monitor says so. The app checks its setting and that no repair is already running (an automatic reconnect can no longer race a manual click or another automatic one), runs it, and journals it. `CLAUDE.md` and the repair design document record this as the one exception to "repairs start only from a button". It is deliberately conservative: WJ-1 only after the router stopped answering just before the drop, only after the rejoin grace, never when the radio was switched off during the outage, once per outage; DH-3 only past its grace period, every 30 s, at most 4 times per outage; a wedged gateway only on a Wi-Fi link with a real RSSI of at least -75 dBm, 100% gateway loss with G2 firing (so a gateway that merely ignores ping never qualifies) for 6 consecutive samples, once per episode. Counters reset when the link returns, the network changes, or the monitor saw a gap, and survive the monitor restarts the app performs. Known limit: choosing "Disconnect" from the Wi-Fi menu right after the router misbehaved looks the same as the router dropping you, and cannot be told apart without private APIs.
+
+### Fixed
+
+- A reconnect targets the network it is about to rejoin, not an old one. The remembered Wi-Fi name is tied to the network identity and cleared when the network changes, so a network whose name macOS hides no longer inherits the previous network's; for any fault where the Mac is still joined, only the name CoreWLAN reads at that moment is used.
+- The app's tests can no longer power-cycle the Wi-Fi of the machine that runs them: the coordinator takes an injected repair runner, and the reconnect tests assert on the recorded calls.
+
 ## [1.14.6] - 2026-10-12
 
 ### Added
