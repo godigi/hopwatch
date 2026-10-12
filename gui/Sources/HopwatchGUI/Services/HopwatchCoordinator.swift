@@ -602,9 +602,6 @@ final class HopwatchCoordinator {
         let attempt = decision.attempt ?? 1
         let of = decision.maxAttempts.map { "/\($0)" } ?? ""
         log.info("Auto-reconnecting Wi-Fi: \(decision.reason, privacy: .public) (\(ruleID, privacy: .public), attempt \(attempt)\(of, privacy: .public))")
-        // Handed to the next monitor process if this one is restarted by the
-        // network event the reconnect itself causes — see MonitorStream.
-        monitor.autoReconnectCarry = "\(ruleID):\(attempt):\(Int(Date().timeIntervalSince1970))"
         repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
                                       phase: .working, detail: nil)
         let summary = "Auto-reconnect Wi-Fi (\(decision.reason), attempt \(attempt)\(of))"

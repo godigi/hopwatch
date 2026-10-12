@@ -81,7 +81,7 @@ setup() {
            THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM \
            THRESH_AUTORECONNECT_WEDGED_LOSS_PCT \
            THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT \
-           THRESH_AUTORECONNECT_WEDGED_SAMPLES THRESH_AUTORECONNECT_CARRY_S \
+           THRESH_AUTORECONNECT_WEDGED_SAMPLES THRESH_MON_CARRY_S \
            THRESH_REPAIR_WIFI_REJOIN_WAIT_S THRESH_REPAIR_WIFI_JOIN_TIMEOUT_S \
            THRESH_REPAIR_WIFI_POWER_TIMEOUT_S THRESH_REPAIR_WIFI_SETTLE_S; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
@@ -130,8 +130,10 @@ setup() {
   # At least two samples, or "consecutive" means nothing.
   [ "$THRESH_AUTORECONNECT_WEDGED_SAMPLES" -ge 2 ]
   # The carry-over must outlast the longest retry sequence, or a restart
-  # mid-sequence forgets it.
-  [ "$THRESH_AUTORECONNECT_CARRY_S" -gt $(( THRESH_DHCP_ADDRESS_GRACE_S + THRESH_AUTORECONNECT_RETRY_S * THRESH_AUTORECONNECT_MAX_RETRIES )) ]
+  # mid-sequence forgets it. (It must also outlast a precursor window, or a
+  # drop that follows a restart could never be matched to its cause.)
+  [ "$THRESH_MON_CARRY_S" -gt "$THRESH_MON_PRECURSOR_S" ]
+  [ "$THRESH_MON_CARRY_S" -gt $(( THRESH_DHCP_ADDRESS_GRACE_S + THRESH_AUTORECONNECT_RETRY_S * THRESH_AUTORECONNECT_MAX_RETRIES )) ]
   # A strong-signal floor: never weaker than the weak-signal cutoff.
   [ "$THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM" -ge "$THRESH_WIFI_RSSI_WEAK_DBM" ]
 }

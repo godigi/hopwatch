@@ -113,9 +113,14 @@ final class MonitorStream {
     /// resolved CLI, skipping the capability handshake and the journal
     /// directory. Nil in the app.
     private var binaryOverrideForTesting: String?
-    /// The last automatic reconnect attempt, `RULE:ATTEMPT:EPOCH`, handed to
-    /// the next monitor process so its counters survive a restart.
-    var autoReconnectCarry: String?
+    /// The newest `status.carry` the monitor emitted, kept verbatim and
+    /// handed to the next monitor process (`HOPWATCH_MONITOR_CARRY`) so what
+    /// the monitor knew survives the restarts this app performs. Opaque to
+    /// the app: the monitor wrote it, the monitor validates it, and nothing
+    /// here reads, builds or compares it. Survives `restart()` and a crash
+    /// recovery; dropped by `stop()`, so switching monitoring off and on is
+    /// a clean slate.
+    private(set) var monitorCarry: String?
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
     /// Set by `restart()` and consumed by the next `spawn()`: the child about
@@ -242,14 +247,17 @@ final class MonitorStream {
         ]
         var childEnv = binaryOverrideForTesting == nil
             ? BinaryLocator.environment() : ProcessInfo.processInfo.environment
-        // The monitor holds the automatic-reconnect counters, and this app
-        // restarts it on every network event (including the ones its own
-        // reconnect causes) and around every investigation burst. Without
-        // this the counters would reset each time and "at most four tries"
-        // would mean four per restart. An opaque pass-through: the monitor
-        // parses it, and ignores it once it is older than its own cutoff.
-        if let carry = autoReconnectCarry {
-            childEnv["HOPWATCH_AUTORECONNECT_CARRY"] = carry
+        // The monitor decides everything about an outage, and this app
+        // restarts it on every network event (a Wi-Fi drop is one, and so is
+        // the reconnect that answers it) and around every investigation
+        // burst. The new process would otherwise start blind: no memory of
+        // the router going quiet before the drop, of when the Mac stopped
+        // being joined, of the user switching the radio off, or of the
+        // attempts already made. An opaque pass-through of the newest sample's
+        // record; the monitor validates it, refuses what is stale, malformed
+        // or about another network, and the app never looks inside.
+        if let carry = monitorCarry {
+            childEnv["HOPWATCH_MONITOR_CARRY"] = carry
         }
         proc.environment = childEnv
 
@@ -333,6 +341,7 @@ final class MonitorStream {
         restartPending = false
         pauseHolders.removeAll()
         pauseReason = nil
+        monitorCarry = nil
         trapsReady = false
         pauseSignalPending = false
         refreshSignalPending = false
@@ -356,8 +365,10 @@ final class MonitorStream {
         let until = burstUntil
         let wasRunning = isRunning
         let wasAwaiting = awaitingSince
+        let carry = monitorCarry
         stop()
         awaitingSince = wasAwaiting
+        monitorCarry = carry
         burstInterval = interval
         burstUntil = until
         restartAttempts = 0
@@ -551,6 +562,7 @@ final class MonitorStream {
         // seconds indefinitely.
         if let until = burstUntil, Date() >= until { endBurst() }
         latest = sample
+        monitorCarry = sample.status.carry
         recent.append(sample)
         if recent.count > Self.recentCapacity {
             recent.removeFirst(recent.count - Self.recentCapacity)

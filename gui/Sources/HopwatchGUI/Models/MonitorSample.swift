@@ -298,6 +298,12 @@ struct MonitorSample: Decodable, Sendable {
         /// Absent from a CLI older than the field, which reads as "not
         /// warranted".
         var autoReconnect: AutoReconnect?
+        /// The monitor's own record of what a restarted process needs to
+        /// carry on (`status.carry`). Opaque: nothing in the app parses,
+        /// compares or interprets it. `MonitorStream` keeps the latest one
+        /// and hands it back, unread, to the next monitor process. Nil from a
+        /// CLI older than the field.
+        var carry: String?
 
         struct AutoReconnect: Decodable, Sendable, Equatable {
             /// `wifi-dropped`, `no-address` or `wedged-gateway`.
@@ -318,6 +324,7 @@ struct MonitorSample: Decodable, Sendable {
             case icmpFiltered = "icmp_filtered"
             case cadenceS = "cadence_s"
             case autoReconnect = "auto_reconnect"
+            case carry
         }
     }
 
@@ -500,6 +507,7 @@ extension MonitorSample.Status {
         paused = c.lenient(.paused, false)
         cadenceS = c.lenient(.cadenceS)
         autoReconnect = c.lenient(.autoReconnect)
+        carry = c.lenient(.carry)
     }
 }
 

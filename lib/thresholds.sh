@@ -750,10 +750,16 @@ THRESH_REPAIR_WIFI_POWER_TIMEOUT_S=5
 THRESH_REPAIR_WIFI_SETTLE_S=1
 
 # The app restarts the monitor on network events and around investigation
-# bursts, and hands the new process the last automatic attempt it made so the
-# counters above survive. An attempt older than this belongs to an outage
-# that has long since ended or been replaced, and is ignored. Ten minutes is
-# comfortably longer than the longest sequence the cutoffs above allow (the
-# DH-3 grace plus every retry, about two and a half minutes) and short enough
-# that an unrelated outage later in the day starts with a clean slate.
-THRESH_AUTORECONNECT_CARRY_S=600
+# bursts, so a Wi-Fi drop usually lands on a brand-new process. Every sample
+# therefore carries an opaque record of what the monitor knows (status.carry,
+# docs/JSON-SCHEMA.md) and the app hands the latest one to the next process:
+# when the router last stopped answering, the precursor of a drop already in
+# progress, the rejoin-grace clock, whether the user switched the radio off,
+# the automatic-attempt counters. A record older than this belongs to an
+# outage that has long since ended or been replaced, and is ignored whole.
+# Ten minutes is comfortably longer than the longest sequence the cutoffs
+# above allow (the DH-3 grace plus every retry, about two and a half minutes)
+# and, since the record is refreshed on every sample, far longer than the
+# seconds a restart actually takes. A record the new process cannot vouch for
+# is dropped, never trusted: see _mon_carry_apply in lib/monitor.sh.
+THRESH_MON_CARRY_S=600

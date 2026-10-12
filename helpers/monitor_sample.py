@@ -609,6 +609,12 @@ def main() -> None:
             # its counters and every cutoff are the monitor's — see
             # docs/JSON-SCHEMA.md.
             "auto_reconnect": _auto_reconnect(),
+            # Opaque to every consumer: the monitor's own record of what a
+            # restarted process needs to carry on (lib/monitor.sh,
+            # _mon_carry_build). A consumer keeps the latest one and hands it
+            # back, unread, in HOPWATCH_MONITOR_CARRY when it starts the next
+            # process. Passed through verbatim; nothing here interprets it.
+            "carry": _env("CARRY"),
         },
     }
 

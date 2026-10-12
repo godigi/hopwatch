@@ -213,7 +213,9 @@ import Testing
         #expect(recorder.calls.count == 1)
         #expect(recorder.calls.first?.id == "reconnect-wifi")
         #expect(recorder.calls.first?.params == ["network": "HomeNet"])
-        #expect(coordinator.monitor.autoReconnectCarry?.hasPrefix("WJ-1:1:") == true)
+        // The app keeps no record of its own: what a restarted monitor needs
+        // is the monitor's (`status.carry`), not something built here.
+        #expect(coordinator.monitor.monitorCarry == nil)
     }
 
     @Test @MainActor func aJoinedFaultNeverTargetsARememberedNetwork() async {
@@ -230,7 +232,7 @@ import Testing
         await coordinator.awaitRepairForTesting()
         #expect(recorder.calls.count == 1)
         #expect(recorder.calls.first?.params["network"] == coordinator.liveSSID)
-        #expect(coordinator.monitor.autoReconnectCarry?.hasPrefix("DH-3:2:") == true)
+        #expect(coordinator.monitor.monitorCarry == nil)
     }
 
     @Test @MainActor func aWedgedGatewayDecisionRunsTheRepair() async {
@@ -280,6 +282,55 @@ import Testing
         await coordinator.awaitRepairForTesting()
         #expect(recorder.calls.count == 1)
         #expect(recorder.calls.first?.params["network"] != "HomeNet")
+    }
+
+    /// An offline sample carries the identity the monitor held through the
+    /// drop (same process) or none at all (a restarted process has no gateway
+    /// and no ARP entry to build one from). Neither is a different network,
+    /// so neither may forget the name WJ-1's repair is about to rejoin.
+    @Test @MainActor func goingOfflineKeepsTheNameOfTheNetworkThatWasLost() async {
+        let (coordinator, recorder, restore) = recordingCoordinator(enabled: true)
+        defer { restore() }
+        coordinator.handleSampleForTesting(joined("ssid:home", ssid: "HomeNet"))
+        for id in ["ssid:home", ""] {
+            coordinator.handleSampleForTesting(
+                dropped(id, rules: ["N1"], reason: "wifi-not-joined"))
+            #expect(coordinator.lastAssociatedSSID == "HomeNet")
+        }
+        // The restarted monitor's sample, which is the one that warrants it.
+        coordinator.handleSampleForTesting(
+            dropped("", rules: ["N1", "WJ-1"], reason: "wifi-not-joined",
+                    precursor: "router-unreachable",
+                    decision: decision("wifi-dropped", "WJ-1")))
+        await coordinator.awaitRepairForTesting()
+        #expect(recorder.calls.count == 1)
+        #expect(recorder.calls.first?.params == ["network": "HomeNet"])
+    }
+
+    /// The other half: keeping the name through a drop must not let it leak
+    /// onto whatever the Mac joins next.
+    @Test @MainActor func aNetworkJoinedAfterTheDropDoesNotInheritTheLostName() async {
+        let (coordinator, _, restore) = recordingCoordinator(enabled: true)
+        defer { restore() }
+        coordinator.handleSampleForTesting(joined("ssid:home", ssid: "HomeNet"))
+        coordinator.handleSampleForTesting(
+            dropped("", rules: ["N1"], reason: "wifi-not-joined"))
+        coordinator.handleSampleForTesting(joined("ssid:cafe", ssid: "<redacted>"))
+        #expect(coordinator.lastAssociatedSSID != "HomeNet")
+    }
+
+    @Test func theMonitorsCarryRecordDecodesAndIsAbsentFromOlderCLIs() throws {
+        func decode(_ tail: String) throws -> MonitorSample.Status {
+            let json = """
+            {"severity":"ok","measurement":"measured","rules":[],
+             "icmp_filtered":false,"degraded":false,"paused":false\(tail)}
+            """
+            return try JSONDecoder().decode(MonitorSample.Status.self, from: Data(json.utf8))
+        }
+        let record = "v1:1700000000:0:0:0:0:0:0:0:0:0:0:0:0:0"
+        #expect(try decode(#","carry":"\#(record)""#).carry == record)
+        #expect(try decode(#","carry":null"#).carry == nil)
+        #expect(try decode("").carry == nil)
     }
 
     @Test func theMonitorsAutoReconnectFieldDecodes() throws {

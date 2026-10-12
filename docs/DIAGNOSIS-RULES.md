@@ -1140,7 +1140,25 @@ already running, then runs `--repair=reconnect-wifi`.
 | `G2` | `wedged-gateway` | Wi-Fi link up, real RSSI >= `THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM`, gateway loss >= `THRESH_AUTORECONNECT_WEDGED_LOSS_PCT`, `G2` firing (so not ICMP filtering), for `THRESH_AUTORECONNECT_WEDGED_SAMPLES` consecutive samples | 1 per episode, re-armed when gateway loss falls below `THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT` |
 
 Counters reset when the link returns, the network changes, or the monitor
-saw a gap (sleep, pause). Known limit: a user who picks "Disconnect" in the
+saw a gap (sleep, pause).
+
+**Restarts.** The app restarts the monitor on every network event, and a
+Wi-Fi drop is one, so the process that sees an outage is normally a new one.
+Everything above is therefore published in `status.carry` on every sample
+(opaque; see `docs/JSON-SCHEMA.md`) and handed to the next process by the
+app, which never reads it: when the router last stopped answering, the
+precursor of a drop already in progress, when the Mac stopped being joined,
+whether the radio was switched off during the outage, and the attempt
+counters. The new process validates it strictly and refuses anything
+malformed, from the future, older than `THRESH_MON_CARRY_S`, or about a
+different network, which leaves a clean slate; a clean slate has no
+precursor and so warrants nothing for WJ-1. Carried times stay the original
+ones: the precursor window is still `THRESH_MON_PRECURSOR_S` from the real
+loss and the rejoin grace still runs from the real start of the outage, so a
+restart never makes old evidence look fresh, and the radio-off guard and
+"once per outage" survive it. Nothing is written to disk.
+
+Known limit: a user who picks "Disconnect" in the
 Wi-Fi menu right after the router misbehaved is indistinguishable, to an
 unprivileged process, from the router dropping them.
 

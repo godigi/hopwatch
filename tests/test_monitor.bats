@@ -2684,34 +2684,243 @@ ar_down() {
   [ "$MON_AR_DHCP_TRIES" -eq 0 ] && [ "$MON_NOADDR_SINCE_EPOCH" -eq 0 ]
 }
 
-@test "auto-reconnect: a carried-over attempt survives a monitor restart, within the cutoff" {
-  _mon_auto_reconnect_seed "DH-3:3:1000" 1010
+# ── What survives a monitor restart: status.carry ─────────────────────────
+# The app restarts the monitor on every network event, and a Wi-Fi drop is
+# one. These pin what the new process inherits, what it refuses, and that a
+# refusal is only ever a clean slate.
+
+# A carry record from named fields (all optional, all default 0 but the
+# time it was written). Fields: AT NET SSID GW INET DOWN PREC WJS WJF
+# TOUCHED WEDGED TRIES DLAST NOADDR.
+mk_carry() {
+  printf 'v1:%s' "${CK_AT:-1000}"
+  local v
+  for v in NET SSID GW INET DOWN PREC WJS WJF TOUCHED WEDGED TRIES DLAST NOADDR; do
+    eval "printf ':%s' \"\${CK_$v:-0}\""
+  done
+  printf '\n'
+}
+
+# The new process, as monitor_run does it on its first cycle: stage the
+# record at "now", then adopt it once the link has been probed.
+restart_with() {
+  _mon_carry_stage "$1" "$2"
+  _mon_carry_apply
+}
+
+@test "carry: every sample's record is exactly the shape the monitor accepts" {
+  MON_LAST_GW_LOSS_TIME=900 MON_DOWN_SINCE_EPOCH=950 MON_OFFLINE_PRECURSOR=router-unreachable
+  MON_AR_WJ_SINCE=960 MON_AR_RADIO_TOUCHED=1 MON_AR_DHCP_TRIES=2 MON_AR_DHCP_LAST=970
+  MON_NETWORK_ID="wifi:ssid=Home,mac=aa:bb" MON_ID_SSID="Home"
+  _mon_carry_build 1000
+  [[ "$MON_CARRY_OUT" =~ ^v1(:[0-9]{1,12}){14}$ ]] || { echo "shape: $MON_CARRY_OUT"; return 1; }
+  # No name, colon or quote of the network reaches the record.
+  [[ "$MON_CARRY_OUT" != *Home* ]] || return 1
+  _mon_carry_stage "$MON_CARRY_OUT" 1001
+  [ "$MON_CARRY_VALID" -eq 1 ]
+  [ "$MON_CARRY_GW_LOSS" -eq 900 ] && [ "$MON_CARRY_DOWN" -eq 950 ] && [ "$MON_CARRY_PRECURSOR" -eq 1 ]
+  [ "$MON_CARRY_TOUCHED" -eq 1 ] && [ "$MON_CARRY_TRIES" -eq 2 ] && [ "$MON_CARRY_DHCP_LAST" -eq 970 ]
+}
+
+@test "carry: a restart mid-outage keeps the precursor, the rejoin clock and the radio guard" {
+  MON_LINK_UP=0
+  restart_with "$(CK_AT=1040 CK_GW=990 CK_DOWN=1000 CK_PREC=1 CK_WJS=1000 CK_TOUCHED=1 CK_TRIES=1 CK_DLAST=1030 mk_carry)" 1042
+  [ "$MON_LAST_GW_LOSS_TIME" -eq 990 ]
+  [ "$MON_DOWN_SINCE_EPOCH" -eq 1000 ] && [ -n "$MON_DOWN_SINCE" ]
+  [ "$MON_OFFLINE_PRECURSOR" = "router-unreachable" ]
+  [ "$MON_AR_WJ_SINCE" -eq 1000 ] && [ "$MON_AR_RADIO_TOUCHED" -eq 1 ]
+  [ "$MON_AR_DHCP_TRIES" -eq 1 ] && [ "$MON_AR_DHCP_LAST" -eq 1030 ]
+}
+
+@test "carry: a restart mid-outage still warrants WJ-1, exactly once, from the original clock" {
+  # The old process saw the router go quiet and the Mac come unjoined at 1000.
+  # The restart lands 50 s in; the grace is measured from 1000, not from 1050.
+  MON_LINK_UP=0
+  restart_with "$(CK_AT=1050 CK_GW=990 CK_DOWN=1000 CK_PREC=1 CK_WJS=1000 mk_carry)" 1052
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S - 1 ))
+  [ -z "$MON_AR_REASON" ]
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S ))
+  [ "$MON_AR_REASON" = "wifi-dropped" ] && [ "$MON_AR_RULE" = "WJ-1" ]
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S + 5 ))
+  [ -z "$MON_AR_REASON" ]
+  # ...and the restart the reconnect itself causes does not allow a second.
+  _mon_carry_build $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S + 6 ))
+  local tok="$MON_CARRY_OUT"
+  MON_AR_WJ_FIRED=0 MON_AR_WJ_SINCE=0 MON_DOWN_SINCE_EPOCH=0 MON_OFFLINE_PRECURSOR=""
+  restart_with "$tok" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S + 8 ))
+  [ "$MON_AR_WJ_FIRED" -eq 1 ]
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S + 9 ))
+  [ -z "$MON_AR_REASON" ]
+}
+
+@test "carry: the radio switched off before a restart still cancels the outage after it" {
+  MON_LINK_UP=0
+  restart_with "$(CK_AT=1050 CK_GW=990 CK_DOWN=1000 CK_PREC=1 CK_WJS=1030 CK_TOUCHED=1 mk_carry)" 1052
+  [ "$MON_AR_RADIO_TOUCHED" -eq 1 ]
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1030 + THRESH_WIFI_REJOIN_GRACE_S + 5 ))
+  [ -z "$MON_AR_REASON" ]
+  ar_down wifi-no-address "N1 DH-3" $(( 1030 + THRESH_WIFI_REJOIN_GRACE_S + 10 ))
+  [ -z "$MON_AR_REASON" ]
+}
+
+@test "carry: a restarted monitor decides the precursor against the carried loss time" {
+  _mon_probe_link() { MON_LINK_UP=0 MON_NETWORK_ID="" MON_INTERFACE=""; }
+  _mon_probe_offline() { MON_OFFLINE_REASON=wifi-not-joined; }
+  _mon_noaddr_track() { :; }
+  _mon_emit() { printf '%s|%s\n' "$MON_OFFLINE_PRECURSOR" "$MON_LAST_GW_LOSS_TIME" >>"$BATS_TEST_TMPDIR/seen"; }
+  local probe
+  for probe in vpn gateway internet web dns tcp wifi_signal browser public hog; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=1
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  local now="$EPOCHSECONDS"
+  # Fresh evidence: the router went quiet 20 s ago.
+  HOPWATCH_MONITOR_CARRY="$(CK_AT=$((now - 5)) CK_GW=$((now - 20)) mk_carry)" monitor_run
+  [ "$(cat "$BATS_TEST_TMPDIR/seen")" = "router-unreachable|$((now - 20))" ]
+  # Stale evidence (still inside the record's own expiry): no precursor.
+  rm -f "$BATS_TEST_TMPDIR/seen"
+  MON_LAST_GW_LOSS_TIME=0 MON_DOWN_SINCE_EPOCH=0 MON_OFFLINE_PRECURSOR="" MON_SEQ=0
+  MON_PREV_CYCLE_TS="" MON_PREV_CADENCE=""
+  local old=$(( now - THRESH_MON_PRECURSOR_S - 30 ))
+  HOPWATCH_MONITOR_CARRY="$(CK_AT=$((now - 5)) CK_GW=$old mk_carry)" monitor_run
+  [ "$(cat "$BATS_TEST_TMPDIR/seen")" = "|$old" ]
+}
+
+@test "carry: a restart that finds the link up keeps the evidence and the wedged latch, not the outage" {
+  MON_LINK_UP=1 MON_NETWORK_ID="net-A"
+  local ck; ck="$(_mon_cksum net-A)"
+  restart_with "$(CK_AT=1050 CK_NET=$ck CK_GW=1000 CK_INET=1010 CK_WEDGED=1 CK_DOWN=1020 CK_WJS=1020 CK_TOUCHED=1 mk_carry)" 1052
+  [ "$MON_LAST_GW_LOSS_TIME" -eq 1000 ] && [ "$MON_LAST_INET_LOSS_TIME" -eq 1010 ]
+  [ "$MON_AR_WEDGED_FIRED" -eq 1 ]
+  [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ] && [ "$MON_AR_RADIO_TOUCHED" -eq 0 ] && [ "$MON_AR_WJ_SINCE" -eq 0 ]
+}
+
+@test "carry: state from one network is never applied on another" {
+  local a b; a="$(_mon_cksum "wifi:mac=aa:aa")"; b="$(_mon_cksum "wifi:mac=bb:bb")"
+  [ "$a" != "$b" ]
+  # Link up on a different network: refused whole.
+  MON_LINK_UP=1 MON_NETWORK_ID="wifi:mac=bb:bb"
+  restart_with "$(CK_AT=1050 CK_NET=$a CK_GW=1000 CK_WEDGED=1 mk_carry)" 1052
+  [ "$MON_LAST_GW_LOSS_TIME" -eq 0 ] && [ "$MON_AR_WEDGED_FIRED" -eq 0 ]
+  # Same network: adopted.
+  MON_NETWORK_ID="wifi:mac=aa:aa"
+  restart_with "$(CK_AT=1050 CK_NET=$a CK_GW=1000 CK_WEDGED=1 mk_carry)" 1052
+  [ "$MON_LAST_GW_LOSS_TIME" -eq 1000 ] && [ "$MON_AR_WEDGED_FIRED" -eq 1 ]
+  # Link down with a readable SSID that is a different one: refused whole,
+  # radio guard included (a clean slate warrants no WJ-1 without a precursor).
+  MON_LAST_GW_LOSS_TIME=0 MON_AR_WEDGED_FIRED=0 MON_LINK_UP=0 MON_SSID="Cafe"
+  restart_with "$(CK_AT=1050 CK_SSID="$(_mon_cksum Home)" CK_GW=1000 CK_DOWN=1000 CK_PREC=1 CK_TOUCHED=1 mk_carry)" 1052
+  [ "$MON_LAST_GW_LOSS_TIME" -eq 0 ] && [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ] \
+    && [ "$MON_OFFLINE_PRECURSOR" = "" ] && [ "$MON_AR_RADIO_TOUCHED" -eq 0 ]
+  # The same SSID, or none readable while unjoined: adopted.
+  MON_SSID="Home"
+  restart_with "$(CK_AT=1050 CK_SSID="$(_mon_cksum Home)" CK_GW=1000 CK_DOWN=1000 CK_PREC=1 mk_carry)" 1052
+  [ "$MON_OFFLINE_PRECURSOR" = "router-unreachable" ]
+  MON_OFFLINE_PRECURSOR="" MON_DOWN_SINCE_EPOCH=0 MON_SSID=""
+  restart_with "$(CK_AT=1050 CK_SSID="$(_mon_cksum Home)" CK_GW=1000 CK_DOWN=1000 CK_PREC=1 mk_carry)" 1052
+  [ "$MON_OFFLINE_PRECURSOR" = "router-unreachable" ]
+}
+
+@test "carry: a record is adopted once, on the first cycle only" {
+  MON_LINK_UP=0
+  _mon_carry_stage "$(CK_AT=1050 CK_GW=1000 CK_DOWN=1000 CK_PREC=1 mk_carry)" 1052
+  _mon_carry_apply
+  [ "$MON_CARRY_VALID" -eq 0 ]
+  MON_DOWN_SINCE_EPOCH=0 MON_OFFLINE_PRECURSOR=""
+  _mon_carry_apply
+  [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ] && [ -z "$MON_OFFLINE_PRECURSOR" ]
+}
+
+@test "carry: a stale, future-dated, malformed or out-of-range record is ignored, never fatal" {
+  local good bad
+  good="$(CK_AT=1000 CK_DOWN=1000 CK_PREC=1 mk_carry)"
+  _mon_carry_stage "$good" 1010; [ "$MON_CARRY_VALID" -eq 1 ]
+  local -a bads=(
+    "$(CK_AT=1000 mk_carry)|$(( 1000 + THRESH_MON_CARRY_S + 1 ))"   # stale
+    "$(CK_AT=5000 mk_carry)|1000"                                     # from the future
+    "$(CK_AT=1000 CK_DOWN=1001 mk_carry)|1010"                        # a time after the record itself
+    "$(CK_AT=1000 CK_GW=2000 mk_carry)|1010"
+    "$(CK_AT=1000 CK_PREC=3 mk_carry)|1010"                           # precursor out of range
+    "$(CK_AT=1000 CK_WJF=2 mk_carry)|1010"                            # flag out of range
+    "$(CK_AT=1000 CK_TOUCHED=7 mk_carry)|1010"
+    "$(CK_AT=1000 CK_TRIES=$(( THRESH_AUTORECONNECT_MAX_RETRIES + 1 )) mk_carry)|1010"
+    "${good%:0}|1010"                                                 # one field short
+    "${good}:0|1010"                                                  # one field long
+    "garbage|1010"
+    "|1010"
+    "V1${good#v1}|1010"
+    "${good/v1:/v2:}|1010"
+    "DH-3:3:1000|1010"                                                # the old shape
+    "${good/:1000:/:-1:}|1010"                                        # negative
+    "${good/:1000:/:1e3:}|1010"
+    "${good};rm -rf /|1010"
+    "${good/:1000:/:0x3e8:}|1010"
+    "${good/:1000:/:1000000000000000:}|1010"                          # unbounded digits
+  )
+  local entry
+  for entry in "${bads[@]}"; do
+    MON_CARRY_VALID=0
+    _mon_carry_stage "${entry%|*}" "${entry##*|}"
+    [ "$MON_CARRY_VALID" -eq 0 ] || { echo "accepted: $entry"; return 1; }
+  done
+}
+
+@test "carry: a leading zero is a decimal digit, not an octal prefix" {
+  _mon_carry_stage "v1:0000001000:0:0:0:0:0000000999:1:0:0:0:0:03:0:0" 1010
+  [ "$MON_CARRY_VALID" -eq 1 ] && [ "$MON_CARRY_DOWN" -eq 999 ] && [ "$MON_CARRY_TRIES" -eq 3 ]
+  # 08 and 09 would be a syntax error as octal; here they stage cleanly, and
+  # the retry cap rejects the value on its merits.
+  _mon_carry_stage "v1:1000:0:0:0:0:0:0:0:0:0:0:08:0:0" 1010
+  [ "$MON_CARRY_VALID" -eq 0 ]
+}
+
+@test "carry: a clean slate warrants nothing, and a bad record leaves the state untouched" {
+  MON_LINK_UP=0
+  restart_with "not a record" 1052
+  [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ] && [ -z "$MON_OFFLINE_PRECURSOR" ] && [ "$MON_AR_RADIO_TOUCHED" -eq 0 ]
+  ar_down wifi-not-joined "N1 WJ-1" 1000
+  ar_down wifi-not-joined "N1 WJ-1" $(( 1000 + THRESH_WIFI_REJOIN_GRACE_S * 10 ))
+  [ -z "$MON_AR_REASON" ]
+}
+
+@test "carry: a carried DH-3 attempt count keeps 'at most four' across restarts" {
+  MON_LINK_UP=0
+  restart_with "$(CK_AT=1010 CK_DOWN=1000 CK_TRIES=3 CK_DLAST=1000 mk_carry)" 1012
   [ "$MON_AR_DHCP_TRIES" -eq 3 ] && [ "$MON_AR_DHCP_LAST" -eq 1000 ]
   ar_down self-assigned "N1 DH-3" $(( 1000 + THRESH_AUTORECONNECT_RETRY_S - 1 ))
   [ -z "$MON_AR_REASON" ]
   ar_down self-assigned "N1 DH-3" $(( 1000 + THRESH_AUTORECONNECT_RETRY_S ))
   [ "$MON_AR_ATTEMPT" -eq 4 ]
-  _mon_auto_reconnect_reset
-  _mon_auto_reconnect_seed "WJ-1:1:1000" 1100
-  [ "$MON_AR_WJ_FIRED" -eq 1 ]
-  _mon_auto_reconnect_reset
-  _mon_auto_reconnect_seed "G2:1:1000" 1100
-  [ "$MON_AR_WEDGED_FIRED" -eq 1 ]
 }
 
-@test "auto-reconnect: a stale, future-dated or malformed carry is ignored, never fatal" {
-  local c
-  for c in "DH-3:3:1000" "garbage" "DH-3:3" "XX-9:1:1000" "DH-3:-1:1000" "DH-3:1:1000;rm" ""; do
-    _mon_auto_reconnect_reset
-    # 1000 is older than the cutoff at this "now" for the first; the rest never parse.
-    _mon_auto_reconnect_seed "$c" $(( 1000 + THRESH_AUTORECONNECT_CARRY_S + 1 ))
-    [ "$MON_AR_DHCP_TRIES" -eq 0 ] || { echo "seeded from '$c'"; return 1; }
-  done
-  _mon_auto_reconnect_seed "DH-3:3:5000" 1000
-  [ "$MON_AR_DHCP_TRIES" -eq 0 ]
-  # A leading zero is a decimal digit, not an octal prefix.
-  _mon_auto_reconnect_seed "DH-3:08:0000001000" 1100
-  [ "$MON_AR_DHCP_TRIES" -eq 8 ]
+@test "carry: a gap in observation does not clear what the record is built from" {
+  # The pause sample publishes the reset counters, so a restart after a
+  # sleep does not resurrect an outage that ended with the lid.
+  ar_down self-assigned "N1 DH-3" 1000
+  [ "$MON_AR_DHCP_TRIES" -eq 1 ]
+  _mon_auto_reconnect_reset
+  _mon_carry_build 1010
+  _mon_carry_stage "$MON_CARRY_OUT" 1011
+  [ "$MON_CARRY_TRIES" -eq 0 ] && [ "$MON_CARRY_NOADDR" -eq 0 ]
+}
+
+@test "monitor_sample: status.carry passes the record through verbatim, and is null without one" {
+  run emit NETDIAG_MON_CARRY="v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+c = json.load(sys.stdin)['status']['carry']
+assert c == 'v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0', c
+"
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)['status']
+assert 'carry' in s and s['carry'] is None, s
+"
 }
 
 @test "monitor_sample: status.auto_reconnect is null unless the monitor warrants one" {

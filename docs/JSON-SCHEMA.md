@@ -775,7 +775,8 @@ it would accumulate forever.
   "status":  {"severity": "ok", "rules": [], "measurement": "measured",
               "icmp_filtered": false,
               "degraded": false, "paused": false, "cadence_s": 10,
-              "auto_reconnect": null},
+              "auto_reconnect": null,
+              "carry": "v1:1760000000:2840131226:0:0:0:0:0:0:0:0:0:0:0:0"},
   "changes": [                    // schema 2+; ABSENT when nothing changed
     {"id": "vpn-disconnected", "field": "vpn.active",
      "from": "1", "to": "0", "summary": "VPN disconnected (Mullvad)"},
@@ -964,6 +965,30 @@ Older events lack attribution; a later capture must not be used to fill them.
   turned on "Automatically reconnect Wi-Fi" (off by default), by running
   `--repair=reconnect-wifi`. A CLI older than the field simply never sends
   it, which a consumer must read as "not warranted".
+- **`status.carry`** is the monitor's own record of what a restarted process
+  needs to carry on, present on every sample (including a paused one, which
+  carries the reset state). **Opaque: a consumer must not parse, compare or
+  act on it.** It keeps the latest one and hands it back, unmodified, in the
+  environment variable `HOPWATCH_MONITOR_CARRY` when it starts the next
+  `--monitor` process. The Hopwatch app restarts the monitor on every network
+  event, and a Wi-Fi drop is one, so without it the new process would know
+  nothing of the router having stopped answering just before the drop
+  (WJ-1's precursor), how long the Mac has been unjoined, whether the user
+  switched the radio off during the outage, or which automatic attempts have
+  been made. This is what keeps `--monitor` writing nothing to disk. For
+  the record only, the shape is `v1:` followed by fourteen unsigned integers
+  (when it was written; fingerprints of the network and its SSID; when the
+  router and the internet last stopped answering; when the link went down and
+  its precursor; the rejoin-grace clock; the radio and attempt flags and
+  counters). The monitor validates it strictly (exact shape, decimal digits
+  only, not from the future, not older than `THRESH_MON_CARRY_S`, every time
+  no later than the record, every flag and count in range) and refuses it
+  whole, starting clean, when the link it finds is demonstrably a different
+  network. A record that fails any check costs a clean slate, never an error,
+  and a clean slate warrants no automatic reconnect. Times inside it are the
+  original ones, so a restart never makes old evidence look fresh. A CLI
+  older than the field omits it (`null`); the consumer then hands back
+  nothing.
 - **`status.paused`** means `SIGUSR1` suspended probing. Every measurement
   in such a sample is stale by definition; do not plot or alert on it.
 - **`changes`** (schema 2+) lists field-level differences from the
