@@ -22,6 +22,14 @@ All notable changes to Hopwatch are recorded here. Format follows
 - A reconnect targets the network it is about to rejoin, not an old one. The remembered Wi-Fi name is tied to the network identity and cleared when the network changes, so a network whose name macOS hides no longer inherits the previous network's; for any fault where the Mac is still joined, only the name CoreWLAN reads at that moment is used.
 - The app's tests can no longer power-cycle the Wi-Fi of the machine that runs them: the coordinator takes an injected repair runner, and the reconnect tests assert on the recorded calls.
 
+## [1.15.1] - 2026-10-12
+
+### Changes
+
+- Merge pull request #5 from godigi/fix/hog-name-parse-test
+- test: stop the link-drop test reading the runner's own Wi-Fi state
+- test: give the hog.py name-parse case a live pid instead of a made-up one
+
 ## [1.15.0] - 2026-10-12
 
 ### Changes
@@ -4248,7 +4256,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/godigi/hopwatch/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/godigi/hopwatch/compare/v1.14.6...v1.15.0
 [1.14.6]: https://github.com/godigi/hopwatch/compare/v1.14.5...v1.14.6
 [1.14.5]: https://github.com/godigi/hopwatch/compare/v1.14.3...v1.14.5
