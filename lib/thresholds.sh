@@ -763,3 +763,12 @@ THRESH_REPAIR_WIFI_SETTLE_S=1
 # seconds a restart actually takes. A record the new process cannot vouch for
 # is dropped, never trusted: see _mon_carry_apply in lib/monitor.sh.
 THRESH_MON_CARRY_S=600
+
+# The one name the app hands back with that record: the network the link was
+# last up on (HOPWATCH_MONITOR_LAST_NETWORK), so an outage that begins in one
+# process can say "last on Home" in the next. It comes from outside, so it is
+# bounded before it is believed, and it is only ever echoed into the sample's
+# JSON. An SSID is at most 32 bytes; twice that leaves room for the
+# "wired via <gateway>" label and for multi-byte names, and anything longer
+# did not come from this monitor.
+THRESH_MON_NETWORK_NAME_MAX_BYTES=64

@@ -456,6 +456,32 @@ def _journal_prune(path: str) -> None:
         return
 
 
+# link.offline.precursor_summary: one sentence per precursor that has
+# something worth saying. `internet-unreachable` is deliberately absent: the
+# internet failing just before the link dropped explains nothing a user can
+# act on, so it gets no copy and the field is null. The wording is the CLI's
+# own; the app renders it verbatim and holds no copy of it.
+_PRECURSOR_SUMMARY = {
+    "router-unreachable": (
+        "Your router stopped responding right before Wi-Fi dropped, "
+        "which usually means it restarted."
+    ),
+}
+
+
+def _precursor_summary(precursor: str | None, rules: list[str]) -> str | None:
+    """The sentence for this outage's precursor, or None.
+
+    Withheld when DH-3 fires. DH-3 (joined, but the router never handed out
+    an address) is a more specific explanation of the same outage, and a
+    router that "stopped responding" is not what a user should be told
+    when the router never answered the DHCP request at all.
+    """
+    if not precursor or "DH-3" in rules:
+        return None
+    return _PRECURSOR_SUMMARY.get(precursor)
+
+
 def _auto_reconnect() -> dict | None:
     """status.auto_reconnect: the monitor's verdict that an automatic Wi-Fi
     reconnect is warranted on this very sample, or None. Passed through
@@ -479,12 +505,14 @@ def main() -> None:
 
     offline_block = None
     if not link_up:
+        precursor = _env("OFFLINE_PRECURSOR")
         offline_block = {
             "reason": _env("OFFLINE_REASON"),
             "down_since": _env("OFFLINE_DOWN_SINCE"),
             "down_duration_s": _i("OFFLINE_DOWN_DURATION_S"),
             "last_network": _env("OFFLINE_LAST_NETWORK"),
-            "precursor": _env("OFFLINE_PRECURSOR"),
+            "precursor": precursor,
+            "precursor_summary": _precursor_summary(precursor, rules),
         }
 
     sample = {
@@ -615,6 +643,14 @@ def main() -> None:
             # back, unread, in HOPWATCH_MONITOR_CARRY when it starts the next
             # process. Passed through verbatim; nothing here interprets it.
             "carry": _env("CARRY"),
+            # The name the monitor would want back with that record, if it
+            # is restarted: the network the link was last up on, or null
+            # (never a placeholder). Opaque to a consumer like `carry`: keep
+            # the latest verbatim and hand it to the next process in
+            # HOPWATCH_MONITOR_LAST_NETWORK, an environment variable, never
+            # an argument. The monitor adopts it only if it matches the
+            # fingerprint inside `carry`.
+            "carry_network": _env("CARRY_NETWORK"),
         },
     }
 

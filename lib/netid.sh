@@ -29,6 +29,25 @@
 # Writes: NETWORK_ID, NETWORK_LABEL, NETWORK_GROUP
 # Entry:  netid_run
 
+# What NETWORK_LABEL says when it has no name to give. Stored runs and the
+# history grouping already contain these exact strings, so they are fixed;
+# they are named here so a consumer that must not show one as a network name
+# (netid_label_is_name) tests against the same text netid_run writes.
+NETID_LABEL_UNKNOWN="unknown network"
+NETID_LABEL_HIDDEN="WiFi (SSID hidden by macOS)"
+
+# True when $1 is something a person would recognise as the name of a
+# network, false for an empty label, a placeholder netid_run writes when it
+# has no name, or a redaction marker. A placeholder is a fact about what
+# could not be read, not a network: "last on unknown network" says the
+# opposite of what it means.
+netid_label_is_name() {
+  case "${1:-}" in
+    ''|"$NETID_LABEL_UNKNOWN"|"$NETID_LABEL_HIDDEN"|'<redacted>'|'[redacted]') return 1 ;;
+  esac
+  return 0
+}
+
 netid_run() {
   local kind="lan" ssid="" parts=""
   [ "$IS_WIFI" -eq 1 ] && kind="wifi"
@@ -102,13 +121,13 @@ netid_run() {
 
   if [ -z "$parts" ]; then
     NETWORK_ID=""
-    NETWORK_LABEL="unknown network"
+    NETWORK_LABEL="$NETID_LABEL_UNKNOWN"
   else
     NETWORK_ID="${kind}:${parts}"
     if [ -n "$ssid" ]; then
       NETWORK_LABEL="$ssid"
     elif [ "$kind" = "wifi" ]; then
-      NETWORK_LABEL="WiFi (SSID hidden by macOS)"
+      NETWORK_LABEL="$NETID_LABEL_HIDDEN"
     else
       NETWORK_LABEL="wired via ${GATEWAY:-?}"
     fi

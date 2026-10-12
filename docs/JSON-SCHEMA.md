@@ -776,7 +776,8 @@ it would accumulate forever.
               "icmp_filtered": false,
               "degraded": false, "paused": false, "cadence_s": 10,
               "auto_reconnect": null,
-              "carry": "v1:1760000000:2840131226:0:0:0:0:0:0:0:0:0:0:0:0"},
+              "carry": "v2:1760000000:2840131226:0:0:0:0:0:0:0:0:0:0:0:0:3335736354",
+              "carry_network": "Home"},
   "changes": [                    // schema 2+; ABSENT when nothing changed
     {"id": "vpn-disconnected", "field": "vpn.active",
      "from": "1", "to": "0", "summary": "VPN disconnected (Mullvad)"},
@@ -848,10 +849,26 @@ Older events lack attribution; a later capture must not be used to fill them.
     - `"no-interface"`: No candidate network interfaces available
   - `down_since`: ISO 8601 UTC timestamp of when link-down was first detected.
   - `down_duration_s`: Number of seconds elapsed since link-down began.
-  - `last_network`: Label of the network before the drop, when known.
+  - `last_network`: The name of the network the link was last up on, or
+    `null` when the monitor cannot say. Never a placeholder: the labels
+    `"unknown network"` and `"WiFi (SSID hidden by macOS)"`, a redaction
+    marker or a blank all read as `null`, because "last on unknown network"
+    says the opposite of what it means. It survives a monitor restart (see
+    `status.carry_network`) only when the restarted process can show the name
+    belongs to the network that was lost; otherwise it is `null`, and a
+    consumer says nothing about a network rather than guess one.
   - `precursor`: Set to `"router-unreachable"` if gateway loss reached critical levels
     inside `THRESH_MON_PRECURSOR_S` (120 s) ahead of the drop (indicating a router restart),
     or `"internet-unreachable"` if public connectivity failed ahead of the drop.
+  - `precursor_summary`: One sentence of display prose for the precursor, or
+    `null`. A consumer renders it verbatim and shows nothing when it is
+    `null`; it holds no copy of its own. Today only `"router-unreachable"`
+    has one ("Your router stopped responding right before Wi-Fi dropped, which
+    usually means it restarted."). `"internet-unreachable"` has none, so its
+    summary is `null`. It is also `null` whenever `DH-3` is in `status.rules`:
+    a Mac that joined but was never given an address has a more specific
+    explanation than a router that "stopped responding", and `DH-3` carries it.
+    A CLI older than the field omits it.
 - **`network.group_id` is the `--history` group key** (`mac:…`, `gw:…` or
   `ssid:…` — the same string `--history` reports in `networks[].id`),
   derived by `lib/netid.sh` from the same inputs as `network.id`, with
@@ -976,11 +993,13 @@ Older events lack attribution; a later capture must not be used to fill them.
   (WJ-1's precursor), how long the Mac has been unjoined, whether the user
   switched the radio off during the outage, or which automatic attempts have
   been made. This is what keeps `--monitor` writing nothing to disk. For
-  the record only, the shape is `v1:` followed by fourteen unsigned integers
+  the record only, the shape is `v2:` followed by fifteen unsigned integers
   (when it was written; fingerprints of the network and its SSID; when the
   router and the internet last stopped answering; when the link went down and
   its precursor; the rejoin-grace clock; the radio and attempt flags and
-  counters). The monitor validates it strictly (exact shape, decimal digits
+  counters; a fingerprint of the last-network name, `0` for none). It holds no
+  names. A `v1:` record, from a CLI before the last-network fingerprint, is
+  not understood and is a clean slate. The monitor validates it strictly (exact shape, decimal digits
   only, not from the future, not older than `THRESH_MON_CARRY_S`, every time
   no later than the record, every flag and count in range) and refuses it
   whole, starting clean, when the link it finds is demonstrably a different
@@ -989,6 +1008,21 @@ Older events lack attribution; a later capture must not be used to fill them.
   original ones, so a restart never makes old evidence look fresh. A CLI
   older than the field omits it (`null`); the consumer then hands back
   nothing.
+- **`status.carry_network`** is the name that goes with `status.carry`: the
+  network the link was last up on (the value `link.offline.last_network`
+  would show), or `null` when there is none or it is only a placeholder.
+  Opaque to a consumer in the same way: keep the latest one verbatim and hand
+  it back, unmodified, in the environment variable
+  `HOPWATCH_MONITOR_LAST_NETWORK` when you start the next `--monitor` process
+  (an environment variable, never an argument) and drop it whenever you drop
+  the record. It exists because the record deliberately holds no names, yet
+  the process that sees an outage is usually not the one that saw the network
+  it began on. The monitor adopts the name only when all of these hold: a
+  record was adopted on this start; the link is down; the name's fingerprint
+  equals the one inside the record; and the name has the shape of a name (not
+  blank, not a placeholder, at most `THRESH_MON_NETWORK_NAME_MAX_BYTES` bytes,
+  no control characters). Otherwise `last_network` stays `null`. The value is
+  only ever echoed back into the stream. A CLI older than the field omits it.
 - **`status.paused`** means `SIGUSR1` suspended probing. Every measurement
   in such a sample is stale by definition; do not plot or alert on it.
 - **`changes`** (schema 2+) lists field-level differences from the
