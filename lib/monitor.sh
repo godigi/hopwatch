@@ -120,6 +120,8 @@ MON_VPN_ACTIVE=0
 MON_VPN_TYPE=""
 MON_VPN_NAME=""
 MON_GW_LOSS=""
+MON_INET_LOSS=""
+MON_INET_LOSS_ALT=""
 MON_GW_RTT=""
 # How many consecutive cycles the warn-band loss condition has held for
 # each leg — gateway and internet — used to confirm G3/L2 before either
@@ -239,6 +241,15 @@ MON_HW_PORTS=""
 # file has to be excused from.
 MON_INIT_PID=1
 
+# Offline diagnosis and context tracking
+MON_DOWN_SINCE=""
+MON_DOWN_SINCE_EPOCH=0
+MON_OFFLINE_REASON=""
+MON_OFFLINE_PRECURSOR=""
+MON_LAST_NETWORK=""
+MON_LAST_GW_LOSS_TIME=0
+MON_LAST_INET_LOSS_TIME=0
+
 # Previous-sample identity, for the schema-2 changes array. Snapshotted
 # by _mon_snapshot_prev after every successful emit; MON_HAVE_PREV=0
 # suppresses a spurious "everything changed" on the first sample.
@@ -259,6 +270,41 @@ MON_PREV_INTERFACE=""
 MON_PREV_RULES=""
 
 # ── Fast tier ────────────────────────────────────────────────────────────
+
+# Offline reason classifier when there is no default route.
+_mon_probe_offline() {
+  MON_OFFLINE_REASON=""
+  local wifi_dev=""
+  if type wifi_primary_device >/dev/null 2>&1; then
+    wifi_dev="$(wifi_primary_device "$MON_HW_PORTS")"
+  fi
+  [ -n "$wifi_dev" ] || wifi_dev="en0"
+  local power_out if_out
+  power_out="$(networksetup -getairportpower "$wifi_dev" 2>/dev/null || true)"
+  if [[ "$power_out" =~ :[[:space:]]*Off ]]; then
+    MON_OFFLINE_REASON="wifi-off"
+    [ -n "$MON_ID_IFACE_TYPE" ] && MON_INTERFACE="$wifi_dev"
+    return 0
+  fi
+  if_out="$(ifconfig "$wifi_dev" 2>/dev/null || true)"
+  local is_active=0 ip=""
+  if printf '%s\n' "$if_out" | grep -q 'status: active'; then
+    is_active=1
+  fi
+  ip="$(printf '%s\n' "$if_out" | awk '/inet /{print $2; exit}')"
+  if [ "$is_active" -eq 0 ]; then
+    MON_OFFLINE_REASON="wifi-not-joined"
+  elif [ -z "$ip" ]; then
+    MON_OFFLINE_REASON="wifi-no-address"
+  elif [[ "$ip" == 169.254.* ]]; then
+    MON_OFFLINE_REASON="self-assigned"
+  else
+    MON_OFFLINE_REASON="no-route"
+  fi
+  if [ -n "$MON_ID_IFACE_TYPE" ]; then
+    MON_INTERFACE="$wifi_dev"
+  fi
+}
 
 # One `route -n get default` for both fields: it is a syscall to the
 # routing table, but two of them per sample forever adds up and they can
@@ -368,7 +414,7 @@ _mon_hold_gw_mac() {
     MON_KNOWN_AT="$now"
     return 0
   fi
-  [ -n "$MON_KNOWN_GW_MAC" ] || return 0
+  [ -n "$MON_KNOWN_GW_MAC" ] || { MON_KNOWN_IFACE_TYPE=""; MON_KNOWN_SSID=""; return 0; }
 
   if [ $((now - MON_KNOWN_AT)) -gt "$THRESH_MON_IDENTITY_HOLD_S" ] \
     || { [ -n "$MON_GATEWAY" ]   && [ "$MON_GATEWAY"   != "$MON_KNOWN_GW" ]; } \
@@ -969,13 +1015,22 @@ _mon_rules() {
   MON_RULES=""
   # A rule can clear only when this cycle measured the inputs that decide it.
   # Link and VPN state are observed every cycle, even when traffic is not.
-  MON_CLEARABLE_RULES="N1 VPN-1 "
+  MON_CLEARABLE_RULES="N1 VPN-1 WF-1 WJ-1 "
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
 
   if [ "$MON_LINK_UP" -eq 0 ]; then
     _mon_add_rule critical N1
+    local down_duration=0
+    [ "$MON_DOWN_SINCE_EPOCH" -gt 0 ] && down_duration=$(( EPOCHSECONDS - MON_DOWN_SINCE_EPOCH ))
+    if [ "$MON_OFFLINE_REASON" = "wifi-off" ]; then
+      _mon_add_rule critical WF-1
+    elif [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ]; then
+      if [ "$down_duration" -ge "$THRESH_WIFI_REJOIN_GRACE_S" ]; then
+        _mon_add_rule critical WJ-1
+      fi
+    fi
     MON_DEGRADED=1
     MON_MEASUREMENT_STATE="link-down"
     _mon_clear_measurements
@@ -1404,6 +1459,11 @@ _mon_emit() {
   NETDIAG_MON_PREV_BSSID="$MON_PREV_BSSID" \
   NETDIAG_MON_PREV_INTERFACE="$MON_PREV_INTERFACE" \
   NETDIAG_MON_PREV_RULES="$MON_PREV_RULES" \
+  NETDIAG_MON_OFFLINE_REASON="$MON_OFFLINE_REASON" \
+  NETDIAG_MON_OFFLINE_DOWN_SINCE="$MON_DOWN_SINCE" \
+  NETDIAG_MON_OFFLINE_DOWN_DURATION_S="$(( MON_DOWN_SINCE_EPOCH > 0 ? now - MON_DOWN_SINCE_EPOCH : 0 ))" \
+  NETDIAG_MON_OFFLINE_PRECURSOR="$MON_OFFLINE_PRECURSOR" \
+  NETDIAG_MON_OFFLINE_LAST_NETWORK="$MON_LAST_NETWORK" \
   python3 "$HELPERS_DIR/monitor_sample.py"
 }
 
@@ -1465,6 +1525,8 @@ _mon_on_resume() {
   # A scan or sleep can outlast cached DNS/TCP/radio/public evidence.
   # Refresh every tier before the first post-pause sample is accepted.
   MON_REFRESH_REQUESTED=1
+  _mon_loss_reset
+  MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
 }
 # shellcheck disable=SC2317,SC2329
 _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
@@ -1477,6 +1539,7 @@ monitor_run() {
   # toggle or a roam. Empty until first observed, so the first cycle (which
   # runs every tier anyway) never counts as a change.
   local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
+  local dns_recheck_pending=0
   MON_BROWSER_DESYNC_COUNT=0
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
@@ -1546,6 +1609,12 @@ monitor_run() {
     if [ -n "$MON_PREV_CYCLE_TS" ] && [ -n "$MON_PREV_CADENCE" ]; then
       MON_GAP_S="$(_mon_gap_seconds \
         "$((now - MON_PREV_CYCLE_TS))" "$MON_PREV_CADENCE")"
+      if [ -n "$MON_GAP_S" ]; then
+        # A gap means the machine slept or stalled. Discard pre-sleep packet
+        # history so old packets do not dilute or distort the post-wake connection.
+        _mon_loss_reset
+        MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
+      fi
     fi
     MON_REFRESHED=""
     MON_MEDIUM_FRESH=0
@@ -1603,10 +1672,32 @@ monitor_run() {
         _mon_probe_gateway
         _mon_probe_internet
         _mon_probe_web
+        if loss_at_least "$MON_GW_LOSS" "$LOSS_CRIT_PCT"; then
+          MON_LAST_GW_LOSS_TIME="$now"
+        fi
+        if loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT"; then
+          MON_LAST_INET_LOSS_TIME="$now"
+        fi
+        MON_LAST_NETWORK="${MON_NETWORK_LABEL:-$MON_NETWORK_ID}"
+        MON_DOWN_SINCE=""
+        MON_DOWN_SINCE_EPOCH=0
+        MON_OFFLINE_PRECURSOR=""
       else
         link_was_down=1
         # No link, no valid window: every packet in it predates the drop.
         _mon_loss_reset
+        if [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ]; then
+          MON_DOWN_SINCE_EPOCH="$now"
+          MON_DOWN_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ "$MON_LAST_GW_LOSS_TIME" -gt 0 ] && [ $(( now - MON_LAST_GW_LOSS_TIME )) -le "$THRESH_MON_PRECURSOR_S" ]; then
+            MON_OFFLINE_PRECURSOR="router-unreachable"
+          elif [ "$MON_LAST_INET_LOSS_TIME" -gt 0 ] && [ $(( now - MON_LAST_INET_LOSS_TIME )) -le "$THRESH_MON_PRECURSOR_S" ]; then
+            MON_OFFLINE_PRECURSOR="internet-unreachable"
+          else
+            MON_OFFLINE_PRECURSOR=""
+          fi
+        fi
+        _mon_probe_offline
       fi
     fi
 
@@ -1678,6 +1769,17 @@ monitor_run() {
     # A failure still waiting for its confirmation is re-probed next cycle
     # rather than after the rest of the 60 s medium interval.
     if [ "$MON_CONN_PENDING" -eq 1 ]; then next_medium=0; fi
+    # If a fresh DNS lookup showed elevated latency (>= 200 ms) without being
+    # confirmed yet, re-probe once next cycle so a transient wake or cold-cache
+    # hiccup does not lock onto the screen for the entire 60 s medium interval.
+    if [ "$MON_MEDIUM_FRESH" -eq 1 ] && [ -n "$MON_DNS_MS" ] \
+       && is_numeric "$MON_DNS_MS" && [ "$MON_DNS_MS" -ge "$THRESH_DNS_LATENCY_WARN_MS" ] \
+       && [ "$dns_recheck_pending" -eq 0 ]; then
+      dns_recheck_pending=1
+      next_medium=0
+    else
+      dns_recheck_pending=0
+    fi
 
     cadence="$MONITOR_FAST_INTERVAL"
     [ "$MON_DEGRADED" -eq 1 ] && cadence="$MONITOR_DEGRADED_INTERVAL"

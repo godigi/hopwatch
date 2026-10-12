@@ -91,6 +91,9 @@ final class AppSettings {
             CrashReporter.setEnabled(crashReportingEnabled)
         }
     }
+    var autoReconnectWiFi: Bool {
+        didSet { Defaults.autoReconnectWiFi = autoReconnectWiFi }
+    }
     var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != oldValue else { return }
@@ -145,6 +148,7 @@ final class AppSettings {
         notificationScope = NotificationScope(rawValue: Defaults.notificationScope) ?? .all
         showInDock = Defaults.showInDock
         crashReportingEnabled = Defaults.crashReportingEnabled
+        autoReconnectWiFi = Defaults.autoReconnectWiFi
         launchAtLogin = SMAppService.mainApp.status == .enabled
         if showInDock {
             NSApp?.setActivationPolicy(.regular)

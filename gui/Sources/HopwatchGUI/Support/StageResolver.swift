@@ -152,6 +152,7 @@ enum StageResolver {
         let measurementState: String
         let activeResolution: ResolutionSnapshot?
         let degradedExperience: DegradedSnapshot?
+        let settling: Bool
         init(isScanning: Bool, isArrivalCheck: Bool = false,
              monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, pauseReason: String?,
@@ -160,7 +161,8 @@ enum StageResolver {
              sampleStale: Bool = false,
              measurementState: String = "unknown",
              activeResolution: ResolutionSnapshot? = nil,
-             degradedExperience: DegradedSnapshot? = nil) {
+             degradedExperience: DegradedSnapshot? = nil,
+             settling: Bool = false) {
             self.isScanning = isScanning
             self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
@@ -175,6 +177,7 @@ enum StageResolver {
             self.measurementState = measurementState
             self.activeResolution = activeResolution
             self.degradedExperience = degradedExperience
+            self.settling = settling
         }
     }
 
@@ -202,7 +205,7 @@ enum StageResolver {
         // the severity: a sample that old is not evidence of anything.
         if i.sampleStale { return .notReporting }
         if let alert = i.activeAlert { return .alerted(alert) }
-        if !i.monitorRunning || i.measurementState != "measured" {
+        if !i.monitorRunning || i.measurementState != "measured" || i.settling {
             return .checking
         }
         switch i.severity {

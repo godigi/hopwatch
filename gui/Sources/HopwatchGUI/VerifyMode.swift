@@ -2103,7 +2103,7 @@ private enum VerifyHarness {
                 ts: HistoryDocument.iso.string(from: ts),
                 runID: id,
                 networkID: "net1",
-                version: "1.14.5",
+                version: "1.14.6",
                 runMode: mode,
                 severity: severity,
                 diagnosisCount: rules.count,
@@ -2669,7 +2669,8 @@ private enum VerifyHarness {
                                monitorRunning: Bool = true,
                                 measurementState: String = "measured",
                                 activeResolution: StageResolver.ResolutionSnapshot? = nil,
-                                degradedExperience: StageResolver.DegradedSnapshot? = nil) -> StageResolver.Inputs {
+                                degradedExperience: StageResolver.DegradedSnapshot? = nil,
+                                settling: Bool = false) -> StageResolver.Inputs {
         StageResolver.Inputs(
             isScanning: isScanning,
             isArrivalCheck: isArrivalCheck,
@@ -2684,7 +2685,8 @@ private enum VerifyHarness {
             sampleStale: sampleStale,
             measurementState: measurementState,
             activeResolution: activeResolution,
-            degradedExperience: degradedExperience
+            degradedExperience: degradedExperience,
+            settling: settling
         )
     }
 
@@ -2705,6 +2707,7 @@ private enum VerifyHarness {
         equal(StageResolver.resolve(inputs(severity: "warn")), .watching(severity: .warn), "warn → watching (amber, before dwell)")
         equal(StageResolver.resolve(inputs(severity: "critical")), .watching(severity: .critical), "critical → watching (red, before dwell)")
         equal(StageResolver.resolve(inputs(measurementState: "unknown")), .checking, "unknown measurement → checking, not healthy")
+        equal(StageResolver.resolve(inputs(settling: true)), .checking, "settling active → checking, not false warn/loss")
 
         // Degraded stage: Activity-level degradation (calls cutting out, gaming lag)
         // produces .degraded when severity is ok, closing the contradiction where

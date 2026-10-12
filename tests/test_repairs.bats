@@ -57,7 +57,28 @@ case "$1" in
 esac
 exit 0
 SH
-  chmod +x "$STUBS/osascript" "$STUBS/open" "$STUBS/lsappinfo"
+  cat >"$STUBS/networksetup" <<'SH'
+#!/bin/sh
+printf 'networksetup %s\n' "$*" >>"$CALLS"
+if [ "$1" = "-listallhardwareports" ]; then
+  cat <<'EOF'
+Hardware Port: Wi-Fi
+Device: en0
+Ethernet Address: 00:11:22:33:44:55
+EOF
+  exit 0
+fi
+if [ "$1" = "-getairportpower" ]; then
+  echo "Wi-Fi Power (en0): On"
+  exit 0
+fi
+if [ "$1" = "-setairportpower" ]; then
+  [ -f "$STATE/networksetup-fails" ] && exit 1
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$STUBS/osascript" "$STUBS/open" "$STUBS/lsappinfo" "$STUBS/networksetup"
 }
 
 no_calls() {
@@ -86,6 +107,14 @@ no_calls() {
   run "$NETDIAG" --repair=open-sign-in --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"open http://captive.apple.com/hotspot-detect.html"* ]]
+  no_calls
+}
+
+@test "--dry-run reconnect-wifi prints networksetup commands and runs nothing" {
+  run "$NETDIAG" --repair=reconnect-wifi --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"networksetup -setairportpower en0 off"* ]]
+  [[ "$output" == *"networksetup -setairportpower en0 on"* ]]
   no_calls
 }
 
@@ -561,7 +590,7 @@ assert all('repairs' not in x for x in d), d
 
 # ── The catalogue agrees with itself ─────────────────────────────────────
 
-@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1 and CP-1 can offer, and only known ones" {
+@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1, CP-1, WF-1, WJ-1 can offer, and only known ones" {
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   local known
@@ -577,7 +606,9 @@ for r in d.values():
         assert rid in known, (r['id'], rid)
 assert d['CONN-1']['repairs'] == ['quit-app'], d['CONN-1']
 assert d['HOG-1']['repairs'] == ['quit-app'], d['HOG-1']
-assert sum(1 for r in d.values() if 'repairs' in r) == 4
+assert d['WF-1']['repairs'] == ['reconnect-wifi'], d['WF-1']
+assert d['WJ-1']['repairs'] == ['reconnect-wifi'], d['WJ-1']
+assert sum(1 for r in d.values() if 'repairs' in r) == 6
 " "$known"
 }
 

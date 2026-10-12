@@ -461,6 +461,16 @@ def main() -> None:
     link_up = os.environ.get("NETDIAG_MON_LINK_UP") == "1"
     rules = (_env("RULES") or "").split()
 
+    offline_block = None
+    if not link_up:
+        offline_block = {
+            "reason": _env("OFFLINE_REASON"),
+            "down_since": _env("OFFLINE_DOWN_SINCE"),
+            "down_duration_s": _i("OFFLINE_DOWN_DURATION_S"),
+            "last_network": _env("OFFLINE_LAST_NETWORK"),
+            "precursor": _env("OFFLINE_PRECURSOR"),
+        }
+
     sample = {
         # Fallback exists only for standalone/test invocation; it must
         # track NETDIAG_MON_SCHEMA in lib/monitor.sh.
@@ -493,6 +503,7 @@ def main() -> None:
             "gateway_mac": _env("GW_MAC"),
             "ssid": _env("SSID"),
             "bssid": _env("BSSID"),
+            "offline": offline_block,
         },
         # Byte-identical to what a full run records, because lib/monitor.sh
         # calls lib/netid.sh rather than reimplementing precedence. This is

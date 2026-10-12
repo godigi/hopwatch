@@ -45,19 +45,27 @@ endif
 
 all: sign
 
+# Use MacOSX26.5.sdk if present in CLT to avoid broken/incomplete SwiftUIMacros in MacOSX27.0.sdk
+SDK_26 := /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+ifeq ($(wildcard $(SDK_26)),$(SDK_26))
+SDK_FLAG := --sdk $(SDK_26)
+endif
+
 build:
-	swift build -c $(CONFIG)
+	swift build -c $(CONFIG) $(SDK_FLAG)
 
 CLT_TESTING_FRAMEWORK := /Library/Developer/CommandLineTools/Library/Developer/Frameworks/Testing.framework
 CLT_DEVELOPER_USR_LIB := /Library/Developer/CommandLineTools/Library/Developer/usr/lib
+CLT_TESTING_PLUGINS   := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 
 test:
 	@if [ -d "$(CLT_TESTING_FRAMEWORK)" ]; then \
-	  swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+	  swift test $(SDK_FLAG) -Xswiftc -plugin-path -Xswiftc $(CLT_TESTING_PLUGINS) \
+	             -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
 	             -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
 	             -Xlinker -rpath -Xlinker $(CLT_DEVELOPER_USR_LIB); \
 	else \
-	  swift test; \
+	  swift test $(SDK_FLAG); \
 	fi
 
 bundle: build

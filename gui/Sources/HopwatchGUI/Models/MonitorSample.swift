@@ -37,7 +37,9 @@ struct MonitorSample: Decodable, Sendable {
 
     /// Effective instantaneous jitter in ms, prioritizing internet then gateway.
     var liveJitterMs: Double? {
-        jitterMs ?? internet.rttJitterMs ?? gateway.rttJitterMs
+        if !link.up && (link.offline != nil || link.interface != nil) { return nil }
+        if (internet.lossPct ?? 0) >= 100 { return nil }
+        return jitterMs ?? internet.rttJitterMs ?? gateway.rttJitterMs
     }
 
     /// Field-level differences from the previous sample, phrased by the
@@ -77,13 +79,34 @@ struct MonitorSample: Decodable, Sendable {
         var gatewayMAC: String?
         var ssid: String?
         var bssid: String?
+        var offline: OfflineContext?
 
         enum CodingKeys: String, CodingKey {
-            case up, interface, type, ip, gateway, ssid, bssid
+            case up, interface, type, ip, gateway, ssid, bssid, offline
             case gatewayMAC = "gateway_mac"
         }
 
         var isWiFi: Bool { type == "wifi" }
+    }
+
+    struct OfflineContext: Decodable, Sendable {
+        var reason: String?
+        var downSince: String?
+        var downDurationS: Int?
+        var lastNetwork: String?
+        var precursor: String?
+
+        enum CodingKeys: String, CodingKey {
+            case reason, precursor
+            case downSince = "down_since"
+            case downDurationS = "down_duration_s"
+            case lastNetwork = "last_network"
+        }
+
+        var formattedDuration: String? {
+            guard let s = downDurationS, s >= 0 else { return nil }
+            return ActivityEntry.duration(Double(s))
+        }
     }
 
     struct NetworkIdentity: Decodable, Sendable, Equatable {

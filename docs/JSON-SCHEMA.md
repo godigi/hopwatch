@@ -823,6 +823,22 @@ Older events lack attribution; a later capture must not be used to fill them.
   `country-changed` / `public-ip-changed` entry is still produced across the
   outage, because the previous-sample snapshot keeps the last known value
   (see `changes` below).
+- **`link.offline`** *(present when `link.up` is `false`, otherwise `null`)*
+  provides structured diagnostic context for why the link is down and what
+  preceded the outage:
+  - `reason`: classified reason for the link-down state:
+    - `"wifi-off"`: Wi-Fi radio is switched off
+    - `"wifi-not-joined"`: Wi-Fi radio is powered on but unassociated with any network
+    - `"wifi-no-address"`: Associated with Wi-Fi but no IPv4 address assigned
+    - `"self-assigned"`: Assigned a 169.254.x.x link-local IP (DHCP failure)
+    - `"no-route"`: Associated with an IP, but default routing table entry missing
+    - `"no-interface"`: No candidate network interfaces available
+  - `down_since`: ISO 8601 UTC timestamp of when link-down was first detected.
+  - `down_duration_s`: Number of seconds elapsed since link-down began.
+  - `last_network`: Label of the network before the drop, when known.
+  - `precursor`: Set to `"router-unreachable"` if gateway loss reached critical levels
+    inside `THRESH_MON_PRECURSOR_S` (120 s) ahead of the drop (indicating a router restart),
+    or `"internet-unreachable"` if public connectivity failed ahead of the drop.
 - **`network.group_id` is the `--history` group key** (`mac:…`, `gw:…` or
   `ssid:…` — the same string `--history` reports in `networks[].id`),
   derived by `lib/netid.sh` from the same inputs as `network.id`, with

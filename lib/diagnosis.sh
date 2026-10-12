@@ -106,6 +106,11 @@ diagnosis_run() {
     add_diag critical DH-3 "$_joined, but the network never gave it an address — so your Mac assigned itself a placeholder one (${LINK_IP:-a self-assigned address}) that can't reach anything. This is almost always the router's address service (DHCP) being down, out of addresses, or still starting up after a reboot. $_fix; if that doesn't work, restart the router. Nothing will work until the network hands out a real address."
   elif [ -z "$GATEWAY" ]; then
     add_diag critical N1 "Your Mac has no network connection at all — nothing is joined and no cable is carrying a link. Turn WiFi on and pick a network, or check that the ethernet cable is seated at both ends. Nothing else can be diagnosed until this is fixed."
+    if [ "${OFFLINE_REASON:-}" = "wifi-off" ] || [ "${MON_OFFLINE_REASON:-}" = "wifi-off" ]; then
+      add_diag critical WF-1 "The Wi-Fi radio on this Mac is switched off while no other network interface carries a connection. Turn Wi-Fi on to reconnect."
+    elif [ "${OFFLINE_REASON:-}" = "wifi-not-joined" ] || [ "${MON_OFFLINE_REASON:-}" = "wifi-not-joined" ]; then
+      add_diag critical WJ-1 "Your Mac is not connected to any Wi-Fi network even though the Wi-Fi radio is on. Pick a network in Wi-Fi settings or toggle Wi-Fi to prompt it to reconnect."
+    fi
   elif [ "${PUBLIC_CHECKED:-0}" -eq 1 ] && [ "$_public_traffic_ok" -eq 0 ] \
        && [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] && [ -z "$GW_LOSS" ]; then
     # Reachable only from a focused run (--mtu-only), where the gateway

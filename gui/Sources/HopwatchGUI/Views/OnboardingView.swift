@@ -40,7 +40,11 @@ struct OnboardingView: View {
 
             step(number: 2,
                  title: "Show real Wi-Fi network names",
-                 detail: "Optional. macOS hides Wi-Fi names from apps unless you grant location access. Hopwatch never uses your location for anything else, and works fine without this — you can name your networks yourself instead.",
+                 detail: coordinator.locationPermissions.isAuthorized
+                     ? "Granted. Hopwatch can identify your Wi-Fi network and monitor connection health."
+                     : (coordinator.locationPermissions.isDeniedOrRestricted
+                         ? "Required. Access is currently denied in System Settings. Click Open Settings to enable Location Services for Hopwatch so it can detect Wi-Fi network names and disconnects."
+                         : "Required. macOS hides Wi-Fi network names and disconnect details from apps unless you grant Location Services access. Hopwatch uses this solely to identify your Wi-Fi network."),
                  done: coordinator.locationPermissions.isAuthorized,
                  action: coordinator.locationPermissions.isDeniedOrRestricted ? "Open Settings" : "Allow") {
                 if coordinator.locationPermissions.isDeniedOrRestricted {
@@ -61,16 +65,17 @@ struct OnboardingView: View {
             Spacer()
 
             HStack(alignment: .firstTextBaseline) {
-                // Never a dead end. Disabling this until notifications are
-                // granted would trap anyone who declined the system prompt
-                // in a window they cannot dismiss — and declining is a
-                // perfectly reasonable answer that leaves the dashboard,
-                // the history and the manual checks fully working.
-                Text(coordinator.alerts.notificationsAuthorized
-                     ? "You can change any of this later in Settings."
-                     : "Without notifications Hopwatch still watches and records everything — it just can't interrupt you. You can turn them on later in Settings.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !coordinator.locationPermissions.isAuthorized {
+                    Text("Location Services permission is required to use Hopwatch so it can identify your Wi-Fi network and detect disconnects.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(coordinator.alerts.notificationsAuthorized
+                         ? "You can change any of this later in Settings."
+                         : "Without notifications Hopwatch still watches and records everything — it just can't interrupt you. You can turn them on later in Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 12)
                 Button(coordinator.alerts.notificationsAuthorized
                        ? "Get started" : "Continue without alerts") {
@@ -78,6 +83,7 @@ struct OnboardingView: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!coordinator.locationPermissions.isAuthorized)
                 .fixedSize()
             }
         }

@@ -34,6 +34,18 @@ wifi_port_is_wireless() {
   printf '%s' "$1" | grep -qi 'Wi-Fi\|AirPort'
 }
 
+# The primary wireless network device (e.g. en0).
+# $1 = optional pre-read `networksetup -listallhardwareports` output.
+wifi_primary_device() {
+  local ports="${1:-}"
+  if [ -z "$ports" ]; then
+    ports="$(networksetup -listallhardwareports 2>/dev/null || true)"
+  fi
+  printf '%s\n' "$ports" | awk '
+    /^Hardware Port:/{is_wifi = ($0 ~ /Wi-Fi|AirPort/)}
+    /^Device:/{if (is_wifi) { print $2; exit }}'
+}
+
 # SSID / BSSID / Security from `ipconfig getsummary <iface>` output ($1).
 # Prints them TAB-separated; any field may be empty. No trimming: the
 # ipconfig values are used verbatim everywhere today.

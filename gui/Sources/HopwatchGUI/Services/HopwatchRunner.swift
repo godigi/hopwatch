@@ -188,19 +188,12 @@ struct HopwatchRunner {
         }
     }
 
-    /// Run one repair the user just confirmed: `hopwatch --repair=ID`.
-    ///
-    /// The only thing this does is hand the CLI the id and the parameters
-    /// the CLI itself offered. Every repair mechanism — and the validation
-    /// of every parameter — is the CLI's; there is no repair logic in
-    /// Swift. Exit 1 is "it ran and did not work" and still carries a JSON
-    /// result; exit 3 is a refusal (unknown repair, bad parameter) with
-    /// nothing run and the reason on stderr.
-    static func repair(_ repair: RunSnapshot.Diagnosis.Repair) async throws -> RepairResult {
+    /// Run one repair: `hopwatch --repair=ID`.
+    static func repair(id: String, params: [String: String] = [:]) async throws -> RepairResult {
         try await CapabilityStore.shared.requireSupport(for: .repair)
-        var args = ["--repair=\(repair.id)"]
-        for key in repair.params.keys.sorted() {
-            args += ["--repair-param", "\(key)=\(repair.params[key] ?? "")"]
+        var args = ["--repair=\(id)"]
+        for key in params.keys.sorted() {
+            args += ["--repair-param", "\(key)=\(params[key] ?? "")"]
         }
         args.append("--json")
         let (out, err, status) = try await execute(arguments: args)
@@ -212,6 +205,11 @@ struct HopwatchRunner {
             throw NetdiagError.badJSON(String(out.prefix(200)))
         }
         return result
+    }
+
+    /// Run one repair the user just confirmed: `hopwatch --repair=ID`.
+    static func repair(_ repair: RunSnapshot.Diagnosis.Repair) async throws -> RepairResult {
+        try await self.repair(id: repair.id, params: repair.params)
     }
 
     /// `netdiag --show=<id>`, decoded, with the bytes kept alongside.

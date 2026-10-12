@@ -670,3 +670,22 @@ THRESH_AWDL_SPIKE_RTT_MIN_MS=200
 THRESH_AWDL_JITTER_MIN_MS=40
 
 
+
+# WJ-1 — Wi-Fi is on but has not rejoined a network. How long the radio may
+# sit powered and unassociated before the monitor says so. An ordinary
+# roam, a router reboot on a fast unit, or waking from sleep re-associates
+# in well under this; macOS's own auto-join retries for longer than that
+# only when it has already given up on the network, which is the case the
+# rule exists for. Measured on this Mac (2026-10-04): the router came back
+# within ~3 minutes and macOS never rejoined — twice, for 12 and 61 minutes.
+THRESH_WIFI_REJOIN_GRACE_S=45
+
+# What counts as "just before the drop" when the monitor names what failed
+# first. A router that stops answering (G1/G2) or an internet that stops
+# answering (P1/P2/L1) inside this window ahead of Wi-Fi losing its
+# association is reported as the likely cause — the router restarting is
+# the common one. Observed lead times were 4 s (router) and several
+# minutes of flapping (internet); the window covers the router case and
+# the last flap of the internet case without reaching back to an
+# unrelated afternoon fault.
+THRESH_MON_PRECURSOR_S=120

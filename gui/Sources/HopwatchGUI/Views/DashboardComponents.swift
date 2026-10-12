@@ -132,6 +132,8 @@ struct DashboardStatusHeroView: View {
     var detectedTime: String? = nil
     var actionTitle: String? = nil
     var onAction: (() -> Void)? = nil
+    var secondaryActionTitle: String? = nil
+    var onSecondaryAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -157,10 +159,19 @@ struct DashboardStatusHeroView: View {
 
             Spacer()
 
-            if let actionTitle, let onAction {
-                Button(actionTitle, action: onAction)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+            if actionTitle != nil || secondaryActionTitle != nil {
+                HStack(spacing: 8) {
+                    if let actionTitle, let onAction {
+                        Button(actionTitle, action: onAction)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                    if let secondaryActionTitle, let onSecondaryAction {
+                        Button(secondaryActionTitle, action: onSecondaryAction)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
             }
 
             if let pill = statusPillText {

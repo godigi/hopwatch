@@ -117,6 +117,13 @@ final class NetworkEventWatcher: NSObject {
         guard let lastEventAt else { return false }
         return Date().timeIntervalSince(lastEventAt) < seconds
     }
+
+    /// Records a settling transition boundary (such as waking from sleep or
+    /// display sleep), ensuring background alerts and transient link glitches
+    /// don't fire before the network stack has stabilized.
+    func markSettling() {
+        lastEventAt = Date()
+    }
 }
 
 // CoreWLAN calls these on its own queue.

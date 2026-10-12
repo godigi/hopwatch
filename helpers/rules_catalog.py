@@ -80,7 +80,7 @@ SCHEMA_RULES_CATALOG = 6
 
 # The repair IDs lib/repairs.sh knows (REPAIR_IDS). A rule's `repairs` list
 # may name only these; tests/test_repairs.bats checks the two lists agree.
-REPAIRS = frozenset({"quit-app", "restart-mac", "open-sign-in"})
+REPAIRS = frozenset({"quit-app", "restart-mac", "open-sign-in", "reconnect-wifi"})
 
 # The measurement family each rule judges — the GUI tints a report-card
 # row by this, not by severity, so a "varies"-severity rule like B1 still
@@ -480,6 +480,49 @@ RULES: list[dict[str, object]] = [
             "the congestion entirely."
         ),
         "fix_target": "your_router",
+    },
+    {
+        "id": "WF-1",
+        "title": "Wi-Fi is turned off",
+        "category": "wifi",
+        "severity": "critical",
+        "scope": "both",
+        "blurb": (
+            "The Wi-Fi radio on this Mac is switched off while no other "
+            "network interface carries a connection. Turn Wi-Fi on to reconnect."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#wf-1--wi-fi-is-turned-off",
+        "impacts": {
+            "calls": "broken", "streaming": "broken", "gaming": "broken",
+            "vpn": "broken", "browsing": "broken",
+        },
+        "fix": "Turn Wi-Fi on in Control Center or System Settings.",
+        "fix_target": "you",
+        "repairs": ["reconnect-wifi"],
+    },
+    {
+        "id": "WJ-1",
+        "title": "Wi-Fi dropped and has not rejoined",
+        "category": "wifi",
+        "severity": "critical",
+        "scope": "both",
+        "blurb": (
+            "The Wi-Fi radio is powered on but has not associated with a "
+            "network. This often happens after a router reboot or temporary "
+            "signal loss where macOS does not automatically rejoin. Reconnecting "
+            "the Wi-Fi radio prompts macOS to rejoin known networks."
+        ),
+        "doc": "DIAGNOSIS-RULES.md#wj-1--wi-fi-dropped-and-has-not-rejoined",
+        "impacts": {
+            "calls": "broken", "streaming": "broken", "gaming": "broken",
+            "vpn": "broken", "browsing": "broken",
+        },
+        "fix": (
+            "Toggle Wi-Fi off and back on to prompt macOS to reconnect, "
+            "or pick your network in Wi-Fi settings."
+        ),
+        "fix_target": "you",
+        "repairs": ["reconnect-wifi"],
     },
     {
         "id": "G1",

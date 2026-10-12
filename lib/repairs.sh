@@ -45,7 +45,7 @@ REPAIR_RS=$'\x1e'
 # lib/monitor.sh), so "open the sign-in page" and "detect the sign-in page"
 # can never point at different places. Defined in lib/common.sh.
 
-REPAIR_IDS="quit-app restart-mac open-sign-in"
+REPAIR_IDS="quit-app restart-mac open-sign-in reconnect-wifi"
 
 repair_known() {
   case " $REPAIR_IDS " in
@@ -86,6 +86,12 @@ repair_describe() {
       REPAIR_CONFIRM="Your web browser will open and show this network's sign-in or terms page. Nothing on your Mac is changed. Accept the terms or enter what it asks for, and the connection should start working."
       REPAIR_RECHECK=later
       REPAIR_IF_UNFIXED="If no sign-in page appears, forget this network in your Wi-Fi settings and join it again, or ask whoever runs the network."
+      ;;
+    reconnect-wifi)
+      REPAIR_LABEL="Reconnect Wi-Fi"
+      REPAIR_CONFIRM="Your Mac's Wi-Fi radio will be turned off and back on to prompt macOS to reconnect to your network. Nothing else on your Mac is changed."
+      REPAIR_RECHECK=now
+      REPAIR_IF_UNFIXED="Check that your Wi-Fi router is powered on, or open Wi-Fi settings to connect manually."
       ;;
     *) return 1 ;;
   esac
@@ -280,6 +286,33 @@ _repair_do_open_sign_in() {
   return 0
 }
 
+_repair_do_reconnect_wifi() {
+  local dev=""
+  if type wifi_primary_device >/dev/null 2>&1; then
+    dev="$(wifi_primary_device)"
+  fi
+  [ -n "$dev" ] || dev="en0"
+  local off_cmd="networksetup -setairportpower ${dev} off"
+  local on_cmd="networksetup -setairportpower ${dev} on"
+  REPAIR_RAN=("$off_cmd" "$on_cmd")
+  if [ "$REPAIR_DRY" -eq 1 ]; then
+    REPAIR_OK=1
+    REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} off and on. Nothing was changed."
+    return 0
+  fi
+  if with_timeout 5 networksetup -setairportpower "$dev" off 2>/dev/null; then
+    sleep 1
+    if with_timeout 5 networksetup -setairportpower "$dev" on 2>/dev/null; then
+      REPAIR_OK=1
+      REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to prompt macOS to reconnect."
+      return 0
+    fi
+  fi
+  REPAIR_OK=0
+  REPAIR_MESSAGE="Could not toggle Wi-Fi on ${dev}."
+  return 0
+}
+
 # ── The CLI ──────────────────────────────────────────────────────────────
 
 # Where a repair that ran is recorded: the journal the recorder fills, and
@@ -304,9 +337,10 @@ repair_cli() {
   REPAIR_DRY="$dry"
   REPAIR_RAN=(); REPAIR_OK=0; REPAIR_MESSAGE=""
   case "$id" in
-    quit-app)     _repair_do_quit_app ;;
-    restart-mac)  _repair_do_restart_mac ;;
-    open-sign-in) _repair_do_open_sign_in ;;
+    quit-app)       _repair_do_quit_app ;;
+    restart-mac)    _repair_do_restart_mac ;;
+    open-sign-in)   _repair_do_open_sign_in ;;
+    reconnect-wifi) _repair_do_reconnect_wifi ;;
   esac
   ran=""
   for i in "${!REPAIR_RAN[@]}"; do ran+="${REPAIR_RAN[$i]}"$'\n'; done

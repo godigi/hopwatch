@@ -317,7 +317,12 @@ extension ActivityEntry {
                 return $0.captureKey < $1.captureKey
             }
             return entry
-        }.sorted { $0.latest > $1.latest }
+        }.sorted {
+            if $0.isOngoing != $1.isOngoing {
+                return $0.isOngoing && !$1.isOngoing
+            }
+            return $0.latest > $1.latest
+        }
     }
 
     /// Fold each alert row into the rule row it is about.

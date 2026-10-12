@@ -54,6 +54,7 @@ final class HopwatchCoordinator {
     }
 
     private var updateCheckTask: Task<Void, Never>?
+    private var hasAutoReconnectedThisOutage = false
     private(set) var latestRun: RunResult?
     /// Home's fallback for a session that has not run a scan yet.
     /// See `reportSource` for why this is a separate property rather than
@@ -195,6 +196,10 @@ final class HopwatchCoordinator {
         for idx in recentResolutions.indices where recentResolutions[idx].isCurrent {
             recentResolutions[idx].dismissed = true
         }
+    }
+
+    var isSettling: Bool {
+        events.withinGracePeriod(4)
     }
 
     func recordResolution(title: String, message: String, icon: String = "checkmark.circle.fill") {
@@ -576,6 +581,23 @@ final class HopwatchCoordinator {
         }
         evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
+
+        if sample.link.up {
+            hasAutoReconnectedThisOutage = false
+        } else if appSettings.autoReconnectWiFi && sample.status.rules.contains("WJ-1") && !hasAutoReconnectedThisOutage {
+            hasAutoReconnectedThisOutage = true
+            log.info("Auto-reconnecting Wi-Fi after WJ-1 drop")
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
+                    self.eventLog.record(kind: "repair", summary: "Auto-reconnect Wi-Fi: \(result.message)", ruleID: "WJ-1",
+                                         network: self.monitor.latest?.network.id)
+                } catch {
+                    self.log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
+                }
+            }
+        }
 
         // The first cycle of a monitor process records monitor-started, matching
         // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
@@ -1203,6 +1225,7 @@ final class HopwatchCoordinator {
         alerts.invalidateConnection()
         notifications.clearAnnouncedFaults()
         dismissActiveResolution()
+        events.markSettling()
         refreshLiveWiFi()
     }
 
@@ -1397,6 +1420,31 @@ final class HopwatchCoordinator {
         repairOutcome = nil
     }
 
+    /// Run the reconnect-wifi repair on demand (e.g. from an offline card button).
+    func reconnectWiFi() {
+        guard !isRepairing else { return }
+        repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                                      phase: .working, detail: nil)
+        repairTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await NetdiagRunner.repair(id: "reconnect-wifi")
+                self.eventLog.record(kind: "repair", summary: result.message, ruleID: "WJ-1",
+                                     network: self.monitor.latest?.network.id)
+                if result.ok {
+                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                                                       phase: .done, detail: result.message)
+                } else {
+                    self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                                                       phase: .failed, detail: result.message)
+                }
+            } catch {
+                self.repairOutcome = RepairOutcome(ruleID: "WJ-1", label: "Reconnect Wi-Fi",
+                                                   phase: .failed, detail: error.localizedDescription)
+            }
+        }
+    }
+
     /// Run a repair the user has just confirmed, then find out whether it
     /// worked. Only ever called from a button the user pressed — never from
     /// a timer, an arrival or an alert (CLAUDE.md, Read-only).
@@ -1533,6 +1581,7 @@ final class HopwatchCoordinator {
         nc.addObserver(forName: NSWorkspace.screensDidWakeNotification,
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
+                self?.events.markSettling()
                 self?.monitor.resume(reason: "the display is asleep")
                 self?.alerts.monitoringPaused = self?.monitor.isPausedForAnyReason ?? false
             }
@@ -1550,6 +1599,7 @@ final class HopwatchCoordinator {
         nc.addObserver(forName: NSWorkspace.didWakeNotification,
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
+                self?.events.markSettling()
                 self?.invalidateCurrentConnection()
                 self?.monitor.resume(reason: "your Mac is asleep")
                 if Defaults.monitoringEnabled { self?.monitor.restart() }
@@ -2091,6 +2141,10 @@ final class HopwatchCoordinator {
         // text from the rules catalog; the literal is only the fallback for
         // a catalog that has not loaded.
         if linkIsDown {
+            let offline = liveSample?.link.offline ?? monitor.latest?.link.offline
+            if let precursor = offline?.precursor, precursor == "router-unreachable" {
+                return "Your router stopped responding right before Wi-Fi dropped, which usually means it restarted."
+            }
             return Self.headlineText(forRulesIn: monitor.latest?.status.rules ?? [],
                                      catalog: rulesCatalog.catalog)
                 ?? NoLinkCopy.fallbackSubtitle

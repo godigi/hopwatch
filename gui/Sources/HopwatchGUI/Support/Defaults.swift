@@ -44,6 +44,7 @@ enum Defaults {
             Key.notificationScope: "all",
             Key.showInDock: false,
             Key.crashReportingEnabled: true,
+            Key.autoReconnectWiFi: false,
         ])
 
         // On first launch of com.godigi.hopwatch, import legacy user preferences
@@ -112,6 +113,14 @@ enum Defaults {
         static let locationBannerDismissed = "locationBannerDismissed"
         static let phaseDurationSamples = "phaseDurationSamples"
         static let crashReportingEnabled = "crashReportingEnabled"
+        static let autoReconnectWiFi  = "autoReconnectWiFi"
+    }
+
+    // MARK: - Recovery
+
+    static var autoReconnectWiFi: Bool {
+        get { d.object(forKey: Key.autoReconnectWiFi) as? Bool ?? false }
+        set { d.set(newValue, forKey: Key.autoReconnectWiFi) }
     }
 
     // MARK: - Crash Reporting

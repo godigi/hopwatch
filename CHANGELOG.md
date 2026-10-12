@@ -6,6 +6,23 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.14.6] - 2026-10-12
+
+### Added
+
+- Wi-Fi disconnect and recovery detection: track when Wi-Fi interface is on but not associated with an SSID, with WF-1 (Wi-Fi disconnected) and WJ-1 (Wi-Fi failed to rejoin) diagnostic rules after rejoin grace period.
+- One-click "Reconnect Wi-Fi" action button in menu bar and dashboard when link is offline.
+- Optional "Auto-reconnect Wi-Fi when connection is lost" setting in Preferences.
+- Required Location Services permission in onboarding to guarantee network name visibility and network state tracking.
+- Precursor diagnosis tracking to identify router reboot or gateway failure prior to Wi-Fi drop.
+
+### Fixed
+
+- Prevent false packet loss and jitter spikes on waking from sleep: reset rolling packet loss history window and gateway/internet loss streaks upon sleep gap or resume.
+- Prevent stale 60s slow-DNS lock-in: dynamically trigger immediate recheck on the next 5s cycle when a fresh DNS probe measures elevated latency (≥200ms), ensuring wake or cold-cache lookups clear within 5 seconds.
+- Settle network state on wake: keep dropdown and dashboard in neutral checking state during the 4-second settling grace window after wake or reconnection before live probes stabilize.
+- Fix unbound variable crash under `set -u` in CLI monitor.
+
 ## [1.14.5] - 2026-10-09
 
 ### Fixed
@@ -4209,7 +4226,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.5...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.14.6...HEAD
+[1.14.6]: https://github.com/godigi/hopwatch/compare/v1.14.5...v1.14.6
 [1.14.5]: https://github.com/godigi/hopwatch/compare/v1.14.3...v1.14.5
 [1.14.3]: https://github.com/godigi/hopwatch/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/godigi/hopwatch/compare/v1.14.1...v1.14.2

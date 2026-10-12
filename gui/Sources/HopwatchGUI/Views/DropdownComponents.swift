@@ -521,6 +521,8 @@ struct MenuStatusHeroView: View {
     var isChecking: Bool = false
     var actionTitle: String? = nil
     var onAction: (() -> Void)? = nil
+    var secondaryActionTitle: String? = nil
+    var onSecondaryAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -554,11 +556,20 @@ struct MenuStatusHeroView: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if let actionTitle, let onAction {
-                    Button(actionTitle, action: onAction)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .padding(.top, 4)
+                if actionTitle != nil || secondaryActionTitle != nil {
+                    HStack(spacing: 8) {
+                        if let actionTitle, let onAction {
+                            Button(actionTitle, action: onAction)
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                        }
+                        if let secondaryActionTitle, let onSecondaryAction {
+                            Button(secondaryActionTitle, action: onSecondaryAction)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
 

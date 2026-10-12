@@ -290,7 +290,8 @@ struct HomeView: View {
             sampleStale: coordinator.latestSampleIsStale,
             measurementState: coordinator.liveSample?.status.measurement ?? "unknown",
             activeResolution: coordinator.activeResolution?.snapshot,
-            degradedExperience: degraded
+            degradedExperience: degraded,
+            settling: coordinator.isSettling
         ))
     }
 
@@ -332,18 +333,66 @@ struct HomeView: View {
                 statusPillBackground: Theme.ColorToken.greenWash
             )
         case .noLink:
-            // Headline and glyph state the observable fact; the subtitle is
-            // the CLI's N1 text (`coordinator.headline`).
+            let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
+            let rules = coordinator.monitor.latest?.status.rules ?? []
+            let headline: String = {
+                if rules.contains("WJ-1") {
+                    return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? "Wi-Fi dropped and hasn't rejoined"
+                } else if rules.contains("WF-1") {
+                    return coordinator.rulesCatalog.catalog?["WF-1"]?.title ?? "Wi-Fi is turned off"
+                } else {
+                    return NoLinkCopy.headline
+                }
+            }()
+
+            let subtitle: String = {
+                var subtitleParts: [String] = []
+                if let dur = offline?.formattedDuration {
+                    if let net = offline?.lastNetwork, !net.isEmpty {
+                        subtitleParts.append("Offline for \(dur) · last on \(net)")
+                    } else {
+                        subtitleParts.append("Offline for \(dur)")
+                    }
+                } else if let net = offline?.lastNetwork, !net.isEmpty {
+                    subtitleParts.append("Last connected to \(net)")
+                }
+
+                if offline?.precursor == "router-unreachable" {
+                    subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
+                } else {
+                    subtitleParts.append(coordinator.headline)
+                }
+
+                return subtitleParts.joined(separator: "\n")
+            }()
+            let hasWJ1 = rules.contains("WJ-1")
+            let actionTitle = hasWJ1 ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
+            let secTitle: String? = hasWJ1 ? "Open Wi-Fi Settings" : nil
+
             DashboardStatusHeroView(
                 iconName: NoLinkCopy.icon,
                 iconTint: Theme.ColorToken.red,
                 iconBackground: Theme.ColorToken.redWash,
-                headline: NoLinkCopy.headline,
-                subtitle: coordinator.headline,
+                headline: headline,
+                subtitle: subtitle,
                 statusPillText: "Offline",
                 statusPillTint: Theme.ColorToken.red,
                 statusPillBackground: Theme.ColorToken.redWash,
-                detectedTime: "Live"
+                detectedTime: "Live",
+                actionTitle: actionTitle,
+                onAction: {
+                    if hasWJ1 {
+                        coordinator.reconnectWiFi()
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                secondaryActionTitle: secTitle,
+                onSecondaryAction: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             )
         case .watching(let sev):
             let isCritical = sev == .critical
@@ -968,7 +1017,12 @@ struct HomeView: View {
     }
 
     private var wifiSignalText: String {
-        if linkDown { return NoLinkCopy.linkReading }
+        if linkDown {
+            let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
+            if offline?.reason == "wifi-off" { return "Wi-Fi is off" }
+            if offline?.reason == "wifi-not-joined" || offline?.reason == "wifi-no-address" { return "Not connected" }
+            return NoLinkCopy.linkReading
+        }
         if coordinator.liveSample == nil && resolvedRSSI == nil { return "—" }
         if !isConnectedToWiFi { return "Ethernet" }
         guard let rssi = resolvedRSSI else { return "—" }

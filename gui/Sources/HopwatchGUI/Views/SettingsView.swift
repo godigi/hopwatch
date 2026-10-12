@@ -73,6 +73,13 @@ struct SettingsView: View {
                 Toggle("Pause on low battery", isOn: $appSettings.pauseOnBattery)
             }
 
+            Section("Wi-Fi Recovery") {
+                Toggle("Automatically reconnect Wi-Fi when connection drops", isOn: $appSettings.autoReconnectWiFi)
+                Text("If Wi-Fi drops and macOS fails to reconnect automatically within 45 seconds, Hopwatch toggles Wi-Fi once to prompt macOS to re-join your network.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Menu bar") {
                 Picker("Show", selection: $appSettings.menuBarStyle) {
                     ForEach(MenuBarStyle.allCases) { Text($0.label).tag($0) }

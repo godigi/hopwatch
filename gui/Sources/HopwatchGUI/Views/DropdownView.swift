@@ -215,7 +215,8 @@ struct DropdownView: View {
             // A sample that predates a stop or pause is not a measurement.
             measurementState: coordinator.liveSample?.status.measurement ?? "unknown",
             activeResolution: coordinator.activeResolution?.snapshot,
-            degradedExperience: degraded
+            degradedExperience: degraded,
+            settling: coordinator.isSettling
         ))
     }
 
@@ -247,14 +248,62 @@ struct DropdownView: View {
                 subtitle: res.message
             )
         case .noLink:
-            // The subtitle is the CLI's N1 text (`coordinator.headline`);
-            // the headline and glyph state the one observable fact.
+            let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
+            let rules = coordinator.monitor.latest?.status.rules ?? []
+            let headline: String = {
+                if rules.contains("WJ-1") {
+                    return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? "Wi-Fi dropped and hasn't rejoined"
+                } else if rules.contains("WF-1") {
+                    return coordinator.rulesCatalog.catalog?["WF-1"]?.title ?? "Wi-Fi is turned off"
+                } else {
+                    return NoLinkCopy.headline
+                }
+            }()
+
+            let subtitle: String = {
+                var subtitleParts: [String] = []
+                if let dur = offline?.formattedDuration {
+                    if let net = offline?.lastNetwork, !net.isEmpty {
+                        subtitleParts.append("Offline for \(dur) · last on \(net)")
+                    } else {
+                        subtitleParts.append("Offline for \(dur)")
+                    }
+                } else if let net = offline?.lastNetwork, !net.isEmpty {
+                    subtitleParts.append("Last connected to \(net)")
+                }
+
+                if offline?.precursor == "router-unreachable" {
+                    subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
+                } else {
+                    subtitleParts.append(coordinator.headline)
+                }
+
+                return subtitleParts.joined(separator: "\n")
+            }()
+            let hasWJ1 = rules.contains("WJ-1")
+            let actionTitle = hasWJ1 ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
+            let secTitle: String? = hasWJ1 ? "Open Wi-Fi Settings" : nil
+
             MenuStatusHeroView(
                 iconName: NoLinkCopy.icon,
                 iconTint: .red,
                 iconBackground: Color.red.opacity(0.12),
-                headline: NoLinkCopy.headline,
-                subtitle: coordinator.headline
+                headline: headline,
+                subtitle: subtitle,
+                actionTitle: actionTitle,
+                onAction: {
+                    if hasWJ1 {
+                        coordinator.reconnectWiFi()
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                secondaryActionTitle: secTitle,
+                onSecondaryAction: {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             )
         case .watching(let sev):
             let isCritical = sev == .critical
@@ -440,7 +489,16 @@ struct DropdownView: View {
     }
 
     private var macDetailText: String {
-        if linkDown { return NoLinkCopy.macDetail }
+        if linkDown {
+            let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
+            if offline?.reason == "wifi-off" {
+                return "Wi-Fi is off"
+            }
+            if offline?.reason == "wifi-not-joined" || offline?.reason == "wifi-no-address" {
+                return "Wi-Fi · not connected"
+            }
+            return NoLinkCopy.macDetail
+        }
         guard coordinator.liveSample != nil else { return "Checking…" }
         let isWiFi = coordinator.liveSample?.link.isWiFi ?? true
         guard isWiFi else {
@@ -720,6 +778,9 @@ struct DropdownView: View {
 
     private var speedMetaText: String {
         if let age = speedValues.age {
+            if linkDown {
+                return "\(age) · before outage"
+            }
             return vpnActive ? "\(age) · before VPN" : age
         }
         return "not tested yet"

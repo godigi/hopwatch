@@ -2417,3 +2417,56 @@ cycle() {
   cycle 1010 "" "" "" ""
   [ -z "$MON_NETWORK_ID" ]
 }
+
+@test "WF-1 fires immediately on link down when Wi-Fi is powered off" {
+  MON_LINK_UP=0
+  MON_OFFLINE_REASON="wifi-off"
+  _mon_rules
+  [[ " $MON_RULES " == *" N1 "* ]]
+  [[ " $MON_RULES " == *" WF-1 "* ]]
+  [[ " $MON_RULES " != *" WJ-1 "* ]]
+  [ "$MON_SEVERITY" = "critical" ]
+}
+
+@test "WJ-1 stays quiet inside grace period when Wi-Fi is not joined" {
+  MON_LINK_UP=0
+  MON_OFFLINE_REASON="wifi-not-joined"
+  MON_DOWN_SINCE_EPOCH="$EPOCHSECONDS"
+  _mon_rules
+  [[ " $MON_RULES " == *" N1 "* ]]
+  [[ " $MON_RULES " != *" WF-1 "* ]]
+  [[ " $MON_RULES " != *" WJ-1 "* ]]
+}
+
+@test "WJ-1 fires after grace period when Wi-Fi is not joined" {
+  MON_LINK_UP=0
+  MON_OFFLINE_REASON="wifi-not-joined"
+  MON_DOWN_SINCE_EPOCH=$(( EPOCHSECONDS - THRESH_WIFI_REJOIN_GRACE_S - 5 ))
+  _mon_rules
+  [[ " $MON_RULES " == *" N1 "* ]]
+  [[ " $MON_RULES " == *" WJ-1 "* ]]
+  [[ " $MON_RULES " != *" WF-1 "* ]]
+  [ "$MON_SEVERITY" = "critical" ]
+}
+
+@test "offline block in sample carries reason, duration, and precursor on link down" {
+  run emit NETDIAG_MON_LINK_UP=0 \
+           NETDIAG_MON_OFFLINE_REASON="wifi-not-joined" \
+           NETDIAG_MON_OFFLINE_DOWN_SINCE="2026-10-12T10:00:00Z" \
+           NETDIAG_MON_OFFLINE_DOWN_DURATION_S=60 \
+           NETDIAG_MON_OFFLINE_PRECURSOR="router-unreachable" \
+           NETDIAG_MON_OFFLINE_LAST_NETWORK="Home"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['link']['up'] is False
+off = d['link']['offline']
+assert off is not None
+assert off['reason'] == 'wifi-not-joined'
+assert off['down_since'] == '2026-10-12T10:00:00Z'
+assert off['down_duration_s'] == 60
+assert off['precursor'] == 'router-unreachable'
+assert off['last_network'] == 'Home'
+"
+}

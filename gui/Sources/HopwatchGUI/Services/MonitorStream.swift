@@ -83,6 +83,7 @@ final class MonitorStream {
     }
 
     private var process: Process?
+    private var stdoutPipe: Pipe?
     private var readTask: Task<Void, Never>?
     /// The capability-gate half of `start()`, tracked so `stop()` can
     /// cancel it. Without this a `stop()` that lands while the handshake
@@ -240,6 +241,7 @@ final class MonitorStream {
             ? BinaryLocator.environment() : ProcessInfo.processInfo.environment
 
         let pipe = Pipe()
+        stdoutPipe = pipe
         proc.standardOutput = pipe
         // stderr goes nowhere: the monitor writes progress and warnings
         // there, and an unread pipe that fills would block the child
@@ -285,17 +287,29 @@ final class MonitorStream {
         startTask = nil
         readTask?.cancel()
         readTask = nil
+        try? stdoutPipe?.fileHandleForReading.close()
+        stdoutPipe = nil
         if let process, process.isRunning {
+            let pid = process.processIdentifier
             // Resume first: a paused monitor handles SIGTERM promptly
             // either way, but leaving it paused-then-terminated makes the
             // shutdown path depend on trap ordering for no benefit.
-            kill(process.processIdentifier, SIGUSR2)
+            kill(pid, SIGUSR2)
             process.terminate()
             // `terminate()` only sends SIGTERM; without a wait the exited
             // child remains unreaped, and a quick restart can briefly leave
             // two monitors probing the same link. Reap off the main actor so
             // an in-flight ping cannot freeze the menu bar while it exits.
+            // If the process does not terminate within 3 seconds, escalate to
+            // SIGKILL to break any child stuck in an uninterruptible wait.
             Task.detached(priority: .utility) {
+                for _ in 0..<30 {
+                    if !process.isRunning { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                if process.isRunning {
+                    kill(pid, SIGKILL)
+                }
                 process.waitUntilExit()
             }
         }

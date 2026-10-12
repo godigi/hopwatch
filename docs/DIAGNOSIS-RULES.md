@@ -645,6 +645,23 @@ All of the below are implemented and can fire.
 - Recommendation: roaming between APs, marginal signal at the desk, or
   a router firmware bug. If sticky/asymmetric roaming is suspected,
   disable the lower band's "auto" or split SSIDs by band.
+
+### WF-1 — Wi-Fi is turned off
+
+- Trigger: link down and Wi-Fi radio power reported off by `networksetup -getairportpower <dev>`.
+- Severity: `critical`.
+- Scope: live monitor (`--monitor`).
+- Evidence: Wi-Fi radio power off with no default route.
+- Recommendation: Turn Wi-Fi on in Control Center or System Settings.
+
+### WJ-1 — Wi-Fi dropped and has not rejoined
+
+- Trigger: link down with Wi-Fi radio power on, unassociated for longer than `THRESH_WIFI_REJOIN_GRACE_S` (45 s).
+- Severity: `critical`.
+- Scope: live monitor (`--monitor`).
+- Evidence: Wi-Fi radio on but unassociated beyond grace period.
+- Recommendation: Reconnect Wi-Fi by toggling the radio off and on to prompt macOS to rejoin known networks, or select your network in Wi-Fi settings.
+
 - **ST-1** — Speed regression vs baseline.
 ### NT-1 — System clock drift > 30 s
 

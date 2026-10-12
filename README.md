@@ -39,6 +39,8 @@
 |:---|:---|
 | 🎯 **Hop Attribution Chain** | Pinpoints root cause at a glance across `[Mac] ──► [Router] ──► [ISP]`. |
 | ⚡ **Live Menu Bar Telemetry** | Monospace live RTT (`● 18ms`), packet loss, and link health directly in your menu bar. |
+| 🛠️ **1-Click Repair Actions** | Actionable "Fix it" buttons (*Quit App*, *Open Sign-in*, *Restart Mac*) with `--dry-run` safety. |
+| 🚦 **Bandwidth Hog & Flow Attribution** | Pinpoints local Mac apps saturating your link (`HOG-1`), exhausting sockets (`SOCK-1`), or flooding router NAT tables (`CONN-1`). |
 | 🔍 **40+ Diagnostic Checks** | Bufferbloat, path MTU, captive portals, Wi-Fi sticky APs, DNS hijacking, and DHCP lease expiry. |
 | 🛡️ **Zero Jargon & Redacted Sharing** | Human-readable diagnoses with actionable fixes; 1-click sanitized reports safe for support tickets. |
 | 📈 **Per-Network Baselines** | Profiles each Wi-Fi and wired network to flag latency spikes and regressions. |
@@ -136,7 +138,8 @@ flagging regressions and drops the moment they occur.
 | **Continuous Menu Bar Telemetry** <br><sub>*(Real-time latency & link status)*</sub> | **Yes** <br>*(Native macOS)* | **Yes** <br>*(Activity only)* | ❌ | ❌ | ❌ | ❌ |
 | **Persistent Outage Journal** <br><sub>*(Track flapping across sleep/wake)*</sub> | **Yes** <br>*(SQLite/JSON history)* | ❌ | ❌ | ❌ | Partial <br>*(Session-based)* | ❌ |
 | **Safe Sanitized Sharing** <br><sub>*(1-click redacted export for tickets)*</sub> | **Yes** <br>*(Masks IPs, MACs, SSIDs)* | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Price & Privacy** | **Free & Open Source** <br>*(100% local, zero telemetry)* | Free / Paid | Ad-supported / Tracking | $20 – $100+ | $40+ / Subscription | Free / Built-in |
+| **One-Click Repair Actions** <br><sub>*(Safe, verifiable remedies with dry-run)*</sub> | **Yes** <br>*(Quit app, restart, captive portal)* | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Price & Privacy** | **Free & Open Source** <br>*(100% local diagnostics, zero ad tracking, optional anonymous crash reports)* | Free / Paid | Ad-supported / Tracking | $20 – $100+ | $40+ / Subscription | Free / Built-in |
 
 ### 🔍 How Hopwatch Differs from Other macOS Tools
 
@@ -210,14 +213,18 @@ hopwatch --redact --json          # safe to paste into a ticket
 hopwatch --watch[=SEC]            # foreground loop, every SEC (default 300)
 hopwatch --monitor                # streaming JSONL, one sample per line
 hopwatch --summary[=HOURS]        # aggregate ~/hopwatch/baseline.jsonl
+hopwatch --events[=HOURS]         # summarize downtime episodes & transitions over last HOURS
 hopwatch --history[=N]            # whole run store as network-grouped JSON
 hopwatch --show=ID                # one stored run, judged against its network
 hopwatch --share[=ID|-]           # one run as a pasteable, redacted report
+hopwatch --repair=ID              # run one guided repair (quit-app, restart-mac, open-sign-in)
+hopwatch --repair=ID --dry-run    # test/preview a repair without changing anything
 hopwatch --install-recorder       # launchd plist, background outage journal
 hopwatch --uninstall-recorder
 hopwatch --version                # print the version and exit
 hopwatch --capabilities           # JSON handshake: schemas, features, deps
 hopwatch --rules-catalog          # JSON catalog: every rule ID, title, blurb
+hopwatch --signal-scale           # Wi-Fi signal scale thresholds (dBm floors & labels)
 ```
 
 | Flag                 | Effect                                                 |
@@ -248,6 +255,11 @@ hopwatch --rules-catalog          # JSON catalog: every rule ID, title, blurb
 | `--bufferbloat-only` | run only the loaded-vs-idle latency test               |
 | `--ping-only`        | run only gateway and internet latency/loss probes      |
 | `--progress`         | emit progress events on **fd 3** while the run happens |
+| `--repair=ID`        | run one repair: quit-app, restart-mac, open-sign-in    |
+|                      | (only when explicitly requested, never automatic)      |
+| `--dry-run`          | preview what a repair would change with 0 modifications|
+| `--repair-param K=V` | parameter for repair (e.g. `bundle_id=<bundle_id>`)    |
+| `--events[=HOURS]`   | summarize transitions, faults and outage episodes (24h)|
 | `--monitor`          | stream one compact JSON object per line until stopped  |
 | `--history[=N]`      | emit the whole run store as one grouped JSON object    |
 | `--show=ID`          | one stored run in full, plus how each of its metrics   |
@@ -263,6 +275,8 @@ hopwatch --rules-catalog          # JSON catalog: every rule ID, title, blurb
 |                      | monitor rule: title, category, severity, scope, a      |
 |                      | plain-English blurb, and a `docs/DIAGNOSIS-RULES.md`   |
 |                      | anchor                                                 |
+| `--signal-scale`     | one JSON object with Wi-Fi signal scale bands (dBm     |
+|                      | boundaries, labels, tones, and plain explanations)     |
 
 Examples:
 
@@ -271,6 +285,8 @@ hopwatch                      # full run, human-readable
 hopwatch --quick              # <8 s subset for "is it up?"
 hopwatch github.com           # "why is github specifically slow?"
 hopwatch --json | jq .diagnosis
+hopwatch --repair=quit-app --dry-run   # preview a proposed finding repair
+hopwatch --events=24          # what dropped, flapped, or degraded in last 24h?
 hopwatch --watch=180          # check every 3 min
 hopwatch --summary=168        # what's been happening this past week?
 hopwatch --wifi-only          # "is it the WiFi?" without the full battery
@@ -450,13 +466,20 @@ recommendation, and rationale in
 
 - **N1/N1b** no network at all / router up but nothing public responds
 - **W1/W2** weak WiFi signal / low SNR
-- **G1/G2** gateway loss (with vs without weak WiFi)
+- **G1/G2** gateway loss (with vs without weak WiFi; includes asymmetric Wi-Fi link)
 - **P1/P2** public unreachable; DNS in/out of play
-- **D1** partial DNS, internet reachable
+- **D1/D3/D4/D5** DNS flaky / slow resolver / public-only fallback / resolver timeout
+- **D6** guided switch to a better public DNS when router DNS fails or is slow
+- **SOCK-1** Mac cannot open UDP sockets (ephemeral port exhaustion or socket binding failure)
+- **CONN-1** outbound connections refused/dropped while ping is clean (e.g. flow flood)
+- **HOG-1** local Mac app saturating upload or download throughput, driving up latency
+- **TR-1** process bandwidth activity during bufferbloat testing
 - **B1/B2** bufferbloat at gateway / ISP hop
 - **M1** path MTU < 1500
 - **MT1** first lossy hop identified
-- **V6-1** IPv6 broken while v4 works (Happy Eyeballs masks)
+- **V6-1/V6-2** IPv6 broken while v4 works / IPv6 DNS failure
+- **CP-1** captive portal interception / sign-in page detected
+- **AV-1/AV-2** chronic network instability / brief transient micro-outages over last 24h
 - **VPN-1** VPN carrying the default route *(specified, not yet emitted)*
 - **TCP-1** TCP works, ICMP filtered
 - **WS-1** WiFi channel congested
@@ -564,12 +587,7 @@ straight across a pause would claim measurements that were never taken.
 The gap threshold comes from the cadence each sample reports about
 itself, so it stays correct when the cadence changes.
 
-**Distribution.** Right now the app is a local build — `make -C gui run`
-— and it signs with the self-signed identity described below. Shipping it
-to anyone else needs a Developer ID and notarization, which is not done
-yet: an unsigned or ad-hoc-signed `.app` downloaded from the internet is
-blocked by Gatekeeper and is genuinely hostile to a non-technical user.
-Until that lands, build it from a clone.
+**Distribution.** Pre-built releases for macOS are published automatically with bundled DMGs and ZIPs on GitHub Releases, via the 1-line installer script, and through Homebrew Cask (`brew install --cask hopwatch`). For local development, `make -C gui run` builds, bundles, signs, and launches the app directly from source.
 
 **Signing.** `make identity` creates a stable self-signed identity in your
 keychain (one interactive keychain prompt). This matters more than it
@@ -602,13 +620,13 @@ Full schema in [`docs/JSON-SCHEMA.md`](./docs/JSON-SCHEMA.md). Sample at
 Hopwatch is designed to be directly callable by autonomous coding assistants, agents (Claude Code, Cursor, GitHub Copilot, Devin), and monitoring pipelines:
 
 - **1-Call Root-Cause Diagnosis**: Run `hopwatch --quick --json` (<8 seconds) to receive a structured JSON document with zero parsing fragility.
-- **Machine-Readable Diagnoses**: The `diagnosis[]` array delivers rule IDs, severity (`info`, `warn`, `critical`), and plain-English diagnosis summaries.
+- **Machine-Readable Diagnoses & Safe Repairs**: The `diagnosis[]` array delivers rule IDs, severity (`info`, `warn`, `critical`), plain-English summaries, and suggested `repairs` executable via `hopwatch --repair=ID --dry-run`.
 - **Capabilities Handshake**: Run `hopwatch --capabilities` to inspect supported schemas, features, and available system dependencies.
 - **Diagnosis Engine Catalog**: Run `hopwatch --rules-catalog` to retrieve the entire catalog of 40+ rules, descriptions, and recovery recommendations.
 
 ```sh
-# Fast agent health check
-hopwatch --quick --json | jq '{culprit: .culprit, findings: [.diagnosis[].summary]}'
+# Fast agent health check with actionable repair recommendations
+hopwatch --quick --json | jq '{culprit: .culprit, findings: [.diagnosis[] | {rule: .rule, summary: .summary, repairs: .repairs}]}'
 ```
 
 ## Frequently Asked Questions
@@ -637,16 +655,16 @@ packet-loss diagnosis (v0.6.0), `--monitor` / `--history` and the
 menu-bar app (v0.7.0), `--show` and run browsing (v0.8.0), `--progress`,
 `--speed-only` and the Live tab (v0.9.0), in-app update checks and the
 `D3`/`D4`/`V6-2` DNS and IPv6 rules (v0.9.1), a full check reachable from
-the app — a "Full check" action on Home and in the dropdown, plus an
-automatic one on first joining a network — (v1.0.0), and a pasteable
-redacted report via `--share` and the app's "Copy report" button
-(v1.0.0).
+the app (v1.0.0), pasteable redacted report via `--share` (v1.0.0),
+Homebrew Cask distribution (v1.10.0), UDP socket exhaustion `SOCK-1` and guided DNS `D6` (v1.11.0),
+one-click repair actions `quit-app`, `restart-mac`, `open-sign-in` (v1.12.0),
+connection-refusal flow flood detection `CONN-1` (v1.13.0),
+bandwidth hog attribution `HOG-1` (v1.14.0), zero-stale-reading
+network boundary transitions (v1.14.5), and sleep wake loss/DNS settling (v1.14.6).
 
 Next:
 
-- Developer ID signing + notarization, so the app can be handed to
-  someone who did not build it
-- Homebrew tap (`brew install godigi/hopwatch/hopwatch`)
+- Phase 2 authenticated repairs (privileged network configuration fixes)
 - Apple Private Relay detection
 - Captive-DNS detection (resolver returning A records for `.invalid`)
 - Upload-side bufferbloat probe
