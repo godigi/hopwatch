@@ -265,14 +265,8 @@ struct DropdownView: View {
 
             let subtitle: String = {
                 var subtitleParts: [String] = []
-                if let dur = offline?.formattedDuration {
-                    if let net = offline?.lastNetwork, !net.isEmpty {
-                        subtitleParts.append("Offline for \(dur) · last on \(net)")
-                    } else {
-                        subtitleParts.append("Offline for \(dur)")
-                    }
-                } else if let net = offline?.lastNetwork, !net.isEmpty {
-                    subtitleParts.append("Last connected to \(net)")
+                if let line = offline?.statusLine {
+                    subtitleParts.append(line)
                 }
 
                 if offline?.precursor == "router-unreachable", !rules.contains("DH-3") {

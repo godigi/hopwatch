@@ -107,6 +107,33 @@ struct MonitorSample: Decodable, Sendable {
             guard let s = downDurationS, s >= 0 else { return nil }
             return ActivityEntry.duration(Double(s))
         }
+
+        /// The network the link was last up on, or nil when the monitor does
+        /// not know it. Blank counts as not knowing.
+        ///
+        /// The monitor sets `last_network` only when the link is up *in that
+        /// process*, and the app restarts the monitor on every network
+        /// event, which a drop is. So a process that starts already offline
+        /// reports none, and the card must say nothing about a network
+        /// rather than name a wrong or empty one.
+        var knownLastNetwork: String? {
+            guard let net = lastNetwork?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !net.isEmpty else { return nil }
+            return net
+        }
+
+        /// "Offline for X · last on Y", degrading clause by clause: the
+        /// duration and the network are each shown only if known. Nil when
+        /// neither is. Shared by the dropdown and the Home card so the two
+        /// cannot disagree about it.
+        var statusLine: String? {
+            switch (formattedDuration, knownLastNetwork) {
+            case let (dur?, net?): return "Offline for \(dur) · last on \(net)"
+            case let (dur?, nil):  return "Offline for \(dur)"
+            case let (nil, net?):  return "Last connected to \(net)"
+            case (nil, nil):       return nil
+            }
+        }
     }
 
     struct NetworkIdentity: Decodable, Sendable, Equatable {
@@ -406,6 +433,24 @@ extension MonitorSample.Link {
         gatewayMAC = c.lenient(.gatewayMAC)
         ssid = c.lenient(.ssid)
         bssid = c.lenient(.bssid)
+        // Without this line the field is declared, the synthesized keys
+        // list it, and it is silently never read: `link.offline` stayed nil
+        // in the running app and every card built on it stayed dark.
+        offline = c.lenient(.offline)
+    }
+}
+
+extension MonitorSample.OfflineContext {
+    /// Lenient like its siblings: the block is context for a card, never
+    /// a reason to lose a sample, and one malformed field (a duration that
+    /// arrives as a string) must not cost the fields that did decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reason = c.lenient(.reason)
+        downSince = c.lenient(.downSince)
+        downDurationS = c.lenient(.downDurationS)
+        lastNetwork = c.lenient(.lastNetwork)
+        precursor = c.lenient(.precursor)
     }
 }
 

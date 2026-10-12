@@ -1034,14 +1034,23 @@ final class HopwatchCoordinator {
     /// survive whatever the monitor emits (a CLI that nulls a down sample
     /// makes it easier, never harder), and it is what the original
     /// screenshots showed.
-    func adoptGalleryNoLinkSample() {
+    ///
+    /// Carries a `link.offline` block, since the card's duration, network and
+    /// precursor lines are drawn from it. `restarted` is the shape a monitor
+    /// process that started already offline emits: no last network, no
+    /// precursor.
+    func adoptGalleryNoLinkSample(restarted: Bool = false) {
         guard var down = monitor.latest else { return }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         down.ts = formatter.string(from: Date())
         down.seq = (down.seq ?? 0) + 1
         down.link = .init(up: false, interface: nil, type: "wired", ip: nil, gateway: nil,
-                          gatewayMAC: nil, ssid: nil, bssid: nil)
+                          gatewayMAC: nil, ssid: nil, bssid: nil,
+                          offline: .init(reason: "wifi-not-joined", downSince: nil,
+                                         downDurationS: restarted ? 10 : 252,
+                                         lastNetwork: restarted ? nil : "Home",
+                                         precursor: restarted ? nil : "router-unreachable"))
         down.gateway.lossPct = 10
         down.gateway.rttJitterMs = 3
         down.status = .init(severity: "critical", measurement: "link-down", rules: ["N1"],
