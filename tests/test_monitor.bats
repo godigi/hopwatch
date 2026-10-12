@@ -898,6 +898,9 @@ drive_link_drop() {
       MON_LINK_UP=0 MON_GATEWAY="" MON_LOCAL_IP="" MON_SSID="" MON_BSSID="" MON_GW_MAC=""
     fi
   }
+  # Stubbed so the offline reason is not read from the machine running the
+  # tests: a CI runner has no Wi-Fi radio, reads as wifi-off and adds WF-1.
+  _mon_probe_offline() { MON_OFFLINE_REASON="no-route"; }
   _mon_probe_vpn() { :; }
   _mon_probe_browser() { :; }
   _mon_probe_gateway() { MON_GW_LOSS=10 MON_GW_RTT=4.5 MON_GW_JITTER=3.2; }

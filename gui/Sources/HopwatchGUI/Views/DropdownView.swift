@@ -76,7 +76,8 @@ struct DropdownView: View {
             statusPillText: statusPillText,
             statusPillColor: statusPillColor,
             onOpenSettings: {
-                openWindow(id: WindowID.settings)
+                coordinator.requestedDestination = .settings
+                openWindow(id: WindowID.dashboard)
                 NSApp.activate(ignoringOtherApps: true)
             }
         )

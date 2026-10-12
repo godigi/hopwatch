@@ -49,14 +49,15 @@ struct HopwatchApp: App {
                 .frame(minWidth: 840, minHeight: 600)
         }
         .defaultSize(width: 1060, height: 720)
-
-        Window("Hopwatch Settings", id: WindowID.settings) {
-            SettingsView()
-                .environment(coordinator)
-                .environment(coordinator.appSettings)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    coordinator.requestedDestination = .settings
+                    delegate.openDashboard()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
-        .defaultSize(width: 520, height: 560)
-        .windowResizability(.contentSize)
 
         Window("Welcome to Hopwatch", id: WindowID.onboarding) {
             OnboardingView()
@@ -101,7 +102,7 @@ extension HopwatchApp {
         // dashboard on a named tab at launch, so an automated check (or a
         // screenshot harness) can inspect any view without a human
         // clicking the menu bar first. Valid tabs match MainDestination:
-        // home, live, activity, trends, networks.
+        // home, live, activity, trends, networks, settings.
         if let value = CommandLine.arguments.first(where: { $0.hasPrefix("--open=") }) {
             let tab = String(value.dropFirst("--open=".count))
             let destination: MainDestination? = switch tab {
@@ -110,6 +111,7 @@ extension HopwatchApp {
             case "activity": .activity
             case "trends": .trends
             case "networks": .networks
+            case "settings": .settings
             default: nil
             }
             if let destination {
