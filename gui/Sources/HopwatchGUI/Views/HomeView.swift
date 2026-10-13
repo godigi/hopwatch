@@ -306,7 +306,7 @@ struct HomeView: View {
                 headline: "All good — watching",
                 subtitle: "Network is responsive with zero packet loss and low jitter to your router and the internet.",
                 statusPillText: "All systems nominal",
-                statusPillTint: Color(red: 0.08, green: 0.5, blue: 0.24),
+                statusPillTint: Theme.ColorToken.green,
                 statusPillBackground: Theme.ColorToken.greenWash
             )
         case .degraded(let deg):

@@ -127,6 +127,66 @@ require_tags() {
   [ -z "$missing" ] || { echo "headings with no link ref:$missing"; return 1; }
 }
 
+@test "no link reference depends on a tag other than the newest" {
+  # Only the newest release and tag are kept. A compare link between two
+  # tags, or a link to an older release page, is dead the moment the next
+  # release deletes the tag it names; 1.17.0, 1.16.3 and 1.16.2 shipped
+  # with exactly that. Older versions link to a commit, which outlives tags.
+  local newest bad
+  newest="$(released_versions | head -1)"
+  bad="$(grep -E '^\[[^]]+\]: https://' "$CHANGELOG" | awk -v newest="$newest" '
+    /^\[Unreleased\]:/ {
+      # Must compare from the newest tag, nothing else.
+      if ($0 !~ ("/compare/v" newest "\\.\\.\\.HEAD$")) print; next
+    }
+    /\/compare\// { print; next }
+    /\/releases\/tag\// && $0 !~ ("/releases/tag/v" newest "$") { print }
+  ')"
+  [ -z "$bad" ] || { echo "link refs that depend on a tag that will not exist:"; echo "$bad"; return 1; }
+}
+
+# bump.py's roll_link_refs, run against a throwaway repo with real tags.
+roll_links() {  # roll_links <changelog-text> <next> <prev> <repo-dir>
+  ( cd "$4" && python3 -I - "$REPO/scripts/bump.py" "$1" "$2" "$3" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("bump", sys.argv[1])
+bump = importlib.util.module_from_spec(spec); spec.loader.exec_module(bump)
+sys.stdout.write(bump.roll_link_refs(sys.argv[2], sys.argv[3], sys.argv[4]))
+PY
+  )
+}
+
+make_tagged_repo() {  # prints the dir; tags v1.0.0 only
+  local d; d="$(mktemp -d)"
+  git -C "$d" init -q
+  git -C "$d" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one
+  git -C "$d" tag v1.0.0
+  echo "$d"
+}
+
+@test "bump.py links the new version to its release and the previous one to a commit" {
+  local d sha out
+  d="$(make_tagged_repo)"
+  sha="$(git -C "$d" rev-parse v1.0.0)"
+  out="$(roll_links $'[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.0.0...HEAD\n[1.0.0]: https://github.com/godigi/hopwatch/releases/tag/v1.0.0\n[0.9.0]: https://github.com/godigi/hopwatch/commit/abc' 1.0.1 1.0.0 "$d")"
+  rm -rf "$d"
+  grep -qF '[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.0.1...HEAD' <<<"$out"
+  grep -qF '[1.0.1]: https://github.com/godigi/hopwatch/releases/tag/v1.0.1' <<<"$out"
+  grep -qF "[1.0.0]: https://github.com/godigi/hopwatch/commit/$sha" <<<"$out"
+  grep -qF '[0.9.0]: https://github.com/godigi/hopwatch/commit/abc' <<<"$out"
+  ! grep -q '/compare/v1.0.0\.\.\.v' <<<"$out"
+}
+
+@test "bump.py leaves the previous link alone when that tag is already gone" {
+  local d out
+  d="$(make_tagged_repo)"
+  git -C "$d" tag -d v1.0.0 >/dev/null
+  out="$(roll_links $'[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.0.0...HEAD\n[1.0.0]: https://github.com/godigi/hopwatch/commit/abc' 1.0.1 1.0.0 "$d")"
+  rm -rf "$d"
+  grep -qF '[1.0.0]: https://github.com/godigi/hopwatch/commit/abc' <<<"$out"
+  ! grep -qF 'compare/v1.0.0...v1.0.1' <<<"$out"
+}
+
 @test "every released version's section actually has notes" {
   while read -r v; do
     [ -n "$v" ] || continue

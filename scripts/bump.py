@@ -124,6 +124,50 @@ def update_file(path: str, pattern: str, replacement: str, dry_run: bool = False
     print(f"  Updated {os.path.relpath(path)}")
 
 
+def tag_commit(version: str) -> str | None:
+    """Full SHA of the commit tag v<version> points at, or None if the tag is gone."""
+    res = subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", f"refs/tags/v{version}^{{commit}}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else None
+
+
+def roll_link_refs(text: str, next_version: str, prev_version: str) -> str:
+    """Rewrite the CHANGELOG footer for a new release.
+
+    Only the newest release and tag are kept on GitHub, so the previous
+    version's tag (and its release page) is about to disappear. A compare
+    link between two tags would be dead as soon as either is deleted, and a
+    link to a release page is dead once a newer release replaces it. So:
+
+      - the new version links to its release page (it is the newest, so it
+        exists);
+      - the previous version's link is rewritten to the commit its tag
+        points at, which outlives the tag. If that tag is already gone the
+        line is left as it is, never regenerated into a link to nothing.
+    """
+    repo = "https://github.com/godigi/hopwatch"
+    new_refs = (
+        f"[Unreleased]: {repo}/compare/v{next_version}...HEAD\n"
+        f"[{next_version}]: {repo}/releases/tag/v{next_version}"
+    )
+    text = re.sub(r"\[Unreleased\]: https://[^\n]+", lambda _: new_refs, text, count=1)
+
+    sha = tag_commit(prev_version)
+    if sha:
+        text = re.sub(
+            rf"^\[{re.escape(prev_version)}\]: {re.escape(repo)}/(?:compare|releases/tag)/[^\n]+$",
+            lambda _: f"[{prev_version}]: {repo}/commit/{sha}",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    return text
+
+
 def update_changelog(
     repo_root: str,
     next_version: str,
@@ -165,8 +209,7 @@ def update_changelog(
 
     text = re.sub(unreleased_pattern, lambda _: replacement, text, count=1, flags=re.MULTILINE)
 
-    footer_ref = f"[Unreleased]: https://github.com/godigi/hopwatch/compare/v{next_version}...HEAD\n[{next_version}]: https://github.com/godigi/hopwatch/compare/v{prev_version}...v{next_version}"
-    text = re.sub(r"\[Unreleased\]: https://[^\n]+", lambda _: footer_ref, text, count=1)
+    text = roll_link_refs(text, next_version, prev_version)
 
     if not dry_run:
         with open(changelog_path, "w", encoding="utf-8") as f:
