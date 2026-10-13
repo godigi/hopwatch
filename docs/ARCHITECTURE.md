@@ -111,9 +111,9 @@ a default:
    from.
 
 5. **Event journaling is unified across GUI and CLI.** The GUI monitor
-   spawns `netdiag --monitor` with `--journal "$HOME/net-diag/events.jsonl"`,
+   spawns `hopwatch --monitor` with `--journal "$HOME/net-diag/events.jsonl"`,
    writing to the identical journal path used by the background launchd
-   recorder agent (`netdiag --install-recorder`). Because both entry points
+   recorder agent (`hopwatch --install-recorder`). Because both entry points
    feed the exact same journal, availability rules (`AV-1` and `AV-2` in
    `lib/availability.sh`) evaluate against complete, real transition history
    whether full checks are triggered from the GUI or the terminal.
@@ -161,7 +161,7 @@ authored:
    stays in `lib/thresholds.sh` with the other four judges.
 
 2. **The arrival card states mechanism, never a verdict.** It may say
-   what netdiag is doing and what it costs — "a full check runs a speed
+   what hopwatch is doing and what it costs — "a full check runs a speed
    test, which can spend a few hundred megabytes of cellular data" — and
    may not characterise the network. This is enforced rather than
    documented: `VerifyMode` runs every `(state, intent)` pair's copy past
@@ -217,13 +217,13 @@ things most SwiftUI projects take for granted: **previews**, and a runnable
 the same underlying reason — the app bundle is the only artifact on this
 toolchain that has both the code and a process to run it in. (SwiftPM does
 not export an executable target's symbols to importers, so a separate test
-executable cannot link against `NetdiagGUI`; and `swift test` compiles but
+executable cannot link against `HopwatchGUI`; and `swift test` compiles but
 executes nothing, because Swift Testing's runner needs the `xctest` host the
 CLT does not ship.)
 
 ```
-netdiag.app --verify           asserts, exits non-zero on failure
-netdiag.app --gallery[=DIR]    renders every screen to PNG, light and dark
+Hopwatch.app --verify           asserts, exits non-zero on failure
+Hopwatch.app --gallery[=DIR]    renders every screen to PNG, light and dark
 ```
 
 - **`--verify` is the test suite.** Pure functions with real consequences —
@@ -256,7 +256,7 @@ netdiag.app --gallery[=DIR]    renders every screen to PNG, light and dark
   which is where their content can be trusted.
 
 Both modes are debug surfaces on the app, not CLI surface: they are not in
-`netdiag --help`, not in `docs/JSON-SCHEMA.md`, and nothing ships depending
+`hopwatch --help`, not in `docs/JSON-SCHEMA.md`, and nothing ships depending
 on them.
 
 ## Bash vs Python helper — decision (v0.2.0, amended v0.8.0)

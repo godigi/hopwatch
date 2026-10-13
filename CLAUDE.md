@@ -105,7 +105,7 @@ colours, identifying values masked. It exists rather than being a flag on
 *unredacted* and `helpers/history.py` drops `--redact` runs from the store
 entirely — so there is no redacted stored copy to read, and sharing a past
 run has to redact at read time. `--share=-` reads one run's JSON on stdin,
-which is how netdiag.app shares the report already on screen without
+which is how Hopwatch.app shares the report already on screen without
 re-running anything.
 
 `--repair` is the repair tier, and the only thing in the CLI that changes
@@ -180,7 +180,7 @@ hopwatch/
 ├── docs/                    # Architecture, design specs, rules, and assets
 │   ├── {ARCHITECTURE,DIAGNOSIS-RULES,JSON-SCHEMA,SCREENSHOTS}.md
 │   ├── design/              # Architecture and feature design specifications
-│   ├── archive/plans/       # Historical implementation plans
+│   ├── CHANGELOG-archive.md # Release notes before 1.16.2
 │   └── assets/              # Light and dark UI screenshots
 ├── .github/workflows/       # GitHub Actions CI & release automation
 ├── README.md  CHANGELOG.md  LICENSE  install.sh  install-app.sh  .gitignore

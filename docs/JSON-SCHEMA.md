@@ -1,7 +1,7 @@
-# netdiag `--json` schema
+# hopwatch `--json` schema
 
-`netdiag --json` writes exactly one JSON object to stdout and nothing else,
-so `netdiag --json | jq .` is always safe. Colors are disabled and no log
+`hopwatch --json` writes exactly one JSON object to stdout and nothing else,
+so `hopwatch --json | jq .` is always safe. Colors are disabled and no log
 file is written unless `--log PATH` is also passed.
 
 This document describes what `helpers/emit_json.py` actually emits, which
@@ -25,13 +25,13 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 
 | Key | Type | Notes |
 |-----|------|-------|
-| `version` | string | netdiag version that produced this run |
+| `version` | string | hopwatch version that produced this run |
 | `timestamp` | string | ISO 8601, UTC |
 | `run_mode` | string | how much of the battery this run attempted — see below |
-| `run_id` | string \| null | the id `netdiag --history`/`--show` will use for this same run — see below |
+| `run_id` | string \| null | the id `hopwatch --history`/`--show` will use for this same run — see below |
 | `interface` | object | `name`, `ip`, `gateway`, `gateway_mac`, `type` (`wifi`/`wired`), `link_status`, `link_up`, `dhcp_router`. `gateway` is the default route's gateway and is `null` when there is no default route. `link_status` is `ifconfig`'s own word (`"active"` / `"inactive"` / `null`) and `link_up` is `true` when an active device also holds an address — together they answer "is this Mac joined to anything", which is a *different question* from `gateway`, and conflating the two is what made `N1` tell users on hotel WiFi that their WiFi was off (see `DIAGNOSIS-RULES.md#n1c--joined-with-no-route-out`). `dhcp_router` is the router the DHCP server offered, present whether or not the kernel installed a route to it. `self_assigned_ip` is `true` when the only IPv4 address on the link is a `169.254.0.0/16` one macOS assigned itself because no DHCP server answered — a third state, not a flavour of `link_up`: `ip` is populated and `link_up` is `false`, which without this flag reads as a contradiction rather than as the DHCP failure it is (see `DIAGNOSIS-RULES.md#dh-3--self-assigned-address-dhcp-never-answered`). `link_mbps`, `link_max_mbps` and `duplex` describe the wired negotiation, from `ifconfig -m`: the rate the link settled on, the top rate the port advertises, and `"full"` / `"half"`. All three are `null` on Wi-Fi, which reports no media subtype at all. `link_mbps` below `link_max_mbps` is `ETH-1`; `duplex` of `"half"` on a port that advertises full duplex is `ETH-2`. `service` is the macOS network-service name carrying the link (`"Wi-Fi"`, `"iPhone USB"`), and `metered` is `true` when data on it costs money by the megabyte — a tethered service name, or an address in a phone hotspot's documented default range. `metered` is why `speedtest` may be `null` in an otherwise complete run: the speed test skips on a metered link unless `--speed` was passed explicitly (see `DIAGNOSIS-RULES.md#met-1--metered-connection`). `metered_certain` says how that was decided: `true` when macOS named the service, which is a fact, and `false` when it was inferred from a hotspot default subnet, which an ordinary home network could also be using. `MET-1` hedges its wording on this rather than asserting a guess. |
 | `network` | object | `id` + human `label` identifying which network this is — scopes the baseline |
-| `wifi` | object | SSID, BSSID, security; `rssi`/`noise`/`snr`/`channel`/`phy`/`tx_rate` are `null` without `sudo`. `privileged` says whether that sudo-only scrape actually ran — without it, a `null` radio field is ambiguous between "measured and quiet" and "never measured", which is what makes a stored flapping episode undiagnosable after the fact. `name_hidden` is `true` when macOS withheld the SSID from an unprivileged caller, so `ssid` is a placeholder rather than a name (see `DIAGNOSIS-RULES.md#wi-1--macos-is-withholding-the-networks-name`). `ssid_source` says where the name came from: `"system"` when this process read it off the link, `"caller"` when the process that launched netdiag could see it and passed it in `NETDIAG_SSID_HINT`, `null` when there is no name at all. The hint exists because TCC attributes `ipconfig getsummary` and `wdutil` to those binaries rather than to the app that spawned them, so netdiag.app can read an SSID over CoreWLAN that the CLI it just launched cannot — recording the provenance keeps a stored run from claiming to have seen what it was told. |
+| `wifi` | object | SSID, BSSID, security; `rssi`/`noise`/`snr`/`channel`/`phy`/`tx_rate` are `null` without `sudo`. `privileged` says whether that sudo-only scrape actually ran — without it, a `null` radio field is ambiguous between "measured and quiet" and "never measured", which is what makes a stored flapping episode undiagnosable after the fact. `name_hidden` is `true` when macOS withheld the SSID from an unprivileged caller, so `ssid` is a placeholder rather than a name (see `DIAGNOSIS-RULES.md#wi-1--macos-is-withholding-the-networks-name`). `ssid_source` says where the name came from: `"system"` when this process read it off the link, `"caller"` when the process that launched hopwatch could see it and passed it in `NETDIAG_SSID_HINT`, `null` when there is no name at all. The hint exists because TCC attributes `ipconfig getsummary` and `wdutil` to those binaries rather than to the app that spawned them, so Hopwatch.app can read an SSID over CoreWLAN that the CLI it just launched cannot — recording the provenance keeps a stored run from claiming to have seen what it was told. |
 | `gateway` | object | `ip`, `loss_pct`, `rtt_avg_ms`, `rtt_jitter_ms` |
 | `internet_latency` | object | `target`, `rtt_avg_ms`, `rtt_jitter_ms`, `loss_pct` against the primary public target, plus `target_alt`, `rtt_avg_ms_alt`, `loss_pct_alt` for the second, independent one. The L1 packet-loss rule escalates to critical only when **both** targets exceed the threshold, so a consumer reproducing the diagnosis needs both numbers. Any field is `null` when that probe didn't run (`--quick`) or returned no summary — never `0`, and never `100`. |
 | `public` | object | `ip`, `asn`, `isp`, `city`, `country`, `country_iso`, `captive_portal`. `country` is the full name (`"Brazil"`); `country_iso` is the ISO-3166 alpha-2 (`"BR"`). Both are emitted because they answer different questions — the name is what a report should read, the code is what a consumer maps to a flag or a locale — and deriving one from the other would mean shipping a country table in every consumer. |
@@ -57,13 +57,13 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 | `hosts_file` | object | `custom_count`, `suspicious_redirects[]` |
 | `availability` | object | How this network has behaved over the last `THRESH_AV_WINDOW_HOURS`, from the event journal — `window_hours`, `outages`, `downtime_s`, `longest_outage_s`, `short_drops`, `unobserved_pct`. **`null` when no journal exists**, which is emphatically not "no outages": without a recorder there is no record. See `DIAGNOSIS-RULES.md#av-1--this-connection-keeps-dropping`. |
 | `traffic` | object | What this Mac itself was putting on the link while the path was measured — `sampled_s`, `down_mbps`, `up_mbps`, `top_processes[]`. **`null` under `--quick`** (the sample is skipped for budget) and whenever `nettop` gave nothing to difference: "not measured" and "measured zero" are different claims. Process names survive `--redact`; they identify software, not a person. See `DIAGNOSIS-RULES.md#tr-1--your-own-mac-was-using-the-connection`. |
-| `watcher` | object | netdiag's own launchd watcher, or **`null` when none is installed** — which is most runs. The only object here that describes netdiag rather than the network. See below. |
+| `watcher` | object | hopwatch's own launchd watcher, or **`null` when none is installed** — which is most runs. The only object here that describes hopwatch rather than the network. See below. |
 | `timings` | object | `total_s`, `budget_s`, `over_budget`, and `phases{}` per stage |
 | `baseline` | object | comparison against history, or `null` — see below |
 | `diagnosis` | array | `severity` (`info`/`warn`/`critical`), `rule`, `summary` |
 | `suitability` | array | one entry per activity — `activity`, `label`, `verdict` (`good`/`degraded`/`broken`/`unmeasured`), `because` (rule IDs), `unmeasured_reason`. Five entries, fixed order, always present. See below. |
 | `most_likely_root_cause` | string | the highest-severity diagnosis summary, first by insertion order |
-| `netdiag_extras` | object | `arp_gw_incomplete`, `network_changed_mid_run`, plus `target*` keys when a positional TARGET was given. `network_changed_mid_run` is `true` when the Mac changed networks between the start and end of the run, so the measurements straddle two — such a run is deliberately **absent from `baseline.jsonl`**, so this field is only ever seen on stdout (see `DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks`). |
+| `hopwatch_extras` | object | `arp_gw_incomplete`, `network_changed_mid_run`, plus `target*` keys when a positional TARGET was given. `network_changed_mid_run` is `true` when the Mac changed networks between the start and end of the run, so the measurements straddle two — such a run is deliberately **absent from `baseline.jsonl`**, so this field is only ever seen on stdout (see `DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks`). |
 
 ## `suitability` — what this network is good for
 
@@ -95,7 +95,7 @@ from a second parse of the same environment variable. A `good` verdict has
 an empty `because`: nothing fired.
 
 **`unmeasured` is a verdict, not an omission.** `--quick` skips bufferbloat,
-the speed test, the loss probe **and** the MTU probe (`bin/netdiag` refuses
+the speed test, the loss probe **and** the MTU probe (`bin/hopwatch` refuses
 `--mtu-only --quick` in as many words), so at that depth four of the five
 activities genuinely cannot be judged and only `browsing` can. The rows
 still appear, with `unmeasured_reason` naming what was not run. Hiding them
@@ -447,7 +447,7 @@ to the full-check population.
 
 ## `run_id`
 
-The same `"<timestamp>.<8 hex>"` id [`--history`](#netdiag---history-schema)
+The same `"<timestamp>.<8 hex>"` id [`--history`](#hopwatch---history-schema)
 and `--show` (below) use to address this run, computed at run time rather
 than waiting for a later `--history` call to derive it — a GUI reacting to
 an alert needs to deep-link to "the check that just ran" immediately, not
@@ -516,7 +516,7 @@ normal for the carrier and not something the user can fix.
 ```json
 {
   "state": "blocked",
-  "program": "/Users/you/Documents/netdiag/bin/netdiag",
+  "program": "/Users/you/Documents/hopwatch/bin/hopwatch",
   "interval_s": 900,
   "last_exit": 126,
   "last_run_age_s": null,
@@ -587,7 +587,7 @@ Changing it would break any consumer already parsing it, so it is
 documented rather than silently altered. Split on whitespace:
 
 ```sh
-netdiag --json | jq -r '.dhcp.dns_servers | split(" ")'
+hopwatch --json | jq -r '.dhcp.dns_servers | split(" ")'
 ```
 
 ## `--redact`
@@ -606,15 +606,15 @@ The JSON object does not carry the exit code; read it from the process.
 
 ---
 
-# `netdiag --progress` event stream
+# `hopwatch --progress` event stream
 
-`netdiag --progress` reports its own progress as it runs: one JSON object
+`hopwatch --progress` reports its own progress as it runs: one JSON object
 per line, **on file descriptor 3**, which the CLI points at stderr. The
 run's own output is unaffected — `--json --progress` still writes exactly
 one object to stdout.
 
 ```console
-$ netdiag --quick --progress 2>&1 >/dev/null | head -4
+$ hopwatch --quick --progress 2>&1 >/dev/null | head -4
 {"t":"plan","phases":["iface","vpn","wifi","gateway", …],"mode":"quick"}
 {"t":"phase","name":"iface","state":"start"}
 {"t":"phase","name":"iface","state":"done","rc":0,"ms":19}
@@ -623,7 +623,7 @@ $ netdiag --quick --progress 2>&1 >/dev/null | head -4
 
 ## Why fd 3
 
-Not stdout: acceptance criterion 2 is that `netdiag --json | jq .` always
+Not stdout: acceptance criterion 2 is that `hopwatch --json | jq .` always
 succeeds, so stdout carries one object and nothing else.
 
 Not stderr either, and this is the part that is not obvious.
@@ -673,9 +673,9 @@ way and return early — so under `--quick` they report `skip` with
 
 The plan is a declared list, and a declared list drifts from the code the
 first time a check is added. `tests/test_progress.bats` asserts both
-directions: every name `bin/netdiag` passes to `run_timed` or
+directions: every name `bin/hopwatch` passes to `run_timed` or
 `launch_parallel` appears in some mode's plan, and every planned name is
-one `bin/netdiag` actually runs.
+one `bin/hopwatch` actually runs.
 
 ## Lines stay short
 
@@ -735,7 +735,7 @@ indeterminate stage rather than inventing motion.
 
 ---
 
-# `netdiag --monitor` sample schema
+# `hopwatch --monitor` sample schema
 
 A **separate, smaller shape** from a full run — not a subset of it by
 accident. A run answers *"what is wrong and why"* and costs 30–115 s; a
@@ -743,7 +743,7 @@ monitor sample answers *"what is true right now"* and costs a couple of
 seconds. Mixing them would mean either a stream too expensive to emit
 every ten seconds or a report too thin to diagnose from.
 
-`netdiag --monitor` writes **one JSON object per line** on stdout, flushed
+`hopwatch --monitor` writes **one JSON object per line** on stdout, flushed
 per sample, until stopped. No log file, no `baseline.jsonl` append,
 nothing under `~/net-diag` — it runs for days, and anything it accumulated
 it would accumulate forever.
@@ -1125,9 +1125,9 @@ something.
 
 ---
 
-# `netdiag --history` schema
+# `hopwatch --history` schema
 
-`netdiag --history` emits one object collapsing the whole run store —
+`hopwatch --history` emits one object collapsing the whole run store —
 `~/net-diag/baseline.jsonl` plus its `-archive.jsonl` sibling — into
 network-grouped rows a chart can decode cheaply. On the author's machine
 that is 5.4 MB of full snapshots reduced to 467 KB.
@@ -1221,7 +1221,7 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
   supports.
   `n` is deliberately not repeated inside it: the identical count already
   lives in `metric_samples` for the same key, and a plain
-  `netdiag --history` now needs `THRESH_COMPARE_*` in the environment for
+  `hopwatch --history` now needs `THRESH_COMPARE_*` in the environment for
   this reason, the same way `--show` always has. One asymmetry a consumer
   must not paper over: `metric_stats` carries all 13 keys from `METRICS`
   for every network — null blocks included, for metrics that network never
@@ -1279,7 +1279,7 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
 
   Every cutoff `judged` compares against comes from `lib/thresholds.sh`
   through the environment, via `helpers/judgement.py`'s
-  `require_threshold` — no defaults, so a plain `netdiag --history` now
+  `require_threshold` — no defaults, so a plain `hopwatch --history` now
   refuses to run (exit 3) if one of the six is unset, the same contract
   `metric_stats` already holds for `THRESH_COMPARE_*`.
 
@@ -1322,9 +1322,9 @@ that is 5.4 MB of full snapshots reduced to 467 KB.
 
 ---
 
-# `netdiag --show=<id>` schema
+# `hopwatch --show=<id>` schema
 
-`netdiag --show=ID` emits one **stored** run: the record exactly as it was
+`hopwatch --show=ID` emits one **stored** run: the record exactly as it was
 written, where it sits in that network's history, and how each of its
 metrics compares to every other run on the same network. One JSON object on
 stdout, exit 0.
@@ -1337,7 +1337,7 @@ does not.
 ```jsonc
 {
   "schema": 1,
-  "version": "0.9.0",                    // netdiag rendering the view, not
+  "version": "0.9.0",                    // hopwatch rendering the view, not
                                          // the one that recorded the run
                                          // (that is run.version)
   "id": "2026-08-11T20:51:19Z.a3f9c1d2",
@@ -1384,7 +1384,7 @@ sentence, the way `diagnosis[].summary` is.
 - **`context.network_id` is the grouped key** — the same string
   `--history` reports in `networks[].id` and `runs[].network_id`, so the
   two join. It is not the raw `network.id` from the record: grouping is
-  what reconciles four eras of netdiag's identity scheme.
+  what reconciles four eras of hopwatch's identity scheme.
 - **`context.runs_on_network` counts every run; a metric's `n` counts the
   ones that recorded it.** They differ, and the gap is the point — 1,915
   checks but only 38 bufferbloat readings.
@@ -1457,9 +1457,9 @@ wrapper can keep telling a mistyped id apart from a broken network.
 
 ---
 
-# `netdiag --share[=ID|-]` schema
+# `hopwatch --share[=ID|-]` schema
 
-`netdiag --share` is the **one mode in this document that emits plain
+`hopwatch --share` is the **one mode in this document that emits plain
 text, not JSON** — a pasteable report, not a machine-readable object.
 
 It exists because there is no redacted copy sitting in the store to read
@@ -1528,22 +1528,22 @@ Exit `2` is never used here either: it is reserved for a real diagnosis.
 
 ---
 
-# `netdiag --version`
+# `hopwatch --version`
 
-Prints `netdiag <VERSION>` to stdout and exits 0. No log file, no
+Prints `hopwatch <VERSION>` to stdout and exits 0. No log file, no
 network, no dependency check — the one thing every version of this
 CLI has always been able to answer.
 
 ```console
-$ netdiag --version
-netdiag 0.9.0
+$ hopwatch --version
+hopwatch 0.9.0
 ```
 
 ---
 
-# `netdiag --capabilities` schema
+# `hopwatch --capabilities` schema
 
-`netdiag --capabilities` writes one JSON object to stdout and exits 0: a
+`hopwatch --capabilities` writes one JSON object to stdout and exits 0: a
 handshake a GUI can use to find out what this install of the CLI actually
 supports before it relies on a feature, rather than parsing `--version`'s
 semver and guessing. Early exit, same family as `--help`: no probing, no
@@ -1590,7 +1590,7 @@ every optional dependency below is missing.
   as new CLI surface ships. A GUI checks membership (`"redact" in
   features`), not the array's length or order.
 - **`deps.bash`** is the version of the bash interpreter actually
-  running the script — after netdiag's own re-exec into Homebrew bash 5
+  running the script — after hopwatch's own re-exec into Homebrew bash 5
   if it started under macOS's system bash — as `major.minor.patch`.
 - **`deps.python3`** is `null` if python3 is not on `PATH`. In practice
   this is close to unreachable: `--capabilities` builds its JSON with a
@@ -1606,9 +1606,9 @@ every optional dependency below is missing.
 
 ---
 
-# `netdiag --rules-catalog` schema
+# `hopwatch --rules-catalog` schema
 
-`netdiag --rules-catalog` writes one JSON object to stdout and exits 0:
+`hopwatch --rules-catalog` writes one JSON object to stdout and exits 0:
 every rule the diagnosis engine (`lib/diagnosis.sh`, `lib/wan.sh`,
 `lib/output.sh`) and the live monitor (`lib/monitor.sh`) can emit,
 described once, plus a glossary of the jargon terms the report card shows.
@@ -1688,7 +1688,7 @@ today's fields keeps working against tomorrow's catalog.
 - **`also`** *(optional, added in `schema` 3)* is a second category for
   the handful of rules that genuinely judge two measurements at once.
   Absent on almost every rule, and absent entirely from a catalog emitted
-  by an older netdiag. `G1` is the only rule carrying one today
+  by an older hopwatch. `G1` is the only rule carrying one today
   (`"category": "router"`, `"also": "wifi"`) — the loss is the router
   row's number and the radio is the Wi-Fi row's, and both should say so.
 
@@ -1766,7 +1766,7 @@ today's fields keeps working against tomorrow's catalog.
     `wifi_signal`, `bufferbloat`, `mtu`, `speed`, `clock`, `packet_loss`,
     `latency`, `jitter`).
   - *(schema 4)* One entry per key in `helpers/history.py`'s `METRICS`
-    table — the same 13 keys `netdiag --history`'s `metric_stats` and
+    table — the same 13 keys `hopwatch --history`'s `metric_stats` and
     `judged.metrics` use (`gateway_rtt_ms`, `gateway_loss_pct`,
     `gateway_jitter_ms`, `inet_rtt_ms`, `inet_loss_pct`, `wifi_rssi_dbm`,
     `wifi_snr_db`, `mtu_effective`, `bufferbloat_gw_ms`,
@@ -1801,9 +1801,9 @@ today's fields keeps working against tomorrow's catalog.
 
 ---
 
-# `netdiag --signal-scale` schema
+# `hopwatch --signal-scale` schema
 
-`netdiag --signal-scale` writes one JSON object to stdout and exits 0:
+`hopwatch --signal-scale` writes one JSON object to stdout and exits 0:
 the four bands this install's Wi-Fi RSSI thresholds define — Excellent,
 Good, Fair, Weak — so a GUI can turn a raw dBm reading into the word a
 person actually reads, without deriving a boundary of its own. Same

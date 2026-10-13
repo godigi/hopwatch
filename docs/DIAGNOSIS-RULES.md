@@ -32,7 +32,7 @@ keep changing; the ID won't.
 Severity says how bad a fault is. It does not say what it stops you
 *doing*, and for a non-expert that is the only form of the answer they can
 use. So every rule additionally declares two things, both held in
-`helpers/rules_catalog.py` and emitted by `netdiag --rules-catalog`:
+`helpers/rules_catalog.py` and emitted by `hopwatch --rules-catalog`:
 
 **`impacts`** — which of five activities the rule breaks or merely
 degrades: video calls, streaming, gaming, VPN & remote access, ordinary
@@ -484,7 +484,7 @@ paper over this would have been the wrong fix in the wrong file.
     - is big enough. **Capacity known** (a full check measured a speed in that direction): the app's rate is at least `THRESH_HOG_MIN_MBPS` and at least `THRESH_HOG_LINK_SHARE_PCT` of `rate + measured speed`, because a speed test run beside a hog measures what is left over (`TR-1`). **Capacity unknown** (`--quick`, the monitor): the slowest interval is at least `THRESH_HOG_UNKNOWN_CAPACITY_MBPS`.
 - **Trigger (monitor):** the same gate, evaluated every fast cycle, held for `THRESH_MON_HOG_CONFIRM_CYCLES` consecutive cycles before the monitor spends a capture; at most one capture per `THRESH_MON_HOG_RECHECK_S` while the gate stays open. A capture that finds an app turns `HOG-1` on; a capture that does not turns it off; so does the gate staying shut for the confirmation count. The monitor never has a speed figure, so it always judges as capacity-unknown, and a later full check, which does, may decline a finding the monitor raised. The monitor persists the measured app/process, direction, rate, dominance and observation time with HOG-1 activity events. A new capture while the rule remains active emits `rule-updated`, updating evidence without creating a new occurrence. The quick scan diagnosis still carries the Quit button.
 - **Severity:** `warn`.
-- **Hopwatch's own traffic is never the answer.** A full check saturates the link on purpose (`bufferbloat_run`, the speed test), so while one runs its `curl`s and `speedtest` are the biggest talkers on the Mac, and the monitor is a different process from the check. `helpers/hog.py` reads one `ps` table and counts as Hopwatch's: this process and its descendants; any process with a `hopwatch` or `netdiag` command line (run directly or as a shell's script) among its ancestors, which is how a check run by the app, a terminal or the launchd watcher is recognised from outside; and the probe tools only Hopwatch runs here (`speedtest`, `mtr`, `ping`, `traceroute`, `dig`, `sntp`, `gping`, `nettop`). A pid that `nettop` reported and `ps` no longer lists cannot be shown to be anyone's and is treated the same way. Hopwatch's own or unverifiable traffic of `THRESH_HOG_MIN_MBPS` or more in a direction **voids that direction**: the latency has an explanation that is not the candidate, and naming a bystander would be a guess.
+- **Hopwatch's own traffic is never the answer.** A full check saturates the link on purpose (`bufferbloat_run`, the speed test), so while one runs its `curl`s and `speedtest` are the biggest talkers on the Mac, and the monitor is a different process from the check. `helpers/hog.py` reads one `ps` table and counts as Hopwatch's: this process and its descendants; any process with a `hopwatch` or `hopwatch` command line (run directly or as a shell's script) among its ancestors, which is how a check run by the app, a terminal or the launchd watcher is recognised from outside; and the probe tools only Hopwatch runs here (`speedtest`, `mtr`, `ping`, `traceroute`, `dig`, `sntp`, `gping`, `nettop`). A pid that `nettop` reported and `ps` no longer lists cannot be shown to be anyone's and is treated the same way. Hopwatch's own or unverifiable traffic of `THRESH_HOG_MIN_MBPS` or more in a direction **voids that direction**: the latency has an explanation that is not the candidate, and naming a bystander would be a guess.
 - **Naming and the button.** The app is resolved with `dns_resolve_gui_app`, as in `SOCK-1` and `CONN-1`. A process that does not resolve to a quittable regular GUI app (a system daemon such as `bird` or `nsurlsessiond`, a root process, a command-line tool, a VPN daemon, Hopwatch itself, Finder) gives the finding without a name and without a button; the process name appears only in the technical clause. Rates, not lifetime counters, decide, so a daemon with a large counter and no current traffic (`mDNSResponder`) is never a candidate.
 - **Repair offered:** `quit-app`, only when an app was named.
 - **What it says:** what was measured (the app's rate, that it is most of what the Mac is sending or receiving, what the pings are doing) and that quitting it is a quick way to find out whether it is the cause. It never claims a cause it did not measure, and says it could not tell which app when it could not.
@@ -570,7 +570,7 @@ All of the below are implemented and can fire.
 - Evidence: VPN type and name.
 - Recommendation: the "gateway" line is the VPN endpoint, not your LAN
   router. RTT, loss, and traceroute reflect the tunnel — for a true
-  picture of the local link, disconnect the VPN and run netdiag again.
+  picture of the local link, disconnect the VPN and run hopwatch again.
 - Trigger: `vpn.active == true`. Severity: `info`, so it never changes the
   exit code — an intentional VPN is not a fault.
 - Emitted since v0.6.0. Between v0.1.0 and v0.5.2 this file and the README
@@ -722,7 +722,7 @@ All of the below are implemented and can fire.
 - Recommendation: none. Nothing is wrong.
 
 **It heads the `N1` chain, and that placement is the whole rule.**
-netdiag's `GATEWAY` comes from `route -n get default`, which is IPv4 —
+hopwatch's `GATEWAY` comes from `route -n get default`, which is IPv4 —
 so a network that is IPv6-only leaves it empty and the run falls into
 `N1c` ("joined with no route out") or `N1` ("no network connection at
 all"). Both are critical, both exit 2, and both are false on a network
@@ -748,7 +748,7 @@ NAT64 network is unconfirmed.
 
 ## What else is in the path
 
-`VPN-2`, `PX-1` and `FW-1` all exist for one reason: **netdiag equates
+`VPN-2`, `PX-1` and `FW-1` all exist for one reason: **hopwatch equates
 "carries my traffic" with "holds the default route"**, and macOS stopped
 honouring that equation years ago. Split tunnels, PAC proxies,
 NetworkExtension content filters, per-app proxies and DoH resolvers each
@@ -776,7 +776,7 @@ broken.
 - Severity: `info`.
 - Evidence: the configured encrypted DNS server URL or address.
 
-An encrypted DNS profile sends DNS queries over an encrypted channel (DoH/DoT) rather than using standard unencrypted lookups. Standard DNS tests in netdiag are measured against local and public unencrypted resolvers for diagnostic baseline comparison, and may not reflect the resolver user applications actually query.
+An encrypted DNS profile sends DNS queries over an encrypted channel (DoH/DoT) rather than using standard unencrypted lookups. Standard DNS tests in hopwatch are measured against local and public unencrypted resolvers for diagnostic baseline comparison, and may not reflect the resolver user applications actually query.
 
 ### PR-1 — iCloud Private Relay active
 
@@ -795,7 +795,7 @@ iCloud Private Relay encrypts and routes Safari and Mail web requests through Ap
 
 `VPN-1` fires on the *default route*. A corporate split-tunnel VPN
 deliberately does not take it — it installs routes for the company's
-prefixes only — so netdiag reported a perfectly healthy network while
+prefixes only — so hopwatch reported a perfectly healthy network while
 every work application was broken, and said nothing about the one
 component that was failing.
 
@@ -814,7 +814,7 @@ why this rule keys on the routing table instead.
 
 On a managed Mac a PAC file decides which destinations go direct and
 which go through a proxy, so `tcp_reach`'s direct connections test a
-path real traffic never uses. Nothing in netdiag read these settings
+path real traffic never uses. Nothing in hopwatch read these settings
 before. Checked only for `LINK_SERVICE` — proxy settings are per-service
 and only the service carrying this run's traffic is relevant.
 
@@ -827,7 +827,7 @@ and only the service carrying this run's traffic is relevant.
 
 Zscaler, Netskope, Cloudflare WARP, Little Snitch and LuLu install
 NetworkExtension content filters that sit in the datapath. When one
-misbehaves it *is* the fault, and netdiag would otherwise attribute its
+misbehaves it *is* the fault, and hopwatch would otherwise attribute its
 symptoms to the router or the ISP.
 
 Only the `network_extension` group counts. This machine has a camera
@@ -841,7 +841,7 @@ and reporting them would be a false alarm on a very common setup.
 - Evidence: Browser application name, running memory version, and current version on disk.
 - Recommendation: Quit and relaunch the browser to finish the update and restore normal browsing.
 
-When a browser updates in the background on macOS, the updater installs the new version into the app bundle and removes the previous version directory from `Versions/` to conserve disk space. While existing tabs and helper processes continue to execute in memory, any new tab or cross-site navigation requires spawning a new helper process from disk. Because the running browser attempts to execute the helper from its original version directory which is now missing, process spawning fails and the tab crashes with an unhappy face ("Aw, Snap!"). Netdiag detects this condition and warns the user that their browser may not be working correctly, advising a quick relaunch.
+When a browser updates in the background on macOS, the updater installs the new version into the app bundle and removes the previous version directory from `Versions/` to conserve disk space. While existing tabs and helper processes continue to execute in memory, any new tab or cross-site navigation requires spawning a new helper process from disk. Because the running browser attempts to execute the helper from its original version directory which is now missing, process spawning fails and the tab crashes with an unhappy face ("Aw, Snap!"). Hopwatch detects this condition and warns the user that their browser may not be working correctly, advising a quick relaunch.
 
 ### DQ-1 — The run measured two networks
 
@@ -888,7 +888,7 @@ evidence of a change.
 - Severity: `info`.
 - Evidence: none needed; the absence is the finding.
 - Recommendation: grant Location Services to whichever process runs
-  netdiag — which is not necessarily a terminal.
+  hopwatch — which is not necessarily a terminal.
 - Two texts, chosen on whether `GW_MAC` is known. See below.
 
 **A data-completeness fact, not a network fault**, and the reason it is
@@ -916,13 +916,13 @@ that fires in the common case says checks are grouped by the router's
 hardware address and nothing is mis-filed.
 
 *"Grant Location Services to your terminal."* Wrong when the caller is
-`netdiag.app` or the launchd watcher, and it sends people to a settings
+`Hopwatch.app` or the launchd watcher, and it sends people to a settings
 pane that will not fix anything. The rule now names no particular app.
 
 **A caller that can see the name can just hand it over.** TCC attributes
 `ipconfig getsummary` and `wdutil` to `/usr/sbin/ipconfig` and
 `/usr/bin/wdutil`, not to the process that spawned them — so
-`netdiag.app`, which reads the real SSID over CoreWLAN and displays it at
+`Hopwatch.app`, which reads the real SSID over CoreWLAN and displays it at
 the top of its own window, was launching a CLI that then reported macOS
 would not tell it the name. Setting `NETDIAG_SSID_HINT` in the child's
 environment fixes that: `lib/wifi.sh` uses it only after both of its own
@@ -979,7 +979,7 @@ is a phone in someone's pocket.
 **Detection, and what it cannot see.** USB and Bluetooth tethering
 announce themselves in the service name and are exact — this developer's
 own service order lists `iPhone USB`. A phone's *Wi-Fi* hotspot is an
-ordinary Wi-Fi network as far as every command-line tool netdiag can
+ordinary Wi-Fi network as far as every command-line tool hopwatch can
 reach: nothing in `scutil --nwi`, `ipconfig getsummary` or
 `system_profiler SPAirPortDataType` reports it as expensive. (The
 `expensive` and `constrained` flags do exist in `NWPathMonitor`, but are
@@ -1010,7 +1010,7 @@ failure this whole family of work exists to remove.
 - Evidence: the measured download and the negotiated PHY rate.
 - Recommendation: use ethernet, or move closer and prefer 5/6 GHz.
 
-**The wrong conclusion it prevents.** "netdiag says 75 Mb/s, I pay for
+**The wrong conclusion it prevents.** "hopwatch says 75 Mb/s, I pay for
 500, my ISP is cheating me" — when the Wi-Fi link negotiated 130 Mb/s,
 75 is the *most* that link can carry and no plan could deliver more
 through it. Both numbers were already collected and nothing joined
@@ -1047,7 +1047,7 @@ stays quiet, because there the number is simply the truth.
 
 **Why it matters.** A damaged pair in a cable, or a cheap dock, drops a
 1000BASE-T link to 100BASE-TX. It is a 10× cap invisible everywhere in
-netdiag except this one line of `ifconfig`, and the speed test then
+hopwatch except this one line of `ifconfig`, and the speed test then
 reports ~94 Mb/s — so the user calls their ISP about a gigabit plan that
 is being delivered correctly.
 
@@ -1241,7 +1241,7 @@ unprivileged process, from the router dropping them.
 - Recommendation: none — this is the carrier's normal internal routing.
 - Rationale: carrier-grade NAT puts RFC1918 hops in a traceroute that
   look identical to a home double-NAT. Splitting them (see
-  `_wan_split_nat_chain`) stops netdiag telling users to bridge a router
+  `_wan_split_nat_chain`) stops hopwatch telling users to bridge a router
   they don't own. Only the home-side chain produces the actionable NAT-1.
 
 ## Rules added in v0.4.x–v0.5.x
@@ -1252,7 +1252,7 @@ unprivileged process, from the router dropping them.
   never measured (a focused run such as `--mtu-only`).
 - Severity: `critical`.
 - Evidence: names the focus flag actually in use.
-- Recommendation: re-run plain `netdiag` for a full picture.
+- Recommendation: re-run plain `hopwatch` for a full picture.
 - Rationale: focused runs skip the gateway section, so P1/P2 can't
   evaluate and a real outage would otherwise produce no diagnosis at all.
   `PUBLIC_CHECKED` is what keeps it honest — `--wifi-only` never runs
@@ -1381,7 +1381,7 @@ transitions to and `--install-recorder` keeps filling.
 
 Why that is worth the exception: a scan is a snapshot, and a snapshot taken
 at a good moment on a connection that dropped six times last night reports
-a healthy network — truthfully, and uselessly. Nothing else netdiag
+a healthy network — truthfully, and uselessly. Nothing else hopwatch
 measures can see last night at all.
 
 Both fire only when a journal exists. **Its absence is never evidence of
@@ -1401,7 +1401,7 @@ connection it is on now — the reason `lib/netid.sh` exists at all.
 - Severity: `warn`.
 - Evidence: how many drops, the total duration, and the longest single one.
 - Recommendation: raise it with whoever runs the line, and use
-  `netdiag --events=24` for the exact times to give them.
+  `hopwatch --events=24` for the exact times to give them.
 
 **Count or total, not both.** They catch different faults. Six ten-second
 drops is a flapping link; one twelve-minute drop is an outage. A rule that
@@ -1451,14 +1451,14 @@ assumes the link was otherwise quiet.
 
 - Trigger: `traffic_at_least "$THRESH_TRAFFIC_BUSY_MBPS"` — either
   direction of the `nettop` sample in `lib/traffic.sh` carried at least
-  the floor, netdiag's own probes excluded.
+  the floor, hopwatch's own probes excluded.
 - Severity: `varies`. `info` alone; `warn` when `B1`, `B2`, `SP-1` or
   `BL-1` also fired.
 - Evidence: the busier direction in Mb/s, and the busiest process by name.
 - Recommendation: on the `warn` path, pause the transfer and re-run
   before concluding anything about the router or the ISP.
 
-**The defect it closes.** netdiag measured the path and never the traffic
+**The defect it closes.** hopwatch measured the path and never the traffic
 on it, so a bufferbloat grade of D with a backup uploading at 40 Mb/s was
 indistinguishable from a grade of D on an idle link. The report blamed
 the router's queue in both cases. One of those users needs a better
@@ -1483,17 +1483,17 @@ tint the bufferbloat row amber every time a backup ran.
 observer: it reads other processes' counters and generates no traffic, so
 unlike `internet_ping` and `bufferbloat` it does not need a quiet link and
 does not need its own slot in the run. The cost of that choice is
-netdiag's own batch traffic landing inside the sample window, which
-`helpers/traffic.py` excludes by process name — without it, netdiag would
+hopwatch's own batch traffic landing inside the sample window, which
+`helpers/traffic.py` excludes by process name — without it, hopwatch would
 report itself as the busiest thing on the link on every run.
 
 **Why `--quick` skips it.** `nettop` needs about three seconds of startup
 before its first snapshot, so even a short window costs four or five
 seconds of a budget that is eight seconds in total.
 
-## Rules about netdiag itself
+## Rules about hopwatch itself
 
-One rule, one category (`netdiag`), and the only entry in this document
+One rule, one category (`hopwatch`), and the only entry in this document
 that judges the tool rather than the network. It earns its own category
 rather than borrowing `baseline` because a category names the row whose
 number a rule is judging, and tinting the Speed row red because a
@@ -1508,12 +1508,12 @@ launchd agent is broken is the same mistake as `G1`'s green dot beside
 - Evidence: the program path for `blocked`, launchd's exit status for
   `failing`, the age of the last completed run for `stale`, and the age
   of the plist for `never`.
-- Recommendation: `netdiag --uninstall-watcher && netdiag
+- Recommendation: `hopwatch --uninstall-watcher && hopwatch
   --install-watcher`, which now refuses to install a watcher somewhere
   it could never run.
 
 **The defect it closes, measured on this project's own machine.**
-`com.netdiag.watcher` failed on every one of 1,386 invocations between
+`com.hopwatch.watcher` failed on every one of 1,386 invocations between
 11 and 28 August 2026 — once every fifteen minutes for seventeen days —
 and nothing said so. `launchctl list` reported exit status 126 the
 entire time. `watcher.stderr.log` grew to 124 KB of a single repeated
@@ -1522,10 +1522,10 @@ install message tells you to `tail -f`, sat at **0 bytes** — which is
 exactly what a healthy watcher with nothing to report looks like.
 
 **The cause is TCC, and it is not developer-specific.** The plist runs
-whatever `netdiag` on `PATH` resolves to; `install.sh` run from inside a
+whatever `hopwatch` on `PATH` resolves to; `install.sh` run from inside a
 clone deliberately points that symlink at the clone; and a launchd agent
 has no consent grant for `~/Documents`, `~/Desktop` or `~/Downloads`.
-Clone netdiag into any of the three, install from it, and the watcher
+Clone hopwatch into any of the three, install from it, and the watcher
 can never execute. There is also no grant to ask for: the TCC prompt
 would be attributed to the *executable*, which is Homebrew's bash, and
 "give bash Full Disk Access" is worse advice than shipping no watcher.
@@ -1545,7 +1545,7 @@ would be noise.
 **Why a heartbeat and not just launchd's exit status.** Exit status
 answers "did the process start and what did it return", which a crash
 loop and a healthy run can share; it says nothing about whether the run
-reached the end. `bin/netdiag` writes `~/net-diag/watcher.heartbeat` on
+reached the end. `bin/hopwatch` writes `~/net-diag/watcher.heartbeat` on
 its normal exit path, and only when `NETDIAG_WATCHER=1` — a variable set
 by nothing but the plist, so an interactive run can never make a dead
 watcher look alive. Deliberately not written from the `EXIT` trap: a run
