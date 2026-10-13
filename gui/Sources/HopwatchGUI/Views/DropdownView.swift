@@ -265,18 +265,15 @@ struct DropdownView: View {
 
             let subtitle: String = {
                 var subtitleParts: [String] = []
-                if let dur = offline?.formattedDuration {
-                    if let net = offline?.lastNetwork, !net.isEmpty {
-                        subtitleParts.append("Offline for \(dur) · last on \(net)")
-                    } else {
-                        subtitleParts.append("Offline for \(dur)")
-                    }
-                } else if let net = offline?.lastNetwork, !net.isEmpty {
-                    subtitleParts.append("Last connected to \(net)")
+                if let line = offline?.statusLine {
+                    subtitleParts.append(line)
                 }
 
-                if offline?.precursor == "router-unreachable", !rules.contains("DH-3") {
-                    subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
+                // The CLI's own sentence about what preceded the drop, or
+                // nothing: it also decides when a more specific rule
+                // (DH-3) makes that sentence the wrong one to show.
+                if let summary = offline?.precursorSummary, !summary.isEmpty {
+                    subtitleParts.append(summary)
                 } else {
                     subtitleParts.append(coordinator.headline)
                 }

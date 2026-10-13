@@ -2694,11 +2694,12 @@ ar_down() {
 
 # A carry record from named fields (all optional, all default 0 but the
 # time it was written). Fields: AT NET SSID GW INET DOWN PREC WJS WJF
-# TOUCHED WEDGED TRIES DLAST NOADDR.
+# TOUCHED WEDGED TRIES DLAST NOADDR LAST (the fingerprint of the last-network
+# name).
 mk_carry() {
-  printf 'v1:%s' "${CK_AT:-1000}"
+  printf 'v2:%s' "${CK_AT:-1000}"
   local v
-  for v in NET SSID GW INET DOWN PREC WJS WJF TOUCHED WEDGED TRIES DLAST NOADDR; do
+  for v in NET SSID GW INET DOWN PREC WJS WJF TOUCHED WEDGED TRIES DLAST NOADDR LAST; do
     eval "printf ':%s' \"\${CK_$v:-0}\""
   done
   printf '\n'
@@ -2707,7 +2708,7 @@ mk_carry() {
 # The new process, as monitor_run does it on its first cycle: stage the
 # record at "now", then adopt it once the link has been probed.
 restart_with() {
-  _mon_carry_stage "$1" "$2"
+  _mon_carry_stage "$1" "$2" "${3:-}"
   _mon_carry_apply
 }
 
@@ -2716,7 +2717,7 @@ restart_with() {
   MON_AR_WJ_SINCE=960 MON_AR_RADIO_TOUCHED=1 MON_AR_DHCP_TRIES=2 MON_AR_DHCP_LAST=970
   MON_NETWORK_ID="wifi:ssid=Home,mac=aa:bb" MON_ID_SSID="Home"
   _mon_carry_build 1000
-  [[ "$MON_CARRY_OUT" =~ ^v1(:[0-9]{1,12}){14}$ ]] || { echo "shape: $MON_CARRY_OUT"; return 1; }
+  [[ "$MON_CARRY_OUT" =~ ^v2(:[0-9]{1,12}){15}$ ]] || { echo "shape: $MON_CARRY_OUT"; return 1; }
   # No name, colon or quote of the network reaches the record.
   [[ "$MON_CARRY_OUT" != *Home* ]] || return 1
   _mon_carry_stage "$MON_CARRY_OUT" 1001
@@ -2855,9 +2856,11 @@ restart_with() {
     "${good}:0|1010"                                                  # one field long
     "garbage|1010"
     "|1010"
-    "V1${good#v1}|1010"
-    "${good/v1:/v2:}|1010"
-    "DH-3:3:1000|1010"                                                # the old shape
+    "V2${good#v2}|1010"
+    "${good/v2:/v3:}|1010"
+    "${good/v2:/v1:}|1010"                                            # the old version, with a field too many
+    "v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0|1010"                          # the real old shape: a clean slate
+    "DH-3:3:1000|1010"                                                # the older shape
     "${good/:1000:/:-1:}|1010"                                        # negative
     "${good/:1000:/:1e3:}|1010"
     "${good};rm -rf /|1010"
@@ -2873,11 +2876,11 @@ restart_with() {
 }
 
 @test "carry: a leading zero is a decimal digit, not an octal prefix" {
-  _mon_carry_stage "v1:0000001000:0:0:0:0:0000000999:1:0:0:0:0:03:0:0" 1010
+  _mon_carry_stage "v2:0000001000:0:0:0:0:0000000999:1:0:0:0:0:03:0:0:0" 1010
   [ "$MON_CARRY_VALID" -eq 1 ] && [ "$MON_CARRY_DOWN" -eq 999 ] && [ "$MON_CARRY_TRIES" -eq 3 ]
   # 08 and 09 would be a syntax error as octal; here they stage cleanly, and
   # the retry cap rejects the value on its merits.
-  _mon_carry_stage "v1:1000:0:0:0:0:0:0:0:0:0:0:08:0:0" 1010
+  _mon_carry_stage "v2:1000:0:0:0:0:0:0:0:0:0:0:08:0:0:0" 1010
   [ "$MON_CARRY_VALID" -eq 0 ]
 }
 
@@ -2911,12 +2914,205 @@ restart_with() {
   [ "$MON_CARRY_TRIES" -eq 0 ] && [ "$MON_CARRY_NOADDR" -eq 0 ]
 }
 
+# ── "Last on Y" across a restart: the name travels beside the record ──────
+# The record holds fingerprints, never names. The app hands the last-network
+# name back separately (HOPWATCH_MONITOR_LAST_NETWORK) and the new process
+# adopts it only when it can show the name is the one the record is about.
+
+@test "last-network: the record fingerprints the name and never contains it" {
+  MON_LAST_NETWORK="Home"
+  _mon_carry_build 1000
+  [[ "$MON_CARRY_OUT" != *Home* ]] || return 1
+  _mon_carry_stage "$MON_CARRY_OUT" 1001
+  [ "$MON_CARRY_VALID" -eq 1 ]
+  [ "$MON_CARRY_LABEL" -eq "$(_mon_cksum Home)" ] && [ "$MON_CARRY_LABEL" -ne 0 ]
+  MON_LAST_NETWORK=""
+  _mon_carry_build 1000
+  _mon_carry_stage "$MON_CARRY_OUT" 1001
+  [ "$MON_CARRY_LABEL" -eq 0 ]
+}
+
+@test "last-network: a restart that finds the link down takes the name the record vouches for" {
+  MON_LINK_UP=0 MON_LAST_NETWORK=""
+  restart_with "$(CK_AT=1050 CK_DOWN=1000 CK_PREC=1 CK_LAST="$(_mon_cksum Home)" mk_carry)" 1052 "Home"
+  [ "$MON_LAST_NETWORK" = "Home" ]
+  # The same through the real build, with a name that needs care: spaces,
+  # a quote and a colon (which the record's own grammar uses), and multibyte.
+  local n="Café \"Bob\": 5G"
+  MON_LAST_NETWORK="$n"
+  _mon_carry_build 1000
+  MON_LAST_NETWORK=""
+  restart_with "$MON_CARRY_OUT" 1001 "$n"
+  [ "$MON_LAST_NETWORK" = "$n" ]
+}
+
+@test "last-network: taken even when the restart lands before any link-down sample (no down-since)" {
+  MON_LINK_UP=0 MON_LAST_NETWORK=""
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum Home)" mk_carry)" 1052 "Home"
+  [ "$MON_LAST_NETWORK" = "Home" ]
+  [ "$MON_DOWN_SINCE_EPOCH" -eq 0 ]
+}
+
+@test "last-network: refused when the fingerprint is another network's" {
+  MON_LINK_UP=0 MON_LAST_NETWORK=""
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum Cafe)" mk_carry)" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  # And a record that names none vouches for nothing.
+  restart_with "$(CK_AT=1050 CK_LAST=0 mk_carry)" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  # No name at all.
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum Home)" mk_carry)" 1052 ""
+  [ -z "$MON_LAST_NETWORK" ]
+}
+
+@test "last-network: refused when the record is stale, malformed or the old shape" {
+  MON_LINK_UP=0 MON_LAST_NETWORK=""
+  local ck; ck="$(_mon_cksum Home)"
+  restart_with "$(CK_AT=1000 CK_LAST=$ck mk_carry)" $(( 1000 + THRESH_MON_CARRY_S + 1 )) "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  restart_with "$(CK_AT=5000 CK_LAST=$ck mk_carry)" 1000 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  restart_with "garbage" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  restart_with "v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0:$ck" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  restart_with "v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+}
+
+@test "last-network: refused when the link is up, or is demonstrably another network" {
+  local ck; ck="$(_mon_cksum Home)"
+  MON_LINK_UP=1 MON_LAST_NETWORK="" MON_NETWORK_ID="wifi:mac=aa:aa"
+  restart_with "$(CK_AT=1050 CK_NET="$(_mon_cksum "wifi:mac=aa:aa")" CK_LAST=$ck mk_carry)" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+  # Down, with a readable SSID that is not the one the record is about: the
+  # whole record is refused, name included.
+  MON_LINK_UP=0 MON_SSID="Cafe"
+  restart_with "$(CK_AT=1050 CK_SSID="$(_mon_cksum Home)" CK_LAST=$ck mk_carry)" 1052 "Home"
+  [ -z "$MON_LAST_NETWORK" ]
+}
+
+@test "last-network: refused when it does not have the shape of a name, even if the fingerprint matches" {
+  MON_LINK_UP=0
+  local -a bad=(
+    ""                                       # nothing
+    "   "                                    # blank
+    $'Ho\nme'                                # a line break would split the stream
+    $'Ho\tme'
+    $'Ho\x01me'
+    "unknown network"                        # placeholders
+    "WiFi (SSID hidden by macOS)"
+    "<redacted>"
+    "[redacted]"
+    "$(printf 'x%.0s' $(seq 1 $(( THRESH_MON_NETWORK_NAME_MAX_BYTES + 1 ))))"   # too long
+    "$(printf 'é%.0s' $(seq 1 $(( THRESH_MON_NETWORK_NAME_MAX_BYTES / 2 + 1 ))))"   # too long in bytes, short in characters
+  )
+  local name
+  for name in "${bad[@]}"; do
+    MON_LAST_NETWORK=""
+    restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum "$name")" mk_carry)" 1052 "$name"
+    [ -z "$MON_LAST_NETWORK" ] || { echo "accepted: $name"; return 1; }
+  done
+  # The longest allowed name is accepted.
+  name="$(printf 'x%.0s' $(seq 1 "$THRESH_MON_NETWORK_NAME_MAX_BYTES"))"
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum "$name")" mk_carry)" 1052 "$name"
+  [ "$MON_LAST_NETWORK" = "$name" ]
+}
+
+@test "last-network: a name this process already has is not replaced by a carried one" {
+  MON_LINK_UP=0 MON_LAST_NETWORK="Office"
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum Home)" mk_carry)" 1052 "Home"
+  [ "$MON_LAST_NETWORK" = "Office" ]
+}
+
+@test "last-network: the name is read once, then gone" {
+  MON_LINK_UP=0 MON_LAST_NETWORK=""
+  restart_with "$(CK_AT=1050 CK_LAST="$(_mon_cksum Home)" mk_carry)" 1052 "Home"
+  [ -z "$MON_CARRY_NAME" ]
+}
+
+@test "last-network: while the link is up only a real name is remembered, never a placeholder or the id" {
+  MON_NETWORK_ID="wifi:mac=aa:bb:cc:dd:ee:ff" MON_NETWORK_LABEL="Home"
+  _mon_note_last_network
+  [ "$MON_LAST_NETWORK" = "Home" ]
+  local label
+  for label in "unknown network" "WiFi (SSID hidden by macOS)" "<redacted>" ""; do
+    MON_LAST_NETWORK="Home" MON_NETWORK_LABEL="$label"
+    _mon_note_last_network
+    [ -z "$MON_LAST_NETWORK" ] || { echo "kept for: $label"; return 1; }
+  done
+  # Nothing falls back to the raw id.
+  [[ "$MON_LAST_NETWORK" != *wifi:mac* ]]
+}
+
+@test "last-network: the labels netid_run writes are the ones netid_label_is_name refuses" {
+  local IS_WIFI=1 WIFI_SSID="" GW_MAC="" GATEWAY="" LINK_DHCP_ROUTER="" INTERFACE="en0"
+  local NETWORK_ID="" NETWORK_LABEL="" NETWORK_GROUP=""
+  netid_run
+  [ "$NETWORK_LABEL" = "unknown network" ]
+  ! netid_label_is_name "$NETWORK_LABEL"
+  GW_MAC="aa:bb:cc:dd:ee:ff" netid_run
+  ! netid_label_is_name "$NETWORK_LABEL"
+  WIFI_SSID="Home" GW_MAC="aa:bb:cc:dd:ee:ff" netid_run
+  [ "$NETWORK_LABEL" = "Home" ] && netid_label_is_name "$NETWORK_LABEL"
+}
+
+@test "monitor_sample: status.carry_network is the name, or null; hostile bytes stay inside the JSON string" {
+  run emit NETDIAG_MON_CARRY_NETWORK='Ho"me\'
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)['status']
+assert s['carry_network'] == 'Ho\"me\\\\', s
+"
+  run emit
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)['status']
+assert 'carry_network' in s and s['carry_network'] is None, s
+"
+}
+
+@test "monitor_sample: link.offline.precursor_summary is the CLI's sentence for a router that went quiet" {
+  run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_RULES="N1 WJ-1" \
+           NETDIAG_MON_OFFLINE_REASON=wifi-not-joined NETDIAG_MON_OFFLINE_PRECURSOR=router-unreachable
+  printf '%s' "$output" | python3 -c "
+import json, sys
+off = json.load(sys.stdin)['link']['offline']
+assert off['precursor'] == 'router-unreachable', off
+assert off['precursor_summary'] == 'Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.', off
+"
+}
+
+@test "monitor_sample: link.offline.precursor_summary is null for no precursor, the internet precursor and an unknown one" {
+  local p
+  for p in "" internet-unreachable something-new; do
+    run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_RULES="N1 WJ-1" \
+             NETDIAG_MON_OFFLINE_REASON=wifi-not-joined NETDIAG_MON_OFFLINE_PRECURSOR="$p"
+    printf '%s' "$output" | python3 -c "
+import json, sys
+off = json.load(sys.stdin)['link']['offline']
+assert 'precursor_summary' in off and off['precursor_summary'] is None, off
+" || { echo "summary for precursor '$p'"; return 1; }
+  done
+}
+
+@test "monitor_sample: link.offline.precursor_summary is withheld while DH-3 fires" {
+  run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_RULES="N1 DH-3" \
+           NETDIAG_MON_OFFLINE_REASON=wifi-no-address NETDIAG_MON_OFFLINE_PRECURSOR=router-unreachable
+  printf '%s' "$output" | python3 -c "
+import json, sys
+off = json.load(sys.stdin)['link']['offline']
+assert off['precursor'] == 'router-unreachable', off
+assert off['precursor_summary'] is None, off
+"
+}
+
 @test "monitor_sample: status.carry passes the record through verbatim, and is null without one" {
-  run emit NETDIAG_MON_CARRY="v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0"
+  run emit NETDIAG_MON_CARRY="v2:1000:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
   printf '%s' "$output" | python3 -c "
 import json, sys
 c = json.load(sys.stdin)['status']['carry']
-assert c == 'v1:1000:0:0:0:0:0:0:0:0:0:0:0:0:0', c
+assert c == 'v2:1000:0:0:0:0:0:0:0:0:0:0:0:0:0:0', c
 "
   run emit
   printf '%s' "$output" | python3 -c "

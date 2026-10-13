@@ -1158,6 +1158,19 @@ loss and the rejoin grace still runs from the real start of the outage, so a
 restart never makes old evidence look fresh, and the radio-off guard and
 "once per outage" survive it. Nothing is written to disk.
 
+The offline card's "last on Y" has one more hand-over, because the record
+holds no names: the app also keeps `status.carry_network` and returns it in
+`HOPWATCH_MONITOR_LAST_NETWORK`. The new process adopts it only when a record
+was adopted, the link is down, the name's fingerprint is the one inside the
+record, and the name has the shape of a name (not blank, not a placeholder,
+bounded in length, no control characters). Otherwise there is no "last on"
+clause: a name is never shown for a network other than the one that was lost.
+The sentence under the headline ("Your router stopped responding right before
+Wi-Fi dropped, which usually means it restarted.") is the CLI's, in
+`link.offline.precursor_summary`, and is withheld while `DH-3` fires, since a
+router that never answered the DHCP request is a better explanation than one
+that "stopped responding".
+
 Known limit: a user who picks "Disconnect" in the
 Wi-Fi menu right after the router misbehaved is indistinguishable, to an
 unprivileged process, from the router dropping them.

@@ -280,8 +280,9 @@ MON_AR_WEDGED_FIRED=0
 # monitor on every network event, and a Wi-Fi drop is one, so the process that
 # sees the outage is usually not the one that saw what led to it. Each sample
 # publishes an opaque record of the state below; the app hands the latest one
-# to the next process in HOPWATCH_MONITOR_CARRY, which parses it here and no
-# one else does. _mon_carry_stage validates it into MON_CARRY_*; _mon_carry_apply
+# to the next process in HOPWATCH_MONITOR_CARRY (with the last-network name
+# beside it in HOPWATCH_MONITOR_LAST_NETWORK, since the record holds no
+# names), which parses it here and no one else does. _mon_carry_stage validates it into MON_CARRY_*; _mon_carry_apply
 # decides, on the first cycle, whether it still describes this link.
 MON_CARRY_VALID=0
 MON_CARRY_NET=0 MON_CARRY_SSID=0
@@ -289,10 +290,17 @@ MON_CARRY_GW_LOSS=0 MON_CARRY_INET_LOSS=0
 MON_CARRY_DOWN=0 MON_CARRY_PRECURSOR=0
 MON_CARRY_WJ_SINCE=0 MON_CARRY_WJ_FIRED=0 MON_CARRY_TOUCHED=0 MON_CARRY_WEDGED=0
 MON_CARRY_TRIES=0 MON_CARRY_DHCP_LAST=0 MON_CARRY_NOADDR=0
+# The fingerprint, in the record, of the last-network name (MON_LAST_NETWORK),
+# and the name the app handed back (HOPWATCH_MONITOR_LAST_NETWORK) which
+# _mon_carry_apply adopts only if the two agree. The name is not part of the
+# record: the record holds integers, the name is passed beside it.
+MON_CARRY_LABEL=0
+MON_CARRY_NAME=""
 MON_CARRY_OUT=""
 # Memo for _mon_cksum, one slot per thing hashed, so the sample loop forks
 # cksum when an identity changes and not on every cycle.
 MON_CK_NET_IN="" MON_CK_NET=0 MON_CK_SSID_IN="" MON_CK_SSID=0
+MON_CK_LAST_IN="" MON_CK_LAST=0
 
 # Previous-sample identity, for the schema-2 changes array. Snapshotted
 # by _mon_snapshot_prev after every successful emit; MON_HAVE_PREV=0
@@ -1443,10 +1451,41 @@ _mon_cksum() {
   [[ "$out" =~ ^[0-9]{1,10}$ ]] && printf '%s' "$((10#$out))" || printf '0'
 }
 
+# Is $1 fit to be shown to a person as "the network you were last on"? The
+# shape check for a name that arrived from outside the process (and for the
+# one this process made): not a placeholder (netid_label_is_name), not blank,
+# no longer than THRESH_MON_NETWORK_NAME_MAX_BYTES bytes, no control
+# character (a newline in it would split a stream the app reads by line).
+# Bytes, not characters: the locale is pinned for the length and the class.
+_mon_name_ok() {
+  local LC_ALL=C name="${1:-}"
+  netid_label_is_name "$name" || return 1
+  [[ "$name" =~ ^[[:space:]]*$ ]] && return 1
+  [ "${#name}" -le "$THRESH_MON_NETWORK_NAME_MAX_BYTES" ] || return 1
+  [[ "$name" != *[[:cntrl:]]* ]] || return 1
+  return 0
+}
+
+# Remember, while the link is up, the name of the network it is up on, for
+# the "last on Y" clause of the outage that may follow. A name or nothing:
+# never the raw network id, and never a placeholder ("unknown network",
+# "WiFi (SSID hidden by macOS)"). Nothing, not the previous value: a new
+# network that cannot be named must not leave the old one's name behind.
+_mon_note_last_network() {
+  if _mon_name_ok "$MON_NETWORK_LABEL"; then
+    MON_LAST_NETWORK="$MON_NETWORK_LABEL"
+  else
+    MON_LAST_NETWORK=""
+  fi
+}
+
 # Build this sample's carry record into MON_CARRY_OUT. $1 = now.
-#   v1:AT:NET:SSID:GWLOSS:INETLOSS:DOWN:PREC:WJSINCE:WJFIRED:TOUCHED:WEDGED:TRIES:DHCPLAST:NOADDR
-# Fourteen unsigned integers after the version. AT is when it was written;
-# NET and SSID fingerprint the network the state belongs to; GWLOSS/INETLOSS
+#   v2:AT:NET:SSID:GWLOSS:INETLOSS:DOWN:PREC:WJSINCE:WJFIRED:TOUCHED:WEDGED:TRIES:DHCPLAST:NOADDR:LAST
+# Fifteen unsigned integers after the version. AT is when it was written;
+# NET and SSID fingerprint the network the state belongs to, and LAST the
+# name of the network the link was last up on (MON_LAST_NETWORK, 0 = none),
+# so the name the app hands back can be checked against the record without
+# the record containing it. v1 had no LAST and is refused whole. GWLOSS/INETLOSS
 # are when the router / the internet last stopped answering (what a later drop
 # is matched to); DOWN is when the link went down (0 = up) and PREC its
 # precursor (0 none, 1 router-unreachable, 2 internet-unreachable), both
@@ -1466,15 +1505,21 @@ _mon_carry_build() {
   if [ "$ssid" != "$MON_CK_SSID_IN" ]; then
     MON_CK_SSID_IN="$ssid"; MON_CK_SSID="$(_mon_cksum "$ssid")"
   fi
-  MON_CARRY_OUT="v1:${at}:${MON_CK_NET}:${MON_CK_SSID}"
+  if [ "$MON_LAST_NETWORK" != "$MON_CK_LAST_IN" ]; then
+    MON_CK_LAST_IN="$MON_LAST_NETWORK"; MON_CK_LAST="$(_mon_cksum "$MON_CK_LAST_IN")"
+  fi
+  MON_CARRY_OUT="v2:${at}:${MON_CK_NET}:${MON_CK_SSID}"
   MON_CARRY_OUT+=":${MON_LAST_GW_LOSS_TIME}:${MON_LAST_INET_LOSS_TIME}"
   MON_CARRY_OUT+=":${MON_DOWN_SINCE_EPOCH}:${prec}"
   MON_CARRY_OUT+=":${MON_AR_WJ_SINCE}:${MON_AR_WJ_FIRED}:${MON_AR_RADIO_TOUCHED}:${MON_AR_WEDGED_FIRED}"
   MON_CARRY_OUT+=":${MON_AR_DHCP_TRIES}:${MON_AR_DHCP_LAST}:${MON_NOADDR_SINCE_EPOCH}"
+  MON_CARRY_OUT+=":${MON_CK_LAST}"
 }
 
 # Validate the previous process's record into MON_CARRY_*. $1 = the record
-# (HOPWATCH_MONITOR_CARRY), $2 = now. Strict: exactly that shape, bounded
+# (HOPWATCH_MONITOR_CARRY), $2 = now, $3 = the last-network name the app held
+# alongside it (HOPWATCH_MONITOR_LAST_NETWORK; only kept, never judged here:
+# _mon_carry_apply decides). Strict: exactly that shape, bounded
 # digits, read as decimal (10# so a leading zero is not octal), not from the
 # future, not older than THRESH_MON_CARRY_S, no time later than the record
 # itself, every flag and count in range. Anything else leaves MON_CARRY_VALID
@@ -1484,11 +1529,12 @@ _mon_carry_build() {
 _mon_carry_stage() {
   local carry="${1:-}" now="${2:-$EPOCHSECONDS}" f i
   MON_CARRY_VALID=0
-  [[ "$carry" =~ ^v1(:[0-9]{1,12}){14}$ ]] || return 0
+  MON_CARRY_NAME="${3:-}"
+  [[ "$carry" =~ ^v2(:[0-9]{1,12}){15}$ ]] || return 0
   IFS=: read -r -a f <<<"$carry"
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do f[i]=$((10#${f[i]})); done
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do f[i]=$((10#${f[i]})); done
   # f: 1 at, 2 net, 3 ssid, 4 gw, 5 inet, 6 down, 7 prec, 8 wjsince, 9 wjfired,
-  #    10 touched, 11 wedged, 12 tries, 13 dhcplast, 14 noaddr
+  #    10 touched, 11 wedged, 12 tries, 13 dhcplast, 14 noaddr, 15 last-name
   [ "${f[1]}" -le "$now" ] || return 0
   [ $(( now - f[1] )) -le "$THRESH_MON_CARRY_S" ] || return 0
   for i in 4 5 6 8 13 14; do [ "${f[i]}" -le "${f[1]}" ] || return 0; done
@@ -1501,6 +1547,7 @@ _mon_carry_stage() {
   MON_CARRY_WJ_SINCE="${f[8]}" MON_CARRY_WJ_FIRED="${f[9]}"
   MON_CARRY_TOUCHED="${f[10]}" MON_CARRY_WEDGED="${f[11]}"
   MON_CARRY_TRIES="${f[12]}" MON_CARRY_DHCP_LAST="${f[13]}" MON_CARRY_NOADDR="${f[14]}"
+  MON_CARRY_LABEL="${f[15]}"
   MON_CARRY_VALID=1
 }
 
@@ -1515,6 +1562,8 @@ _mon_carry_stage() {
 # original times: the precursor window is measured from the real loss, and the
 # rejoin grace from the real start of the outage, not from this restart.
 _mon_carry_apply() {
+  local name="$MON_CARRY_NAME"
+  MON_CARRY_NAME=""
   [ "$MON_CARRY_VALID" -eq 1 ] || return 0
   MON_CARRY_VALID=0
   local ssid="${MON_SSID:-}"
@@ -1533,6 +1582,16 @@ _mon_carry_apply() {
   # The rest describes an outage; a link that is up has none (the link-up
   # branches reset all of it anyway).
   [ "$MON_LINK_UP" -eq 0 ] || return 0
+  # The name of the network that was lost, handed back by the app beside the
+  # record. Taken only when it is the very name the record fingerprints, so a
+  # name can never be shown for a network other than the one the record is
+  # about, and only if it has the shape of a name. Anything else leaves it
+  # empty, which the card renders as no "last on" clause at all.
+  if [ -z "$MON_LAST_NETWORK" ] && [ "$MON_CARRY_LABEL" -ne 0 ] \
+     && _mon_name_ok "$name" \
+     && [ "$(_mon_cksum "$name")" = "$MON_CARRY_LABEL" ]; then
+    MON_LAST_NETWORK="$name"
+  fi
   if [ "$MON_CARRY_DOWN" -gt 0 ]; then
     MON_DOWN_SINCE_EPOCH="$MON_CARRY_DOWN"
     MON_DOWN_SINCE="$(date -u -r "$MON_CARRY_DOWN" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
@@ -1773,6 +1832,7 @@ _mon_emit() {
   NETDIAG_MON_AUTO_RECONNECT_ATTEMPT="$MON_AR_ATTEMPT" \
   NETDIAG_MON_AUTO_RECONNECT_MAX="$MON_AR_MAX" \
   NETDIAG_MON_CARRY="$MON_CARRY_OUT" \
+  NETDIAG_MON_CARRY_NETWORK="$MON_LAST_NETWORK" \
   python3 "$HELPERS_DIR/monitor_sample.py"
 }
 
@@ -1850,7 +1910,9 @@ monitor_run() {
   local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
   local dns_recheck_pending=0
   MON_BROWSER_DESYNC_COUNT=0
-  _mon_carry_stage "${HOPWATCH_MONITOR_CARRY:-}" "$EPOCHSECONDS"
+  _mon_carry_stage "${HOPWATCH_MONITOR_CARRY:-}" "$EPOCHSECONDS" "${HOPWATCH_MONITOR_LAST_NETWORK:-}"
+  # Read once; nothing this process starts needs it.
+  unset HOPWATCH_MONITOR_LAST_NETWORK
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
   local parent_pid="$PPID"
@@ -2002,7 +2064,7 @@ monitor_run() {
         if loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT"; then
           MON_LAST_INET_LOSS_TIME="$now"
         fi
-        MON_LAST_NETWORK="${MON_NETWORK_LABEL:-$MON_NETWORK_ID}"
+        _mon_note_last_network
         MON_DOWN_SINCE=""
         MON_DOWN_SINCE_EPOCH=0
         MON_OFFLINE_PRECURSOR=""

@@ -121,6 +121,15 @@ final class MonitorStream {
     /// recovery; dropped by `stop()`, so switching monitoring off and on is
     /// a clean slate.
     private(set) var monitorCarry: String?
+    /// The newest `status.carry_network`: the name of the network the link
+    /// was last up on, which the record deliberately does not contain. Kept
+    /// verbatim and handed to the next process in
+    /// `HOPWATCH_MONITOR_LAST_NETWORK` (an environment variable, never an
+    /// argument), same lifecycle as `monitorCarry`: survives `restart()`,
+    /// dropped by `stop()`. The app never reads, trims or compares it; the
+    /// monitor adopts it only if it matches the record's fingerprint, and
+    /// only ever echoes it back into the stream.
+    private(set) var monitorLastNetwork: String?
     private var burstInterval: Int?
     private var burstTimer: Task<Void, Never>?
     /// Set by `restart()` and consumed by the next `spawn()`: the child about
@@ -259,6 +268,12 @@ final class MonitorStream {
         if let carry = monitorCarry {
             childEnv["HOPWATCH_MONITOR_CARRY"] = carry
         }
+        // The name beside the record, so an outage that begins in the new
+        // process can still say which network it lost. Without the record it
+        // would be refused anyway, so it is not sent alone.
+        if monitorCarry != nil, let name = monitorLastNetwork {
+            childEnv["HOPWATCH_MONITOR_LAST_NETWORK"] = name
+        }
         proc.environment = childEnv
 
         let pipe = Pipe()
@@ -342,6 +357,7 @@ final class MonitorStream {
         pauseHolders.removeAll()
         pauseReason = nil
         monitorCarry = nil
+        monitorLastNetwork = nil
         trapsReady = false
         pauseSignalPending = false
         refreshSignalPending = false
@@ -366,9 +382,11 @@ final class MonitorStream {
         let wasRunning = isRunning
         let wasAwaiting = awaitingSince
         let carry = monitorCarry
+        let lastNetwork = monitorLastNetwork
         stop()
         awaitingSince = wasAwaiting
         monitorCarry = carry
+        monitorLastNetwork = lastNetwork
         burstInterval = interval
         burstUntil = until
         restartAttempts = 0
@@ -563,6 +581,7 @@ final class MonitorStream {
         if let until = burstUntil, Date() >= until { endBurst() }
         latest = sample
         monitorCarry = sample.status.carry
+        monitorLastNetwork = sample.status.carryNetwork
         recent.append(sample)
         if recent.count > Self.recentCapacity {
             recent.removeFirst(recent.count - Self.recentCapacity)

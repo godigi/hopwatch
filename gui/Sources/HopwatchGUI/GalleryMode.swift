@@ -230,7 +230,12 @@ enum GalleryMode {
         // `--gallery-no-link`: turn that sample into a link-down one that
         // still carries the healthy sample's stale readings. See
         // `adoptGalleryNoLinkSample`.
-        if CommandLine.arguments.contains("--gallery-no-link") {
+        // `--gallery-no-link-restarted` is the same card as a restarted
+        // monitor draws it when the hand-over from the previous process was
+        // refused (no last network, no precursor).
+        if CommandLine.arguments.contains("--gallery-no-link-restarted") {
+            coordinator.adoptGalleryNoLinkSample(restarted: true)
+        } else if CommandLine.arguments.contains("--gallery-no-link") {
             coordinator.adoptGalleryNoLinkSample()
         }
         // `--gallery-moved`: the monitor is on a network the hydrated report
