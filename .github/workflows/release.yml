@@ -22,6 +22,14 @@ name: release
 #
 # Release notes are generated, never hand-written, so the Release and the
 # CHANGELOG cannot disagree.
+#
+# There are two ways in. A tag pushed from a maintainer's machine
+# (.githooks/pre-push) triggers `on: push: tags`. A tag pushed by
+# auto-version.yml does NOT, because events created with the default
+# GITHUB_TOKEN never start workflows; v1.15.1, v1.16.0 and v1.16.1 were
+# tagged that way and silently skipped. auto-version.yml therefore calls
+# `workflow_dispatch` below, which GITHUB_TOKEN is allowed to do. Both paths
+# run the same job, so everything it checks and builds is the same either way.
 
 on:
   push:
@@ -48,26 +56,32 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
+      # The tag's own tree: the app and CLI are built from exactly the commit
+      # being released. Checking out the default branch instead would build
+      # whatever main holds when this runs, and gui/Makefile names its
+      # artefacts from that tree's HOPWATCH_VERSION, so any merge that landed
+      # between the tag and this run would fail packaging or ship the wrong
+      # build. That window is wider on the dispatch path.
       - uses: actions/checkout@v5
         with:
-          # The default branch, not the tag — deliberately.
-          #
-          # CHANGELOG.md is cumulative: main's copy documents every version,
-          # and it is the copy that gets *corrected* when an old entry turns
-          # out to be wrong (0.6.0's notes, for one, were only reunited with
-          # their section long after 0.6.0 shipped). Checking out the tag
-          # would publish whatever that entry looked like at the time and
-          # silently lose every later repair — and, for any tag older than
-          # this workflow, would find no helpers/changelog_section.py to
-          # read it with at all, which makes the workflow_dispatch backfill
-          # path impossible.
-          #
-          # The one thing that must come from the tag is HOPWATCH_VERSION,
-          # since the whole point of check 1 is what that specific commit
-          # claims about itself. It is read with `git show <tag>:` below.
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           fetch-tags: true
+
+      # CHANGELOG.md is the one file that comes from the default branch.
+      # It is cumulative: main's copy documents every version, and it is the
+      # copy that gets *corrected* when an old entry turns out to be wrong
+      # (0.6.0's notes, for one, were only reunited with their section long
+      # after 0.6.0 shipped). The tag's copy would publish whatever the entry
+      # looked like at the time and lose every later repair. The reader comes
+      # along from main too, because a tag older than helpers/changelog_section.py
+      # has no way to parse it.
+      - name: Take CHANGELOG.md and its reader from the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          git checkout "origin/$DEFAULT_BRANCH" -- CHANGELOG.md helpers/changelog_section.py
 
       - name: Resolve the version under release
         id: v
@@ -96,8 +110,8 @@ jobs:
           # 1. The version the CLI reports must be the version being tagged.
           #    `hopwatch --version` is what a user and the GUI's capabilities
           #    handshake both read, so a mismatch here means the artefact
-          #    lies about itself. Read from the tag, not the checked-out
-          #    default branch, whose HOPWATCH_VERSION has usually moved on.
+          #    lies about itself. Read with `git show` from the tag itself,
+          #    which is also what is checked out.
           cli="$(git show "$TAG:bin/hopwatch" 2>/dev/null | sed -n 's/^HOPWATCH_VERSION="\(.*\)"$/\1/p' | head -1)"
           if [ -z "$cli" ]; then
             cli="$(git show "$TAG:bin/netdiag" 2>/dev/null | sed -n 's/^\(HOPWATCH\|NETDIAG\)_VERSION="\(.*\)"$/\2/p' | head -1)"
