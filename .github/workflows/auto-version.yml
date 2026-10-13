@@ -2,11 +2,38 @@ name: auto-version
 
 # Automatically bumps version, rolls CHANGELOG, and pushes a release tag
 # whenever new feature or fix commits land on main without a release.
+#
+# It also starts the release workflow for the tag it just pushed, and that
+# last step is the point of a good deal of this file. Events created with
+# the default GITHUB_TOKEN do not trigger other workflows (GitHub's guard
+# against runaway loops), so this job's `git push --follow-tags` never fired
+# release.yml's `on: push: tags`. v1.15.1, v1.16.0 and v1.16.1 were each
+# tagged by this job and none became a Release, which left Casks/hopwatch.rb
+# pointing at a DMG URL that did not exist. Nothing failed, so nothing said
+# so: the same silent drift release.yml was written to end, reopened by the
+# one path that does not use a personal credential.
+#
+# `workflow_dispatch` is the documented exception to that rule, so the job
+# dispatches release.yml itself. That needs `actions: write` below, and no
+# token or secret beyond the one every run already has. A tag a human pushes
+# from their own machine (.githooks/pre-push) never passes through this job,
+# so it triggers release.yml by the tag push alone and is not dispatched
+# twice.
 
 on:
   push:
     branches: [main]
     tags-ignore: ["v*"]
+
+# One bump at a time. Two merges in quick succession would otherwise both
+# compute the next version from the same tag. Queued, not cancelled: a run
+# that is cancelled mid-bump would leave a tag without its release commit.
+# GitHub keeps only the newest waiting run, which is fine here because the
+# job checks out the tip of main (below), so the survivor covers every
+# commit the dropped one would have.
+concurrency:
+  group: auto-version
+  cancel-in-progress: false
 
 jobs:
   auto-bump:
@@ -14,9 +41,15 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     permissions:
       contents: write
+      # To dispatch release.yml after the tag is pushed (see the header).
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
+          # The tip of main, not the SHA that triggered this run. Serialised
+          # runs would otherwise bump from a stale checkout that does not
+          # contain the previous run's release commit.
+          ref: main
           fetch-depth: 0
           fetch-tags: true
 
@@ -31,14 +64,27 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           python3 scripts/bump.py --ci
 
-      - name: Push Version Bump and Tag
+      - name: Push Version Bump and Tag, then start the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           # Only push if bump created a new commit/tag
-          latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
           head_tag="$(git tag --points-at HEAD 2>/dev/null || true)"
           if [ -n "$head_tag" ]; then
             echo "Pushing release commit and tag: $head_tag"
-            git push origin main --follow-tags
+            # Atomic and by explicit name: if main moved and the push is
+            # rejected, the tag must not land alone on an orphaned commit
+            # (--follow-tags updates refs independently) and then be handed
+            # to the release workflow.
+            git push --atomic origin HEAD:main "refs/tags/$head_tag"
+
+            # A push made with GITHUB_TOKEN does not trigger release.yml's
+            # tag trigger, so start it explicitly. See the header. A failure
+            # here is meant to turn the run red: a tag with no Release is
+            # exactly what this step exists to prevent.
+            echo "Dispatching release.yml for $head_tag"
+            gh workflow run release.yml -f tag="$head_tag"
           else
             echo "No version bump needed."
           fi
