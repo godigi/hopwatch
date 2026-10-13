@@ -1656,17 +1656,18 @@ RULES: list[dict[str, object]] = [
     },
     {
         "id": "DH-3",
-        "title": "No address handed out — Mac assigned its own",
+        "title": "The network never gave your Mac an address",
         "category": "dhcp",
         "severity": "critical",
         "scope": "both",
         "blurb": (
-            "Your Mac is joined to this network but the network never "
-            "gave it an address, so it assigned itself a placeholder one "
-            "that cannot reach anything. Usually the router's address "
-            "service is down, out of addresses, or still starting up "
-            "after a reboot. Rejoining the network makes your Mac ask "
-            "again; failing that, restart the router."
+            "Your Mac is joined to this network but never got a usable "
+            "address from it (either none at all, or a placeholder one "
+            "it made up for itself), so it cannot reach anything. "
+            "Usually the router's address service is down, out of "
+            "addresses, or still starting up after a reboot. Rejoining "
+            "the network makes your Mac ask again; failing that, "
+            "restart the router."
         ),
         "doc": "DIAGNOSIS-RULES.md#dh-3--self-assigned-address-dhcp-never-answered",
         "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",

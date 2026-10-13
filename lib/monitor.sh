@@ -249,6 +249,50 @@ MON_OFFLINE_PRECURSOR=""
 MON_LAST_NETWORK=""
 MON_LAST_GW_LOSS_TIME=0
 MON_LAST_INET_LOSS_TIME=0
+# When the Wi-Fi link was first seen associated-but-addressless in this
+# stretch of observation (0 = it is not), for DH-3's grace period. Separate
+# from MON_DOWN_SINCE_EPOCH, which counts from the moment the route went
+# away and so would count time spent not joined at all as time spent
+# waiting for an address.
+MON_NOADDR_SINCE_EPOCH=0
+
+# Automatic Wi-Fi reconnect (status.auto_reconnect). The monitor is the one
+# long-running process, so it holds the counters and makes the decision; the
+# app only checks its own setting. See _mon_auto_reconnect.
+#   MON_AR_REASON    "" (nothing warranted now) or wifi-dropped, no-address,
+#                    wedged-gateway — emitted only on the sample that warrants
+#                    an attempt, not on every sample the condition holds
+#   MON_AR_RULE      the rule behind it (WJ-1, DH-3, G2)
+#   MON_AR_ATTEMPT / MON_AR_MAX   which attempt this is, of how many
+MON_AR_REASON=""
+MON_AR_RULE=""
+MON_AR_ATTEMPT=0
+MON_AR_MAX=0
+MON_AR_WJ_SINCE=0
+MON_AR_WJ_FIRED=0
+MON_AR_RADIO_TOUCHED=0
+MON_AR_DHCP_TRIES=0
+MON_AR_DHCP_LAST=0
+MON_AR_WEDGED_STREAK=0
+MON_AR_WEDGED_FIRED=0
+
+# What survives a restart of this process (status.carry). The app restarts the
+# monitor on every network event, and a Wi-Fi drop is one, so the process that
+# sees the outage is usually not the one that saw what led to it. Each sample
+# publishes an opaque record of the state below; the app hands the latest one
+# to the next process in HOPWATCH_MONITOR_CARRY, which parses it here and no
+# one else does. _mon_carry_stage validates it into MON_CARRY_*; _mon_carry_apply
+# decides, on the first cycle, whether it still describes this link.
+MON_CARRY_VALID=0
+MON_CARRY_NET=0 MON_CARRY_SSID=0
+MON_CARRY_GW_LOSS=0 MON_CARRY_INET_LOSS=0
+MON_CARRY_DOWN=0 MON_CARRY_PRECURSOR=0
+MON_CARRY_WJ_SINCE=0 MON_CARRY_WJ_FIRED=0 MON_CARRY_TOUCHED=0 MON_CARRY_WEDGED=0
+MON_CARRY_TRIES=0 MON_CARRY_DHCP_LAST=0 MON_CARRY_NOADDR=0
+MON_CARRY_OUT=""
+# Memo for _mon_cksum, one slot per thing hashed, so the sample loop forks
+# cksum when an identity changes and not on every cycle.
+MON_CK_NET_IN="" MON_CK_NET=0 MON_CK_SSID_IN="" MON_CK_SSID=0
 
 # Previous-sample identity, for the schema-2 changes array. Snapshotted
 # by _mon_snapshot_prev after every successful emit; MON_HAVE_PREV=0
@@ -1031,7 +1075,13 @@ _mon_rules() {
         _mon_add_rule critical WJ-1
       fi
     elif [ "$MON_OFFLINE_REASON" = "self-assigned" ] || [ "$MON_OFFLINE_REASON" = "wifi-no-address" ]; then
-      _mon_add_rule critical DH-3
+      # Associated but addressless is the normal state for the first seconds
+      # of every join, wake and roam, so DH-3 waits for it to persist.
+      local noaddr_duration=0
+      [ "$MON_NOADDR_SINCE_EPOCH" -gt 0 ] && noaddr_duration=$(( EPOCHSECONDS - MON_NOADDR_SINCE_EPOCH ))
+      if [ "$noaddr_duration" -ge "$THRESH_DHCP_ADDRESS_GRACE_S" ]; then
+        _mon_add_rule critical DH-3
+      fi
     fi
     MON_DEGRADED=1
     MON_MEASUREMENT_STATE="link-down"
@@ -1337,6 +1387,257 @@ _mon_rules() {
   return 0
 }
 
+# ── Automatic Wi-Fi reconnect ────────────────────────────────────────────
+# The only place Hopwatch decides to repair something unprompted, and only
+# ever as advice: the verdict goes out as status.auto_reconnect and the app
+# acts on it if, and only if, the user switched "Automatically reconnect
+# Wi-Fi" on (default off). Nothing here runs a repair. See CLAUDE.md
+# (Permissions) and docs/design/2026-10-07-repair-actions-design.md.
+#
+# Three situations, and for each the question is the same: is this the
+# network failing, or the user doing something on purpose?
+#
+#   wifi-dropped    WJ-1 — Wi-Fi is on but did not rejoin. Warranted only
+#                   when the router stopped answering just before the drop
+#                   (the precursor), the radio was never switched off during
+#                   the outage, and the link stayed unjoined past the rejoin
+#                   grace. Once per outage.
+#   no-address      DH-3 — joined, no usable address, past the grace
+#                   period. Every THRESH_AUTORECONNECT_RETRY_S, at most
+#                   THRESH_AUTORECONNECT_MAX_RETRIES per outage.
+#   wedged-gateway  link up, good signal, the router answers nobody: G2 for
+#                   THRESH_AUTORECONNECT_WEDGED_SAMPLES consecutive samples.
+#                   Once per episode.
+#
+# What cannot be told apart from here: a user who chooses "Disconnect" in
+# the Wi-Fi menu right after the router misbehaved looks exactly like the
+# router dropping them. Both leave the radio on, unjoined, with the same
+# precursor. Telling them apart needs the user's intent, which macOS does
+# not expose to an unprivileged process.
+
+# Forget everything an episode accumulated. Called when the link comes back,
+# when the network changes, and after any gap in observation (sleep, pause):
+# a counter that survived a night's sleep would describe an outage that
+# ended hours ago.
+_mon_auto_reconnect_reset() {
+  MON_AR_WJ_SINCE=0
+  MON_AR_WJ_FIRED=0
+  MON_AR_RADIO_TOUCHED=0
+  MON_AR_DHCP_TRIES=0
+  MON_AR_DHCP_LAST=0
+  MON_AR_WEDGED_STREAK=0
+  MON_AR_WEDGED_FIRED=0
+  MON_NOADDR_SINCE_EPOCH=0
+}
+
+# A short, stable fingerprint of an identity string (the network id, an SSID)
+# for the carry record. It lets the new process ask "is this still the network
+# the record was about?" without the record containing a name, and without a
+# name's quotes or colons ever reaching the strict shape check. Not a security
+# measure: a collision would need the same outage on a colliding network.
+# 0 means "none" — the empty string, or no cksum to ask.
+_mon_cksum() {
+  local out=""
+  [ -n "${1:-}" ] && out="$(printf '%s' "$1" | cksum 2>/dev/null)"
+  out="${out%% *}"
+  [[ "$out" =~ ^[0-9]{1,10}$ ]] && printf '%s' "$((10#$out))" || printf '0'
+}
+
+# Build this sample's carry record into MON_CARRY_OUT. $1 = now.
+#   v1:AT:NET:SSID:GWLOSS:INETLOSS:DOWN:PREC:WJSINCE:WJFIRED:TOUCHED:WEDGED:TRIES:DHCPLAST:NOADDR
+# Fourteen unsigned integers after the version. AT is when it was written;
+# NET and SSID fingerprint the network the state belongs to; GWLOSS/INETLOSS
+# are when the router / the internet last stopped answering (what a later drop
+# is matched to); DOWN is when the link went down (0 = up) and PREC its
+# precursor (0 none, 1 router-unreachable, 2 internet-unreachable), both
+# decided once, at the drop; the rest are the counters of _mon_auto_reconnect.
+# Every time in it is the original, so a restart never makes evidence look
+# fresher than it is.
+_mon_carry_build() {
+  local at="${1:-$EPOCHSECONDS}" prec=0 ssid="${MON_ID_SSID:-}"
+  case "$MON_OFFLINE_PRECURSOR" in
+    router-unreachable)   prec=1 ;;
+    internet-unreachable) prec=2 ;;
+  esac
+  [ "$ssid" != "<redacted>" ] || ssid=""
+  if [ "${MON_NETWORK_ID:-}" != "$MON_CK_NET_IN" ]; then
+    MON_CK_NET_IN="${MON_NETWORK_ID:-}"; MON_CK_NET="$(_mon_cksum "$MON_CK_NET_IN")"
+  fi
+  if [ "$ssid" != "$MON_CK_SSID_IN" ]; then
+    MON_CK_SSID_IN="$ssid"; MON_CK_SSID="$(_mon_cksum "$ssid")"
+  fi
+  MON_CARRY_OUT="v1:${at}:${MON_CK_NET}:${MON_CK_SSID}"
+  MON_CARRY_OUT+=":${MON_LAST_GW_LOSS_TIME}:${MON_LAST_INET_LOSS_TIME}"
+  MON_CARRY_OUT+=":${MON_DOWN_SINCE_EPOCH}:${prec}"
+  MON_CARRY_OUT+=":${MON_AR_WJ_SINCE}:${MON_AR_WJ_FIRED}:${MON_AR_RADIO_TOUCHED}:${MON_AR_WEDGED_FIRED}"
+  MON_CARRY_OUT+=":${MON_AR_DHCP_TRIES}:${MON_AR_DHCP_LAST}:${MON_NOADDR_SINCE_EPOCH}"
+}
+
+# Validate the previous process's record into MON_CARRY_*. $1 = the record
+# (HOPWATCH_MONITOR_CARRY), $2 = now. Strict: exactly that shape, bounded
+# digits, read as decimal (10# so a leading zero is not octal), not from the
+# future, not older than THRESH_MON_CARRY_S, no time later than the record
+# itself, every flag and count in range. Anything else leaves MON_CARRY_VALID
+# at 0 and the process starts from a clean slate — which is always the safe
+# answer, since a clean slate warrants nothing (WJ-1 needs a precursor it
+# will not have). It never errors, because the value came from outside.
+_mon_carry_stage() {
+  local carry="${1:-}" now="${2:-$EPOCHSECONDS}" f i
+  MON_CARRY_VALID=0
+  [[ "$carry" =~ ^v1(:[0-9]{1,12}){14}$ ]] || return 0
+  IFS=: read -r -a f <<<"$carry"
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do f[i]=$((10#${f[i]})); done
+  # f: 1 at, 2 net, 3 ssid, 4 gw, 5 inet, 6 down, 7 prec, 8 wjsince, 9 wjfired,
+  #    10 touched, 11 wedged, 12 tries, 13 dhcplast, 14 noaddr
+  [ "${f[1]}" -le "$now" ] || return 0
+  [ $(( now - f[1] )) -le "$THRESH_MON_CARRY_S" ] || return 0
+  for i in 4 5 6 8 13 14; do [ "${f[i]}" -le "${f[1]}" ] || return 0; done
+  [ "${f[7]}" -le 2 ] || return 0
+  for i in 9 10 11; do [ "${f[i]}" -le 1 ] || return 0; done
+  [ "${f[12]}" -le "$THRESH_AUTORECONNECT_MAX_RETRIES" ] || return 0
+  MON_CARRY_NET="${f[2]}" MON_CARRY_SSID="${f[3]}"
+  MON_CARRY_GW_LOSS="${f[4]}" MON_CARRY_INET_LOSS="${f[5]}"
+  MON_CARRY_DOWN="${f[6]}" MON_CARRY_PRECURSOR="${f[7]}"
+  MON_CARRY_WJ_SINCE="${f[8]}" MON_CARRY_WJ_FIRED="${f[9]}"
+  MON_CARRY_TOUCHED="${f[10]}" MON_CARRY_WEDGED="${f[11]}"
+  MON_CARRY_TRIES="${f[12]}" MON_CARRY_DHCP_LAST="${f[13]}" MON_CARRY_NOADDR="${f[14]}"
+  MON_CARRY_VALID=1
+}
+
+# Adopt the staged record, once, on the first cycle — after the link has been
+# probed, because only then is there anything to check it against. It is
+# refused whole when this link is demonstrably not the one it described:
+#   link up   the network id must fingerprint the same (a record of a network
+#             this one cannot be shown to be is evidence about another);
+#   link down there is usually no identity left to compare, so it is taken on
+#             trust unless an SSID is readable and is a different one.
+# A refusal costs a clean slate and nothing else. What is adopted keeps its
+# original times: the precursor window is measured from the real loss, and the
+# rejoin grace from the real start of the outage, not from this restart.
+_mon_carry_apply() {
+  [ "$MON_CARRY_VALID" -eq 1 ] || return 0
+  MON_CARRY_VALID=0
+  local ssid="${MON_SSID:-}"
+  if [ "$MON_LINK_UP" -eq 1 ]; then
+    if [ "$MON_CARRY_NET" -ne 0 ] \
+       && [ "$(_mon_cksum "${MON_NETWORK_ID:-}")" != "$MON_CARRY_NET" ]; then
+      return 0
+    fi
+  elif [ -n "$ssid" ] && [ "$ssid" != "<redacted>" ] && [ "$MON_CARRY_SSID" -ne 0 ] \
+       && [ "$(_mon_cksum "$ssid")" != "$MON_CARRY_SSID" ]; then
+    return 0
+  fi
+  MON_LAST_GW_LOSS_TIME="$MON_CARRY_GW_LOSS"
+  MON_LAST_INET_LOSS_TIME="$MON_CARRY_INET_LOSS"
+  MON_AR_WEDGED_FIRED="$MON_CARRY_WEDGED"
+  # The rest describes an outage; a link that is up has none (the link-up
+  # branches reset all of it anyway).
+  [ "$MON_LINK_UP" -eq 0 ] || return 0
+  if [ "$MON_CARRY_DOWN" -gt 0 ]; then
+    MON_DOWN_SINCE_EPOCH="$MON_CARRY_DOWN"
+    MON_DOWN_SINCE="$(date -u -r "$MON_CARRY_DOWN" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+    case "$MON_CARRY_PRECURSOR" in
+      1) MON_OFFLINE_PRECURSOR="router-unreachable" ;;
+      2) MON_OFFLINE_PRECURSOR="internet-unreachable" ;;
+      *) MON_OFFLINE_PRECURSOR="" ;;
+    esac
+  fi
+  MON_AR_WJ_SINCE="$MON_CARRY_WJ_SINCE"
+  MON_AR_WJ_FIRED="$MON_CARRY_WJ_FIRED"
+  MON_AR_RADIO_TOUCHED="$MON_CARRY_TOUCHED"
+  MON_AR_DHCP_TRIES="$MON_CARRY_TRIES"
+  MON_AR_DHCP_LAST="$MON_CARRY_DHCP_LAST"
+  MON_NOADDR_SINCE_EPOCH="$MON_CARRY_NOADDR"
+  return 0
+}
+
+# DH-3's grace clock: starts the first cycle the Wi-Fi link is seen
+# associated without a usable address, and stops the moment it is not.
+# $1 = now, in epoch seconds.
+_mon_noaddr_track() {
+  case "$MON_OFFLINE_REASON" in
+    self-assigned|wifi-no-address)
+      [ "$MON_NOADDR_SINCE_EPOCH" -gt 0 ] || MON_NOADDR_SINCE_EPOCH="${1:-$EPOCHSECONDS}" ;;
+    *) MON_NOADDR_SINCE_EPOCH=0 ;;
+  esac
+}
+
+# Decide, for this cycle, whether an automatic reconnect is warranted now.
+# Runs after _mon_rules (it reads MON_RULES) and before the sample is
+# emitted. Sets MON_AR_REASON / RULE / ATTEMPT / MAX; REASON is empty on
+# every cycle that warrants nothing. $1 = now, in epoch seconds.
+_mon_auto_reconnect() {
+  local now="${1:-$EPOCHSECONDS}"
+  MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
+  [ "$MON_PAUSED" -eq 0 ] || return 0
+  local rules=" ${MON_RULES:-} "
+
+  if [ "$MON_LINK_UP" -eq 1 ]; then
+    # The outage, if there was one, is over. The wedged latch is the
+    # exception: it ends on recovered *gateway loss*, below, because a
+    # router that is still wedged after our power cycle also looks "up".
+    MON_AR_WJ_SINCE=0; MON_AR_WJ_FIRED=0; MON_AR_RADIO_TOUCHED=0
+    MON_AR_DHCP_TRIES=0; MON_AR_DHCP_LAST=0
+    if [ "$MON_IFACE_TYPE" = "wifi" ] \
+       && is_numeric "${MON_WIFI_RSSI:-}" \
+       && [ "$MON_WIFI_RSSI" -ge "$THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM" ] \
+       && loss_at_least "$MON_GW_LOSS" "$THRESH_AUTORECONNECT_WEDGED_LOSS_PCT" \
+       && [[ "$rules" == *" G2 "* ]]; then
+      MON_AR_WEDGED_STREAK=$((MON_AR_WEDGED_STREAK + 1))
+      if [ "$MON_AR_WEDGED_STREAK" -ge "$THRESH_AUTORECONNECT_WEDGED_SAMPLES" ] \
+         && [ "$MON_AR_WEDGED_FIRED" -eq 0 ]; then
+        MON_AR_WEDGED_FIRED=1
+        MON_AR_REASON="wedged-gateway"; MON_AR_RULE="G2"
+        MON_AR_ATTEMPT=1; MON_AR_MAX=1
+      fi
+    else
+      # Consecutive means consecutive: any sample that does not meet every
+      # condition starts the count again.
+      MON_AR_WEDGED_STREAK=0
+      if loss_below "$MON_GW_LOSS" "$THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT"; then
+        MON_AR_WEDGED_FIRED=0
+      fi
+    fi
+    return 0
+  fi
+
+  MON_AR_WEDGED_STREAK=0
+
+  # The user switched the radio off themselves. Whatever follows in this
+  # outage is theirs to finish — unless it was our own repair that did it,
+  # which is why this only counts before the first attempt.
+  if [ "$MON_OFFLINE_REASON" = "wifi-off" ] \
+     && [ "$MON_AR_WJ_FIRED" -eq 0 ] && [ "$MON_AR_DHCP_TRIES" -eq 0 ]; then
+    MON_AR_RADIO_TOUCHED=1
+  fi
+
+  if [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ]; then
+    [ "$MON_AR_WJ_SINCE" -gt 0 ] || MON_AR_WJ_SINCE="$now"
+  else
+    MON_AR_WJ_SINCE=0
+  fi
+  [ "$MON_AR_RADIO_TOUCHED" -eq 0 ] || return 0
+
+  if [[ "$rules" == *" WJ-1 "* ]] \
+     && [ "$MON_AR_WJ_FIRED" -eq 0 ] \
+     && [ "$MON_OFFLINE_PRECURSOR" = "router-unreachable" ] \
+     && [ "$MON_AR_WJ_SINCE" -gt 0 ] \
+     && [ $(( now - MON_AR_WJ_SINCE )) -ge "$THRESH_WIFI_REJOIN_GRACE_S" ]; then
+    MON_AR_WJ_FIRED=1
+    MON_AR_REASON="wifi-dropped"; MON_AR_RULE="WJ-1"
+    MON_AR_ATTEMPT=1; MON_AR_MAX=1
+  elif [[ "$rules" == *" DH-3 "* ]] \
+       && [ "$MON_AR_DHCP_TRIES" -lt "$THRESH_AUTORECONNECT_MAX_RETRIES" ] \
+       && { [ "$MON_AR_DHCP_LAST" -eq 0 ] \
+            || [ $(( now - MON_AR_DHCP_LAST )) -ge "$THRESH_AUTORECONNECT_RETRY_S" ]; }; then
+    MON_AR_DHCP_TRIES=$((MON_AR_DHCP_TRIES + 1))
+    MON_AR_DHCP_LAST="$now"
+    MON_AR_REASON="no-address"; MON_AR_RULE="DH-3"
+    MON_AR_ATTEMPT="$MON_AR_DHCP_TRIES"; MON_AR_MAX="$THRESH_AUTORECONNECT_MAX_RETRIES"
+  fi
+  return 0
+}
+
 # ── Previous-sample snapshot ─────────────────────────────────────────────
 # Called after each successful emit, so the next sample diffs against
 # what the consumer actually saw.
@@ -1378,6 +1679,7 @@ _mon_snapshot_prev() {
 # parses forever is a far worse trade than ~50 ms of interpreter startup
 # once per cycle. At the 10 s fast cadence that is 0.5% duty.
 _mon_emit() {
+  _mon_carry_build "$EPOCHSECONDS"
   # The sibling import (rules_catalog.py) must not write __pycache__ into a
   # sealed app bundle: newer Homebrew pythons do so by default, and inside
   # the signed .app that mutates a resource the signature covers.
@@ -1466,6 +1768,11 @@ _mon_emit() {
   NETDIAG_MON_OFFLINE_DOWN_DURATION_S="$(( MON_DOWN_SINCE_EPOCH > 0 ? now - MON_DOWN_SINCE_EPOCH : 0 ))" \
   NETDIAG_MON_OFFLINE_PRECURSOR="$MON_OFFLINE_PRECURSOR" \
   NETDIAG_MON_OFFLINE_LAST_NETWORK="$MON_LAST_NETWORK" \
+  NETDIAG_MON_AUTO_RECONNECT_REASON="$MON_AR_REASON" \
+  NETDIAG_MON_AUTO_RECONNECT_RULE="$MON_AR_RULE" \
+  NETDIAG_MON_AUTO_RECONNECT_ATTEMPT="$MON_AR_ATTEMPT" \
+  NETDIAG_MON_AUTO_RECONNECT_MAX="$MON_AR_MAX" \
+  NETDIAG_MON_CARRY="$MON_CARRY_OUT" \
   python3 "$HELPERS_DIR/monitor_sample.py"
 }
 
@@ -1535,7 +1842,7 @@ _mon_on_refresh() { MON_REFRESH_REQUESTED=1; }
 
 monitor_run() {
   local now next_fast=0 next_medium=0 next_slow=0 cadence
-  local prev_network_id="" network_changed announced_pause=0
+  local prev_network_id="" prev_network_id_before="" network_changed announced_pause=0
   local link_was_down=0 link_restored
   # Identity-adjacent state last seen by the fast tier, to notice a VPN
   # toggle or a roam. Empty until first observed, so the first cycle (which
@@ -1543,6 +1850,7 @@ monitor_run() {
   local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
   local dns_recheck_pending=0
   MON_BROWSER_DESYNC_COUNT=0
+  _mon_carry_stage "${HOPWATCH_MONITOR_CARRY:-}" "$EPOCHSECONDS"
   # Captured once: bash never updates PPID, so this is the pid of whoever
   # started us and stays that way even after re-parenting.
   local parent_pid="$PPID"
@@ -1587,6 +1895,10 @@ monitor_run() {
         # this re-emitted the previous cycle's gap_s, already reported once
         # by the cycle that saw it.
         MON_GAP_S=""
+        # A paused sample decides nothing, and a pause is a gap in
+        # observation: counters from before it are not evidence now.
+        MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
+        _mon_auto_reconnect_reset
         MON_SEQ=$((MON_SEQ + 1))
         _mon_emit "$MONITOR_FAST_INTERVAL" || break
         _mon_snapshot_prev
@@ -1616,6 +1928,7 @@ monitor_run() {
         # history so old packets do not dilute or distort the post-wake connection.
         _mon_loss_reset
         MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
+        _mon_auto_reconnect_reset
       fi
     fi
     MON_REFRESHED=""
@@ -1632,6 +1945,7 @@ monitor_run() {
       _mon_probe_link
       if [ "$MON_NETWORK_ID" != "$prev_network_id" ]; then
         network_changed=1
+        prev_network_id_before="$prev_network_id"
         prev_network_id="$MON_NETWORK_ID"
         # Reset before probing: the first packets on this connection must
         # not be folded into the previous network's rolling windows.
@@ -1639,7 +1953,15 @@ monitor_run() {
         MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
         _mon_conn_reset
         _mon_hog_reset
+        # Not on the first cycle: every network is "new" to a process that
+        # has just started, and that would discard the carried-over attempt.
+        [ -z "$prev_network_id_before" ] || _mon_auto_reconnect_reset
       fi
+      # Once, on the first cycle: take over what the previous process knew,
+      # now that there is a probed link to check it against. After the reset
+      # above on purpose — on the first cycle that reset is skipped, and on a
+      # later one there is nothing staged.
+      _mon_carry_apply
       _mon_probe_vpn
       # A VPN toggle moves the public IP/ISP/country, and the DNS and TCP
       # paths with it; a roam moves RSSI, noise and channel. Left to the
@@ -1684,6 +2006,7 @@ monitor_run() {
         MON_DOWN_SINCE=""
         MON_DOWN_SINCE_EPOCH=0
         MON_OFFLINE_PRECURSOR=""
+        MON_NOADDR_SINCE_EPOCH=0
       else
         link_was_down=1
         # No link, no valid window: every packet in it predates the drop.
@@ -1700,6 +2023,7 @@ monitor_run() {
           fi
         fi
         _mon_probe_offline
+        _mon_noaddr_track "$now"
       fi
     fi
 
@@ -1768,6 +2092,7 @@ monitor_run() {
 
     _mon_probe_hog
     _mon_rules
+    _mon_auto_reconnect "$now"
     # A failure still waiting for its confirmation is re-probed next cycle
     # rather than after the rest of the 60 s medium interval.
     if [ "$MON_CONN_PENDING" -eq 1 ]; then next_medium=0; fi

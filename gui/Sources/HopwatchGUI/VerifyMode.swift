@@ -178,6 +178,7 @@ private enum VerifyHarness {
                                            linkDown: true)),
               .critical, "link-down sample + monitor not running → critical, not the generic warning")
         runForceRefreshTests()
+        runMonitorCarryTests()
 
         // ── HealthResolver: link-down precedence ──────────────────────────
         func dot(monitorRunning: Bool = true, alertRank: Int? = nil, scanning: Bool = false,
@@ -621,6 +622,65 @@ private enum VerifyHarness {
         stream.stop()
         check(stream.isAwaitingFirstSample && stream.latest != nil,
               "stop() keeps the last sample but marks it as awaiting a fresh one")
+    }
+
+    // MARK: - Monitor carry across restarts
+
+    /// The app restarts the monitor on every network event, and a Wi-Fi drop
+    /// is one. What the monitor knew (`status.carry`) has to cross that
+    /// restart or its automatic-reconnect decision can never see the router
+    /// go quiet before the drop. The app's whole part is to keep the newest
+    /// record verbatim and hand it to the next process, so that is all this
+    /// asserts — what the monitor does with it is pinned in
+    /// tests/test_monitor.bats. The stand-in child records the environment
+    /// it was started with.
+    static func runMonitorCarryTests() {
+        print("Monitor carry across restarts")
+        let dir = NSTemporaryDirectory() + "hopwatch-verify-carry-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let script = dir + "/fake-monitor"
+        let seen = dir + "/seen"
+        let carry = "v1:1700000000:0:0:1699999990:0:0:0:0:0:0:0:0:0:0"
+        let line = linkDownLine.replacingOccurrences(
+            of: #""cadence_s":5}"#, with: #""cadence_s":5,"carry":"\#(carry)"}"#)
+        let body = """
+        #!/bin/bash
+        parent=$PPID
+        printf '%s\\n' "${HOPWATCH_MONITOR_CARRY-unset}" >> "\(seen)"
+        while kill -0 "$parent" 2>/dev/null; do
+          printf '%s\\n' '\(line)'
+          sleep 0.25 & wait $!
+        done
+        """
+        try? body.write(toFile: script, atomically: true, encoding: .utf8)
+        chmod(script, 0o755)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        func starts() -> [String] {
+            ((try? String(contentsOfFile: seen, encoding: .utf8)) ?? "")
+                .split(separator: "\n").map(String.init)
+        }
+
+        let stream = MonitorStream()
+        stream.useBinaryForTesting(script)
+        stream.start()
+        spin(3.0, until: { stream.monitorCarry != nil })
+        equal(starts(), ["unset"], "a first start has nothing to carry")
+        equal(stream.monitorCarry, carry, "the newest sample's record is kept verbatim")
+        check(stream.latest?.status.carry == carry, "and decodes from status.carry")
+
+        stream.restart()
+        spin(3.0, until: { starts().count >= 2 })
+        equal(starts(), ["unset", carry],
+              "restart() hands the record, unread and unchanged, to the next process")
+        equal(stream.monitorCarry, carry, "and keeps it while the new process starts up")
+
+        stream.stop()
+        equal(stream.monitorCarry, nil, "stopping monitoring is a clean slate")
+        stream.start()
+        spin(3.0, until: { starts().count >= 3 })
+        equal(starts().last, "unset", "a start after a stop carries nothing")
+        stream.stop()
+        print("")
     }
 
     // MARK: - Alert attribution

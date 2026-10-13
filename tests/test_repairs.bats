@@ -19,6 +19,8 @@ setup() {
   mkdir -p "$STUBS" "$STATE"
   export HOPWATCH_LOG_DIR="$BATS_TEST_TMPDIR/logs"
   export REPAIR_QUIT_WAIT_S=1
+  # reconnect-wifi's pauses (lib/thresholds.sh holds the real values).
+  export REPAIR_WIFI_SETTLE_S=0 REPAIR_WIFI_REJOIN_WAIT_S=1
   export STATE CALLS
   stub_world
   PATH="$STUBS:$PATH"
@@ -72,13 +74,36 @@ if [ "$1" = "-getairportpower" ]; then
   echo "Wi-Fi Power (en0): On"
   exit 0
 fi
-if [ "$1" = "-setairportpower" ] || [ "$1" = "-setairportnetwork" ]; then
+if [ "$1" = "-setairportpower" ]; then
   [ -f "$STATE/networksetup-fails" ] && exit 1
+  [ -f "$STATE/power-on-fails" ] && [ "$3" = on ] && exit 1
+  [ "$3" = off ] && rm -f "$STATE/associated"
+  # Switching on: macOS rejoins by itself only if the test says it does.
+  [ "$3" = on ] && [ -f "$STATE/rejoins-by-itself" ] && : >"$STATE/associated"
+  exit 0
+fi
+if [ "$1" = "-listpreferredwirelessnetworks" ]; then
+  echo "Preferred networks on en0:"
+  [ -f "$STATE/preferred" ] && sed 's/^/	/' "$STATE/preferred"
+  exit 0
+fi
+if [ "$1" = "-setairportnetwork" ]; then
+  [ -f "$STATE/networksetup-fails" ] && exit 1
+  # networksetup reports a failed join on stdout and still exits 0.
+  if [ -f "$STATE/join-output" ]; then cat "$STATE/join-output"; exit 0; fi
+  : >"$STATE/associated"
   exit 0
 fi
 exit 0
 SH
-  chmod +x "$STUBS/osascript" "$STUBS/open" "$STUBS/lsappinfo" "$STUBS/networksetup"
+  cat >"$STUBS/ifconfig" <<'SH'
+#!/bin/sh
+printf 'ifconfig %s\n' "$*" >>"$CALLS"
+echo "en0: flags=8863<UP,BROADCAST> mtu 1500"
+if [ -f "$STATE/associated" ]; then echo "	status: active"; else echo "	status: inactive"; fi
+exit 0
+SH
+  chmod +x "$STUBS/osascript" "$STUBS/open" "$STUBS/lsappinfo" "$STUBS/networksetup" "$STUBS/ifconfig"
 }
 
 no_calls() {
@@ -628,4 +653,158 @@ assert 'repair' in json.load(sys.stdin)['features']
   [[ "$output" == *"--repair=ID"* ]]
   [[ "$output" == *"--repair-param"* ]]
   [[ "$output" == *"--dry-run"* ]]
+}
+
+# ── reconnect-wifi: the network parameter ────────────────────────────────
+# The name arrives from the network, so it is validated and refused, never
+# trimmed into shape, and nothing runs when it is refused.
+
+@test "reconnect-wifi accepts a plain network name and names it in the dry run" {
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param network=Test --dry-run --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['ok'] is True and d['dry_run'] is True, d
+assert any(\"-setairportnetwork en0 'Test'\" in r for r in d['ran']), d['ran']
+assert 'Test' in d['message'], d
+"
+  no_calls
+}
+
+@test "reconnect-wifi takes names with spaces, quotes and equals signs, and a full 32 bytes" {
+  local name
+  for name in "Cafe WiFi" "Bob's \"AP\"" "a=b" "$(printf 'x%.0s' {1..32})" "e-1-ok"; do
+    run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$name" --dry-run
+    [ "$status" -eq 0 ] || { echo "refused: $name"; echo "$output"; return 1; }
+  done
+  no_calls
+}
+
+@test "reconnect-wifi refuses an empty network name" {
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param network= --dry-run
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"network must be"* ]]
+  no_calls
+}
+
+@test "reconnect-wifi refuses a name longer than 32 bytes, counting bytes not characters" {
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$(printf 'x%.0s' {1..33})" --dry-run
+  [ "$status" -eq 3 ]
+  # 17 two-byte characters is 17 characters but 34 bytes.
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$(printf 'é%.0s' {1..17})" --dry-run
+  [ "$status" -eq 3 ]
+  # 16 of them is exactly 32 bytes.
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$(printf 'é%.0s' {1..16})" --dry-run
+  [ "$status" -eq 0 ]
+  no_calls
+}
+
+@test "reconnect-wifi refuses a name that starts with a hyphen" {
+  local name
+  for name in "-Test" "--help" "-setairportpower"; do
+    run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$name" --dry-run
+    [ "$status" -eq 3 ] || { echo "accepted: $name"; return 1; }
+  done
+  no_calls
+}
+
+@test "reconnect-wifi refuses control characters and line breaks, including a trailing one" {
+  local name
+  for name in $'Home\nNet' $'Home\n' $'\nHome' $'Home\tNet' $'Home\rNet' $'Home\x01' $'Home\x7f'; do
+    run "$NETDIAG" --repair=reconnect-wifi --repair-param "network=$name" --dry-run
+    [ "$status" -eq 3 ] || { printf 'accepted: %q\n' "$name"; return 1; }
+  done
+  no_calls
+}
+
+@test "a refused network name stops a real run too, before anything is touched" {
+  run "$NETDIAG" --repair=reconnect-wifi --repair-param network=-evil
+  [ "$status" -eq 3 ]
+  no_calls
+}
+
+@test "only reconnect-wifi takes a network parameter" {
+  run "$NETDIAG" --repair=open-sign-in --repair-param network=Test --dry-run
+  [ "$status" -eq 3 ]
+  no_calls
+}
+
+# ── reconnect-wifi: an honest result ─────────────────────────────────────
+# Run for real, against the stubs: nothing here touches this Mac's Wi-Fi.
+
+reconnect_json() {
+  run "$NETDIAG" --repair=reconnect-wifi "$@" --json
+}
+
+@test "reconnect-wifi with no network: radio cycled, and the message says nothing has joined yet" {
+  reconnect_json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['ok'] is True and d['dry_run'] is False, d
+assert 'no network has been joined yet' in d['message'], d['message']
+"
+  grep -q 'setairportpower en0 off' "$CALLS"
+  grep -q 'setairportpower en0 on' "$CALLS"
+  ! grep -q 'setairportnetwork' "$CALLS"
+}
+
+@test "reconnect-wifi leaves a network macOS rejoined by itself alone" {
+  : >"$STATE/rejoins-by-itself"
+  printf 'Home\nBetter Network\n' >"$STATE/preferred"
+  reconnect_json --repair-param network=Home
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"macOS rejoined a network by itself"* ]]
+  ! grep -q 'setairportnetwork' "$CALLS"
+}
+
+@test "reconnect-wifi joins a remembered network macOS did not rejoin, and says it did" {
+  printf 'Other\nHome Net\n' >"$STATE/preferred"
+  reconnect_json --repair-param "network=Home Net"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['ok'] is True, d
+assert 'joined \"Home Net\"' in d['message'], d['message']
+"
+  grep -qF 'setairportnetwork en0 Home Net' "$CALLS"
+}
+
+@test "reconnect-wifi reports a failed join as a failure, even though networksetup exits 0" {
+  printf 'Home\n' >"$STATE/preferred"
+  printf 'Failed to join network Home.\nError: -3900  The operation couldn\x27t be completed.\n' >"$STATE/join-output"
+  reconnect_json --repair-param network=Home
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['ok'] is False, d
+assert 'failed' in d['message'] and 'Failed to join network Home.' in d['message'], d['message']
+assert 'rejoin' in d['message'] or 'Wi-Fi menu' in d['message'], d['message']
+"
+}
+
+@test "reconnect-wifi will not join a name macOS does not remember" {
+  printf 'Something Else\n' >"$STATE/preferred"
+  reconnect_json --repair-param network=Home
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a network this Mac remembers"* ]]
+  ! grep -q 'setairportnetwork' "$CALLS"
+}
+
+@test "reconnect-wifi says so when the radio could not be switched on again" {
+  : >"$STATE/power-on-fails"
+  reconnect_json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not be switched back on"* ]]
+}
+
+@test "reconnect-wifi says nothing was changed when the radio will not switch off" {
+  : >"$STATE/networksetup-fails"
+  reconnect_json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing was changed"* ]]
 }

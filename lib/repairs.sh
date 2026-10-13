@@ -23,14 +23,24 @@
 #
 #   * It runs only when something invoked `--repair`. Nothing in this file
 #     is reachable from a scan, the monitor, a timer or an alert; the only
-#     thing a scan does here is *describe* an offer.
-#   * No sudo, ever, in this phase. Nothing here changes DNS, Wi-Fi,
-#     routing or ARP state.
+#     thing a scan does here is *describe* an offer. The one unattended
+#     caller is the app's opt-in "Automatically reconnect Wi-Fi" (off unless
+#     the user turns it on), which may invoke reconnect-wifi and nothing
+#     else, on the monitor's say-so (status.auto_reconnect).
+#   * No sudo, ever, in this phase. Nothing here changes DNS, routing or
+#     ARP state; reconnect-wifi switches the Wi-Fi radio off and on, and
+#     may rejoin a network macOS already remembers.
 #   * Parameters are validated, never trusted, and never sanitised: a value
 #     that does not match is refused and nothing runs. No value that came
-#     from the network (an SSID, a hostname, a DHCP string) is ever put on
-#     a command line — the only parameter in this phase is an app's bundle
-#     id, which must match ^[A-Za-z0-9.-]+$.
+#     from the network (a hostname, a DHCP string) is ever put on a command
+#     line. Two parameters exist: an app's bundle id, which must match
+#     ^[A-Za-z0-9.-]+$, and — for reconnect-wifi only — the name of the
+#     Wi-Fi network to rejoin. That name is the one thing here that
+#     originated on the network, so it is held to the narrowest rule that
+#     still works: 1 to 32 bytes, no leading hyphen, no control
+#     characters; it is passed to networksetup as a single argument, never
+#     through a shell; and it is joined only if macOS already remembers a
+#     network of exactly that name (see _repair_wifi_remembered).
 #   * Nothing is ever SIGKILLed. quit-app asks the app to quit, the way
 #     its own Quit menu item does.
 
@@ -130,6 +140,34 @@ repair_param_get() {
   return 0
 }
 
+# repair_param_present KEY — whether the parameter was given at all, even
+# as an empty value (an empty network name is refused, not ignored).
+repair_param_present() {
+  local i
+  for i in "${!REPAIR_PARAM_KEYS[@]}"; do
+    [ "${REPAIR_PARAM_KEYS[$i]}" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# The longest an 802.11 network name can be, in bytes: a protocol limit, not
+# a tuning choice, which is why it is not in lib/thresholds.sh.
+REPAIR_NETWORK_MAX_BYTES=32
+
+# repair_network_valid NAME — a Wi-Fi network name Hopwatch will pass to
+# networksetup. 1 to 32 bytes (the longest an SSID can be), not starting
+# with a hyphen (it would read as an option), and no control characters or
+# line breaks. A name that fails is refused; nothing is stripped or
+# truncated into one that passes.
+repair_network_valid() {
+  local LC_ALL=C v="$1"
+  [ -n "$v" ] || return 1
+  [ "${#v}" -le "$REPAIR_NETWORK_MAX_BYTES" ] || return 1
+  case "$v" in -*) return 1 ;; esac
+  [[ "$v" =~ [[:cntrl:]] ]] && return 1
+  return 0
+}
+
 # repair_validate ID — checks the id and its parameters against what that
 # repair accepts. Sets REPAIR_ERR and returns 1 on anything else. It
 # rejects; it never repairs a value into an acceptable one.
@@ -152,6 +190,21 @@ repair_validate() {
       *) REPAIR_ERR="${id} does not take a parameter named '${key}'"; return 1 ;;
     esac
   done
+  if [ "$id" = reconnect-wifi ] && repair_param_present network; then
+    # Read from the array, not through $(...): command substitution would
+    # strip a trailing line break and so let "Home\n" pass as "Home".
+    local _ni _net=""
+    for _ni in "${!REPAIR_PARAM_KEYS[@]}"; do
+      if [ "${REPAIR_PARAM_KEYS[$_ni]}" = network ]; then
+        _net="${REPAIR_PARAM_VALS[$_ni]}"
+        break
+      fi
+    done
+    if ! repair_network_valid "$_net"; then
+      REPAIR_ERR="network must be 1 to 32 bytes, must not start with a hyphen, and must not contain control characters or line breaks"
+      return 1
+    fi
+  fi
   if [ "$id" = quit-app ]; then
     local bid
     bid="$(repair_param_get bundle_id)"
@@ -287,6 +340,28 @@ _repair_do_open_sign_in() {
   return 0
 }
 
+# Whether the Wi-Fi interface is associated with a network right now. The
+# same test the monitor uses for "joined" (lib/monitor.sh, _mon_probe_offline):
+# `networksetup -getairportnetwork` is not used because macOS withholds the
+# network name from it without Location Services and answers "not associated"
+# for a Mac that is.
+_repair_wifi_associated() {
+  ifconfig "$1" 2>/dev/null | grep -q 'status: active'
+}
+
+# Whether macOS remembers a network by exactly this name. A forced join is
+# only ever to a network the user has joined before; a name that is not on
+# the list is never typed into a join, whatever sent it.
+_repair_wifi_remembered() {
+  networksetup -listpreferredwirelessnetworks "$1" 2>/dev/null \
+    | sed '1d; s/^[[:space:]]*//' | grep -Fxq -- "$2"
+}
+
+# One line of another program's output, safe to put in a message.
+_repair_clean() {
+  printf '%s' "$1" | head -n 1 | tr -d '[:cntrl:]' | cut -c1-120
+}
+
 _repair_do_reconnect_wifi() {
   local dev="" target_net=""
   if type wifi_primary_device >/dev/null 2>&1; then
@@ -294,6 +369,9 @@ _repair_do_reconnect_wifi() {
   fi
   [ -n "$dev" ] || dev="en0"
   target_net="$(repair_param_get network)"
+  local settle="${REPAIR_WIFI_SETTLE_S:-$THRESH_REPAIR_WIFI_SETTLE_S}"
+  local rejoin_wait="${REPAIR_WIFI_REJOIN_WAIT_S:-$THRESH_REPAIR_WIFI_REJOIN_WAIT_S}"
+  local power_t="$THRESH_REPAIR_WIFI_POWER_TIMEOUT_S" join_t="$THRESH_REPAIR_WIFI_JOIN_TIMEOUT_S"
   local off_cmd="networksetup -setairportpower ${dev} off"
   local on_cmd="networksetup -setairportpower ${dev} on"
   if [ -n "$target_net" ]; then
@@ -304,30 +382,67 @@ _repair_do_reconnect_wifi() {
   if [ "$REPAIR_DRY" -eq 1 ]; then
     REPAIR_OK=1
     if [ -n "$target_net" ]; then
-      REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} and rejoin ${target_net}. Nothing was changed."
+      REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} off and on and, if macOS has not rejoined a network by itself, join ${target_net}. Nothing was changed."
     else
       REPAIR_MESSAGE="Would toggle Wi-Fi radio on ${dev} off and on. Nothing was changed."
     fi
     return 0
   fi
-  if with_timeout 5 networksetup -setairportpower "$dev" off 2>/dev/null; then
-    sleep 1
-    if with_timeout 5 networksetup -setairportpower "$dev" on 2>/dev/null; then
-      if [ -n "$target_net" ]; then
-        sleep 2
-        with_timeout 5 networksetup -setairportnetwork "$dev" "$target_net" >/dev/null 2>&1 || true
-      fi
-      REPAIR_OK=1
-      if [ -n "$target_net" ]; then
-        REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to reconnect to ${target_net}."
-      else
-        REPAIR_MESSAGE="Toggled Wi-Fi radio on ${dev} to prompt macOS to reconnect."
-      fi
-      return 0
-    fi
+  if ! with_timeout "$power_t" networksetup -setairportpower "$dev" off 2>/dev/null; then
+    REPAIR_OK=0
+    REPAIR_MESSAGE="Could not switch Wi-Fi off on ${dev}, so nothing was changed."
+    return 0
   fi
-  REPAIR_OK=0
-  REPAIR_MESSAGE="Could not toggle Wi-Fi on ${dev}."
+  sleep "$settle"
+  if ! with_timeout "$power_t" networksetup -setairportpower "$dev" on 2>/dev/null; then
+    REPAIR_OK=0
+    REPAIR_MESSAGE="Wi-Fi was switched off but could not be switched back on. Turn it on from the Wi-Fi menu in the menu bar."
+    return 0
+  fi
+
+  # Give macOS the first go at rejoining: it knows the user's network
+  # priorities, and a network it picked must not be overridden by ours.
+  local waited=0
+  while [ "$waited" -lt "$rejoin_wait" ] && ! _repair_wifi_associated "$dev"; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if _repair_wifi_associated "$dev"; then
+    REPAIR_OK=1
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, and macOS rejoined a network by itself."
+    return 0
+  fi
+  if [ -z "$target_net" ]; then
+    # Switching the radio is all this repair was asked to do, so that alone
+    # counts as done; the message says plainly that nothing has joined yet.
+    REPAIR_OK=1
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, but no network has been joined yet. macOS may still rejoin in a few seconds; if not, pick a network from the Wi-Fi menu."
+    return 0
+  fi
+
+  # Asked to rejoin a named network and macOS did not. Only a remembered one.
+  if ! _repair_wifi_remembered "$dev" "$target_net"; then
+    REPAIR_OK=0
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, but \"${target_net}\" is not a network this Mac remembers, so Hopwatch did not try to join it. Pick a network from the Wi-Fi menu."
+    return 0
+  fi
+  local out rc
+  out="$(with_timeout "$join_t" networksetup -setairportnetwork "$dev" "$target_net" 2>&1)"
+  rc=$?
+  # networksetup reports a failed join on stdout and often still exits 0,
+  # so the exit status alone proves nothing. A join counts only if the
+  # status was clean, nothing was complained about, and the interface is
+  # actually associated afterwards.
+  if [ "$rc" -eq 124 ]; then
+    REPAIR_OK=0
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, but joining \"${target_net}\" took longer than ${join_t} seconds and was stopped. macOS may still rejoin by itself; otherwise pick it from the Wi-Fi menu."
+  elif [ "$rc" -ne 0 ] || [ -n "$out" ] || ! _repair_wifi_associated "$dev"; then
+    REPAIR_OK=0
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, but joining \"${target_net}\" failed${out:+: $(_repair_clean "$out")}. macOS may still rejoin by itself; otherwise pick it from the Wi-Fi menu."
+  else
+    REPAIR_OK=1
+    REPAIR_MESSAGE="Wi-Fi was switched off and on, and Hopwatch joined \"${target_net}\"."
+  fi
   return 0
 }
 

@@ -74,7 +74,16 @@ setup() {
            THRESH_HOG_GW_RTT_MS THRESH_HOG_JITTER_MS THRESH_HOG_SAMPLE_S \
            THRESH_HOG_SNAPSHOTS THRESH_HOG_MIN_MBPS THRESH_HOG_LINK_SHARE_PCT \
            THRESH_HOG_UNKNOWN_CAPACITY_MBPS THRESH_HOG_DOMINANCE_PCT \
-           THRESH_MON_HOG_CONFIRM_CYCLES THRESH_MON_HOG_RECHECK_S; do
+           THRESH_MON_HOG_CONFIRM_CYCLES THRESH_MON_HOG_RECHECK_S \
+           THRESH_WIFI_REJOIN_GRACE_S THRESH_MON_PRECURSOR_S \
+           THRESH_DHCP_ADDRESS_GRACE_S THRESH_AUTORECONNECT_RETRY_S \
+           THRESH_AUTORECONNECT_MAX_RETRIES \
+           THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM \
+           THRESH_AUTORECONNECT_WEDGED_LOSS_PCT \
+           THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT \
+           THRESH_AUTORECONNECT_WEDGED_SAMPLES THRESH_MON_CARRY_S \
+           THRESH_REPAIR_WIFI_REJOIN_WAIT_S THRESH_REPAIR_WIFI_JOIN_TIMEOUT_S \
+           THRESH_REPAIR_WIFI_POWER_TIMEOUT_S THRESH_REPAIR_WIFI_SETTLE_S; do
     [ -n "${!v:-}" ] || { echo "undefined threshold: $v"; return 1; }
   done
 }
@@ -92,6 +101,41 @@ setup() {
   run grep -nE '(loss_at_least|loss_below) "\$[A-Z_]+" [0-9]+|-lt -?[1-9][0-9]* \]|-ge -?[1-9][0-9]* \]|-gt -?[1-9][0-9]* \]' \
     "$REPO/lib/diagnosis.sh"
   [ "$status" -ne 0 ] || { echo "inline cutoff in diagnosis.sh:"; echo "$output"; return 1; }
+}
+
+@test "lib/monitor.sh and lib/repairs.sh carry no inline numeric cutoff either" {
+  # The automatic Wi-Fi reconnect decides, unattended, to power-cycle a
+  # radio, and it does so in monitor.sh against every number in the
+  # "Automatic Wi-Fi reconnect" block of thresholds.sh. The same grep as
+  # diagnosis.sh's: a comparison against a bare non-zero number. A loop
+  # bound or a sentinel is spelled with a named constant or zero.
+  run grep -nE '(loss_at_least|loss_below) "\$[A-Z_]+" [0-9]+|-lt -?[1-9][0-9]* \]|-ge -?[1-9][0-9]* \]|-gt -?[1-9][0-9]* \]' \
+    "$REPO/lib/monitor.sh" "$REPO/lib/repairs.sh"
+  [ "$status" -ne 0 ] || { echo "inline cutoff:"; echo "$output"; return 1; }
+}
+
+@test "the guard would actually catch a cutoff planted in monitor.sh" {
+  cp "$REPO/lib/monitor.sh" "$BATS_TEST_TMPDIR/planted_monitor.sh"
+  printf '\nif [ "$MON_AR_DHCP_TRIES" -ge 4 ]; then :; fi\n' >> "$BATS_TEST_TMPDIR/planted_monitor.sh"
+  run grep -nE '(loss_at_least|loss_below) "\$[A-Z_]+" [0-9]+|-lt -?[1-9][0-9]* \]|-ge -?[1-9][0-9]* \]|-gt -?[1-9][0-9]* \]' \
+    "$BATS_TEST_TMPDIR/planted_monitor.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "the automatic-reconnect cutoffs are the ones the design relies on" {
+  # Not a statement that these are the right numbers; a statement that the
+  # relationships the code assumes still hold when someone retunes them.
+  # Recovery sits below the trigger, or an episode could never end.
+  [ "$THRESH_AUTORECONNECT_WEDGED_RECOVER_PCT" -lt "$THRESH_AUTORECONNECT_WEDGED_LOSS_PCT" ]
+  # At least two samples, or "consecutive" means nothing.
+  [ "$THRESH_AUTORECONNECT_WEDGED_SAMPLES" -ge 2 ]
+  # The carry-over must outlast the longest retry sequence, or a restart
+  # mid-sequence forgets it. (It must also outlast a precursor window, or a
+  # drop that follows a restart could never be matched to its cause.)
+  [ "$THRESH_MON_CARRY_S" -gt "$THRESH_MON_PRECURSOR_S" ]
+  [ "$THRESH_MON_CARRY_S" -gt $(( THRESH_DHCP_ADDRESS_GRACE_S + THRESH_AUTORECONNECT_RETRY_S * THRESH_AUTORECONNECT_MAX_RETRIES )) ]
+  # A strong-signal floor: never weaker than the weak-signal cutoff.
+  [ "$THRESH_AUTORECONNECT_WEDGED_RSSI_MIN_DBM" -ge "$THRESH_WIFI_RSSI_WEAK_DBM" ]
 }
 
 @test "helpers/history.py carries no inline numeric cutoff either" {

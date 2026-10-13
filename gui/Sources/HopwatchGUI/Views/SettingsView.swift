@@ -383,8 +383,8 @@ struct SettingsView: View {
             // Wi-Fi Self-Healing
             SettingsCard(title: "Wi-Fi Self-Healing & Recovery", icon: "arrow.triangle.2.circlepath", subtitle: "Automatic link recovery when connections stall.") {
                 SettingsToggleRow(
-                    title: "Automatically reconnect Wi-Fi when stalled",
-                    description: "If your router reboots or connection drops unexpectedly and macOS fails to reconnect automatically within 45 seconds, Hopwatch toggles Wi-Fi once to prompt macOS to re-join. Does not trigger if you manually disconnect while the network is healthy.",
+                    title: "Automatically reconnect Wi-Fi",
+                    description: "Off by default. When on, Hopwatch turns Wi-Fi off and on without asking if your router stops answering and Wi-Fi does not come back, if your network never hands your Mac an address, or if the router stops responding despite a strong signal. It does not do this if you switched Wi-Fi off yourself.",
                     isOn: $appSettings.autoReconnectWiFi
                 )
             }

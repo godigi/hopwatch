@@ -357,7 +357,7 @@ key is absent when it offers none, which is nearly always.
 
 | Field | Meaning |
 |---|---|
-| `id` | Which repair: `quit-app`, `restart-mac`, `open-sign-in`. |
+| `id` | Which repair: `quit-app`, `restart-mac`, `open-sign-in`, `reconnect-wifi`. |
 | `label` | The button text. Names the action; never a generic "Fix". |
 | `confirm` | Shown before it runs: what will change. |
 | `admin` | Whether it will ask for an admin password. Always `false` today. |
@@ -389,6 +389,17 @@ repair or a refused parameter — in which case nothing ran and nothing is
 printed on stdout. `quit-app` requires `bundle_id` matching
 `^[A-Za-z0-9][A-Za-z0-9.-]*$` and refuses Finder, Dock, loginwindow,
 SystemUIServer and Hopwatch itself.
+
+`reconnect-wifi` takes one optional parameter, `network`: the name of the
+Wi-Fi network to rejoin if macOS has not rejoined one by itself after the
+radio is switched off and on. It is **refused** (exit `3`, nothing run) when
+empty, longer than 32 bytes, beginning with `-`, or containing a control
+character or line break; it is never trimmed into validity. It is joined
+only if macOS already remembers a network of exactly that name. `ok` is
+`true` when the radio was cycled and either macOS rejoined by itself, or no
+`network` was given, or the named network was joined; `false` when the radio
+could not be switched, the name is not a remembered network, or the join
+failed or timed out. `message` says which, in plain words.
 
 A repair that really runs appends one line to the event journal, if a
 journal already exists (it never creates one): `kind` and `field` are
@@ -763,7 +774,9 @@ it would accumulate forever.
               "captive_portal": false},
   "status":  {"severity": "ok", "rules": [], "measurement": "measured",
               "icmp_filtered": false,
-              "degraded": false, "paused": false, "cadence_s": 10},
+              "degraded": false, "paused": false, "cadence_s": 10,
+              "auto_reconnect": null,
+              "carry": "v1:1760000000:2840131226:0:0:0:0:0:0:0:0:0:0:0:0"},
   "changes": [                    // schema 2+; ABSENT when nothing changed
     {"id": "vpn-disconnected", "field": "vpn.active",
      "from": "1", "to": "0", "summary": "VPN disconnected (Mullvad)"},
@@ -936,6 +949,46 @@ Older events lack attribution; a later capture must not be used to fill them.
   signal a UI should use to stop presenting `gateway.loss_pct` and the
   latency figures as meaningful: on such a network they are an artefact of
   the probe, not a property of the link.
+- **`status.auto_reconnect`** is the monitor's verdict that an automatic
+  Wi-Fi reconnect is warranted on *this sample*; `null` on every sample that
+  warrants nothing (the usual case), and always `null` on a paused sample.
+  When present it is `{"reason", "rule", "attempt", "max_attempts"}`:
+  `reason` is `"wifi-dropped"` (rule `WJ-1`), `"no-address"` (`DH-3`) or
+  `"wedged-gateway"` (`G2`); `attempt` of `max_attempts` says which try this
+  is (DH-3 retries, the others are 1 of 1). It appears **once per attempt**,
+  not on every sample the condition holds, so a consumer that acts on it acts
+  once. The monitor holds the counters and every cutoff (`THRESH_DHCP_*`,
+  `THRESH_AUTORECONNECT_*`, `THRESH_WIFI_REJOIN_GRACE_S`; see
+  [`DIAGNOSIS-RULES.md`](./DIAGNOSIS-RULES.md#automatic-wi-fi-reconnect)); a
+  consumer applies none of them. It is advice, not an action: the monitor
+  runs nothing, and the Hopwatch app acts on it only when the user has
+  turned on "Automatically reconnect Wi-Fi" (off by default), by running
+  `--repair=reconnect-wifi`. A CLI older than the field simply never sends
+  it, which a consumer must read as "not warranted".
+- **`status.carry`** is the monitor's own record of what a restarted process
+  needs to carry on, present on every sample (including a paused one, which
+  carries the reset state). **Opaque: a consumer must not parse, compare or
+  act on it.** It keeps the latest one and hands it back, unmodified, in the
+  environment variable `HOPWATCH_MONITOR_CARRY` when it starts the next
+  `--monitor` process. The Hopwatch app restarts the monitor on every network
+  event, and a Wi-Fi drop is one, so without it the new process would know
+  nothing of the router having stopped answering just before the drop
+  (WJ-1's precursor), how long the Mac has been unjoined, whether the user
+  switched the radio off during the outage, or which automatic attempts have
+  been made. This is what keeps `--monitor` writing nothing to disk. For
+  the record only, the shape is `v1:` followed by fourteen unsigned integers
+  (when it was written; fingerprints of the network and its SSID; when the
+  router and the internet last stopped answering; when the link went down and
+  its precursor; the rejoin-grace clock; the radio and attempt flags and
+  counters). The monitor validates it strictly (exact shape, decimal digits
+  only, not from the future, not older than `THRESH_MON_CARRY_S`, every time
+  no later than the record, every flag and count in range) and refuses it
+  whole, starting clean, when the link it finds is demonstrably a different
+  network. A record that fails any check costs a clean slate, never an error,
+  and a clean slate warrants no automatic reconnect. Times inside it are the
+  original ones, so a restart never makes old evidence look fresh. A CLI
+  older than the field omits it (`null`); the consumer then hands back
+  nothing.
 - **`status.paused`** means `SIGUSR1` suspended probing. Every measurement
   in such a sample is stale by definition; do not plot or alert on it.
 - **`changes`** (schema 2+) lists field-level differences from the

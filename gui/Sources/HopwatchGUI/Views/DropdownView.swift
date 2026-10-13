@@ -253,7 +253,7 @@ struct DropdownView: View {
             let rules = coordinator.monitor.latest?.status.rules ?? []
             let headline: String = {
                 if rules.contains("DH-3") {
-                    return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? "No address handed out — Mac assigned its own"
+                    return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WJ-1") {
                     return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? "Wi-Fi dropped and hasn't rejoined"
                 } else if rules.contains("WF-1") {
@@ -275,9 +275,7 @@ struct DropdownView: View {
                     subtitleParts.append("Last connected to \(net)")
                 }
 
-                if rules.contains("DH-3") {
-                    subtitleParts.append("The router didn't hand out an IP address (DHCP pool exhausted or router rebooting). Reconnecting requests a fresh address.")
-                } else if offline?.precursor == "router-unreachable" {
+                if offline?.precursor == "router-unreachable", !rules.contains("DH-3") {
                     subtitleParts.append("Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.")
                 } else {
                     subtitleParts.append(coordinator.headline)
