@@ -50,7 +50,7 @@ $ launchctl list | grep netdiag
 -	126	com.netdiag.watcher
 
 $ sort ~/net-diag/watcher.stderr.log | uniq -c
-1386 bash: /Users/bfreeman/.../netdiag/bin/netdiag: Operation not permitted
+1386 bash: /Users/you/.../hopwatch/bin/hopwatch: Operation not permitted
 ```
 
 Exit status 126 is "found but could not execute". The plist

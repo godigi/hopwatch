@@ -16,6 +16,7 @@
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
   CHANGELOG="$REPO/CHANGELOG.md"
+  ARCHIVE="$REPO/docs/CHANGELOG-archive.md"
   SECTION="$REPO/helpers/changelog_section.py"
 }
 
@@ -39,16 +40,16 @@ require_tags() {
 # ── The parser ───────────────────────────────────────────────────────────
 
 @test "changelog_section extracts a known section's prose" {
-  run python3 "$SECTION" --file "$CHANGELOG" --version 0.6.1
+  run python3 "$SECTION" --file "$ARCHIVE" --version 0.6.1
   [ "$status" -eq 0 ]
   [ -n "$output" ]
 }
 
 @test "changelog_section accepts a version with or without a leading v" {
-  run python3 "$SECTION" --file "$CHANGELOG" --version v0.6.1
+  run python3 "$SECTION" --file "$ARCHIVE" --version v0.6.1
   [ "$status" -eq 0 ]
   local with_v="$output"
-  run python3 "$SECTION" --file "$CHANGELOG" --version 0.6.1
+  run python3 "$SECTION" --file "$ARCHIVE" --version 0.6.1
   [ "$output" = "$with_v" ]
 }
 
@@ -64,7 +65,7 @@ require_tags() {
   # The footer sits directly under the last version's prose, so an
   # off-by-one in the parser publishes a maintenance note as 0.1.0's
   # release notes.
-  run python3 "$SECTION" --file "$CHANGELOG" --version 0.1.0
+  run python3 "$SECTION" --file "$ARCHIVE" --version 0.1.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"https://github.com"* ]] || return 1
   [[ "$output" != *"<!--"* ]] || return 1
@@ -88,16 +89,19 @@ require_tags() {
   }
 }
 
-@test "every released version has a git tag" {
+@test "the newest released version has a git tag" {
   # The gap this closes: a CHANGELOG entry for a version that was never
-  # tagged describes something a reader cannot obtain.
+  # tagged describes something a reader cannot obtain. Only the newest
+  # version is held to it. Older releases and their tags were deliberately
+  # pruned from the public repo, and their notes live in
+  # docs/CHANGELOG-archive.md, so "every heading has a tag" can no longer
+  # hold and would fail on every release after the one that pruned them.
   require_tags
-  local missing=""
-  while read -r v; do
-    [ -n "$v" ] || continue
-    git -C "$REPO" rev-parse -q --verify "refs/tags/v$v" >/dev/null || missing="$missing v$v"
-  done <<< "$(released_versions)"
-  [ -z "$missing" ] || { echo "documented but untagged:$missing"; return 1; }
+  local v
+  v="$(released_versions | head -1)"
+  [ -n "$v" ] || { echo "CHANGELOG.md has no released version"; return 1; }
+  git -C "$REPO" rev-parse -q --verify "refs/tags/v$v" >/dev/null \
+    || { echo "newest documented version v$v has no tag"; return 1; }
 }
 
 @test "every version heading is preceded by a blank line" {
@@ -135,13 +139,14 @@ require_tags() {
   # The README's Roadmap said the one-line installer shipped in v0.5.3.
   # There has never been a v0.5.3 — no tag, no CHANGELOG section — and the
   # installer actually landed in 0.6.0. A reader chasing that version finds
-  # nothing, which is worse than an undated claim.
-  require_tags
+  # nothing, which is worse than an undated claim. Old tags are pruned, so
+  # the check is against the versions the changelog and its archive
+  # document, not against the tag list.
   local missing=""
   local v
   for v in $(grep -oE '\(v[0-9]+\.[0-9]+\.[0-9]+\)' "$REPO/README.md" \
              | tr -d '()' | sort -u); do
-    git -C "$REPO" rev-parse -q --verify "refs/tags/$v" >/dev/null || missing="$missing $v"
+    grep -qhF "## [${v#v}]" "$CHANGELOG" "$ARCHIVE" || missing="$missing $v"
   done
   [ -z "$missing" ] || { echo "README credits versions that do not exist:$missing"; return 1; }
 }

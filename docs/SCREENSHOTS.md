@@ -73,3 +73,9 @@ Expanded view displaying complete diagnostic test results, suitability ratings f
 | Dark Mode | Light Mode |
 |:---:|:---:|
 | <img src="assets/main-window-dark.png" width="460" alt="Main Window Dark Mode" /> | <img src="assets/main-window-light.png" width="460" alt="Main Window Light Mode" /> |
+
+---
+
+## Regenerating these images
+
+Every image here is rendered by `HopwatchGUI --gallery` from synthetic data, never from a real network history. `scripts/gallery-fixture.py` writes the fake home directory (invented networks, runs and events) and its header lists the exact commands, including the two settings that stop the app reading the real home directory and preferences. Check each new image before committing it.

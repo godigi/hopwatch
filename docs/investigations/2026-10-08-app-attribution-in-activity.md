@@ -37,7 +37,7 @@ Implementation validation should cover stream/journal evidence, backward-compati
 
 ## Local implementation — 2026-10-09
 
-Implemented on `fix/app-activity-attribution` in `/Users/bfreeman/Documents/AI-Workspace/netdiag_worktrees/app-activity-attribution`, based on `11a9bbd`. Local version is 1.14.3. At the end of local validation, changes were uncommitted and no public release had been made.
+Implemented on `fix/app-activity-attribution` in a separate worktree, based on `11a9bbd`. Local version is 1.14.3. At the end of local validation, changes were uncommitted and no public release had been made.
 
 The monitor now retains each successful capture's app name/bundle or process, transfer direction and rate, share of non-Hopwatch Mac traffic, capture timestamp, router RTT and router/internet jitter. HOG-1 fired events carry this evidence through the stream and journal. Recaptures produce `rule-updated` rather than a second firing. A recovery can retain the last capture with its original measurement timestamp; it never presents recovered latency or current traffic as the original evidence.
 
