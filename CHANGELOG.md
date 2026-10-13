@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-13
+
 ### Added
 
 - **DH-3 now fires from the live monitor, and offers a repair.** A Wi-Fi link that is joined but has no usable address (no address at all, or a `169.254` placeholder) for `THRESH_DHCP_ADDRESS_GRACE_S` (30 s) raises DH-3 on the menu-bar and Home hero card with a "Reconnect Wi-Fi" button. The grace period is deliberate: associated-but-addressless is normal for the first seconds of every join, wake and roam. DH-3's catalog title and text no longer claim the Mac "assigned itself" an address, which is false when it has none.
@@ -4261,7 +4263,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.15.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/godigi/hopwatch/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/godigi/hopwatch/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/godigi/hopwatch/compare/v1.14.6...v1.15.0
 [1.14.6]: https://github.com/godigi/hopwatch/compare/v1.14.5...v1.14.6
