@@ -35,15 +35,23 @@
 # (netid_label_is_name) tests against the same text netid_run writes.
 NETID_LABEL_UNKNOWN="unknown network"
 NETID_LABEL_HIDDEN="WiFi (SSID hidden by macOS)"
+# A wired network has no name, only a router: the label is this prefix plus
+# the gateway address ("wired via 192.168.1.1").
+NETID_LABEL_WIRED_PREFIX="wired via "
 
 # True when $1 is something a person would recognise as the name of a
 # network, false for an empty label, a placeholder netid_run writes when it
 # has no name, or a redaction marker. A placeholder is a fact about what
 # could not be read, not a network: "last on unknown network" says the
-# opposite of what it means.
+# opposite of what it means. A wired label is a description of a link, not a
+# name: "last on wired via 192.168.1.1" reads as a place where "last on Home"
+# reads as a network, so it is refused too. (A Wi-Fi network that happens to
+# be called "wired via ..." is refused with it; that is the price of telling
+# the two apart from the label alone.)
 netid_label_is_name() {
   case "${1:-}" in
     ''|"$NETID_LABEL_UNKNOWN"|"$NETID_LABEL_HIDDEN"|'<redacted>'|'[redacted]') return 1 ;;
+    "$NETID_LABEL_WIRED_PREFIX"*) return 1 ;;
   esac
   return 0
 }
@@ -129,7 +137,7 @@ netid_run() {
     elif [ "$kind" = "wifi" ]; then
       NETWORK_LABEL="$NETID_LABEL_HIDDEN"
     else
-      NETWORK_LABEL="wired via ${GATEWAY:-?}"
+      NETWORK_LABEL="${NETID_LABEL_WIRED_PREFIX}${GATEWAY:-?}"
     fi
   fi
 

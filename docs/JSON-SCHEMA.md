@@ -847,13 +847,23 @@ Older events lack attribution; a later capture must not be used to fill them.
     - `"self-assigned"`: Assigned a 169.254.x.x link-local IP (DHCP failure)
     - `"no-route"`: Associated with an IP, but default routing table entry missing
     - `"no-interface"`: No candidate network interfaces available
+  - `reason_label`: The short caption for `reason`, or `null`. Today
+    `"Wi-Fi is off"` for `wifi-off` and `"Not connected"` for
+    `wifi-not-joined` and `wifi-no-address`. `null` for a reason with no
+    caption (`self-assigned`, `no-route`, an unknown one), and whenever
+    `link.type` is `"wired"`: the reasons are read from the Wi-Fi device and
+    say nothing about a lost wired link. A consumer renders it verbatim and,
+    on `null`, shows its neutral "no link" wording; it maps no reason to text
+    itself. A CLI older than the field omits it.
   - `down_since`: ISO 8601 UTC timestamp of when link-down was first detected.
   - `down_duration_s`: Number of seconds elapsed since link-down began.
   - `last_network`: The name of the network the link was last up on, or
     `null` when the monitor cannot say. Never a placeholder: the labels
     `"unknown network"` and `"WiFi (SSID hidden by macOS)"`, a redaction
     marker or a blank all read as `null`, because "last on unknown network"
-    says the opposite of what it means. It survives a monitor restart (see
+    says the opposite of what it means. A wired network's label
+    (`"wired via 192.168.1.1"`) describes a link rather than naming a
+    network, so it reads as `null` too. It survives a monitor restart (see
     `status.carry_network`) only when the restarted process can show the name
     belongs to the network that was lost; otherwise it is `null`, and a
     consumer says nothing about a network rather than guess one.
@@ -864,7 +874,10 @@ Older events lack attribution; a later capture must not be used to fill them.
     `null`. A consumer renders it verbatim and shows nothing when it is
     `null`; it holds no copy of its own. Today only `"router-unreachable"`
     has one ("Your router stopped responding right before Wi-Fi dropped, which
-    usually means it restarted."). `"internet-unreachable"` has none, so its
+    usually means it restarted."). The sentence is worded for the link that
+    dropped: "Wi-Fi" when `link.type` is `"wifi"`, "the wired connection" when
+    it is `"wired"`, and "your connection" when the monitor does not know (a
+    process restarted mid-outage no longer does). `"internet-unreachable"` has none, so its
     summary is `null`. It is also `null` whenever `DH-3` is in `status.rules`:
     a Mac that joined but was never given an address has a more specific
     explanation than a router that "stopped responding", and `DH-3` carries it.
@@ -1021,7 +1034,7 @@ Older events lack attribution; a later capture must not be used to fill them.
   record was adopted on this start; the link is down; the name's fingerprint
   equals the one inside the record; and the name has the shape of a name (not
   blank, not a placeholder, at most `THRESH_MON_NETWORK_NAME_MAX_BYTES` bytes,
-  no control characters). Otherwise `last_network` stays `null`. The value is
+  no control characters, not a wired label). Otherwise `last_network` stays `null`. The value is
   only ever echoed back into the stream. A CLI older than the field omits it.
 - **`status.paused`** means `SIGUSR1` suspended probing. Every measurement
   in such a sample is stale by definition; do not plot or alert on it.

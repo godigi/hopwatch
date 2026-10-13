@@ -3002,6 +3002,7 @@ restart_with() {
     $'Ho\x01me'
     "unknown network"                        # placeholders
     "WiFi (SSID hidden by macOS)"
+    "wired via 192.168.1.1"                  # a description of a link, not a name
     "<redacted>"
     "[redacted]"
     "$(printf 'x%.0s' $(seq 1 $(( THRESH_MON_NETWORK_NAME_MAX_BYTES + 1 ))))"   # too long
@@ -3036,7 +3037,7 @@ restart_with() {
   _mon_note_last_network
   [ "$MON_LAST_NETWORK" = "Home" ]
   local label
-  for label in "unknown network" "WiFi (SSID hidden by macOS)" "<redacted>" ""; do
+  for label in "unknown network" "WiFi (SSID hidden by macOS)" "wired via 192.168.1.1" "<redacted>" ""; do
     MON_LAST_NETWORK="Home" MON_NETWORK_LABEL="$label"
     _mon_note_last_network
     [ -z "$MON_LAST_NETWORK" ] || { echo "kept for: $label"; return 1; }
@@ -3055,6 +3056,10 @@ restart_with() {
   ! netid_label_is_name "$NETWORK_LABEL"
   WIFI_SSID="Home" GW_MAC="aa:bb:cc:dd:ee:ff" netid_run
   [ "$NETWORK_LABEL" = "Home" ] && netid_label_is_name "$NETWORK_LABEL"
+  # A wired network is labelled by its router, which is not a name.
+  IS_WIFI=0 WIFI_SSID="" GATEWAY="192.168.1.1" GW_MAC="aa:bb:cc:dd:ee:ff" netid_run
+  [ "$NETWORK_LABEL" = "wired via 192.168.1.1" ]
+  ! netid_label_is_name "$NETWORK_LABEL"
 }
 
 @test "monitor_sample: status.carry_network is the name, or null; hostile bytes stay inside the JSON string" {
@@ -3072,15 +3077,58 @@ assert 'carry_network' in s and s['carry_network'] is None, s
 "
 }
 
-@test "monitor_sample: link.offline.precursor_summary is the CLI's sentence for a router that went quiet" {
-  run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_RULES="N1 WJ-1" \
-           NETDIAG_MON_OFFLINE_REASON=wifi-not-joined NETDIAG_MON_OFFLINE_PRECURSOR=router-unreachable
-  printf '%s' "$output" | python3 -c "
+@test "monitor_sample: link.offline.precursor_summary is the CLI's sentence for a router that went quiet, worded for the link" {
+  local t want
+  for t in "wifi|Wi-Fi" "wired|the wired connection" "|your connection"; do
+    run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_RULES="N1 WJ-1" NETDIAG_MON_IFACE_TYPE="${t%%|*}" \
+             NETDIAG_MON_OFFLINE_REASON=wifi-not-joined NETDIAG_MON_OFFLINE_PRECURSOR=router-unreachable
+    want="Your router stopped responding right before ${t#*|} dropped, which usually means it restarted."
+    printf '%s' "$output" | python3 -c "
 import json, sys
 off = json.load(sys.stdin)['link']['offline']
 assert off['precursor'] == 'router-unreachable', off
-assert off['precursor_summary'] == 'Your router stopped responding right before Wi-Fi dropped, which usually means it restarted.', off
+assert off['precursor_summary'] == sys.argv[1], off
+" "$want" || { echo "type '${t%%|*}'"; return 1; }
+  done
+}
+
+@test "monitor_sample: an unrecognised link type gets the wording that is true of any link" {
+  run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_IFACE_TYPE=thunderbolt \
+           NETDIAG_MON_OFFLINE_REASON=no-route NETDIAG_MON_OFFLINE_PRECURSOR=router-unreachable
+  printf '%s' "$output" | python3 -c "
+import json, sys
+off = json.load(sys.stdin)['link']['offline']
+assert 'right before your connection dropped' in off['precursor_summary'], off
 "
+}
+
+@test "monitor_sample: link.offline.reason_label is the CLI's short caption for the reason" {
+  local pair
+  for pair in "wifi-off|Wi-Fi is off" "wifi-not-joined|Not connected" "wifi-no-address|Not connected"; do
+    # With the link type known to be Wi-Fi, and with it unknown (a restarted monitor).
+    run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_IFACE_TYPE=wifi NETDIAG_MON_OFFLINE_REASON="${pair%%|*}"
+    printf '%s' "$output" | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['link']['offline']['reason_label'] == sys.argv[1]
+" "${pair#*|}" || { echo "wifi: ${pair%%|*}"; return 1; }
+    run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_OFFLINE_REASON="${pair%%|*}"
+    printf '%s' "$output" | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['link']['offline']['reason_label'] == sys.argv[1]
+" "${pair#*|}" || { echo "untyped: ${pair%%|*}"; return 1; }
+  done
+}
+
+@test "monitor_sample: link.offline.reason_label is null for a reason with no caption, no reason, and a wired link" {
+  local args
+  for args in "wifi|self-assigned" "wifi|no-route" "wifi|" "wifi|something-new" "wired|wifi-off" "wired|wifi-not-joined"; do
+    run emit NETDIAG_MON_LINK_UP=0 NETDIAG_MON_IFACE_TYPE="${args%%|*}" NETDIAG_MON_OFFLINE_REASON="${args#*|}"
+    printf '%s' "$output" | python3 -c "
+import json, sys
+off = json.load(sys.stdin)['link']['offline']
+assert 'reason_label' in off and off['reason_label'] is None, off
+" || { echo "case $args"; return 1; }
+  done
 }
 
 @test "monitor_sample: link.offline.precursor_summary is null for no precursor, the internet precursor and an unknown one" {

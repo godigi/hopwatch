@@ -1169,7 +1169,10 @@ The sentence under the headline ("Your router stopped responding right before
 Wi-Fi dropped, which usually means it restarted.") is the CLI's, in
 `link.offline.precursor_summary`, and is withheld while `DH-3` fires, since a
 router that never answered the DHCP request is a better explanation than one
-that "stopped responding".
+that "stopped responding". It names the link that dropped ("Wi-Fi", "the wired
+connection", or "your connection" when a restarted monitor no longer knows),
+and the short captions under the Mac node and the signal tile come from
+`link.offline.reason_label`, so the app maps no reason to text.
 
 Known limit: a user who picks "Disconnect" in the
 Wi-Fi menu right after the router misbehaved is indistinguishable, to an
