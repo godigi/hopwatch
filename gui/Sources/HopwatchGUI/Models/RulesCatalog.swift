@@ -77,6 +77,14 @@ struct RulesCatalog: Decodable, Sendable {
         /// dozen rules have no action behind them), not a gap; `nil` only
         /// against a catalog too old to have this field at all.
         var fixTarget: String?
+        /// The IDs of the repairs (`lib/repairs.sh`) this rule can offer,
+        /// added in catalog schema `6`. `nil` on a rule that offers none and
+        /// against a catalog too old to emit the field. Which one a given
+        /// run actually offers is `diagnosis[].repairs`; this is the answer
+        /// for a surface with no scan behind it (the offline card, which
+        /// reads the monitor's firing rules), so it decides which button to
+        /// draw and the app keeps no list of rules that get one.
+        var repairs: [String]?
 
         /// Every family this rule is about, primary first. The one thing
         /// a consumer deciding "does this rule concern my row?" should
@@ -111,6 +119,13 @@ struct RulesCatalog: Decodable, Sendable {
     private var metricsByKey: [String: Metric] = [:]
 
     subscript(id: String) -> Rule? { byID[id] }
+
+    /// The first of `firing` (in the order given) whose catalog entry lists
+    /// `repairID` among its repairs, or nil. Which finding offers which
+    /// repair is the CLI's decision; this only reads it back.
+    func firstRule(offering repairID: String, among firing: [String]) -> String? {
+        firing.first { byID[$0]?.repairs?.contains(repairID) == true }
+    }
     func metric(_ key: String) -> Metric? { metricsByKey[key] }
 }
 
@@ -138,7 +153,8 @@ extension RulesCatalog {
                         severity: entry.severity, scope: entry.scope,
                         blurb: entry.blurb, doc: entry.doc,
                         impacts: entry.impacts, fix: entry.fix,
-                        fixAway: entry.fixAway, fixTarget: entry.fixTarget)
+                        fixAway: entry.fixAway, fixTarget: entry.fixTarget,
+                        repairs: entry.repairs)
         }
         byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -173,9 +189,10 @@ extension RulesCatalog {
         var fix: String?
         var fixAway: String?
         var fixTarget: String?
+        var repairs: [String]?
 
         enum CodingKeys: String, CodingKey {
-            case id, title, category, also, severity, scope, blurb, doc, impacts, fix
+            case id, title, category, also, severity, scope, blurb, doc, impacts, fix, repairs
             case fixAway = "fix_away"
             case fixTarget = "fix_target"
         }
@@ -201,6 +218,8 @@ extension RulesCatalog {
             fix = c.lenient(.fix)
             fixAway = c.lenient(.fixAway)
             fixTarget = c.lenient(.fixTarget)
+            // Schema `6`. Nil, not a decode failure, against an older CLI.
+            repairs = c.lenient(.repairs)
         }
     }
 

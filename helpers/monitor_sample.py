@@ -461,15 +461,28 @@ def _journal_prune(path: str) -> None:
 # internet failing just before the link dropped explains nothing a user can
 # act on, so it gets no copy and the field is null. The wording is the CLI's
 # own; the app renders it verbatim and holds no copy of it.
+#
+# The sentence names the link that dropped, so it is worded for the link
+# type: "Wi-Fi" only when the monitor knows it was Wi-Fi, "the wired
+# connection" only when it knows it was wired. A monitor that restarted
+# mid-outage (the app restarts it on every network event) no longer knows,
+# and then the sentence says "your connection", which is true of either.
 _PRECURSOR_SUMMARY = {
     "router-unreachable": (
-        "Your router stopped responding right before Wi-Fi dropped, "
+        "Your router stopped responding right before {link} dropped, "
         "which usually means it restarted."
     ),
 }
 
+_LINK_NAME = {
+    "wifi": "Wi-Fi",
+    "wired": "the wired connection",
+}
+_LINK_NAME_UNKNOWN = "your connection"
 
-def _precursor_summary(precursor: str | None, rules: list[str]) -> str | None:
+
+def _precursor_summary(precursor: str | None, rules: list[str],
+                       link_type: str | None = None) -> str | None:
     """The sentence for this outage's precursor, or None.
 
     Withheld when DH-3 fires. DH-3 (joined, but the router never handed out
@@ -479,7 +492,30 @@ def _precursor_summary(precursor: str | None, rules: list[str]) -> str | None:
     """
     if not precursor or "DH-3" in rules:
         return None
-    return _PRECURSOR_SUMMARY.get(precursor)
+    template = _PRECURSOR_SUMMARY.get(precursor)
+    if template is None:
+        return None
+    return template.format(link=_LINK_NAME.get(link_type or "", _LINK_NAME_UNKNOWN))
+
+
+# link.offline.reason_label: the short caption for each offline reason, for
+# the places the app has room for a few words (the Mac node, the signal
+# tile). A reason with no entry gets None and the app shows its neutral
+# "no link" wording; it never maps a reason to text itself. The reasons are
+# read from the Wi-Fi device (lib/monitor.sh _mon_probe_offline), so when the
+# monitor knows the lost link was wired they say nothing about it and the
+# label is None.
+_REASON_LABEL = {
+    "wifi-off": "Wi-Fi is off",
+    "wifi-not-joined": "Not connected",
+    "wifi-no-address": "Not connected",
+}
+
+
+def _reason_label(reason: str | None, link_type: str | None) -> str | None:
+    if link_type == "wired":
+        return None
+    return _REASON_LABEL.get(reason or "")
 
 
 def _auto_reconnect() -> dict | None:
@@ -508,11 +544,12 @@ def main() -> None:
         precursor = _env("OFFLINE_PRECURSOR")
         offline_block = {
             "reason": _env("OFFLINE_REASON"),
+            "reason_label": _reason_label(_env("OFFLINE_REASON"), _env("IFACE_TYPE")),
             "down_since": _env("OFFLINE_DOWN_SINCE"),
             "down_duration_s": _i("OFFLINE_DOWN_DURATION_S"),
             "last_network": _env("OFFLINE_LAST_NETWORK"),
             "precursor": precursor,
-            "precursor_summary": _precursor_summary(precursor, rules),
+            "precursor_summary": _precursor_summary(precursor, rules, _env("IFACE_TYPE")),
         }
 
     sample = {

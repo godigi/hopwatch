@@ -102,9 +102,16 @@ struct MonitorSample: Decodable, Sendable {
         /// shows nothing when this is nil. Nil from a CLI older than the
         /// field.
         var precursorSummary: String?
+        /// The CLI's short caption for `reason` ("Wi-Fi is off", "Not
+        /// connected"), or nil when it has none: a reason with no caption, a
+        /// wired link, or a CLI older than the field. Rendered verbatim; the
+        /// app maps no reason to text and shows `NoLinkCopy`'s neutral
+        /// wording when this is nil.
+        var reasonLabel: String?
 
         enum CodingKeys: String, CodingKey {
             case reason, precursor
+            case reasonLabel = "reason_label"
             case precursorSummary = "precursor_summary"
             case downSince = "down_since"
             case downDurationS = "down_duration_s"
@@ -114,6 +121,13 @@ struct MonitorSample: Decodable, Sendable {
         var formattedDuration: String? {
             guard let s = downDurationS, s >= 0 else { return nil }
             return ActivityEntry.duration(Double(s))
+        }
+
+        /// `reasonLabel`, or nil when it is absent or blank.
+        var knownReasonLabel: String? {
+            guard let label = reasonLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !label.isEmpty else { return nil }
+            return label
         }
 
         /// The network the link was last up on, or nil when the monitor does
@@ -465,6 +479,7 @@ extension MonitorSample.OfflineContext {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         reason = c.lenient(.reason)
+        reasonLabel = c.lenient(.reasonLabel)
         downSince = c.lenient(.downSince)
         downDurationS = c.lenient(.downDurationS)
         lastNetwork = c.lenient(.lastNetwork)

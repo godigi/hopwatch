@@ -100,8 +100,10 @@ enum StaleSampleCopy {
 enum NoLinkCopy {
     /// Stage headline, Dropdown and Home.
     static let headline = "No network connection"
-    /// Used only when the CLI's own N1 text is unavailable.
-    static let fallbackSubtitle = "Your Mac has no network connection at all."
+    /// Used only when the CLI's own N1 text is unavailable (the rules
+    /// catalog has not loaded). A fact about what the app sees, in no words
+    /// of the CLI's verdict: why there is no link is N1's to say.
+    static let fallbackSubtitle = "Hopwatch's connection monitor reports no active network link."
     /// A reading slot with nothing to read.
     static let unknownValue = "—"
     /// The caption under the router and internet nodes.

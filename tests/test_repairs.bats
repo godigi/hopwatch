@@ -638,6 +638,24 @@ assert sum(1 for r in d.values() if 'repairs' in r) == 7
 " "$known"
 }
 
+# The catalogue's per-rule `repairs` is what a surface with no scan behind it
+# (the app's offline card) draws its button from, so it must say exactly what
+# the diagnosis offers: every repair_offer RULE ID call in lib/ is in the
+# catalogue, and every catalogue entry is offered somewhere.
+@test "the catalogue's per-rule repairs are exactly the repair_offer calls in lib/" {
+  local offers
+  offers="$(grep -hoE '^[[:space:]]*repair_offer [A-Z0-9-]+ [a-z-]+' "$REPO"/lib/*.sh | awk '{print $2" "$3}' | sort -u)"
+  [ -n "$offers" ]
+  run "$NETDIAG" --rules-catalog
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+offered = {tuple(l.split()) for l in sys.argv[1].splitlines()}
+catalogued = {(r['id'], rid) for r in json.load(sys.stdin)['rules'] for rid in r.get('repairs', [])}
+assert offered == catalogued, (sorted(offered - catalogued), sorted(catalogued - offered))
+" "$offers"
+}
+
 @test "--capabilities lists the repair feature" {
   run "$NETDIAG" --capabilities
   [ "$status" -eq 0 ]
