@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-10-13
+
 ### Fixed
 
 - **The "All good" banner is readable in dark mode.** The green status banner at the top of Home and the main window set its headline, sentence and "All systems nominal" pill in a fixed dark green that disappeared against the dark green background. They now use the app's own green and body-text colours, which adapt to the appearance, so the banner reads clearly in both light and dark mode. The README and `docs/SCREENSHOTS.md` images that show it are re-captured from synthetic data.
@@ -44,7 +46,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.1...HEAD
+[1.17.1]: https://github.com/godigi/hopwatch/releases/tag/v1.17.1
 [1.17.0]: https://github.com/godigi/hopwatch/commit/685ef4f5e4695ff17a34c5b986f0c877165168fe
 [1.16.3]: https://github.com/godigi/hopwatch/commit/7bf928d274434b04483d7a59f5f308785749d242
 [1.16.2]: https://github.com/godigi/hopwatch/commit/23379af98d37b28f6b8aed9946c7b103b93dfe9f
