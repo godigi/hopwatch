@@ -1,5 +1,5 @@
 {
-    "version": "1.16.2",
+    "version": "1.16.3",
     "timestamp": "2026-09-01T14:31:03Z",
     "run_mode": "full",
     "run_id": null,
@@ -64,7 +64,7 @@
     },
     "dns": [
         {
-            "resolver": "177.21.96.10",
+            "resolver": "203.0.113.53",
             "name": "apple.com",
             "answer": "17.253.144.10",
             "ok": true
@@ -82,7 +82,7 @@
             "ok": true
         },
         {
-            "resolver": "177.21.96.10",
+            "resolver": "203.0.113.53",
             "name": "cloudflare.com",
             "answer": "104.16.132.229",
             "ok": true
@@ -431,7 +431,7 @@
         "lease_start": "09/01/2026 04:23:07",
         "lease_end": "09/02/2026 04:23:07",
         "time_remaining_s": 60720,
-        "dns_servers": "177.21.96.10"
+        "dns_servers": "203.0.113.53"
     },
     "mtr": {
         "target": "1.1.1.1",

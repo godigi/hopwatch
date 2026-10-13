@@ -1,0 +1,4340 @@
+# Changelog archive
+
+Every release through 1.16.1, moved here verbatim from [CHANGELOG.md](../CHANGELOG.md) when
+the project trimmed its public release history to the current version. Entries keep
+the wording they shipped with, including the raw commit subjects of the
+auto-generated ones. Most of these versions no longer have a tag or a GitHub
+Release; the git history still holds every commit.
+
+## [1.16.1] - 2026-10-13
+
+### Fixed
+
+- **The app never read `link.offline`, so the offline card's extra lines never appeared.** `MonitorSample.Link` declared the monitor's `link.offline` block, but its lenient decoder skipped it, so `offline` was always nil. It is now decoded leniently (a missing, null or malformed block, or a single malformed field in it, never drops the sample or the other fields), which switches on the "Offline for X · last on Y" line and the router-restart sentence on the menu-bar and Home cards, and the "Wi-Fi is off" / "Not connected" readings. The two cards now build that line from one shared function.
+- **The router-restart sentence now comes from the CLI.** "Your router stopped responding right before Wi-Fi dropped, which usually means it restarted." was a verdict written in Swift in three places. The monitor now sends it as `link.offline.precursor_summary` (`docs/JSON-SCHEMA.md`); the app renders it verbatim and shows nothing when it is absent, and holds no copy. The CLI also decides when to withhold it (while `DH-3` fires, as before). The `internet-unreachable` precursor has no sentence, as it never had one in the app.
+- **"Last on Y" now survives the monitor restart.** The app restarts the monitor on every network event, so the process that reports a drop almost never saw the network it lost, and the card almost never named it. The carry record holds no names, so the app now hands the monitor the last-network name separately (`status.carry_network` out, `HOPWATCH_MONITOR_LAST_NETWORK` back in, an environment variable, same lifecycle as the record). The monitor adopts it only when a record was adopted this start, the link is down, the name's fingerprint is the one inside the record, and the name has the shape of a name; otherwise there is no "last on" clause, so a name is never shown for a different network than the one that was lost. The record is now `v2` (one more fingerprint); a `v1` record from before the upgrade is a clean slate.
+- A placeholder never reaches the card as a network name: `last_network` is empty rather than "unknown network", "WiFi (SSID hidden by macOS)" or a raw network id. On a Mac that has not granted Location Services, macOS hides the SSID, so there is honestly no name to show.
+
+## [1.16.0] - 2026-10-13
+
+### Added
+
+- **DH-3 now fires from the live monitor, and offers a repair.** A Wi-Fi link that is joined but has no usable address (no address at all, or a `169.254` placeholder) for `THRESH_DHCP_ADDRESS_GRACE_S` (30 s) raises DH-3 on the menu-bar and Home hero card with a "Reconnect Wi-Fi" button. The grace period is deliberate: associated-but-addressless is normal for the first seconds of every join, wake and roam. DH-3's catalog title and text no longer claim the Mac "assigned itself" an address, which is false when it has none.
+- **`reconnect-wifi` can rejoin a named network.** `--repair-param network=<name>` is validated and refused, never trimmed (1 to 32 bytes, no leading `-`, no control characters or line breaks) and is joined only if macOS already remembers a network of exactly that name. macOS gets the first chance to rejoin by itself after the radio is switched back on, and a network it chose is never overridden. The result is now honest: `networksetup` reports a failed join on stdout while exiting 0, so its output and the interface's actual association are checked, and a failed or timed-out join is reported as a failure in plain words. Radio and join timeouts are in `lib/thresholds.sh`.
+- **`status.auto_reconnect` in the monitor stream.** The monitor decides, per sample, whether an automatic Wi-Fi reconnect is warranted now and why (`wifi-dropped` for WJ-1, `no-address` for DH-3, `wedged-gateway` for G2), and holds the counters and every cutoff (`lib/thresholds.sh`). Documented in `docs/JSON-SCHEMA.md` and `docs/DIAGNOSIS-RULES.md`.
+
+### Changed
+
+- **Automatic Wi-Fi reconnect is now a recorded, opt-in exception, and its decision lives in the CLI.** Settings > "Automatically reconnect Wi-Fi" is **off by default**; when on, the app may run the `reconnect-wifi` repair, and only that, without a button press, but only when the monitor says so. The app checks its setting and that no repair is already running (an automatic reconnect can no longer race a manual click or another automatic one), runs it, and journals it. `CLAUDE.md` and the repair design document record this as the one exception to "repairs start only from a button". It is deliberately conservative: WJ-1 only after the router stopped answering just before the drop, only after the rejoin grace, never when the radio was switched off during the outage, once per outage; DH-3 only past its grace period, every 30 s, at most 4 times per outage; a wedged gateway only on a Wi-Fi link with a real RSSI of at least -75 dBm, 100% gateway loss with G2 firing (so a gateway that merely ignores ping never qualifies) for 6 consecutive samples, once per episode. Counters reset when the link returns, the network changes, or the monitor saw a gap, and survive the monitor restarts the app performs (see the `status.carry` entry under Fixed). Known limit: choosing "Disconnect" from the Wi-Fi menu right after the router misbehaved looks the same as the router dropping you, and cannot be told apart without private APIs.
+
+### Fixed
+
+
+- **The automatic Wi-Fi reconnect for a dropped network (WJ-1) could never fire in the app.** WJ-1 needs to know the router stopped answering just before the link went down, and the app restarts the monitor on every network event, a Wi-Fi drop included, so the process that saw the outage was a new one with no memory of what came before. It also lost the rejoin-grace clock and, worse, the record that the user had switched the radio off during the outage, which is what stops the app reconnecting against their will. Every monitor sample now carries an opaque `status.carry` record (`docs/JSON-SCHEMA.md`); the app hands the newest one, unread, to the next monitor process (`HOPWATCH_MONITOR_CARRY`), which replaces the narrower attempt-only hand-over. The monitor validates it strictly and refuses anything malformed, from the future, older than `THRESH_MON_CARRY_S` (10 minutes) or about a different network, which costs a clean slate and a clean slate warrants nothing. Times in the record are the original ones, so the precursor window and the grace period are measured from the real loss, never from the restart, and a state carried from one network is not applied on another. Still nothing written to disk. The remembered Wi-Fi name the repair targets already survived the drop (an offline sample never counts as a different network); that is now pinned by tests in both directions.
+- A reconnect targets the network it is about to rejoin, not an old one. The remembered Wi-Fi name is tied to the network identity and cleared when the network changes, so a network whose name macOS hides no longer inherits the previous network's; for any fault where the Mac is still joined, only the name CoreWLAN reads at that moment is used.
+- The app's tests can no longer power-cycle the Wi-Fi of the machine that runs them: the coordinator takes an injected repair runner, and the reconnect tests assert on the recorded calls.
+
+## [1.15.1] - 2026-10-12
+
+### Changes
+
+- Merge pull request #5 from godigi/fix/hog-name-parse-test
+- test: stop the link-drop test reading the runner's own Wi-Fi state
+- test: give the hog.py name-parse case a live pid instead of a made-up one
+
+## [1.15.0] - 2026-10-12
+
+### Changes
+
+- feat: embed settings in dashboard tab and redesign settings interface
+
+## [1.14.6] - 2026-10-12
+
+### Added
+
+- Wi-Fi disconnect and recovery detection: track when Wi-Fi interface is on but not associated with an SSID, with WF-1 (Wi-Fi disconnected) and WJ-1 (Wi-Fi failed to rejoin) diagnostic rules after rejoin grace period.
+- One-click "Reconnect Wi-Fi" action button in menu bar and dashboard when link is offline.
+- Optional "Auto-reconnect Wi-Fi when connection is lost" setting in Preferences.
+- Required Location Services permission in onboarding to guarantee network name visibility and network state tracking.
+- Precursor diagnosis tracking to identify router reboot or gateway failure prior to Wi-Fi drop.
+
+### Fixed
+
+- Prevent false packet loss and jitter spikes on waking from sleep: reset rolling packet loss history window and gateway/internet loss streaks upon sleep gap or resume.
+- Prevent stale 60s slow-DNS lock-in: dynamically trigger immediate recheck on the next 5s cycle when a fresh DNS probe measures elevated latency (≥200ms), ensuring wake or cold-cache lookups clear within 5 seconds.
+- Settle network state on wake: keep dropdown and dashboard in neutral checking state during the 4-second settling grace window after wake or reconnection before live probes stabilize.
+- Fix unbound variable crash under `set -u` in CLI monitor.
+
+## [1.14.5] - 2026-10-09
+
+### Fixed
+
+- Reset current connection evidence immediately after wake and network/path changes. Menu, dashboard, live comparisons, charts and activity no longer carry another connection's measurements or unconfirmed stored reports into a newly joined network.
+- Expire old measurements independently of monitoring pause/off; paused samples and invalid timestamps cannot refresh readings. Guard delayed scan, history hydration and router-probe results against connection changes, and leave interrupted arrival checks retryable.
+- Show neutral waiting states for unmeasured latency, loss, jitter, suitability, VPN and reliability. Remove illustrative defaults for IP addresses, DNS servers, Wi-Fi channel/security, ISP and DHCP lease. Unknown Wi-Fi names no longer imply disconnection, and VPN freshness reflects an actual reading.
+- Scope saved throughput to the confirmed current network and keep dated speed results out of current activity suitability. A failed fresh public lookup supersedes earlier country/IP/ISP evidence.
+- Reset CLI rolling loss windows and confirmation streaks before probing the first packets on a changed network, and refresh every probe tier when a scan/sleep pause resumes.
+- Preserve fresh full/speed-only results with monitoring off, expire displayed scan evidence through observable clock updates, and scope router admin caches to the connection generation. Monitor-detected network transitions invalidate previous-visit evidence even without system watcher callbacks.
+- Preserve absent technical-check fields when decoding partial reports; omit fabricated traceroute, IPv6, NAT, SNR and neighbor findings. Network boundaries clear old notification recovery state and retain the correct activity-episode boundary.
+
+## [1.14.3] - 2026-10-09
+
+### Changes
+
+- fix: retain contemporaneous app/process attribution, upload/download rate, traffic share and observation time in activity history and both recent-activity views. Rechecks update one incident and retain changing app identities; old events explicitly state that attribution was not recorded.
+- fix: describe high traffic alongside elevated latency without claiming a proven cause.
+
+## [1.14.2] - 2026-10-08
+
+### Changes
+
+- ci: bundle source with Sentry debug symbols for code context
+
+## [1.14.1] - 2026-10-08
+
+### Changes
+
+- Merge branch 'fix/no-link-state'
+- fix: scope stale readings to the current network, add sample watchdog
+- docs: audit of other stale or misleading displays (18 findings)
+- fix: no-link state is red, says so, and shows no stale readings
+- fix: monitor stops reporting readings from before a link drop
+
+## [1.14.0] - 2026-10-08
+
+### Added
+
+- `HOG-1` (warn): one app on this Mac is using up the connection. When pings are slow or uneven while none are lost, and a single app is sending or receiving most of the data moving on this Mac on every interval of a short `nettop` capture, the report says how fast it is going and what the pings are doing, names the app when it can, and offers the existing "Quit <app>" button. It replaces "latency is high" or a bufferbloat grade with no culprit. The capture runs only once the cheap latency gate passes (in `--quick` too) and never on a healthy cycle. Hopwatch's own processes (descendants of the run, anything under a `hopwatch`/`netdiag` command line, the probe tools) are never the answer, and their own traffic voids the direction, so the speed test is never accused. A process that is not a quittable GUI app (a system daemon, a command-line tool) yields the finding with no name and no button. With a speed figure (a full check) the app must hold `THRESH_HOG_LINK_SHARE_PCT` of the line; without one, `THRESH_HOG_UNKNOWN_CAPACITY_MBPS`. Mirrored in the monitor, which waits `THRESH_MON_HOG_CONFIRM_CYCLES` cycles and takes at most one capture per `THRESH_MON_HOG_RECHECK_S`. New `helpers/hog.py`; design in `docs/design/2026-10-08-upload-hog-design.md`.
+- `THRESH_HOG_*` and `THRESH_MON_HOG_*` in `lib/thresholds.sh`.
+
+## [1.13.0] - 2026-10-08
+
+### Added
+
+- `CONN-1` (warn): new connections from this Mac are being refused or dropped while ping is clean. On 2026-10-08 this Mac's own torrent client flooded the router with new flows: UDP DNS to 1.1.1.1 and 8.8.8.8 timed out about 10% of the time and TCP/443 connects were "refused" in 10-40 ms about 60% of the time, with 0% ping loss, and Hopwatch alternated between "your DNS server is flaky" (`D1`) and, in the app, "Web blocked, port 443 down". Both were verdicts on one probe of a single fault and each named a cause nobody measured. `CONN-1` fires when lookups and direct TCP/443 connects fail together, or two unrelated resolvers fail the same question, while the router and internet pings are clean. It says what was observed and that the cause was not found, and suppresses `D1`, `D5` and `D6`. It does not fire under `SOCK-1`, a captive portal, `P1`/`P2` or any loss rule. Mirrored in the monitor.
+- `CONN-1` names the app responsible when there is one. At the moment it fires (never on a healthy cycle) the scan counts each process's UDP sockets and connections stuck in `SYN_SENT` with user-level `lsof`; an app holding at least `THRESH_SOCK_HOLDER_SHARE_PCT` of all of them and at least `THRESH_CONN_HOLDER_MIN_FLOWS` is named and gets the existing "Quit <app>" button. Apps whose process is a bundled helper that outlived its parent (Stremio's `node`) are now found through the `.app` the executable sits in, for `SOCK-1` too.
+- `THRESH_MON_CONN_CONFIRM_CYCLES`, `THRESH_CONN_RESOLVERS_TOGETHER` and `THRESH_CONN_HOLDER_MIN_FLOWS` in `lib/thresholds.sh`.
+
+### Changed
+
+- The monitor no longer decides `D1` from a single `dig`. `D1` (when it would fire alone) and `CONN-1` wait `THRESH_MON_CONN_CONFIRM_CYCLES` consecutive medium-tier samples, and `CONN-1` is withdrawn only after as many clean ones. While a first failure waits, the next sample comes one fast cycle later rather than 60 s later. After a failed lookup the monitor also asks a second, unrelated resolver, which is the only extra probe it adds.
+- The app's Browsing tile reads `CONN-1` and `D1` from the CLI's rules instead of deciding from one `dns.ok` / `tcp.any_ok` sample, so it can no longer flip between "DNS failing" and "Web blocked" on whichever probe lost the cycle. Those two labels are gone.
+
+## [1.12.0] - 2026-10-07
+
+### Added
+
+- Repair buttons, phase 1. A finding can now offer one button that fixes it, labelled with the action itself ("Quit Spotify", "Restart this Mac", "Open the sign-in page"). Pressing it shows what will change, runs the repair, re-checks at the quick depth, and says either "Fixed" or "That didn't help" with what to try next. Nothing is ever repaired automatically. These three need no password; repairs that ask for one are designed (`docs/design/2026-10-07-repair-actions-design.md`) and not built.
+- `hopwatch --repair=ID [--repair-param KEY=VALUE]... [--dry-run] [--json]`: the CLI runs every repair, the app only invokes it. `--dry-run` prints what would run and changes nothing. Exit `0` done, `1` ran and failed, `3` unknown repair or refused parameter.
+  - `quit-app` asks one app to close the way its own Quit menu does. Offered by `SOCK-1` when the top holder of the UDP sockets resolves (via `lsappinfo`, walking up from helper processes) to an app the user can quit. Refuses Finder, Dock, loginwindow, SystemUIServer and Hopwatch itself.
+  - `restart-mac` shows the standard macOS restart window with its cancellable countdown. Offered by `SOCK-1` when no quittable app holds the sockets. **Its live path has never been run** — only the dry run and a compile of the script were tested, because triggering it restarts the machine.
+  - `open-sign-in` opens the network's sign-in page. Offered by `CP-1`. Tested by dry run and stubs only.
+- `diagnosis[].repairs` in `--json`, and a `repairs` list per rule in `--rules-catalog` (catalog schema 6). All button, confirmation and what-next wording is written in `lib/repairs.sh`.
+- A repair that really runs appends one `repair` line to the event journal when a journal already exists. `--events` reads past it; it never opens, closes or extends an episode.
+
+### Fixed
+
+- The app's decoder for a finding assigned `severity`, `rule` and `summary` and nothing else, so a new field on a finding was silently dropped. Caught by the new `--verify` case before release: without the fix no repair button could ever have appeared.
+
+## [1.11.0] - 2026-10-07
+
+### Added
+
+- `SOCK-1` (critical): this Mac cannot open a UDP socket, so it cannot look up website names. On 2026-10-07 the Mac could not open a UDP socket (`dig: isc_socket_bind: address not available`, system-wide, cured only by a reboot; ephemeral-port exhaustion is the likely cause but was never proven) and Hopwatch reported `D1` "your DNS server is flaky, restart your router" for over an hour. Every DNS probe ran `dig ... 2>/dev/null` and read an empty answer as "the resolver did not answer". The probes now go through one shared `dns_probe` (`lib/common.sh`, used by `lib/dns.sh` and `lib/monitor.sh`) that keeps dig's stderr and, only when an answer is missing, asks the kernel for a UDP socket with the new `helpers/sockcheck.py` (a healthy run pays nothing). A refused bind, or dig saying so itself, fires `SOCK-1` and suppresses `D1`, `D2`, `D5` and `V6-2` for that run, since their evidence is void. The summary names the app holding the sockets only when it holds at least `THRESH_SOCK_HOLDER_SHARE_PCT` of them (`lsof` without root sees only your own processes); otherwise it says to restart the Mac.
+- Fault-time evidence for `SOCK-1`, because a reboot erases it: the UDP socket count (`netstat -an -p udp`), the top holders by process (`lsof -nP -iUDP`) and whether DNS over TCP still works. It lands in a new nullable top-level `dns_local` object in `--json`, in the monitor's `dns.local_fail` / `dns.local` fields, and in the `--journal` line that records the fault (`evidence`).
+- `D6` (info): guided switch to a better DNS. Fires when the resolver your router hands out is not answering, or is slower than `D3`'s cutoff, while a public resolver answered in the same scan. It explains what DNS is, then how to switch to plain public DNS (stated as not encrypted), its downsides and how to undo it, with the browser's Secure DNS as an optional extra. Guidance only: Hopwatch never changes DNS. Never fires alongside `SOCK-1`, on a manual or already-public resolver, or when an encrypted DNS profile is active (`EDNS-1`). When `D6` fires, `D1`, `D3` and `D5` keep their rule, severity and observation but drop their own remedy sentence, so the report gives one set of advice, not two.
+- The app registers `SOCK-1` as a fault on the Mac (not the router or ISP) and adds it to the "Websites aren't loading" alert.
+
+### Changed
+
+- The release workflow now uploads the app's debug symbols to Sentry, so crashes in Hopwatch's own code arrive as file and line instead of raw addresses. The step is inert until `SENTRY_AUTH_TOKEN` (secret) and `SENTRY_ORG` / `SENTRY_PROJECT` (variables) are set, and it cannot block a release: a failed upload is only a warning annotation.
+
+### Fixed
+
+- A resolver that never answered was recorded as having answered. BIND 9.10's `dig +short` prints ";; connection timed out; no servers could be reached" on stdout, and the probes took the first stdout line as the answer, so a dead resolver counted as `OK` and `D1`/`D5` could not fire on a real timeout. `dns_probe` discards dig's `;;` notices.
+
+## [1.10.10] - 2026-10-06
+
+### Fixed
+
+- One network no longer reads as several in the event journal, so one fault stops being cut into pieces. The monitor derived `network.id` afresh every fast cycle from `route` and `arp -n`, and both go quiet exactly when a router is struggling: the default route is withdrawn while Wi-Fi re-associates (no gateway, so no id at all, journaled as `"network": null`), and the gateway's ARP entry is empty until the next reply (so the id fell back to a bare `wifi:gw=…`). Measured on a real 13-day journal: 235 id changes, 230 of them between the MAC form and no id or a gateway address of the same network, 210 inside a single monitor process (only 19 at a restart; 38 were the gateway-address form the report named, the rest the `null` form), against 5 genuine changes between different routers. `helpers/events.py` pairs fires and clears on (network, rule), so a fire under one spelling and the clear under another never met: the fire stayed open until the next restart, and the clear was reported as an end with no beginning. Over that journal's last 72 hours the longest G2 episode was 22,767 s (6.3 h) and G2 totalled 49,132 s; it is now 436 s and 3,948 s, and orphan clears fell from 178 to 51. Fixed at three layers. `lib/monitor.sh` now keeps the router MAC (and the SSID and interface type read with it) while a lookup fails, for at most `THRESH_MON_IDENTITY_HOLD_S` (900 s, `lib/thresholds.sh`), spelled exactly as a fresh read would spell it; a MAC read afterwards, a different gateway address, interface or visible SSID ends the hold at once, so a real network change still changes the id. `helpers/events.py` folds a `null` or bare-gateway line onto the MAC id it sits between, using the existing strong/weak rule (a line between two different MACs is left alone, a gateway address is folded only where exactly one MAC claims it, and nothing folds across a `gap` of the hold or more), keeping the journaled value in `network_journaled`, so journals already written read correctly. In the app, `NetworkEvent.continuesPrevious` no longer treats a `mac:` group against a `gw:` group as a changed network at a restart it caused itself. Not changed: `ActivityEntry.fold` still keys on the stored id, so events stored before this still split until they age out of the event store. `--events` `schema` stays 1; `network_journaled` is additive.
+
+## [1.10.9] - 2026-10-06
+
+### Fixed
+
+- An alert could notify no more often than every 30 minutes, whatever its definition said. `NotificationManager` kept its own fixed 30-minute cooldown per alert id on the real clock, underneath the per-definition `cooldown` that `AlertEngine` already enforces, so "Connection lost" (defined to repeat after 5 minutes) and the 1-minute public-IP alert could only repeat every 30, and the Settings captions saying otherwise were false. The in-place update that swaps the holding line ("Checking whether it's your Wi-Fi or your router...") for the CLI's own sentence went through the same check and was dropped whenever it arrived inside those 30 minutes, which is always, so the macOS notification kept showing the holding text while the dropdown was correct. The definition's cooldown is now the one authority; the manager keeps only a 30-second storm guard (`NotificationManager.minimumRepeatInterval`), which sits below the shortest definition cooldown (60 s) and so cannot contradict one. An in-place update of a notification that was delivered is no longer rate-limited and does not restart the guard; an update with no delivered notification to replace (an alert raised inside its cooldown, whose scan lands later) is dropped instead of posting a new one. The engine now hands the manager its own clock so the two read the same time. The "rate-limited to at most one per 30 minutes" line in Settings now says what is true. Resolved notices were never subject to the cooldown and are unchanged. `--verify` gains "Alert notifications (one cooldown authority)" and rewrites the old 30-minute check, and those count posts rather than scans, which is why this went unnoticed.
+- "Your public IP address changed" no longer appears as an alert for one monitor cycle and then vanishes. A public IP changing is an event, visible in exactly one sample, but it was modelled as a condition: the engine raised it, the dropdown showed it for a few seconds with an empty body, the next sample "cleared" it, and the resolution feedback then announced "Your public IP address changed is back to normal" for 45 seconds, which is meaningless for something that cannot be un-changed. Definitions can now be marked `isEvent`; `AlertEngine` notifies and logs an event (still honouring its 60-second cooldown) but never puts it in `active`, so it cannot reach the banner, the headline, the Activity badge or the resolution feedback. Nothing about the notification, the event log entry, the alert-triggered scan or the Settings toggle and caption changed, and the other event-style alerts (captive portal, VPN dropped, different network) describe states that persist and are unchanged. `--verify` gains "Public IP change (an event, never an active alert)".
+- Settings no longer says "Weak-signal warnings wait two minutes and repeat at most once an hour." There is no weak-signal alert and nothing posts a weak-signal notification.
+- A fault that simply carries on through a monitor restart no longer goes silent in the journal. A fresh monitor's first sample has nothing to diff against, so its `changes` is empty and a rule already firing in it was never written down: after a restart during a steady fault the journal held nothing but `monitor-started` lines (about 25 minutes of them in a real journal, while the router dropped 60% of packets throughout), and a later clear arrived with no fire before it (356 such orphan `rule-cleared` lines in the same journal). `--monitor --journal` now writes, right after `monitor-started`, one `rule-fired` per rule already firing in the first sample, marked `"already_firing": true` so a reader can tell "observed starting" from "found in progress". `--events` joins it to the episode the previous process had open (one episode, `restarts_bridged` counting the restart, nothing added to `unobserved_s`); with none to join it is an episode flagged `start_unobserved` with `started` the first moment it was seen and `duration_is_lower_bound: true`. On journals written before this, a `rule-cleared` that follows a restart-closed episode of the same rule with no fire between is now joined to it instead of being reported as a second, beginningless episode. The `--monitor` stream is unchanged (its first sample still carries no `changes`, so the app does not alert again on a fault it was already showing), `--events` `schema` stays 1, and the new field is optional and only present when true. See `docs/JSON-SCHEMA.md`.
+- The dropdown's "Recent activity" no longer reads one continuous fault as many. `ActivityEntry.fold` closed every open entry at each `monitor-started` event, and the app restarts its own monitor about once a minute on a faulty link (cadence changes, and the start and end of the 60-second investigation burst), so a router that dropped packets throughout showed as "4 times · 48s+ total". A restart the app made itself, while it was running, with the network not known to have changed, is now recorded with `continuesPrevious` and stepped over: the entry stays open until a clear is observed. An app launch, monitoring switched off and on, a monitor that died and was relaunched, or a network change are still boundaries and still end an entry as a lower bound. This needs no window or cutoff, because the app knows it caused the restart. No new strings; events stored before this decode as boundaries, as they were always read. `--verify` has a new section covering a fault across three restarts, a fault that clears and recurs, a network change, and the `+` floor marker.
+
+## [1.10.8] - 2026-10-06
+
+### Fixed
+
+- `hopwatch --events` no longer chops one continuous fault into many short episodes at every monitor restart. The app restarts the monitor to change cadence and to start and end its 60-second investigation burst, which on a flapping link is about once a minute; each restart wrote `monitor-started`, which `helpers/events.py` read as the end of every open episode, and the fresh monitor then re-reported the still-firing rule as a brand new `rule-fired`. In the last three hours of a real journal that was 25 episodes, 11 of them "ended by monitor-restart", 12 for G2 alone. An episode closed by a restart now stays open to continuation: if the same rule fires again on the same network within `THRESH_EV_RESTART_BRIDGE_S` (90 s, in `lib/thresholds.sh`) of the latest restart, it is one episode. Its duration spans both, the time between is added to `unobserved_s`, a new `restarts_bridged` count (present only when above zero) says how many restarts were stepped over, and it is labelled `monitor-restart` / `duration_is_lower_bound` only if a restart really ended its last segment. A rule that cleared first, a different rule, a different network, or a re-fire outside the window are not merged. The reader still judges nothing: the window is how long a fresh monitor takes to report a fault that was already there. Additive; `--events` `schema` stays 1. `AV-1`/`AV-2` read these episodes through `lib/availability.sh` and now count a bridged fault once.
+- Not fixed here: the dropdown's "N times, Xs+ total" is folded in Swift by `ActivityEntry.fold` from the app's own event store, with the same restart-closes rule, so it still shows the old shape. A fault that simply carries on through a restart with no re-fire (a rule already firing in the new monitor's first sample is never journaled) is also still cut at the restart.
+
+- The "Your VPN disconnected" and "This isn't the network you think" alerts could never fire. Both are raised by a transition (VPN up then down; gateway MAC changing under one Wi-Fi name), which is visible in exactly one monitor sample, while their dwell (10 s and 30 s) needs the condition to hold continuously and was cleared by the very next sample. A transition now starts the wait and the alert fires if the new state is still the state when the dwell ends: the VPN still down, the new router still the one in use. A VPN that reconnects, or a gateway that flips back, inside the dwell is dropped as a blip. The VPN alert clears (with its resolved notice) when the VPN returns; the router alert clears, silently, when the familiar router is back or the Wi-Fi name changes. The network-just-changed grace period holds both rather than swallowing them: the dwell starts when it lifts. `public-ip-changed` (no dwell) and every rule-driven alert are unchanged. `--verify` gains "Event-driven alerts (dwell on a transition)".
+
+- The monitor reported a "gap" (a sleep or stall) on nearly every cycle. A gap is flagged when the time since the previous cycle started exceeds `THRESH_MON_GAP_FACTOR` times the cadence, but that time includes the previous cycle's own probes, which take 8-11 s on a lossy link and up to ~47 s when every tier fires at once, while the app runs cadences of 5 s, 3 s and 2 s (tolerances of 15, 9 and 6 s). In one live journal 113 of a monitor's 114 cycles carried a `gap_s` of 10-13 s, and 1462 historical gap lines were 7-9 s. Downstream, `--events` summed them into 12831 s of unobserved time in a 10800 s window, the Home screen's "% offline or asleep" figure was wrong, and the live chart broke its line on every sample. The tolerance now has a floor, `THRESH_MON_GAP_MIN_S` (60 s), set above the worst cycle the probe timeouts can add up to. A 10 s cadence now tolerates 60 s rather than 30 s; a 300 s cadence is unchanged. Anything over a minute, which includes every real sleep, is still reported.
+- The monitor's pause marker re-emitted the previous cycle's `gap_s`, so the journal showed an identical gap twice, two seconds apart, on consecutive `seq`. The marker measures nothing and now carries `null`; the gap is reported once, by the cycle that saw it.
+- A comment in `lib/monitor.sh` claimed the gap excludes the cycle's own work. It excludes only the current cycle's; it is start-to-start and includes the previous cycle's. Corrected, along with a comment in `MonitorSeries.swift` that called `gap_s` monotonic (it is wall clock).
+
+- Running the bats suite no longer writes to your real run history. `tests/test_json.bats` and `tests/test_output.bats` run real `--quick` scans, and nothing redirected the store, so every `bats tests/` from any checkout appended eight runs (and four `.log` files) to `~/net-diag/baseline.jsonl` -- the file the app's per-network medians and history are computed from. About 42 of the last 50 stored runs on one machine's current network were test runs. `tests/setup_suite.bash` now sandboxes `$HOME` under `$BATS_RUN_TMPDIR` for the whole run (and unsets `HOPWATCH_LOG_DIR`/`NETDIAG_LOG_DIR`/`LOG_DIR`), for `bats tests/` and `bats tests/one_file.bats` alike. It sandboxes `$HOME` rather than exporting a store variable because that variable outranks `HOME` and would redirect the tests that set `HOME` on purpose. `tests/test_store_isolation.bats` asks the CLI where it would write (`--history`'s `sources.live`) and fails if that is ever outside the bats temp dir.
+- `tests/test_monitor.bats` no longer leaks real monitors. `start_monitor` was called as `pid="$(start_monitor)"`, which made the monitor's parent a subshell that exits at once; it was re-parented to pid 1 before `lib/monitor.sh` captured its parent, which disables the monitor's parent-died guard (correctly, for the launchd recorder). One such orphan pinged a router every 2 seconds for 42 minutes. Monitors are now started so the bats test shell stays their parent, a `teardown()` kills every monitor a test started (TERM, then KILL), and each carries `--monitor-count` as a hard cap. The file header no longer claims to be network-free: the pause/resume and orphan-cleanup tests ping the real gateway.
+
+## [1.10.7] - 2026-10-06
+
+### Changes
+
+- docs: plan for moving live suitability verdicts out of Swift
+- fix(wan): split ASN/IP lists with read -a to clear SC2206
+- test: make the full-check speed fixture bash-3.2 safe
+- fix: show the real internet ping and alert on the leg that is not filtered
+
+## [1.10.6] - 2026-10-06
+
+### Fixed
+
+- The scan and the monitor disagreed about a Wi-Fi link with a strong signal and critical gateway packet loss. `lib/monitor.sh` said `G2` (critical); `lib/diagnosis.sh` said `W5` (warn) and suppressed `G2`. The app showed a red dot over an amber report, and an alert waiting for a G-rule sentence never got one (seen live: monitor `G2` at 68% loss and -37 dBm, scan `W5` warn at 55%). Both engines now say `G2`, critical. Loss at or above the critical threshold is a measurement and stays critical whatever the suspected cause; the strong signal now only selects G2's cause sentence ("the likely cause is the router struggling to hear your Mac back... move closer, and if it keeps happening, reboot it").
+- The Report card's Router row no longer drops to a warning colour on a strong-signal Wi-Fi link with gateway loss. That override sat on top of the red `bad` the row would otherwise get, and also coloured the row for loss below the lowest gateway rule, so it contradicted the diagnosis in both directions. It followed W5's gate and goes with W5.
+- `tests/test_monitor.bats` claimed to hold the two engines to the same rule set for the same link but never covered this branch; it now does.
+
+### Removed
+
+- Rule `W5` (asymmetric Wi-Fi link) is retired and can no longer fire; its case is folded into `G2`. Its catalog entry and `docs/DIAGNOSIS-RULES.md` section stay, marked retired, so stored runs that recorded `W5` still resolve to a title and an explanation. `THRESH_WIFI_ASYMMETRIC_LOSS_PCT` is gone (nothing read it once the Router-row override was removed); `THRESH_WIFI_ASYMMETRIC_MIN_RSSI` stays as the threshold that picks G2's cause sentence.
+
+## [1.10.5] - 2026-10-06
+
+### Changes
+
+- fix: stop reporting a lossy link as "ping is just blocked" (1.10.4)
+
+## [1.10.4] - 2026-10-06
+
+### Fixed
+
+- Stop TCP-1 ("only ping is filtered, the network is fine") from reporting a link that is losing most of its packets as healthy. It fired whenever TCP 443 connected and gateway ping loss was >= 50%, without looking at the forwarded path; TCP connects through heavy loss because it retransmits (a live sample of gateway 58%, internet 61%/60%, TCP ok came out as severity `info`, rule `TCP-1`, `icmp_filtered: true`). Both engines now share one predicate, `loss_corroborates_gateway` in `lib/common.sh`: when every measured internet-side ping leg is >= `LOSS_WARN_PCT` and the two are not both at total loss, TCP-1 stays silent, `status.icmp_filtered` is false, and G1/G2/G3 evaluate normally. TCP-1 still fires for a high gateway loss with clean internet pings, for gateway and both internet targets at 100% (alongside ICMP-1), and when internet loss was not measured (`--quick`), exactly as before. In the monitor, a stale TCP-1 now clears on such a cycle.
+- Fix the app's Gaming tile, which returned "Smooth · TCP 443 ok" whenever `icmp_filtered` was set without consulting loss, while Calls, Streaming and Browsing used the loss figure.
+- Fix the app's effective-loss figure, which dropped the internet leg and kept the gateway leg under TCP-1. That was backwards: the gateway figure is the unmeasurable one under TCP-1, so the internet leg is the one to keep.
+- Fix the degraded headline, which hard-coded "Browsing & streaming fine" regardless of those tiles' own verdicts.
+
+## [1.10.3] - 2026-10-06
+
+### Fixed
+
+- Prevent false P1/P2 internet-outage diagnoses from healthy focused pings, a single failed public-IP metadata service, or a failed monitor web probe when independent TCP traffic succeeds. Preserve measured true outages and captive-portal precedence.
+- Attribute DNS fallback only after the configured secondary resolver answers; a direct public-resolver answer no longer impersonates the configured fallback.
+- Run the full check's final diagnosis after the speed measurement so printed and saved capacity advice agree, while retaining the early Report card.
+- Keep unresolved monitor faults through unknown or partially measured cycles; record recovery only when that rule's own inputs were measured.
+- Judge history using recurring recorded faults and scan context: filtered gateway ICMP loss, absolute clock drift, and VPN or split-tunnel MTU policy. Keep raw measurements visible.
+- Match baselines across SSID visibility changes on the same network, and treat MTU increases as improvements rather than regressions.
+- Show current-channel Wi-Fi neighbors and the CLI's crowding verdict on the dashboard. Display skipped DNS, TCP, and bufferbloat probes as unknown instead of healthy, accept any successful TCP target as reachable, and do not invent missing latency or grades.
+- Prevent Python helper imports from writing bytecode into the signed app bundle after launch.
+
+See [the detection audit](docs/2026-10-06-detection-audit.md) for each of the 13 corrected cases and their regression coverage.
+
+## [1.10.2] - 2026-10-05
+
+### Changes
+
+- perf(cli): eliminate subprocess forks across monitor, ping, public reach, and WAN probes via pure Bash regex parsing.
+- perf(cli): stream suitability reporting directly into a single Python pass, eliminating intermediate process spawning and subshell buffering.
+- perf(gui): precompute route warning resolution in `HomeView` and memoize hydrated run results in coordinator, eliminating redundant per-frame recalculations.
+- perf(gui): optimize `AlertEngine.activeSorted` with fast-paths and pre-ranked mapping, and use sequence `.min()` in place of array sorting for rule attributions.
+- perf(helpers): speed up timestamp parsing via `datetime.fromisoformat` and reduce memory footprint in history records using SHA-256 digests.
+- fix(helpers): enforce explicit UTF-8 encoding across baseline, history, and summary JSONL file loaders.
+
+## [1.10.1] - 2026-09-30
+
+### Changes
+
+- fix: optimize monitor sample parsing, chart rendering, and fix wifi telemetry crash
+
+## [1.10.0] - 2026-09-28
+
+### Added
+- **Overview Dashboard Visual Redesign**: Overhauled the Overview tab layout into an explicit 2-column side-by-side dashboard:
+  - **Upper Row**: Live Ping Chart, Findings & Next Steps, and Recent Activity in the left column paired side-by-side with the comprehensive Check Details & Evidence Table on the right.
+  - **Check Details & Evidence Table**: Full 15-check row telemetry list (Jitter, Packet Loss, Bufferbloat, MTU, Router Gateway, Local DNS, Internet DNS, Multi-CDN, Captive Portal, etc.) with explicit status badges, descriptions, and usual medians.
+  - **Lower Row**: Network Details 2×5 grid (SSID, BSSID, Channel, Interface, Gateway, DNS, Public IP, IPv6, Security, Band) side-by-side with Technical Detail & Telemetry 2×5 grid and quick action links (*Configure Interface…*, *View Raw JSON*, *Copy Redacted Report*, *Save Markdown…*).
+  - **Hero & Suitability Strip**: Clean hero card with right-aligned status pill badge (*All systems nominal*) and restructured 5 suitability cards (*Calls, Streaming, Gaming, VPN / Remote, Browsing*) with multi-line metrics to eliminate text truncation (`...`).
+
+### Improved
+- **Networks Tab Header & History Controls**: Separated network detail header into two distinct rows to prevent SSID title squeezing on narrow views, and hid internal picker labels in the check history bar to prevent vertical wrapping.
+- **Trends Scope Window**: Converted history window selector buttons to compact labels (`24h`, `7d`, `30d`, `All`) and widened the picker frame to prevent button text overlap.
+- **Live Monitoring Headline**: Cleaned up the live connection card headline to display `"All good — watching"` during nominal operation.
+
+## [1.9.0] - 2026-09-27
+
+### Added
+- **Speed Test Isolation & Custom Visual Progress Bar**: The "Test Speed" buttons on the dashboard and network details panel now run a dedicated, isolated speed test (`--speed-only`) instead of kicking off an entire 27-phase full diagnostic check. Added an interactive, real-time speed progress bar with stage-specific gradient animations, live throughput updates, and cancel controls directly inside the dashboard's "Throughput & Speed" card.
+
+### Fixed
+- **Dashboard Culprit Tone**: Fixed route path node styling so that non-critical warnings and service-level degradations tint the culprit node in amber rather than alarmist critical red. Only severe critical issues (loss ≥10%, link down, full outage) trigger red culprit styling.
+- **Route Node Issue Explanations**: Display specific issue descriptions (e.g. latency, jitter, or degraded headline) directly beneath the Router and Internet nodes on the Dashboard when warned, avoiding ambiguity when packet loss is 0%.
+- **Network Detail Card Loss Formatting**: Formatted live comparison loss chip with `LossFormatter.formatPct` so sub-1% loss values display with decimals instead of truncating to `0%`.
+- **Dashboard & Menu Bar Parity**:
+  - Hop 1 ("This Mac" / Local Link) on the Dashboard now mirrors the Menu Bar with dynamic Wi-Fi/Wired icons, Wi-Fi lag warning states (`"Good (laggy)"`), Mac/Wi-Fi culprit attribution, amber connection lines during Wi-Fi lag, and evaluation of catalog Wi-Fi diagnostic rules (`W1`-`W6`, `AWDL-1`).
+  - Menu Bar router node now explains jitter (`±X ms jitter`) and latency (`X ms latency`) alongside packet loss on warnings.
+  - Dashboard speed card now reflects historical speed test data when active snapshot is absent and displays `"· before VPN"` context.
+  - Outage ping display on Dashboard route nodes shows `"no reply"` when loss reaches 100% and suppresses the `"ms"` suffix for non-numeric statuses (`"no reply"`, `"TCP ok"`, `"—"`).
+  - Dashboard healthy status hero banner displays the dynamic quiet line (`"Nothing has changed in Xm on NetworkName"`).
+  - Internet node detail checks for gateway jitter dominance before attributing jitter to broadband.
+- **Dashboard Latency Test Fast-Tier Sampling & Live Reactivity**: Fixed the dashboard ping chart's internet series which was inadvertently filtering for medium-tier (60s) samples, restoring fast-tier sampling so both router and internet pings capture every 2-second burst sample in real time. Added active testing feedback with an animated progress spinner, a countdown/until notice, styled active button states, and automatically switched the chart window to 15m when starting the test.
+
+## [1.8.4] - 2026-09-26
+
+### Fixed
+- **Sub-1% Packet Loss Formatting**: Display one decimal place for packet loss below 1% (e.g. `0.3% packet loss`) across the menu dropdown, status subtitles, experience cards, and dashboard vitals, instead of truncating/rounding to `0%`.
+- **False 0% Packet Loss on Warning**: Prevent internet hop node from displaying `"0% packet loss"` in amber/red warning styling when warned due to high latency, jitter, or application degradation; now accurately shows the contributing factor (e.g. latency/jitter or connection status).
+- **Effective Gateway Loss Clamping**: Fixed downstream validation in `SuitabilityEngine` to use `min(gwLoss, inetLoss)` instead of unconditionally overwriting router loss with internet loss, preventing false attribution of upstream packet loss to local Wi-Fi.
+
+## [1.8.3] - 2026-09-26
+
+### Changes
+
+- fix: resolve false positive Wi-Fi laggy flag and restore internet hop culprit attribution
+
+## [1.8.2] - 2026-09-26
+
+### Changes
+
+- docs: update CHANGELOG.md for 1.8.1 and fix VERSION env in release workflow
+
+## [1.8.1] - 2026-09-26
+
+### Fixed — False Flag Alarm Eliminations
+- **Router ICMP Rate Limiting**: Added downstream validation across `HopwatchCoordinator`, `MonitorSample`, and `SuitabilityEngine`. When internet loss is clean (< 2%), isolated packet loss to the local gateway is recognized as benign router control-plane rate limiting and suppressed from sounding false alarms or degrading call/gaming suitability.
+- **Double NAT & CGNAT (`NAT-1`, `NAT-1b`)**: Removed false gaming degradation; Double NAT and ISP-side CGNAT no longer penalize outbound gaming suitability. Updated diagnostic advice to clarify that Double NAT only affects inbound peer hosting.
+- **Secondary DNS Silent Fallback (`D5`, `V6-2`)**: Removed false calls and streaming degradations. Delayed DNS fallback only impacts initial page navigation (`browsing`).
+- **AirDrop Latency Spikes (`AWDL-1`)**: Refined attribution headline to `"AirDrop Latency Spikes"` and culprit badge to `"Culprit: macOS AirDrop"`, clarifying that Wi-Fi hardware and signal are healthy. Removed calls degradation while preserving accurate gaming spike notices.
+- **iCloud Private Relay (`PR-1`)**: Removed false degradations on calls, gaming, and VPN; architectural privacy routing for Safari and Mail is properly treated as neutral diagnostic info.
+
+
+## [1.8.0] - 2026-09-25
+
+### Changes
+
+- feat: integrate Sentry crash reporting with PII scrubbing and privacy controls
+
+## [1.7.5] - 2026-09-25
+
+### Changes
+
+- fix: resolve crash in live ping chart and improve location state refresh
+
+## [1.7.4] - 2026-09-25
+
+### Changes
+
+- fix: resolve shellcheck warning, desync reporting, and optimize date and series operations
+
+## [1.7.3] - 2026-09-25
+
+### Changes
+
+- fix: tune packet loss sensitivity thresholds, add monitor rest intervals, and router admin reachability
+
+## [1.7.2] - 2026-09-23
+
+### Fixed
+
+- **Browser Desynchronization Alerting (`BR-1`)**: Added `browser-desync` alert definition (`AlertDefinition`) in GUI, enabling instant alert banners, stage resolver attribution, and macOS notifications when a Chromium browser silently updates in the background.
+- **Root Cause Determination in `build_json` (`lib/output.sh`)**: Prevented `build_json` from clobbering `MOST_LIKELY_ROOT_CAUSE` and ensured `BR-1` root cause takes priority over advisory warnings like weak Wi-Fi (`W1`) or crowded channels (`WS-1`).
+- **3-Hop Attribution Wi-Fi Health Classification (`HopAttributionResolver.swift`)**: Moved `W1` from critical to warning rules, and prioritized `BR-1` for Mac app attribution (`"Culprit: Browser App"`) whenever there is no total physical link outage.
+- **Continuous Background Monitoring (`lib/monitor.sh`, `rules_catalog.py`)**: Added `_mon_probe_browser` to the medium monitoring tier so background update desyncs are detected live without requiring a manual full scan.
+
+## [1.7.1] - 2026-09-23
+
+### Changes
+
+- docs: update screenshots and README previews with latest menu and dashboard UI
+
+## [1.7.0] - 2026-09-21
+
+### Changes
+
+- feat: activity-first degraded reporting and high latency status
+
+## [1.6.0] - 2026-09-21
+
+### Changes
+
+- feat: add graded evidence pills, elevate speed & reliability vitals, and unfold technical panel
+
+## [1.5.0] - 2026-09-21
+
+### Added
+
+- **Visible App Version Publishing**: Prominently displays the active app version (`v1.5.0`) in both the status dropdown menu (header and footer) and the main dashboard (sidebar brand header and footer status bar).
+- **Wi-Fi Roaming & Handover Detection**: Integrated access point handoff recognition across both live monitoring and diagnostic attribution. Transient gateway drops during wireless roaming are badged as `"Notice: Wi-Fi Roamed"` with reassuring copy, suppressing false router alarms over the 100-second rolling loss window and distinguishing physical roaming from chronic upstream ISP degradation.
+- **Suitability Engine & Experience Grid**: Added 3-column real-time experience breakdown (Voice & Video Calls, Online Gaming, Media Streaming) with calibrated latency, jitter, packet loss, and MTU evaluation.
+
+### Changed
+
+- **Calibrated Packet Loss Rolling Window**: Increased `MONITOR_LOSS_WINDOW_PROBES` from 5 to 10 in `lib/thresholds.sh`, accumulating a statistically robust sample denominator (100 packets for Gateway, 200 packets for Internet) spanning ~100 seconds.
+- **Filtered Warm-up Quantization Spikes**: Suppressed single-drop quantization spikes in `lib/monitor.sh` during monitor warm-up ($S < 40$) so an isolated dropped packet on an initial probe does not calculate as 5% or 10% loss.
+- **Calibrated Connection Stability Thresholds**: In `ConnectionStability`, loss $\le 1.0\%$ remains Optimal (green); minor loss ($1.0\% < \text{loss} \le 4.0\%$) evaluates as Variable (yellow); only sustained loss $> 4.0\%$ evaluates as Unstable (red).
+- **Calibrated Calls & Gaming Suitability**: In `SuitabilityEngine`, Voice & Video Calls degrades to "May cut out" at $\ge 3.0\%$ loss (up from $1.5\%$) and "Frequent cutouts" at $\ge 8.0\%$ loss (up from $5.0\%$). Gaming loss threshold calibrated to $\ge 2.0\%$ for degraded.
+- **Calibrated Dropdown & Dashboard Node Warnings**: In `DropdownView` and `HomeView`, router and internet hop lines only turn warning amber at $\ge 3.0\%$ packet loss or on active diagnosis rules. Incidental loss $< 1.0\%$ is cleanly presented as 0% packet loss.
+
+## [1.4.2] - 2026-09-19
+
+### Fixed
+
+- Prevent false "ISP Outage" and 100% packet loss warnings on ICMP-filtered networks (cafes, hotels, guest Wi-Fi) when TCP/HTTP connectivity is intact.
+- Corrected dropdown router latency reporting displaying "n/a" when only internet ICMP was filtered.
+- Unified `LiveView` stability calculation with `HopwatchCoordinator.currentStability`.
+- Surfaced actionable technical evidence directly beneath the culprit card in `HopAttributionView` via a single "Evidence & Diagnostics" drawer, eliminating nested disclosure clicks.
+- Integrated standalone speed test results into the main dashboard status card, baseline comparisons, and report measurement tables.
+- Fixed `TrendsView` metric picker sample counts to dynamically reflect the selected network rather than global totals.
+- Handled ICMP-filtered networks in menu bar `dot+ping` mode with router latency fallback and "TCP ok" status.
+
+## [1.4.1] - 2026-09-18
+
+### Changes
+
+- fix: sync dashboard and menu status, dismiss invalid resolutions, and update status dot on degradation
+
+## [1.4.0] - 2026-09-18
+
+### Changes
+
+- feat(gui): add dock icon toggle, dynamic window activation, and streamline dropdown menu
+- fix(diagnosis): prioritize actionable browser desync root cause over channel crowding
+- feat(wifi): add native CoreWLAN telemetry helper for sudo-free signal probing
+
+## [1.3.3] - 2026-09-18
+
+### Changes
+
+- refactor(cli): remove netdiag legacy symlink and standardize on hopwatch
+
+## [1.3.2] - 2026-09-18
+
+### Changes
+
+- refactor(app): migrate bundle identifier to com.godigi.hopwatch and deep-link notification settings
+
+## [1.3.1] - 2026-09-17
+
+### Changes
+
+- fix(updater): guarantee atomic release assets, updater safety gates, and resilient installer
+
+## [1.3.0] - 2026-09-17
+
+### Changes
+
+- feat: add official Hopwatch macOS app icon and branding assets
+- docs: organize legacy superpowers design and plan archives
+- feat: add llms.txt, citation metadata, and AI-optimized query documentation
+
+## [1.2.4] - 2026-09-17
+
+### Changes
+
+- perf: accelerate telemetry parsing, memoize history networks, and optimize view render loops
+
+## [1.2.3] - 2026-09-17
+
+### Changes
+
+- fix: resolve watcher service detection, test harness paths, and bump regex
+- chore: elevate GitHub repository presentation, community templates, and README visuals
+
+## [1.2.2] - 2026-09-16
+
+### Changed — Rebranded Project to Hopwatch
+- **App & CLI Identity**: Rebranded project from `netdiag` to `Hopwatch` (`hopwatch` CLI and `Hopwatch.app` menu bar companion), preserving backwards-compatible `netdiag` symlinks and legacy data paths.
+- **Permissions**: Handled denied notification states cleanly without redundant prompts.
+
+## [1.2.1] - 2026-09-16
+
+### Fixed — Packaging & CI Automation
+- **Release Packaging**: Guarded GUI DMG creation to execute strictly on Darwin runners with Swift installed.
+
+## [1.2.0] - 2026-09-16
+
+### Added — Background Browser Update Desynchronization Diagnostic (`BR-1`)
+
+- **Silent Update Crash Detection (`lib/browser.sh`, `helpers/browser_check.py`)**: When Chromium-based browsers (Google Chrome, Brave, Arc, Edge, Chromium) silently auto-update in the background on macOS, the updater replaces the app bundle on disk and deletes the active framework version directory from `Versions/` to reclaim space. While open tabs remain alive in memory, opening any new tab or navigating across sites attempts to spawn a new renderer helper from disk; because the old version files are gone, process spawning fails (`ENOENT`) and the tab crashes immediately with an unhappy face ("Aw, Snap!"). Chrome's internal `UpgradeDetector` often does not display an update prompt during this window. Netdiag now catches this condition in `< 30ms` with zero elevated privileges required.
+- **Cautious, Plain-English Diagnosis (`lib/diagnosis.sh`)**: Added rule `BR-1` (*"Browser may not work correctly after background update"*), warning users that their browser may not be working correctly due to background updates and explaining that quitting and relaunching the browser will complete the update and restore normal browsing.
+- **Activity Suitability Projection (`helpers/suitability.py`, `helpers/rules_catalog.py`)**: Rule `BR-1` projects onto the report card's "What should work here" section, accurately marking `Ordinary browsing: won't hold up` so users do not mistakenly assume their Wi-Fi, router, or ISP is at fault when the physical network is otherwise healthy.
+- **Structured JSON Export (`helpers/emit_json.py`)**: Emits a `browser_health` object containing `desync`, `app`, `running_version`, `disk_version`, and `pid` in `--json` mode.
+- **Defensive Safeguards Against False Alarms**: Implemented 6-layer verification including process user-ownership filtering (`uid == os.getuid()`), bundle existence checks, defunct process rejection, strict numeric version validation, physical directory absence verification on disk, and guaranteed bypass when running and disk versions match.
+
+## [1.1.1] - 2026-09-13
+
+### Fixed — Connection Stability Thresholds
+
+- **Tuned Jitter and Latency Thresholds (`MonitorSeries`)**: Adjusted connection stability thresholds for realistic internet jitter and latency variations, avoiding false-positive instability ratings under normal packet delivery.
+
+## [1.1.0] - 2026-09-13
+
+### Fixed — CI & Release Automation
+
+- **Release Bumper Script (`scripts/bump.py`)**: Fixed `re.sub` replacement syntax when updating release templates to prevent regex escape parsing errors.
+- **Git Pre-push Hook (`scripts/pre-push`)**: Improved oneline git log regex parsing to reliably handle commit hashes across git versions.
+
+## [1.0.0] - 2026-09-13
+
+### Fixed — Diagnostic Accuracy, Hop Attribution, & CoreWLAN Telemetry
+
+- **Hop Attribution Channel Contention Disambiguation (`HopAttributionResolver`)**: Rule `WS-1` (crowded Wi-Fi channel) now generates an `Advisory: Crowded Channel` badge and `"Wi-Fi Channel Crowded"` headline with targeted channel guidance, rather than falsely declaring the link degraded or claiming packet drops when packet loss is 0.0%. Fallback reassurance only mentions dropping packets when gateway loss is observed.
+- **Differentiated Upstream ISP Badges**: Differentiated total outages (`>= 95%` loss or unreachable) badged as `Culprit: ISP Outage` from partial packet loss badged as `Culprit: Upstream Packet Loss` (e.g. 12% loss).
+- **CoreWLAN Telemetry Fallback (`RunReportView`)**: When the CLI scan lacks sudo permissions for `wdutil`, the GUI gracefully falls back to CoreWLAN live RSSI (`Good · -56 dBm (live)`) instead of stating "not recorded (needs sudo)" right below the live chip.
+- **Signal Health Decoupling**: Removed `WS-1` from the health check rules of the Wi-Fi signal row so channel contention does not color the RSSI row yellow.
+- **Activity Suitability Refinement (`rules_catalog.py`)**: Removed streaming from `WS-1` degradation; passive channel crowding no longer marks buffered streaming as "Rough".
+- **Dropdown Header Truncation (`DropdownView`)**: Prevented stage title and headline text truncation in the 360pt menu bar popover using flexible wrapping and minimum scale factors.
+
+### Added — Remediation Feedback & Resolution Banner (Closed-Loop Confirmation) [TASK-027]
+
+- **Closed-Loop Resolution Stage (`StageResolver`)**: Added `.resolved(ResolutionSnapshot)` stage to the dropdown stage resolver, providing immediate, uplifting confirmation when user actions (moving closer to Wi-Fi, switching bands, captive portal login) or network recoveries succeed.
+- **Ephemeral Resolution Engine (`NetdiagCoordinator`)**: Detects transitions from degraded to healthy states and synthesizes measured metric improvements:
+  - *Wi-Fi Band Upgrade*: Confirms movement from 2.4 GHz to 5/6 GHz channels with negotiated rate gains.
+  - *Wi-Fi Signal Recovery*: Reports quantitative RSSI increases (e.g. jumping from -78 dBm to -46 dBm Excellent).
+  - *Network Stabilized*: Confirms packet loss elimination (0% loss) alongside measured ping latency.
+  - *Captive Portal Online*: Confirms web authentication success and active internet connectivity.
+- **Resolution Banner Card (`DropdownView`)**: Renders an uplifting green banner in the dropdown stage card with confirmation iconography, plain-English summary of measured improvement, and an inline dismiss button (fades smoothly to idle after 45 seconds).
+- **Test Coverage**: Added test suite `ResolutionFeedbackTests.swift`, verification checks in `VerifyMode.swift`, and offscreen snapshot `stage-resolved.png`.
+
+### Added — Live Jitter Tracking & Real-Time Connection Stability Badge [TASK-026]
+
+- **Burst Probe Jitter Extraction (`lib/monitor.sh`)**: Extracts instantaneous standard deviation jitter directly from the existing probe bursts (`ping_parse_summary` stddev) for both gateway and internet targets without sending any additional probe packets.
+- **Structured Jitter Streaming (`helpers/monitor_sample.py`)**: Exports `rtt_jitter_ms` on gateway and internet objects alongside top-level `jitter_ms` to the monitor JSON feed.
+- **Live Stability Evaluation (`ConnectionStability`)**: Implemented RFC 3550 exponential moving jitter smoothing (`MonitorSeries.movingJitter`) and an instantaneous connection stability engine categorizing connection readiness into Optimal (🟢), Variable (🟡), and Unstable (🔴) based on RTT, jitter, and packet loss.
+- **Zero-Click Stability Badge (`DropdownView`)**: Embeds a real-time stability badge under the latency heartbeat strip with status glyphs, tooltips, and live jitter readouts for instant visibility into gaming, video call, and streaming readiness.
+- **Test Coverage**: Added test assertions in `tests/test_monitor.bats`, Swift testing suite in `ConnectionStabilityTests.swift`, and `--verify` check in `VerifyMode.swift`.
+
+### Added — Smart, Rate-Limited macOS System Notifications on Network Degradation [TASK-025]
+
+- **Native Notification Manager (`NotificationManager`)**: Emits standard macOS banner notifications via `UNUserNotificationCenter` for critical network state transitions (e.g. healthy to complete outage or high packet loss).
+- **Anti-Spam Rate Limiting & Cooldown**: Enforces a strict 30-minute cooldown timer per ongoing fault category to eliminate notification fatigue during ongoing network instability.
+- **Closed-Loop Restoration Alert**: Emits an immediate, reassuring notification (*"Wi-Fi Restored: Reconnected to HomeNet 5G (14ms latency)"*) the moment the connection recovers, and automatically dismisses stale degradation banners from Notification Center.
+- **User Preferences**: Added dedicated controls in `SettingsView` allowing users to toggle system notifications on/off and select alert sensitivity between all degradation and complete outages only.
+
+### Added — Network Memory & Historical Performance Card for Known Networks [TASK-024]
+
+- **Network Memory Synthesis (`NetworkHistoryStore`)**: Synthesizes a persistent historical memory profile for each known network from recorded checks and runs. Tracks typical baseline metrics (median gateway/internet latency, typical jitter, typical and peak download/upload speeds, uptime/incident count) and computes an overall network reliability percentage and grade (Excellent, Good, Fair, Degraded).
+- **Network Detail Card (`NetworkDetailCard`)**: Renders a dedicated memory card displaying throughput, latency/jitter, reliability rating chips, and an automated "Today vs Typical for this network" comparison panel that highlights latency deltas (e.g. "4 ms faster than typical"), packet loss status, and download speed percentages.
+- **Integrated into GUI Views**: Embedded in `NetworksView` (replacing the basic stats row with the comprehensive memory card and displaying summary rating chips in the sidebar) and in `HomeView` when returning to known networks with 2+ checks.
+
+### Added — Instant 1-Line App Installer & Seamless macOS Setup (`install-app.sh`)
+
+- **1-Line Mac App Installer (`install-app.sh`)**: Zero-friction installer `curl -fsSL https://raw.githubusercontent.com/godigi/netdiag/main/install-app.sh | bash` that queries GitHub Releases, downloads the latest `Netdiag.dmg`, installs `Netdiag.app` to `/Applications`, links the `netdiag` CLI to PATH, completely strips Gatekeeper quarantine attributes, and launches the app in seconds.
+- **Unified CLI `install.sh --app`**: Enhanced `install.sh` with an `--app` flag to seamlessly install the native menu bar app and CLI in a single step.
+- **Visual ASCII Architecture & Telemetry Preview**: Added a high-fidelity ASCII representation of the live menu bar item (`● 18ms`) and hop attribution chain (`Mac ➔ Wi-Fi ➔ Router ➔ ISP`) directly to the top of `README.md`.
+- **Streamlined Quick Install Options**: Reorganized `README.md` into 4 frictionless options with copy-paste commands, including Homebrew tap commands and a copyable 1-line Gatekeeper fix (`xattr -cr /Applications/Netdiag.app`).
+
+### Improved — In-App Auto-Updater & Safe Atomic Installation
+
+- **Prominent In-App Update Banner (`DropdownView`)**: Replaced the subtle footer link with a dedicated, high-visibility update card that highlights new versions, previews release notes, provides a one-click `Update & Relaunch` action, and renders a live download progress bar.
+- **Real-Time Network Download Progress (`FileDownloader`)**: Integrated an `URLSessionDownloadDelegate` that streams byte-level download progress directly to the UI rather than jumping between arbitrary percentage steps.
+- **Dynamic Target Path & Safe Atomic Swap**: Upgraded `UpdateChecker` to dynamically detect the running app's location (`targetAppURL`), stage updates to a temporary directory, create a backup of the existing version, atomically swap binaries, and automatically roll back if replacement fails.
+- **Comprehensive Gatekeeper Quarantine Clearing**: Recursively clears all Apple quarantine and provenance attributes (`xattr -cr`) on the staged bundle to guarantee flawless relaunch on macOS 14 Sonoma and macOS 15 Sequoia.
+- **Unit Test Coverage (`UpdateCheckerTests`)**: Added a full test suite verifying `SemanticVersion` comparison, release JSON decoding, release note extraction, and asset archive filtering.
+
+### Changed — aligned diagnosis remediation with "Do No Harm" standard [D1, D2, D3, D4, V6-2, B1]
+
+A core netdiag tenet is **"Do No Harm"**: diagnostic advice must never recommend permanent, hard-coded client-side system configuration changes to solve transient network symptoms:
+
+- **DNS Remediation Safety (`D1`, `D2`, `D3`, `D4`)**: Eliminated advice telling users to manually hardcode public DNS (`1.1.1.1` or `8.8.8.8`) into macOS `System Settings → Network → Details → DNS`. Hardcoded adapter DNS permanently breaks captive portal logins at hotels and airports (which depend on local router DNS interception) and breaks internal domain resolution (`.local`, mDNS, corporate split DNS). Remediation now focuses on non-destructive actions: restarting the router to refresh its DNS cache, toggling Wi-Fi, or enabling application-level Encrypted DNS (DNS-over-HTTPS) in browsers.
+- **IPv6 Preservation (`V6-2`)**: Removed harmful recommendations to disable IPv6 or set "Link-local Only" in macOS network settings when an IPv6 DNS server fails to respond. Disabling IPv6 permanently breaks connectivity to modern IPv6-only networks. Remediation now targets the router: restarting the router to re-acquire its IPv6 prefix lease and refresh its advertised DNS, with explicit reassurance that no settings changes are needed on the Mac.
+- **Bufferbloat Traffic Hygiene (`B1`)**: Replaced hardware-replacement recommendations and alarmist wording with practical traffic hygiene guidance: pausing heavy background downloads during video calls or configuring Smart Queue Management (SQM) / QoS in router settings.
+
+### Improved — anti-false-positive guardrails for MTU, DHCP, and bufferbloat [M1, DH-1, B1, B2]
+
+Diagnostic accuracy depends on suppressing false alarms on functioning networks and keeping remediation advice proportional and non-destructive:
+
+- **VPN-Aware Path MTU (`M1`)**: VPN tunnels naturally add 60–80 bytes of encryption and encapsulation overhead (IPsec/WireGuard/OpenVPN), causing `mtu.effective` to fall between 1380 and 1420 bytes. Previously, this fired `M1` ("critical/warn: path MTU below 1500"), causing spurious alerts for corporate and remote VPN users. `M1` now suppresses warnings for standard tunnel MTUs (1280–1499 bytes) when an active VPN or split tunnel is present (`VPN_ACTIVE=1` or `PATH_SPLIT_TUNNEL=1`), only firing `warn` if the MTU drops below the IPv6 architectural minimum of 1280 bytes.
+- **Realistic DHCP Lease Expiration (`DH-1`)**: The previous threshold fired a warning whenever a DHCP lease had less than 1 hour remaining. Because DHCP standard RFC 2131 specifies lease renewal at 50% lifetime (T1), standard 2-hour leases triggered false warnings for an entire hour every renewal cycle. The threshold is updated to 10 minutes (`THRESH_DHCP_LEASE_WARN_S=600`), accurately indicating an actual lease renewal stall while softening guidance.
+- **Proportional Bufferbloat Severity & Actionable Remediation (`B1`, `B2`)**: Connections with verified high download bandwidth ($\ge 150\text{ Mbps}$, `THRESH_BUFFERBLOAT_FAST_MBPS`) now demote Grade D/F bufferbloat from `critical` to `warn`, reflecting that ordinary tasks rarely saturate the pipe enough to induce queue bloat. Removed outdated advice instructing users to replace their router, focusing remediation exclusively on enabling Smart Queue Management (SQM) or QoS settings.
+
+### Added — suboptimal Wi-Fi band trapping detection [W6]
+
+Modern dual-band routers broadcast a unified SSID across both 2.4 GHz and 5 GHz (or 6 GHz) frequencies. When MacBooks wake from sleep or connect from afar, they often associate with the 2.4 GHz beacon. Even after moving close to the router, macOS does not aggressively roam to 5 GHz if the 2.4 GHz connection is deemed "acceptable", trapping the user on congested 2.4 GHz channels with throughput caps:
+
+- **Rule `W6` (info / warn)**: Triggers when the Mac is associated with a 2.4 GHz channel (channels 1–14) while a faster 5 GHz or 6 GHz band on the same network is available with strong signal ($\text{RSSI} \ge -65\text{ dBm}$) and an advantageous signal delta ($\le 12\text{ dBm}$ difference). Escalates to `warn` if the 2.4 GHz link transmit rate is severely restricted ($\text{Tx} \le 54\text{ Mbps}$).
+- Guides users to toggle Wi-Fi off and back on to prompt macOS to associate with the 5 GHz band.
+- Built with strict anti-false-positive guardrails: stays silent if the 5 GHz signal is weak, if the signal delta exceeds 12 dBm, or if the Mac is already connected to 5 GHz.
+- Integrated into `HopAttributionResolver` (attributes culprit to Wi-Fi with tailored reassurance), `RunReportView` (Wi-Fi signal row health check list), and diagnostic rules catalog.
+
+### Added — unresponsive primary DNS resolver & silent fallback delay detection [D5]
+
+When a router DHCP configuration or network admin assigns an unreachable primary DNS server alongside a functional secondary resolver (e.g. dead local gateway DNS proxy or dead local Pi-hole with public secondary DNS), every application-level domain lookup incurs a hidden 1–5 second timeout delay before macOS falls back to the secondary resolver. Browsing feels sluggish even though internet connectivity tests pass:
+
+- **Rule `D5` (warn)**: Triggers when the system's primary DNS resolver completely fails to respond (`DNS_PRIMARY_FAIL=1`), but one or more configured secondary fallback resolvers respond successfully (`DNS_FALLBACK_OK=1`). Suppresses generic flaky DNS warning `D1` to provide actionable guidance pinpointing the unresponsive primary resolver.
+- Detects multi-resolver configurations via `SYS_RES_ALL` in `lib/dns.sh` and benchmarks primary vs secondary resolvers independently.
+- Integrated into `HopAttributionResolver` (attributes culprit to ISP/DNS with reassuring guidance), `RunReportView` (Name lookups row health evaluation), and diagnostic rules catalog.
+
+### Added — Apple Wireless Direct Link (AirDrop/Sidecar) latency spike detection [AWDL-1]
+
+macOS uses Apple Wireless Direct Link (`awdl0`) for peer-to-peer ecosystem features (AirDrop, AirPlay, Sidecar, Universal Control). The Mac's single Wi-Fi radio periodically leaves the current access point channel to scan social channels (channels 44 and 149) for nearby Apple devices. During these discovery hops, network packets stall, causing periodic 200–500 ms latency spikes and micro-stutter in Zoom, Google Meet, Teams, and online gaming while overall packet loss remains 0% and base ping is low:
+
+- **Rule `AWDL-1` (warn)**: Triggers when `awdl0` is active on Wi-Fi and ping probes to the local gateway exhibit pronounced latency spikes ($\text{RTT}_{\max} \ge 200\text{ ms}$ or jitter $\ge 40\text{ ms}$) despite clean packet delivery ($\text{loss} < 10\%$) and fast baseline ping ($\text{RTT}_{\text{avg}} \le 35\text{ ms}$).
+- Guides users to set AirDrop receiving to "Off" in Control Center or disconnect Sidecar when needing jitter-free video calls or low-latency gaming.
+- Integrated into `HopAttributionResolver` (attributes culprit to Wi-Fi with tailored advice), `RunReportView` (Wi-Fi signal row health evaluation), and diagnostic rules catalog.
+
+### Added — effective Wi-Fi health and asymmetric link / rate-collapse detection [W4, W5]
+
+A strong Wi-Fi signal icon (e.g. -50 dBm RSSI) does not guarantee a healthy wireless link. Two common failure modes were previously misattributed or undetected:
+
+- **Wi-Fi Transmit Rate Collapse (`W4`)**: Despite strong signal reception (RSSI $\ge -65$ dBm), severe interference or physical obstructions can collapse the negotiated physical transmit rate down to 54 Mbps or lower (802.11a/g fallback). Rule `W4` (warn) alerts to this collapse, guiding users to move closer or switch to 5 GHz / 6 GHz rather than assuming link health.
+- **Asymmetric Wi-Fi Link & Return Path Loss (`W5`)**: High-powered access points transmit up to +30 dBm EIRP while MacBooks transmit around +15 dBm. Through obstacles, the Mac receives a strong signal from the router, but the router fails to decode the Mac's return packets, causing high gateway packet loss. Previously, this fired `G2` ("Local router packet loss"), falsely advising users to restart their router. Rule `W5` (warn) detects this return-path asymmetry, replacing `G2` and accurately pointing to Wi-Fi attenuation.
+- Integrated into `HopAttributionResolver` (culprit attribution to Wi-Fi with tailored reassurance), `RunReportView` (Wi-Fi signal row health aggregation), and rules catalog documentation.
+
+### Added — visual hop attribution chain and culprit badge [GUI]
+
+When users encounter connection issues, the first question they ask is: "Is it my Wi-Fi, my router, or my internet provider?"
+
+- Introduced `HopAttributionResolver` pure resolution engine, partitioning the network path into 3 segments (Wi-Fi / Local Link, Local Router / Gateway, Internet & ISP) and determining the primary Culprit (`none`, `wifi`, `router`, `isp`) along with plain-English reassurance.
+- Added `HopAttributionView` at the top of `RunReportView`: an interactive horizontal node chain (`[Mac] ──(Wi-Fi)──► [Router] ──(Broadband)──► [Internet]`) with visual state icons, a prominent Culprit Badge, and reassuring root-cause guidance.
+- Integrated `HopAttributionCompactView` into `DropdownView` during `watching` and `alerted` stages for at-a-glance hop attribution directly in the menu bar.
+- Tested across Wi-Fi degradation (`G1`), router packet loss (`G2`), upstream ISP loss (`P1`/`P2`), local bufferbloat (`B1`) vs upstream bufferbloat (`B2`), and all-clear states.
+
+
+### Added — plain-English metric tooltips and MetricGlossary [GUI]
+
+Technical metrics like `Bufferbloat (+184 ms)`, `Packet size (MTU) 1492 bytes`, `UPnP enabled`, `RSSI -76 dBm`, and `SNR 21 dB` can be confusing to non-network engineers.
+
+- Introduced `MetricGlossary` providing concise explanations and real-world impact descriptions across all diagnostic rows (Bufferbloat, MTU, RSSI, SNR, IPv6, VPN, UPnP, Clock drift, DNS latency, Packet loss, Router, Internet, Speed, Local network, Availability).
+- Added native macOS `.help(...)` tooltips across metric labels in `RunReportView` and `DropdownView`.
+- Enriched `HelpHint` question-mark popovers to fall back seamlessly to `MetricGlossary` for offline or uncataloged metrics.
+
+### Changed — dropdown status menu redesign with unified telemetry [GUI]
+
+Redesigned `DropdownView` into a cohesive, modern macOS Control Center-style layout where 100% of information remains immediately visible on launch with zero clicks or disclosures:
+
+- **Status Header & Integrated Action**: Integrated the "Run Check" action button directly into the status card, removing the awkward floating button separating live telemetry.
+- **Performance & Live Heartbeat (Unified Card)**: Fuses live internet ping, packet loss, and the heartbeat sparkline into one cohesive card paired beside live throughput speeds (Down/Up Mbps and test age).
+- **Connection Path & Context Strip**: A 4-item pill strip displaying local first hop (Router latency, Wi-Fi signal) and network identity (VPN state, Country/Public IP).
+- **Recent Activity Stream**: Formats 24-hour folded episodes with aligned relative timestamps, status glyphs, and clean summary text.
+- **Streamlined Utility Footer**: Clean bottom bar for Dashboard, Pause/Resume, Diagnostics sharing, Settings, and Quit.
+
+### Added — sticky access point detection on multi-AP Wi-Fi networks [W3]
+
+In multi-AP environments (mesh networks, campuses, hotels), macOS frequently
+stays associated with a distant, weak access point (e.g. -78 dBm) even though
+a much stronger AP (e.g. -50 dBm) broadcasting the same SSID is nearby.
+
+Rule `W3` (info) detects this "sticky AP" state:
+- Scrapes alternative BSSIDs and RSSIs from `system_profiler SPAirPortDataType`.
+- Validates that multiple APs exist on the current network (`WIFI_MULTI_AP=1`).
+- Alerts when the current signal is poor (`wifi.rssi <= -75 dBm`), a candidate
+  AP on the same SSID is strong (`wifi.candidate_rssi >= -60 dBm`), and the
+  difference is at least 15 dBm (`THRESH_WIFI_STICKY_DELTA_DBM`).
+- Advises toggling Wi-Fi off and back on to force macOS's association daemon to
+  re-evaluate and pick the stronger access point.
+
+### Added — prominent speedometer dial and live throughput gauge [GUI]
+
+During full scans, the speed test is the longest running phase (~25s). Live
+throughput was previously constrained to a tiny 11pt inline caption.
+
+`ScanProgressView` now features a prominent, animated vector speedometer dial
+(`SpeedometerDialView`) and hero throughput gauge (`SpeedometerGaugeView`):
+- Dynamic scaling across broadband tiers (up to 1,000 Mbps).
+- Directional indicator (`↓ Download` / `↑ Upload`) and live Mbps readout.
+- In-flight milestone accumulation via the fd-3 progress stream, reverting
+  gracefully once the phase completes.
+
+### Added — live ping and latency display in the menu bar [GUI]
+
+Users on voice or video calls need to know immediately if their connection is
+lagging without opening the menu or dashboard.
+
+- Added `.dotAndPing` style to `AppSettings.MenuBarStyle`, configurable from
+  `SettingsView`.
+- Renders the live rounded RTT (`● 18ms`) in a clean monospace font directly in
+  the macOS menu bar, tinting amber and red as latency spikes occur.
+
+### Added — one-click quick actions for captive portals and router admin [GUI]
+
+- **Captive Portals (`CP-1`)**: When arriving at a captive portal, macOS often
+  fails to trigger the captive assistant. The Arrival and Alert stage cards now
+  surface an explicit `[Open Login Page]` action button that opens
+  `http://captive.apple.com/hotspot-detect.html` in the default browser.
+- **Router Admin Page**: When a router or bufferbloat issue (`B1`, `G2`) is
+  detected on an owned network (`network.isMine == true`), a quick action button
+  safely navigates directly to `http://<gateway_ip>` for private RFC1918 addresses.
+
+### Added — "Share Diagnostics..." action and Support Summary export [GUI]
+
+- **Share Diagnostics**: Exports or copies a redacted diagnostic summary in
+  clean `.json` or `.md` format (via `helpers/share.py`) without leaking MACs,
+  passwords, or public IP addresses.
+- **Copy for Support**: One-click action in `RunReportView` that formats a
+  plain-English, jargon-free report designed specifically for hotel front desks,
+  Airbnb hosts, and ISP customer support.
+
+### Added — subnet crowding telemetry and device surge detection [LAN-1]
+
+- `helpers/emit_json.py` now exports `arp_active_count` under the `lan` block.
+- `RunReportView` displays active device counts in the LAN summary card.
+- `helpers/baseline.py` flags a device count surge (`LAN-1`) when the current
+  active count triples the historical median on a known private network.
+
+### Added — native "Launch at Login" support via SMAppService [GUI]
+
+- Integrated macOS 13+ `SMAppService.mainApp` in `AppSettings` and `SettingsView`,
+  allowing the menu bar app to launch automatically at login cleanly without
+  legacy background helper bundles.
+
+### Changed — unified event journaling between GUI and CLI [Track E]
+
+- `MonitorStream.spawn` passes `--journal "$HOME/net-diag/events.jsonl"`, giving
+  the GUI monitor and CLI scans a shared, single source of truth for network
+  transitions and enabling availability rules (`AV-1`/`AV-2`) during full checks.
+
+### Added — distributable DMG packaging and Homebrew Cask formula
+
+- Added `make -C gui dmg` and root `Makefile` targets to build compressed,
+  read-only DMGs (`Netdiag-<version>.dmg`) with drag-and-drop `/Applications`
+  installation.
+- Added `Casks/netdiag.rb` for automated Homebrew Cask installation.
+- Configured `.github/workflows/release.yml` to package and attach the DMG
+  artifact to GitHub Releases.
+
+### Fixed — `--events` dropped the outage that began before the window
+
+`netdiag --events=24` omitted any fault that started more than a day ago
+and ended inside the window — which is the likeliest shape of the question
+`--events` exists to answer. Asked at breakfast about a fault that began at
+23:40 and cleared at 07:02, it returned an `episodes` array with nothing in
+it.
+
+`in_window` filters the rows before `episodes()` pairs them, so the
+`rule-fired` is gone and the `rule-cleared` arrives orphaned. `close()`
+popped nothing and returned, and the episode was never appended. The raw
+row stayed in `events`, which is no help to anything reading `episodes` —
+including `lib/availability.sh`, whose AV-1 outage count therefore excluded
+every drop that straddled the window's start.
+
+An end with no beginning is still an end. An orphan clear now produces a
+resolved episode with `started: null`, `duration_s: null` and
+`start_unobserved: true` — the beginning is not invented and no duration is
+derived from one — sorted first, because the only thing known about that
+start is that it precedes every start that was seen. This is the same
+answer the GUI's `ActivityEntry.fold` gives for the same input, fixed one
+release entry above for the same reason; the two are meant to agree, and
+`ActivityEntry`'s header already claimed an orphan clear as one of the
+three cases it reproduces from `helpers/events.py`. It was the one case
+`helpers/events.py` did not actually handle.
+
+The reader still judges nothing: whether that duration — or its absence —
+is acceptable is AV-1's to say against `lib/thresholds.sh`.
+`docs/JSON-SCHEMA.md` documents the null start; `tests/test_events.bats`
+gains the window case, and the test that asserted the old behaviour ("a
+clear with no matching fire is not an episode") now asserts the new one.
+
+### Fixed — three ways the Activity timeline mis-told the history it folds [GUI]
+
+An hour-long fault could render with no duration; a fault that ran through
+midnight could print twice in one day's section; and a fault that had just
+been resolved could vanish from the dropdown entirely. All three are in
+`ActivityEntry.fold` and the two views over it, and all three come from the
+same place: the fold reproduces `helpers/events.py`'s episode pairing, and
+in these three cases it had drifted from it.
+
+**The restart discarded the span it was meant to bound.** When a rule fires
+twice with no clear between, the monitor restarted mid-fault — it emits only
+on transition, so a second `fired` means it lost its previous sample. The
+branch closed the open episode at `existing.end ?? existing.start`, and
+`end` is nil for everything in `open` by construction, so every such episode
+closed at its own start. Zero length, rejected by the one-second rendering
+floor, `totalDuration` nil — and `durationIsLowerBound` left qualifying a
+duration that no longer existed, so the `+` the branch set could never
+appear. A fault known to have held for an hour read as a bare occurrence.
+`helpers/events.py` does the opposite and is the reference: `episodes()`
+skips the second `rule-fired` and keeps the earlier start, the earliest
+moment the fault is known to have been true. `Episode` now carries a
+`lastSeen` sighting distinct from `end` — an ending is not the same fact as
+a sighting — so the span survives, reads "lasted 1h+", and stays open. The
+existing "re-fire after a restart" test never reached this branch: its clear
+closes the first episode before the second fire lands.
+
+**Two places disagreed about which day a row belongs to.** `group` keys per
+day on the episode's start; `ActivityView` bucketed its sections on
+`latest`. For an episode crossing midnight those are different days, so a
+rule firing 23:50 Monday and clearing 00:10 Tuesday, then firing again at
+09:00 Tuesday, produced two entries that both landed in Tuesday's section —
+the same sentence twice, and the one-row-per-rule-per-day promise in
+`ActivityEntry`'s own header broken. Both now use the start.
+`helpers/events.py` identifies an episode the same way, sorting on
+`started`, and `earliest` reproduces `group`'s key by construction where
+`latest` cannot: `merge` and `absorbAlerts` both move `latest` as rows
+accumulate. The bucketing moved out of the view into `ActivityEntry.byDay`,
+beside the key it has to agree with, and now sorts its sections explicitly —
+day order only followed from the fold's newest-first ordering while the
+bucket was `latest` too.
+
+**A rolling window manufactures orphans.** A `rule-cleared` with no matching
+`rule-fired` was dropped, which is a sound defence against the 500-entry
+store cap truncating history and the wrong answer for the dropdown, which
+folds `eventLog.within(hours: 24)`: any fault older than a day that ends
+today arrives with its beginning already outside the slice. So a long fault
+that had just been fixed disappeared from the panel where "it's fixed now"
+is the most useful thing to say — something the older `EventRow` timeline
+did render. An end with no beginning is still an end. It now folds to a
+zero-length episode, so the same one-second floor leaves `totalDuration` nil
+and the row states the resolution in the CLI's own words without inventing a
+duration for it; it keeps its `rule-cleared` kind and so its green check,
+while `merge` prefers a fired episode's words on a day the rule was also
+seen to fire. Rejected: folding a wider slice than the dropdown displays,
+which fixes only that surface and inflates its "LAST 24 HOURS" counts with
+same-day episodes from outside the window; and dropping orphans only when
+the store detects truncation, which is a property of the whole store rather
+than evidence about one rule, and leaves the window case unfixed.
+
+21 new `--verify` assertions cover all three, each written to fail first.
+Full parity with `helpers/events.py` is now completed across two dimensions:
+
+**Monitor restarts bound open episodes:** `NetdiagCoordinator` now writes an
+explicit `monitor-started` event when `sample.seq == 1`. When folding history,
+`ActivityEntry.fold` matches `helpers/events.py` by closing any open episodes
+as lower bounds (`+`) measured up to the restart time, rather than leaving them
+falsely ongoing.
+
+**Episode keying differentiates by network:** `NetworkEvent` now carries an
+optional `network` identifier. `ActivityEntry.fold` keys open episodes on
+`(network, ruleID)` tuples instead of rule IDs alone, ensuring that moving
+between Wi-Fi networks (or roaming between BSSIDs) while a fault is active
+does not cross-close or improperly merge episodes across network boundaries.
+
+### Fixed — a missing UPnP state counted as a measured path
+
+`measured_families()` decided whether the `path` family had been probed by
+testing `wan.upnp.state` against the literal `"unknown"` — bash's default
+from `lib/globals.sh`. When the value is `None` or `""` the comparison is
+true and the family was counted as probed. That happens on a direct
+invocation of `helpers/emit_json.py`, a mode the module's own docstring
+supports on purpose ("a direct helper invocation should expose missing
+metadata as null"), where no `NETDIAG_*` variable is set and the whole
+`wan` block comes back null.
+
+Nothing user-visible was wrong in a normal run — bash always exports the
+`"unknown"` default — but the `vpn` row would have read `good` for a run
+that probed no path at all the moment the MTU probe happened to be
+present, which is the exact lie `helpers/suitability.py`'s header names as
+its reason to exist. The check now recognises the family by the two values
+that mean it *ran* (`enabled`, `disabled`) rather than by the one spelling
+of absence bash happens to use.
+
+### Fixed — `schemas.run` still said 1 after the run document grew `suitability`
+
+`--capabilities` exists so a GUI can ask what its CLI supports instead of
+probing the output for a key. When `--json` gained a top-level
+`suitability` block, `SCHEMA_RULES_CATALOG` was bumped 4 → 5 in the same
+change and `SCHEMA_RUN` was left at 1 — so a pre-suitability build and a
+current one answered the handshake identically, and the one question the
+handshake could have answered had to be answered by probing instead.
+`helpers/capabilities.py`'s own docstring states the rule that was missed:
+bump the constant the day the run document actually grows a field.
+
+`schemas.run` is now `2`. Nothing in the app gates on it today
+(`CLICapabilities.schemas` is carried through only for the About caption,
+and `CapabilityStore.requiredVersion` compares version strings), so this
+breaks nothing and makes the entry usable the day a gate is wanted.
+`run` has no embedded number to check itself against the way the other six
+do, so its new bats test reads the run document's *shape* instead: it
+invokes `helpers/emit_json.py` standalone and fails if a build that emits
+`suitability` still answers 1. Also corrected `docs/JSON-SCHEMA.md`'s
+worked example, which still showed `rules_catalog: 4`, and a Swift doc
+comment that listed six `schemas` keys when there have been seven since
+`signal_scale` shipped.
+
+### Fixed — the Trends outlier clamp never engaged on a real chart [GUI]
+
+`TrendsView.Clamp` exists so that one 2.8-second reading cannot flatten a
+latency chart into a line on the floor. It did that only for series of more
+than 100 samples, which Trends almost never draws: a day of runs on one
+network is dozens of points.
+
+The tail was located by the *index* `floor(n * 0.99)`, and for every n from
+10 to 100 that index is `n - 1` — so "the 99th percentile" was the maximum
+itself, the extreme-tail guard reduced to `maximum > maximum * 2`, false for
+all positive data, and the function returned nil. The clamp's own doc
+comment's worked example — 37 readings in a 2–8 ms band plus one 2800 ms
+spike — was one of the cases it silently declined to help.
+
+The tail is now set aside by *count* (the top 1% of samples, floored at one
+reading) and the ceiling is taken from the highest reading below it. Below
+100 samples there is no 1% and no element strictly under the 99th
+percentile, so a percentile index is the wrong instrument at that size; the
+floor of one reading is the honest reading of the same intent. Its cost is
+that two *equal* extremes in a short series count as spread rather than as a
+tail, which is the right call at 5% of the data. The fix also closes the
+same failure at large n, where 24 equal spikes in 2371 samples put the index
+inside the tail. 28 new `--verify` assertions walk n = 10, 38, 100, 101 and
+2371, both the clamping and the left-alone cases.
+
+## [0.14.0] - 2026-09-01
+
+### Fixed — a new network could go unchecked forever, and Home showed somebody else's report [GUI]
+
+Joining a brand-new network showed no check running, none queued, and no
+sign one had ever run — while a Wi-Fi warning about "the last hour" sat at
+the top of the window, describing an hour spent on a different network in a
+different building. Three separate defects, each verified against a live
+install's stored preferences.
+
+**The arrival check could decline itself permanently.** `handleSample`
+advanced its `lastNetworkID` guard *before* attempting the scan, and
+`launch()` silently declines while another scan is in flight. The code's own
+comment promised "the next sighting retries", but there is no next sighting
+while you stay on the network: every later sample returned at the guard.
+Leaving and rejoining was the only way out. The evidence was a network named
+in `networkNames` and absent from `seenNetworks` — a pair only reachable
+through that path. Arrival is now a persisted per-network state
+(`unchecked → checking → checked | declined`) driven on every sample, with a
+30-second doubling backoff capped at five minutes. A decline for policy is
+terminal; a decline for busy-ness, a failure and a cancellation all leave the
+network unchecked so the next sample tries again.
+
+**Arrival was almost always silently downgraded to a lighter check.**
+`FullCheckPolicy` treats any severity outside `{ok, info, warn}` as unsafe —
+correctly, since an unrecognised value must not read as safe. But it was
+asked at the instant of joining, when the monitor has produced no sample and
+severity is the empty string, so an honest "I do not understand this" became
+a downgrade on essentially every arrival. `ArrivalPolicy` is three-valued: it
+waits for a real sample before deciding. On ordinary Wi-Fi that means every
+new network now gets the full check, which was always the contract.
+
+**Home rendered another network's report unlabelled.** Cold-launch hydration
+took the newest stored run *globally*, with no network predicate, through the
+same view that renders a live one. Hydration is now scoped to the network you
+are on — no run for it is the correct empty state, since the arrival card is
+already saying a check is on its way — and `RunReportView` gained a
+provenance caption so the general case is closed too, not just this instance.
+
+### Added — the app says which of its three depths is happening [GUI]
+
+An arrival card at the top of Home names the network and states what netdiag
+is doing about it: a check starting, a check queued behind one already
+running, a check that will not happen automatically because the Settings
+toggle is off, or a full check deliberately downgraded with a button to
+override. The menu-bar dropdown gained a matching `.arrived` stage, so an
+arrival check no longer reads as "Testing" — indistinguishable from a scan
+the user started — while Home calls it something else.
+
+A metered link is the one carve-out from "every new network gets a full
+check": `NWPathMonitor` already reported `isExpensive`/`isConstrained` and
+the app was discarding both. A personal hotspot now gets the quick check and
+an explicit "Run full check anyway" button, because a full check runs a speed
+test and that spends real cellular data. The card says so; it does not say
+anything about whether the network is any good. That distinction is enforced
+— `--verify` rejects a set of verdict words in every arrival string, since
+verdicts belong to `lib/diagnosis.sh` and reach the UI through
+`diagnosis[].summary` verbatim.
+
+### Fixed — one network could hold three different names [GUI]
+
+`historyJoinID` fell back to the CLI's raw *record* format when no group had
+been resolved, and `HistoryStore.migrateRawKeys` rewrote only the two `mac=`
+spellings — never `gw=`. So one iPhone hotspot accumulated all of
+`gw:10.125.128.1`, `wifi:gw=10.125.128.1` and `mac:76:42:18:5c:40:64`, and a
+check recorded under one could never be found under another.
+
+`helpers/history.py` has always had the right rule (`mac:` > `ssid:` > `gw:`,
+plus a fold of weak keys onto their MAC group); the GUI never got it.
+`NetworkIdentity` ports it, and `tests/fixtures/network-ids.txt` is now read
+by both halves — bats drives it through Python, `--verify` through Swift — so
+the two cannot drift. That guard exists because this drift is invisible: the
+symptom appears months later as a check filed under a key the network will
+never present under again. `helpers/history.py` gained
+`canonical_network_id()` so the rule is callable on its own, and its second,
+subtly different parser was removed rather than left beside the first.
+
+Upgrading migrates `seenNetworks` into the new store and **fails closed**:
+anything that cannot be canonicalised confidently is treated as already
+checked. A network wrongly assumed seen loses one automatic baseline and is
+one button away from getting it; a network wrongly assumed new can spend a
+few hundred megabytes of someone's cellular data without asking.
+
+### Changed — Home answers first and asks only one question [GUI]
+
+Home now leads with "What should work here" as one horizontal, icon-first
+status strip. The dense measurement report is still intact behind a single
+"Check details" disclosure, while the duplicate Recent checks card is gone;
+past runs already have a dedicated Networks screen.
+
+The app no longer presents quick and full checks as two equivalent manual
+choices. Continuous monitoring owns the fast path and automatically starts a
+targeted, non-saturating investigation when a fault appears. The one manual
+action on Home and in the menu-bar dropdown is the occasional Full check
+(with the existing safe lighter fallback when the link may be struggling),
+and a first visit to a network still establishes a full baseline once.
+
+Wi-Fi signal now carries its scale colour everywhere it appears: Excellent
+and Good are green, Fair and Weak are yellow, and a critical radio finding or
+disconnected link is red. The word and status glyph remain alongside colour,
+so colour is never the only signal.
+
+### Fixed — one outlier was setting the whole Trends scale [GUI]
+
+The gateway RTT chart held 2443 samples that sit between about 2 and 8 ms,
+plus a handful of multi-second spikes. Charted against their own range, the
+axis ran 0–3000 ms and all the ordinary variation drew as a flat line on the
+floor: the chart contained every point and conveyed none of them.
+
+The y-axis is now clamped near the 99th percentile — but only when the
+maximum exceeds it by more than 2×, since a series with a genuinely wide
+spread should be seen at full height, and never below the typical band the
+same chart shades. Nothing is hidden by this: readings above the ceiling are
+drawn pinned to it with their own orange triangle, and a caption states how
+many there are and how high the highest actually went ("18 readings are
+above this range and are drawn at the top edge — the highest reached
+2786.47 ms"). That caption is required rather than decorative, for the
+reason `MonitorSeries` refuses to draw a line across a gap: a chart that
+quietly rescales past its own outliers is reassuring in the same false way.
+
+Also: Swift Charts formats axis values through the current locale, so the
+incident chart's count axis rendered 2000 as "2.000" — reading as *two*
+against an axis whose other labels were 0, 500 and 1.500. Both charts now
+label their y-axis plainly. Same defect as the count interpolations in the
+entry below, arriving by a different route.
+
+These numbers scale an axis and decide nothing about the network, so they
+are not thresholds under CLAUDE.md's rule — the cutoffs that judge a reading
+still live in `lib/thresholds.sh` and reach this screen as the CLI's own
+`judged` verdict, rendered verbatim.
+
+### Fixed — three things the gallery showed [GUI]
+
+All three were found by looking at `--gallery`'s renders rather than by
+reading the code, which is the point of having it.
+
+- **The report card truncated its values mid-reason.** The value column was
+  a fixed 128pt with a `.help()` tooltip as a "safety net for any value long
+  enough to truncate". On an ordinary `--quick` run, seven of the thirteen
+  rows read `not measured (quic…` — cut off one character into the word
+  carrying the whole point, so the card explained nothing seven times over,
+  and the tooltip was load-bearing rather than a net. Meanwhile the row's
+  slack was being spent on a `Spacer`. The value column now takes that
+  slack (`minWidth: 128, maxWidth: .infinity`), and the verdict chip takes a
+  fixed 76pt in exchange so every row divides the remainder identically and
+  the columns stay aligned — which a flexible value column beside a
+  variable-width chip would not.
+- **One incident, two rows in Activity.** `AlertEngine` firing writes an
+  `alert` event alongside the `rule-fired` the CLI already reported, so
+  "Moderate internet packet loss" (rule `L2`) and "Internet connection
+  degraded" (the alert `L2` raised) both appeared. The dropdown's teaser
+  already dropped that echo; Activity listed both. The alert is now absorbed
+  into the rule's own row as a bell glyph rather than deleted — being
+  *notified* is the one thing the alert row knew that the rule row did not,
+  and it is what separates the findings that interrupted you from the ones
+  that did not. An alert with no rule behind it (public IP changed, captive
+  portal, VPN dropped) has nothing to merge into and keeps its own row.
+- **Trends rendered counts as decimals.** `Text("…\(someInt)…")` builds a
+  `LocalizedStringKey`, which formats integers with the locale's grouping
+  separator, so 2371 samples appeared as "Gateway RTT (2.371)" and 2393 runs
+  as "2.393 runs" — both reading as decimals — while `metricNote` said
+  "2371 samples" because it interpolates into a plain `String`. Same
+  numbers, two spellings, one wrong. The four count call-sites now use
+  `Text(verbatim:)`, matching the spelling that was already right.
+
+### Fixed — opening Trends did not hide the sidebar; it pushed the whole window off the top
+
+The report was "click Trends and the sidebar disappears, and things are
+missing". Both halves are the same bug, and neither is about the sidebar.
+
+Since `screencapture` needs Screen Recording permission this process
+doesn't have, the app was made to describe its own window instead: walk
+the real view tree a few seconds after launch and print what AppKit
+actually did. On four tabs the `NavigationSplitView` host measured
+945×707 at y=0 — exactly the window. On Trends it measured **945×1274 at
+y = −257.5**: nearly twice the window's height, centred, so the top 257pt
+sat above the title bar. That is one view sized to an ideal height it
+should never have been given, taking everything with it — the filter row,
+the purpose line, the verdict card, the first chart's heading, *and* the
+sidebar's five rows, which live in the same over-tall column. The
+sidebar's split item reported `collapsed=false` and its table still held
+five rows the whole time. Nothing was ever hidden; the window was showing
+the middle of a view twice its size.
+
+The cause was one modifier on one line of text: `.fixedSize(horizontal:
+false, vertical: true)` on Trends' purpose subtitle. That modifier is
+correct and used throughout this app — but everywhere else the prose it
+marks sits *inside* a `ScrollView`, which absorbs whatever height it asks
+for. This one line sits outside the scroll view, in the header, where its
+ideal height *is* the detail column's ideal height; asked for that ideal
+at an unconstrained width, a fixed-size `Text` answers with a many-line
+one. Removing it puts every tab back to 945×707 at y=0. Text wraps by
+itself there, so the modifier was buying nothing even before it cost
+this.
+
+Introduced by the Live/Trends work below — the view it replaced had no
+such line — and shipped because that work was verified by building, by
+`--verify` and by bats, none of which lay out a window.
+
+### Fixed — ND-1 accused a watcher that was working perfectly [CLI]
+
+Found by looking at the app: the Home report showed one warning, "netdiag's
+background watcher is installed but isn't running: launchd reports that its
+last run exited 1", while `~/net-diag` was filling with successful watcher
+runs exactly 15 minutes apart.
+
+`watchdog_run` classified the watcher as `failing` whenever its last launchd
+exit was non-zero. That reads netdiag's own exit-code contract backwards.
+`bin/netdiag` documents `0` healthy · `1` warnings only · `2` critical
+diagnosis · `3` script error, and its EXIT trap deliberately remaps any
+unplanned abort to `3` *precisely so* a broken script cannot masquerade as
+"warnings only". Exits 1 and 2 are successful runs that found something —
+which is the watcher's entire job.
+
+The consequence was a self-sustaining false alarm. Any single warning made a
+watcher run exit 1; the next run read that exit status, fired ND-1, and
+exited 1 because ND-1 is itself a warning — so once tripped it could never
+clear. On this machine a standing `G3` (minor packet loss to the router) had
+left ND-1 as the report's only warning, permanently. The check also sat
+*above* the heartbeat tests, so a perfectly fresh heartbeat could not
+override it.
+
+Only an off-contract exit now counts as failure: `3`, or anything that never
+reached the trap at all (126, 127, a signal). Verified on this machine — the
+Background watcher row went from "last run exited 1" to "last ran 6m ago",
+ND-1 stopped firing, and the run's own exit code went from 1 to 0.
+
+### Changed — history as episodes, not transitions [GUI]
+
+The prompt was a screenshot of the Activity screen and one question: is it
+helpful to have all those alerts in the history? It was not. The screen
+held 329 rows, of which 61 said "Severe internet packet loss" and 53 said
+"Resolved: Severe internet packet loss".
+
+The first hypothesis was that the app was diagnosing its own test traffic —
+that the launchd watcher's 15-minute scan was loading the link and the
+monitor was recording the result as a fault. **That was wrong, and is worth
+recording as wrong**: correlating all 329 stored events against the 198
+scan start times on disk put 22% within 90s of a scan, against a ~20%
+baseline for the watcher's cadence. There is no relationship. The packet
+loss is real and genuinely flapping; the defect was entirely in how it was
+presented.
+
+- **Fired and cleared are one row now, with a duration.** `EventStore`
+  records one entry per transition, which is the right thing to store and
+  the wrong thing to show: it throws away the two facts a reader wants —
+  how long it lasted, and how often it has happened. `ActivityEntry.fold`
+  pairs each `rule-fired` with its `rule-cleared` and groups a day's
+  episodes per rule, so twelve rows about one afternoon's flapping become
+  one reading "Minor packet loss to router · 6 times · 47s+ total". On this
+  machine's real store: 329 rows → 62.
+- **It reproduces `helpers/events.py`'s honest cases**, because they are
+  properties of transition logs rather than of that file. A second `fired`
+  with no `cleared` between means the monitor restarted and the gap went
+  unobserved, so that episode closes where it was last seen and its
+  duration is marked a floor (`47s+`, not `47s`). An orphan `cleared` whose
+  `fired` predates the store's 500-entry cap describes an end with no
+  beginning and contributes no row. And nothing here judges a duration:
+  whether four minutes of loss is acceptable is `lib/diagnosis.sh`'s to say
+  against `lib/thresholds.sh`, exactly as that helper's header records.
+- **An unpaired episode no longer claims the fault is still running.** The
+  first draft appended "still active" whenever an episode had no recorded
+  end, which put that phrase on three rows at once including one two days
+  old — the usual reason a clear never arrives is that the monitor stopped,
+  not that the condition persisted. What is happening *now* is the "Active
+  now" section's claim, made from live alert state.
+- **Timeline rows wore critical-red regardless of severity.**
+  `EventStyle.tint(for:)` keyed only on `kind`, so warn-level `G3` "Minor
+  packet loss to router" was indistinguishable from critical `P1` "No
+  network connection at all", and a history of the former read as a history
+  of outages. It now tints from the catalog's severity for the rule behind
+  the event. This is the same defect fixed for `AlertStageCard` in the
+  entry below; the timeline rows kept it. An unknown severity stays red —
+  the catalog resolving late is the common case at launch, and greying out
+  a real fault until a fetch completes is the worse error.
+- **The dropdown's 24-hour teaser folds too.** Unfolded, one flapping rule
+  ate all three rows of the app's most space-constrained surface, saying
+  one thing three times and never saying for how long.
+
+Twenty asserts covering the fold run in `--verify`, which is where this
+project's Swift logic is checked (`swift test` cannot execute on a CLT-only
+machine — see `VerifyMode.swift`'s header).
+
+### Added — `--gallery`, so the app can be looked at without a screen [GUI]
+
+There is no Xcode on this machine and therefore no SwiftUI previews, so the
+only way to see a change was `make run` and a pair of human eyes. Two
+earlier attempts at closing that gap fell short in the same way:
+`--verify`'s `runSnapshots()` renders a hand-written *stand-in* of the
+dropdown's stage card, and its own header admits it is not a snapshot of
+`DropdownView` — a stand-in cannot show a layout bug, because the layout it
+draws is not the one that ships. A temporary `TempLayoutDump` walked the
+real window's `NSView` tree and printed frames: numbers about a picture,
+in place of the picture. It is removed here, superseded.
+
+`netdiag.app --gallery[=DIR]` renders the **real** views — the ones
+`NetdiagApp` instantiates — against the **real on-disk state**, in light and
+dark, at the app's own sizes, to PNG. That includes `DropdownView`, which
+no capture tool can reach: a `MenuBarExtra` panel is not in the window list.
+`--gallery-only=NAME` narrows the run; `--gallery-debug` dumps the view tree.
+
+Three findings from the first honest render are fixed above. Two notes on
+getting there, because each failure produced a *plausible* screenshot
+rather than an obviously broken one, which is the dangerous kind of wrong
+for a tool whose purpose is to be believed:
+
+- **Screen capture is not an option and was not used.**
+  `screencapture`/`CGWindowListCreateImage` need the Screen Recording TCC
+  grant, which is per-binary and cannot be granted non-interactively;
+  `screencapture -x` here fails with "could not create image from display".
+  The harness asks the view to draw itself instead, and needs no permission.
+- **The renderer must let `NSApp.run()` actually run.** The obvious
+  shape — do the work in `applicationWillFinishLaunching` and never return,
+  spinning a nested `RunLoop` so no scene is created and no monitor spawns
+  — silently produced empty screens. `NSApp.run()` is not merely a run
+  loop; it drives the window update cycle SwiftUI's `List` builds its
+  `NSTableView` rows from. With AppKit's loop never entered, `ActivityView`
+  laid out at the right size, drew its heading, and reported
+  `numberOfRows == 0` against a store holding 329 events. The app now
+  launches for real and `bootstrap()`'s `--gallery` guard is what keeps the
+  monitor from starting. Hydration is reads only — deliberately skipping
+  the one write `start()` does at that point, so a screenshot run leaves
+  `events.json` alone.
+
+## [0.13.1] - 2026-08-30
+
+### Added — the app shows what should work here [GUI]
+
+The five activity verdicts the CLI has been emitting since 0.13.0 now
+appear in the app's report card, above the diagnosis list, in the same
+order and with the same words the terminal uses.
+
+Built as a shared component rather than a view private to the report,
+because the arrival card lands next and renders the same five rows in the
+menu-bar dropdown. A user sees those two surfaces seconds apart, and
+describing a verdict differently in each is how an app contradicts
+itself — the same reason `SignalScale.cellContent` and `AlertStageCard`
+are shared.
+
+The panel decides a colour, a glyph and a two-word category label, and
+nothing else; the label, ordering, reason sentence and verdict are the
+CLI's, rendered verbatim. The four verdicts get four distinct *shapes*,
+not four tints of one shape, so the panel still reads for someone who
+cannot distinguish red from green.
+
+Also removes a dead `Suitability` type that had been sitting in
+`RunSnapshot` decoding a differently-shaped key (`web_browsing`,
+`video_calls`, `large_downloads`) that nothing in `helpers/` or `lib/`
+ever emitted, and that no view read. Its own comment called it a
+candidate for deletion. The idea had been started once and abandoned;
+this is the shape the CLI actually produces.
+
+## [0.13.0] - 2026-08-30
+
+### Added — the report says what this network is good for [`suitability`]
+
+`netdiag --json` gains a `suitability` array and the text report gains a
+"What should work here" section: five verdicts — video calls, streaming,
+gaming, VPN & remote access, ordinary browsing — each `good`, `degraded`,
+`broken` or `unmeasured`, each naming the rule that decided it.
+
+This is the answer a non-expert can actually use. The report already said
+`Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of that fact most people can
+act on. On a real run of a network with `G2` firing, it now reads: video
+calls broken, gaming broken, streaming rough, browsing rough — because G2.
+
+**It is a projection, not a second opinion.** The verdict is the worst
+`impacts` level among the rules that fired. `helpers/suitability.py` reads
+no metrics and contains no numeric comparison at all — a test walks its AST
+and fails the build if one appears — so it cannot become a fifth judge next
+to `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py`, and it can never print a healthy activity above a
+firing rule that breaks it. Even the internals hold the line: the
+worst-of-N helper ranks by position in a table rather than by comparing
+numbers.
+
+**`unmeasured` is a verdict, not a hidden row.** `--quick` skips
+bufferbloat, the speed test, the loss probe *and* the MTU probe, so at that
+depth four of the five genuinely cannot be judged. The rows still print,
+saying what was not run. Dropping them would quietly convert "we did not
+look" into "nothing is wrong", which is the failure this whole project is
+organised against. A rule that fired outranks this: a connection that is
+down is down at any depth.
+
+Two implementation notes worth recording. `measured_families()` reads the
+*assembled document* rather than the environment, so what the verdict
+claims was measured cannot drift from what the report shows. And the one
+family with no natural null is `path`, which keys off
+`wan.upnp.state != "unknown"` — `wan` is present even on `--quick`, but its
+UPnP probe sits behind the same `--quick` gate as the rest of the path
+batch, making that string the honest signal.
+
+"What should work here" also joins Report / Summary / Diagnosis as a
+punchline section in `hdr()`. A headline answer suppressed in default mode
+is not a headline.
+
+### Added — the fix, lifted out of the paragraph [`fix`, `fix_away`, `fix_target`]
+
+Every catalog rule now carries `fix`, `fix_target`, and — where the advice
+genuinely changes when the equipment is not yours — `fix_away`.
+
+The advice already existed; it was just unreachable. `add_diag` takes the
+summary as one string, so "Fix: enable Smart Queue Management or QoS in
+your router's admin page" was a substring of a paragraph that nothing could
+rank, reorder or swap. `add_diag` is untouched: general advice about a rule
+is what the catalog already holds (`blurb`), not a fact about one incident.
+
+`fix_target` is the traveller-facing half. "Reboot your router" is sound at
+home and useless in a hotel, where the router is behind the front desk, so
+the target says which of the two the reader is in: `you`, `your_router`,
+`your_isp`, `network_operator`, `nobody`. Across 53 rules that lands as you
+21, nobody 12, your_router 10, your_isp 8, network_operator 2, with 12
+carrying a second `fix_away` sentence.
+
+`nobody` is a real answer rather than a gap — a VPN that is carrying
+traffic, an IPv6-only network that works, ping blocked while the connection
+is fine. Inventing an action to fill a required field would be worse than
+saying there is nothing to do.
+
+A test pins the thing that actually matters about `fix_away`: it may never
+open with an imperative. "Reboot the router", read by a guest, is an order
+they cannot carry out; "ask whoever runs this network to restart it" is one
+they can. An imperative opening is the signature of advice written for the
+wrong reader.
+
+### Added — every rule says which activities it breaks [`impacts`, catalog schema 5]
+
+Groundwork for answering the question a non-expert actually has. The report
+says `Bufferbloat grade F` and `MTU 1492`; it has never said "your video call
+will not survive here", which is the only form of the answer most people can
+use.
+
+Each rule in `netdiag --rules-catalog` now carries an optional `impacts` map
+over five activities — video calls, streaming, gaming, VPN and remote access,
+ordinary browsing — saying which of them the rule breaks or merely degrades.
+36 of 53 rules carry one; the rest (a drifted clock, an expiring lease, a
+watcher that is not running) genuinely have no activity consequence and omit
+the key rather than carrying an empty object, so "no consequence" and "not yet
+classified" stay distinguishable.
+
+**Where the line between the two levels sits** turned out to matter more
+than the levels themselves. `broken` means the activity cannot function at
+all right now; `degraded` means it functions, but unreliably or badly. Two
+consequences, both of which the first draft of the table got wrong: an
+*intermittent* fault is never `broken` (a flapping link ends the call you
+are on, but the next one connects), and a *historical* one never is either
+(`AV-1` counts yesterday's outages, while the rest of a report describes the
+link at this instant — a red "video calls: won't hold up" on a connection
+that is currently fine is a claim the run has not established).
+
+The rule that exposed it: `NAT-1` was marked `gaming: broken` because its
+own prose says double NAT "breaks games". It does not. It breaks *inbound*
+reach, and a game connecting outbound to a matchmaking server plays fine,
+just with Strict NAT and worse matchmaking. What double NAT genuinely
+breaks is port-forwarding-dependent — Plex, Steam in-home streaming,
+doorbells — and none of those has a row here. A test now fails the build if
+`AV-1`, `AV-2`, `WD-1`, `NAT-1` or `NAT-1b` reaches for `broken` again.
+
+Nothing reads it yet. The point of putting it here is that the suitability
+layer being built on top can then be a **projection of which rules fired**
+rather than a second reading of the metrics. Four things already judge a
+network — `lib/diagnosis.sh`, `lib/monitor.sh`, `helpers/history.py` and
+`helpers/summary.py` — and CLAUDE.md exists to stop them drifting apart. A
+fifth judge that read `bufferbloat_gw_ms` for itself would, on its first
+disagreement, put a green "calls: fine" row directly above a red B1 paragraph.
+Deriving from the fired rule set makes that contradiction structurally
+impossible rather than merely unlikely.
+
+Two things this turned up that were not obvious going in:
+
+- `helpers/capabilities.py` mirrors `SCHEMA_RULES_CATALOG` and
+  `tests/test_capabilities.bats` compares the two, so the 4 → 5 bump had to
+  happen in both files or the suite fails. Not cosmetic.
+- The test asserts an invariant rather than a count: **every rule graded
+  `critical` must declare what it breaks.** A fault graded critical that
+  affects nothing a person actually does is a contradiction — the severity
+  claims the connection is unusable while the table claims every activity is
+  fine. That invariant immediately caught `ETH-2` (ethernet stuck on half
+  duplex), which was `critical` and classified as having no consequence at
+  all, despite causing collisions and heavy loss. `ETH-1` stays absent by
+  contrast: a link negotiated below the port's ceiling is a cap, not a fault,
+  the same reason `SP-1` ("WiFi is the speed cap") carries none.
+
+### Fixed — the menu says one thing once, and means it [GUI]
+
+Four ways the dropdown misrepresented what the CLI had actually decided.
+The prompt was a user's observation that "in the menu, we can have two
+alert areas"; the audit that followed found the duplicate plus three
+neighbours, all in the same seam — the app had no idea *which* rule inside
+an alert had fired, so everything downstream that asked "how bad is this?"
+got the wrong answer.
+
+- **An alert stored the rules it listens for, not the ones that fired.**
+  `AlertEngine.ActiveAlert.rules` was assigned `def.rules` — its own
+  doc comment already said "the exact set that fired", so this was a bug
+  against stated intent, not a design choice. `internet-degraded` listens
+  for `L1` (critical) and `L2` (warn), so a moderate-loss episode was
+  ranked critical by `activeSorted`, attributed to "rule L1" on the card,
+  and written to the event log as whichever of the two `Set.first`
+  happened to yield — recorded as `L1` on 2026-08-29 01:52 and `L2` on a
+  later identical run. `evaluate(sample:)` and `evaluate(run:)` now pass
+  the intersection with the CLI's reported rules, and `onAlertFired`
+  carries it through to the timeline entry.
+- **Every alert wore critical-red.** `alertStage` hardcoded
+  `exclamationmark.triangle.fill` in red for all twelve, so warn-severity
+  `BL-1` ("Slower than usual"), `DH-1` and `NAT-1` — and the rule-less
+  "Your public IP address changed" — looked exactly like a dead
+  connection, while the *lower*-priority `.watching` card two lines up
+  correctly rendered the same warn condition in amber. The card now tints
+  from the catalog's severity for the firing rule: red at critical, amber
+  at warn, blue at info and for the four event-driven alerts that carry no
+  rule by construction. A rule-backed alert that cannot be ranked — the
+  catalog still loading, or a rule this build has never heard of — keeps
+  red, because there rank 0 means "unknown", not "harmless".
+- **One incident printed twice on one 360pt panel.** Firing writes an
+  event whose summary is the alert's own title, and the stage card renders
+  that same title, with a different timestamp — the card counts from
+  `raisedAt`, the event is stamped when the dwell elapses. The dropdown's
+  three-row teaser now drops the exact echo of the alert already on the
+  stage. Only that row, and only in the teaser: the `rule-fired` row below
+  it is the CLI's own words for what fired ("Moderate internet packet
+  loss") and says something the category label does not, and Activity
+  still lists every event. Nothing is deleted; this is a rendering rule.
+- **"See full report (+2)" led to a view with neither.** It opened
+  Activity, which rendered `eventLog` and nothing else — while
+  `MainWindow` badged that same row with `alerts.activeSorted.count`.
+  Activity grows an "Active now" section listing what is firing, so the
+  badge counts something visible and the button's "+2" lands where those
+  two are; the label is now "See all alerts". It also sat beside an
+  "Activity" button calling the identical `openActivity()`.
+- **A green dot over "Monitoring paused".** `currentHealth` fell through
+  to `monitor.latest`, and `MonitorStream.stop()` keeps its final sample
+  on purpose, so switching monitoring off left the last pre-pause reading
+  asserting a healthy network indefinitely. `Health` gains a `.paused`
+  case (grey `pause.circle.fill`, distinguishable from healthy without
+  colour) and the decision moves into `HealthResolver` — a pure function
+  mirroring `StageResolver`, with the same precedence so the dot and the
+  card cannot disagree. Scanning deliberately holds the last reading
+  rather than greying out: a scan is the app looking harder, not away.
+
+The alert card is now one view, `AlertStageCard`, shared by the dropdown
+and Activity. `--verify` renders *it* once per severity band instead of
+the hand-written stand-in that only ever drew the critical case — which is
+exactly how the uniform red survived — and gains 13 asserts across
+`HealthResolver` and alert attribution.
+### Changed — prose and pickers stop setting how wide these views want to be
+
+**Correction:** this entry originally claimed to fix the "Trends hides
+the sidebar" report, and it did not. That was a wrong diagnosis, chased
+because the numbers below are real and pointed the right way; the actual
+cause is one modifier on one line of text, in the entry two above. What
+follows is true and worth keeping — it is a width change, not a fix.
+
+Trends looked wrong in a narrow window: select it and the sidebar
+collapses. The cause is not in Trends' own logic but in how much width it
+*asks* for. None of this app's views declares a minimum width — measured
+offscreen with `NSHostingView`, every one of them reports `min = 0` and
+will shrink to nothing — so the only number `NavigationSplitView` has to
+weigh, when deciding whether the sidebar still fits beside the detail, is
+the detail's **ideal** width. And an ideal width is assembled from things
+nobody thinks of as layout: an uncapped `Text` asks for the width of its
+whole sentence on one line, and a macOS pop-up asks for the width of its
+widest menu item.
+
+Trends asked for 699pt. All 699 of it came from two places that had
+nothing to do with charts: the coverage note's paragraph of prose at the
+very bottom of the scroll view, and the Network picker, whose items are
+ISP-derived names — so joining a network called "SOMOS NETWORKS COLOMBIA
+S.A.S. BIC via 192.168.68.1" quietly widened the window at which the app
+keeps its sidebar. A layout that changes because of who your ISP is, is a
+layout with an input nobody declared.
+
+Prose blocks now go through one `View.proseWidth()` modifier that caps
+them at a readable measure, and the three Trends pickers are sized to the
+room their values need rather than left to whichever network has the
+longest name. Trends now asks for 593pt (was 699) and Home for 659pt (was
+709) — Trends, the tab that prompted this, is now the narrowest of the
+three main views rather than the widest. The cap is also just better
+typography: a sentence set 700pt wide is hard to track from one line to
+the next, and these screens are mostly explanation.
+
+Not a regression from the Live/Trends work below — the view it replaced
+asked for the same 699pt — which, in hindsight, was the clue that this
+was not the reported bug's cause: the symptom was new and this number
+was not. Measured, not eyeballed: `screencapture` is blocked without
+Screen Recording permission, so the numbers come from rendering each
+view offscreen and reading `fittingSize`. That method is sound for
+measuring a view and useless for observing a window, which is why the
+real cause needed the app to report its own view tree instead.
+
+### Added — Live and Trends now say what they are, and Trends says what a network is usually like
+
+The app's two chart tabs were its most confusing corner, for novices and
+experts alike: neither said what it was for, both drew similar lines of
+similar-sounding metrics, and the difference that actually matters was
+never stated on screen. Live is the `--monitor` stream — small probes
+every few seconds, an hour deep, held in memory, never written down.
+Trends is the stored-run store — one point per saved check, per network,
+over weeks. Live's samples never reach Trends, and "internet" is a TCP
+connect in one and a ping in the other. Someone comparing the two
+numbers was comparing two different measurements and was told nothing.
+
+Both tabs now open with one plain line about themselves, and each grows
+a card that says something about the state it is actually in.
+
+- **Live gets a status line for the ordinary case.** The screen used to
+  say nothing at all while monitoring was simply running — the banner
+  only appeared when something was off. It now shows
+  `NetdiagCoordinator.headline` verbatim with the `currentHealth` dot,
+  captioned with the newest change the app has logged and how long ago.
+  That property is the one the menu-bar dropdown already reads, so this
+  card and the dropdown cannot describe the same moment differently; no
+  verdict is composed in Swift here. It also inherits headline's
+  existing honesty about a reading it doesn't have — a sample with no
+  measurement reads "Checking…", never all-clear.
+- **Trends gets the CLI's own verdict.** `judged.summary` from
+  `--history` schema `2`, rendered verbatim, tinted from
+  `judged.overall`, captioned "Judged by netdiag, not the app". Shown
+  only when the selected network maps onto exactly one raw `--history`
+  group: a manually merged network gets no card, because re-deriving a
+  verdict for a group the CLI never judged is precisely the diagnostic
+  logic CLAUDE.md forbids the GUI. "All networks" gets a wayfinding line
+  instead, and the network picker now defaults to the network you are on.
+- **A typical-range band behind the line.** p10–p90 from the same
+  `metric_stats` the CLI already emits, drawn as a neutral rectangle with
+  a dashed median rule, captioned "Shaded: this network's typical range,
+  from its saved checks." Same single-group rule as the verdict card, and
+  no percentile arithmetic in Swift — the app draws numbers the CLI
+  computed or draws nothing.
+- **The empty state stops being Swift-authored.** `HistoryView.hint(for:)`
+  — a Swift `switch` making claims about which check modes measure what,
+  the clearest violation of the no-prose rule in the app — is deleted.
+  The no-data panel now renders the catalog's `why_absent` verbatim and
+  supplies its own "Full check" button; with no catalog entry, or against
+  a CLI too old to carry one, the neutral sample-count sentence stands
+  alone.
+- **Live's chart subtitles come from the catalog too**
+  (`monitor_gateway_rtt`, `monitor_internet_tcp`, `monitor_gateway_loss`),
+  falling back byte-for-byte to the sentences the screen has always shown
+  when the running CLI doesn't have them. The live host list moved out of
+  the subtitle into a caption of its own — "Currently: …" — because a
+  sentence describing the measurement should not have to be rebuilt
+  around whichever hosts the last sample happened to probe.
+- **`HelpHint` popovers** beside every chart title on both tabs, using
+  glossary keys that already exist, so the help is there for a novice and
+  out of the way for everyone else.
+
+`Views/HistoryView.swift` is now `Views/TrendsView.swift`: it was named
+after the CLI command it reads rather than the tab it draws, which is why
+every discussion of the two views had to disambiguate the name first.
+
+`HistoryDocument.Judged.metrics` — the per-metric verdict map — is
+decoded even though no view reads it yet, rather than declared and
+skipped: a property that silently never decodes is the exact bug
+`tests/test_gui_decoding.bats` exists to catch, and `metric_stats` next
+to it already proves a `[String: T?]` dictionary decodes JSON nulls
+without a hand-written initialiser.
+
+Every addition gates on data being present. No new
+`CapabilityStore.Feature`, no new "your CLI is too old" path: against a
+netdiag that predates `judged` and `why_absent`, the verdict card and the
+band do not appear, popovers render nothing, empty states fall back to
+the count sentence, and Live reads exactly as it did before.
+
+### Added — netdiag judges the record, not just the moment [AV-1, AV-2]
+
+The verdict layer over the event journal, and the half `helpers/events.py`
+deliberately refuses to do. A scan is a snapshot, and a snapshot taken at a
+good moment on a connection that dropped six times last night reports a
+healthy network — truthfully, and uselessly.
+
+- **`AV-1` (warn)** fires when this network's outages in the last
+  `THRESH_AV_WINDOW_HOURS` reach either `THRESH_AV_OUTAGE_COUNT` or
+  `THRESH_AV_DOWNTIME_S`. Either, not both: six ten-second drops is a
+  flapping link and one twelve-minute drop is an outage, and a rule
+  requiring both would report neither. It names how many, how long in
+  total, how long the worst was, and points at `--events` for the exact
+  times to hand to whoever runs the line.
+- **`AV-2` (info)** fires on drops shorter than `THRESH_AV_FLAP_MAX_S` —
+  the case no individual scan can ever see, because a check run before one
+  and after it finds nothing wrong both times. Independent of `AV-1`, not
+  an else-branch: a link can flap into uselessness while no single drop is
+  long enough to reach the downtime cutoff.
+- **What counts as "down" is policy, so it lives in `lib/thresholds.sh`**
+  as `THRESH_AV_OUTAGE_RULES` — `N1`, `N1b`, `N1c`, `P1`, `P2`.
+  Deliberately not `L1`/`L2`/`D1`: those are a connection working badly,
+  and counting them would turn every bad afternoon into downtime. A test
+  asserts no second copy of that list exists anywhere in `lib/` or
+  `helpers/`.
+- **Both are scoped to `NETWORK_ID`.** A laptop that spent yesterday on a
+  café's broken WiFi must not have that charged to the office connection
+  it is on now.
+- **Neither fires without a journal.** Its absence is not evidence of
+  uptime — that is `ND-1`'s failure one level down — so `availability` is
+  `null` in the JSON and the Report card grows no row.
+- **Both say when the window was not watched.** Above
+  `THRESH_AV_UNOBSERVED_NOTE_PCT` the sentence appends the unobserved
+  fraction and scopes the count to what was *seen*. A note and not a
+  suppression, deliberately: an outage that was observed did happen, and
+  silence about it because the Mac also slept is the worse error. The
+  reverse — "no outages in 24 hours" off six hours of watching — is the
+  claim the note exists to prevent.
+
+`lib/availability.sh` reads the journal through `helpers/events.py` and
+applies the cutoffs; the reader still judges nothing. 14 new tests.
+
+
+### Added — netdiag remembers what happened [event journal, `--events`]
+
+The first item of Tier 1 from `docs/design/nothing-was-watching.md`, and
+the one that decides whether netdiag is a monitor at all. It could always
+say what was wrong *now*. It could not say what was wrong at 03:14, or for
+how long, and it did not say that it couldn't.
+
+The monitor already computed the answer and threw it away. `_changes()` in
+`helpers/monitor_sample.py` has always diffed each cycle against the last
+— VPN up and down, SSID changes, roams, public-IP changes, every rule
+firing and clearing, each with a user-facing sentence — and every one of
+those was rendered into a sample, used to decide whether to notify, and
+then discarded. Nothing durable recorded a transition.
+
+- **`--monitor --journal PATH`** appends one line per transition. Opt-in,
+  because `--monitor`'s documented contract is a process that writes
+  nothing to disk, and a consumer piping the stream into its own program
+  should keep getting exactly that. A bad path fails at startup with exit
+  3 rather than dropping every event for days.
+- **Two kinds the journal adds to the change set**: `monitor-started`, so
+  a reader can tell "no events because nothing happened" from "no events
+  because nothing was running"; and `gap`, carrying the seconds the
+  monitor was not looking.
+- **`--events[=HOURS]`** reads it back: transitions in the window, faults
+  paired into episodes with durations, and how much of the window was
+  actually observed. `netdiag --events=24` now answers the question the
+  design document opens with.
+- **`--install-recorder`** is a KeepAlive launchd agent running that
+  monitor, so the journal keeps filling across reboots. Separate from the
+  watcher rather than folded into it: the watcher stores a snapshot every
+  fifteen minutes, so any outage shorter than its cadence happens entirely
+  between two clean runs. It refuses TCC-protected paths for the same
+  reason `ND-1` exists.
+- Retention mirrors `baseline.jsonl` — past `NETDIAG_KEEP_EVENTS` the
+  oldest roll into `events-archive.jsonl` rather than being deleted.
+
+**Three honest cases the episode pairing has to survive**, and does: an
+episode still open at the end is measured **to the last event, never to
+now**, because the recorder may have stopped an hour ago and "ongoing for
+four hours" would be inventing observation; a monitor restart closes an
+open episode there with `duration_is_lower_bound`, rather than letting it
+span a period nobody watched; and a `gap` inside an episode is recorded as
+`unobserved_s` rather than absorbed into its duration, because a four-hour
+outage and a four-hour closed lid produce identical silence.
+
+**The reader does not judge.** No uptime verdict, no outage
+classification, no threshold — whether four minutes of downtime is
+acceptable is a verdict, and verdicts fire from `lib/diagnosis.sh` against
+`lib/thresholds.sh`. `AV-1`/`AV-2` are the next piece and are deliberately
+absent here rather than smuggled into a helper.
+
+19 new tests in `tests/test_events.bats`, including that `--monitor`
+without `--journal` still writes nothing under `HOME`.
+
+### Fixed — BL-1 warned about differences too small to matter
+
+`helpers/baseline.py` was a pure ratio test. A metric exceeding its
+median by ×2 or ×3 produced a warn-severity BL-1 regardless of how small
+both numbers were, so a bufferbloat delta moving from **0.1 ms to 0.7 ms**
+was reported as a `×7.0 spike` — grade A before and after, since
+`THRESH_BUFFERBLOAT_A_MS` is 5. Replaying every record in one machine's
+`~/net-diag/baseline.jsonl` (2,103 records) reproduces **21** such spike
+warnings, of which **10 are noise**: all six bufferbloat lines had a
+current value under 5 ms, and four gateway-RTT lines were ordinary Wi-Fi
+(10.9, 14.7, 15.4 and 15.8 ms against medians of 3–4 ms).
+
+A spike now has to clear an absolute floor as well as the ratio. The
+floors live in `lib/thresholds.sh` and reach `baseline.py` through the
+environment, with no defaults, exactly as `THRESH_SPEED_DROP_FACTOR`
+already did — a floor decides whether a number is bad, so it is a
+threshold and gets a threshold's treatment.
+
+- bufferbloat deltas reuse `THRESH_BUFFERBLOAT_A_MS` (5 ms): below an A
+  grade there is nothing to report however large the ratio looks.
+- `gateway.loss_pct` reuses `LOSS_WARN_PCT` (10%).
+- `gateway.rtt_avg_ms` gets a new `THRESH_BASELINE_GW_RTT_FLOOR_MS`.
+  Nothing else in the project judges an absolute gateway RTT, so the
+  value was picked from the data: the twelve gateway-RTT lines in that
+  store split into four noise readings (≤ 15.8 ms) and eight real ones
+  (≥ 36.9 ms, up to 2,786 ms), with a gap between. **25 ms** sits in that
+  gap with room either side. 50 ms, the first candidate, sits past it and
+  would also have silenced the 36.9 ms line, which belongs with the real
+  ones.
+
+The same replay over the fixed logic returns **11** warnings: every noise
+line gone, every real one kept.
+
+The labels were jargon in prose the user has to act on. `bufferbloat inet
+Δ` — "I don't even know what INET is, and I'm a very technical person" —
+is now *extra delay to your ISP under load*; `gateway RTT` is *time to
+reach your router*; `speedtest down` is *download speed*; `path MTU` is
+*largest packet size*. Values are rounded and carry units, so
+`gateway RTT is 10.915 vs 3.1525 median (×3.5 spike)` reads as
+`time to reach your router is now 11 ms, normally 3 ms (×3.5)`.
+
+### Fixed — WI-1 fired while the app displayed the name it said macOS withheld
+
+TCC attributes `ipconfig getsummary` and `wdutil` to `/usr/sbin/ipconfig`
+and `/usr/bin/wdutil`, not to the process that spawned them. So
+`netdiag.app` — which reads the real SSID over CoreWLAN, shows it at the
+top of its window, and adopts it as the network's name — was launching a
+CLI that read back the literal string `<redacted>` and reported that
+macOS would not say which network you were on. Every stored run was also
+labelled `WiFi (SSID hidden by macOS)`.
+
+The caller can now hand the name over in `NETDIAG_SSID_HINT`.
+`lib/wifi.sh` consults it only after both of its own scrapes have come
+back empty or redacted — a measured value always wins — and records which
+it was in the new `wifi.ssid_source` (`"system"` / `"caller"` / `null`),
+so a stored run never claims to have seen what it was told. With the hint
+present `WIFI_NAME_HIDDEN` is never set and WI-1 does not fire at all.
+Verified on a real network: the run reports `ssid: Cafe Jeri hotel`,
+`ssid_source: caller`, label `Cafe Jeri hotel`, no WI-1. `network.id`
+still carries the gateway MAC, which is what `helpers/history.py`'s
+`group_key` prefers, so nothing regroups.
+
+`lib/monitor.sh` deliberately ignores the hint: it is captured once at
+spawn time, which is fresh for a scan lasting seconds and stale for a
+process that outlives the network it was told about — and `MON_SSID`
+feeds `netid_run`, so a stale value would corrupt identity, not just a
+caption.
+
+**Two things WI-1 claimed that were wrong**, both corrected:
+
+- *"History for this network gets mixed in with every other unnamed
+  network."* False whenever a gateway MAC is known — `lib/netid.sh` puts
+  the MAC in `network.id` and `group_key` prefers `mac:` over `ssid:`, so
+  grouping was always correct and only the label was generic. The rule
+  now emits one of two texts depending on `GW_MAC`; the common one says
+  nothing is mis-filed. It told users their stored data was worthless
+  when it was not.
+- *"Grant Location Services to your terminal."* Wrong when the caller is
+  `netdiag.app` or the launchd watcher, and it pointed at a settings pane
+  that would not have fixed anything.
+
+### Added — an overall progress bar for a full check
+
+A full check showed a phase grid and "12 of 28", with a determinate bar
+only during the speed test. `ScanProgress.swift` and
+`docs/design/watching-it-happen.md` argued the case against a bar — "a
+plan, not a percentage" — on the grounds that `--json` emits nothing
+until the end, so nothing could be a percentage *of*.
+
+That argument has expired, and the doc now records why rather than being
+quietly contradicted. The CLI emits a `plan` naming every phase a mode
+will attempt and a `ms` on every `done`, so the app can weight a bar by
+durations measured on this machine. The objection worth keeping is the
+one about *shape*: the speed test is 65–115 s of a ~150 s run, so a bar
+driven by phase count would race to ~90% and then sit still.
+
+`Support/PhaseWeights.swift` is a pure value type holding
+`mode → phase → last 5 durations`, persisted in `Defaults`, reporting the
+**median** — with an odd window one stalled phase cannot become the
+estimate, and it ages out entirely after five good runs, which an EWMA
+would not. `.skipped` and `.didNotRun` phases leave both the numerator
+and the denominator, so a `--quick` run that skips the speed test does
+not strand 40% of the bar. The running phase contributes its weight times
+its own sub-progress, so the speed test's slice fills smoothly. The
+fraction is non-decreasing by construction, not by a clamp.
+
+`parallel_batch` is excluded from the weighting: `bin/netdiag` launches
+ten checks concurrently, each announcing itself on fd 3 as it lands, and
+then wraps `collect_parallel` in a `run_timed parallel_batch` whose
+duration is the wall clock those ten shared. A captured `--quick` stream
+shows dns 380 ms, tcp_reach 120 ms, ipv6 18 ms — and `parallel_batch`
+395 ms spanning all of them. Counting both put the same seconds in the
+denominator twice.
+
+The ETA appears only once durations have been learned for that mode; a
+fresh install gets the bar and no time, because equal-weight guesses
+cannot back one. A countdown under two seconds reads "Finishing up…"
+rather than "0s left". The "N of M" line stays — it answers a different
+question, exactly, and is the only one a fresh install can answer at all.
+
+Asserted in `--verify` (`swift test` runs nothing on a CLT-only
+toolchain): monotonicity, the 1.0 ceiling, the skipped-speed-test case,
+sub-progress inside the heaviest phase, the unlearned case, and the
+`parallel_batch` double-count.
+
+### Added — netdiag measures the traffic on the link, not just the link [TR-1]
+
+netdiag has always measured the *path* and never what was travelling it.
+That gap produced one specific, common, confidently wrong answer: a
+bufferbloat grade of D while a backup uploads at 40 Mb/s is
+indistinguishable from a grade of D on an idle link, and the report
+blamed the router's queue in both cases. One of those users needs a
+better router. The other needs to wait ten minutes. They were being given
+the same advice — and the same applies to a speed result measured
+alongside a cloud sync, which reports the leftovers and reads as a slow
+ISP.
+
+`lib/traffic.sh` samples `nettop` for `THRESH_TRAFFIC_SAMPLE_S` seconds
+and `helpers/traffic.py` differences the two snapshots into machine-wide
+Mb/s plus the three busiest processes. Both are unprivileged; neither
+needs `sudo`.
+
+- **`TR-1` (new `traffic` category)** fires above
+  `THRESH_TRAFFIC_BUSY_MBPS` in either direction, naming the rate and the
+  process. `info` on its own — a Mac downloading something is a Mac
+  working correctly, and warning on every large download is the noise
+  `ND-1`'s `pending` state exists to avoid. It becomes `warn` only beside
+  `B1`, `B2`, `SP-1` or `BL-1`, where it stops being context and becomes
+  a competing explanation for a finding the user is about to act on.
+- **Its own category, not `load`.** A category names the row whose number
+  a rule judges, and TR-1 passes no judgement on the router's queueing —
+  it is the reason to distrust that row. Tagging it `load` would tint the
+  bufferbloat row amber every time a backup ran.
+- **It runs inside the parallel batch**, unlike every other check that
+  cares about a quiet link. `nettop` is a passive observer and generates
+  no traffic, so making it wait would add its whole window to the run for
+  nothing. The cost is netdiag's own probes landing inside the sample,
+  which `traffic.py` excludes by process name — without that, netdiag
+  would report itself as the busiest thing on the link every run.
+- **`--quick` skips it.** `nettop` needs ~3 s of startup before its first
+  snapshot; the whole `--quick` budget is 8 s. `traffic` is `null` there,
+  and `null` also when the sample failed — "not measured" and "measured
+  zero" are different claims and only one of them qualifies the report.
+- Process names survive `--redact`: they identify software, not a person,
+  and "something was using 40 Mb/s" is not a report anyone can act on.
+
+**Verification.** The parser is covered by fixtures in both directions,
+the floor and the info/warn escalation by unit tests, and the negative
+path by a live run (an idle Mac produces no row and no rule).
+
+The positive path could not be *staged* — transfers started from the test
+environment never registered on this machine's interface counters, so
+such a test would have proven the harness rather than the feature — but
+it was subsequently observed for real, unprompted, during the sample
+capture in `examples/sample-output.txt`: a music client streaming while
+the check ran produced `⚠ Local traffic 12.19 Mb/s down · Spotify
+Helper` and the matching `TR-1` note. That is the whole feature working
+on a real run, and it is what the committed sample now shows.
+
+A second, smaller correction: the planted-key check in
+`tests/test_gui_decoding.bats` matched one `case ...` line by its exact
+text, so it stopped planting anything the moment a real key was added to
+that line — passing for the wrong reason. It now inserts by structure.
+
+
+### Fixed — the app was never decoding `wan`
+
+`RunSnapshot.init(from:)` declared `wan` in `CodingKeys`, declared it as a
+property, and never assigned it. Every run therefore held the default
+`WAN()`, so the NAT topology row's own conditions —
+`s.wan.doubleNat.detected`, `s.wan.upnp.state == "enabled"` — could never
+be true. The row could only appear because a *rule* fired, and when it did
+it rendered an empty default rather than the topology the CLI had actually
+measured. `suitability` was unassigned the same way.
+
+Swift's synthesised `Decodable` conformance would have caught this; a
+hand-written `init(from:)` has no check that every declared key is
+consumed, and the symptom — a field holding its default — is
+indistinguishable from a run where the field was genuinely absent. That
+indistinguishability is why it survived.
+
+New `tests/test_gui_decoding.bats` parses the `CodingKeys` block and the
+`init(from:)` body out of the Swift source and asserts they match in both
+directions, plus a planted-key check that the guard fails when it should.
+A bats test rather than a `--verify` one because it is a fact about the
+source text, not about runtime behaviour, which is exactly what `--verify`
+cannot see here.
+
+`suitability` is decoded only so that parity holds: no `suitability` key
+is emitted anywhere in `helpers/` or `lib/`, `docs/JSON-SCHEMA.md` does
+not document one, and no view reads the property. It is flagged in place
+as a deletion candidate rather than quietly blessed.
+
+### Added — netdiag notices when its own watcher stops [ND-1]
+
+The first item from `docs/design/nothing-was-watching.md`, and a bug
+before it is a feature: `com.netdiag.watcher` failed **1,386 consecutive
+times over seventeen days** on this project's own machine while every
+visible signal said it was fine. `launchctl list` reported exit status
+126 throughout. `watcher.stderr.log` grew to 124 KB of a single repeated
+`Operation not permitted`. `watcher.stdout.log` — the file the install
+message tells you to `tail -f` — stayed at **0 bytes**, which is exactly
+what a healthy watcher with nothing to report looks like.
+
+The cause is TCC and it is not developer-specific. The plist runs
+whatever `netdiag` on `PATH` resolves to; `install.sh` run from inside a
+clone points that symlink at the clone; and a launchd agent has no
+consent grant for `~/Documents`, `~/Desktop` or `~/Downloads`. Clone
+netdiag into any of the three, install from it, and the watcher can
+never execute. There is no grant to ask for either — the TCC prompt
+would be attributed to Homebrew's bash, and "give bash Full Disk Access"
+is worse advice than shipping no watcher at all.
+
+Four changes, in the order they matter:
+
+- **`--install-watcher` refuses those paths** and prints what to do
+  instead, exiting 3 and writing no plist. A plist that exists is a
+  plist launchd keeps failing to run every fifteen minutes forever.
+- **A heartbeat, not just an exit status.** The plist now sets
+  `NETDIAG_WATCHER=1`, and `bin/netdiag` writes
+  `~/net-diag/watcher.heartbeat` on its normal exit path when it sees
+  that variable. Exit status says a process started and returned;
+  it cannot say a run reached the end. Nothing but the plist sets the
+  variable, so an interactive run can never make a dead watcher look
+  alive — and it is deliberately not written from the `EXIT` trap,
+  because a run that aborted did not complete.
+- **New `lib/watchdog.sh`** reads the plist, `launchctl`'s exit status
+  and that heartbeat, and decides one state: `ok`, `pending`, `stale`,
+  `never`, `failing` or `blocked`. One decision, read by the Report
+  card row, by `ND-1` and by the app — three consumers that could
+  otherwise describe the same watcher three different ways.
+- **`ND-1` (warn, new `netdiag` category)** fires on the four broken
+  states. `pending` — installed more recently than
+  `THRESH_WATCHER_INTERVAL_S × THRESH_WATCHER_STALE_FACTOR` — stays
+  quiet, because a watcher installed a minute ago has not run yet and
+  accusing it then teaches users to ignore the rule.
+
+`netdiag` is its own category rather than borrowing `baseline` because a
+category names the row whose number a rule judges, and tinting the Speed
+row red over a broken launchd agent is the same mistake as `G1`'s green
+dot beside "35% loss", pointed the other way. The Report card row is
+capped at `warn` for a related reason: `bad` rows sort above the network
+itself, and nothing about the network is wrong when this fires.
+
+The `watcher` object in `--json` is **`null` when none is installed**,
+which is most runs — an object of nulls would claim "installed, and
+nothing about it is known". `program` is dropped under `--redact` rather
+than masked: it is an absolute path under `$HOME`, so it carries the
+account name whether or not that string is anything `redact()` knows to
+look for.
+
+`THRESH_WATCHER_INTERVAL_S` also retires the inline `900` that used to
+live in `lib/launchd.sh` — the cadence now decides a verdict, so it
+belongs where every other number that decides a verdict lives.
+
+21 new tests in `tests/test_watchdog.bats`, including a guard that every
+state the machine can produce is one both `lib/diagnosis.sh` and
+`lib/headline.sh` handle: a seventh state added in one place would
+otherwise render as nothing at all, which is the exact failure this
+whole rule exists to end.
+
+### Docs — nothing was watching
+
+New `docs/design/nothing-was-watching.md`. Nothing implemented. The
+sibling document asks whether netdiag describes a network correctly;
+this one asks whether netdiag is a **monitor**, and concludes that it is
+a camera being sold as a security system. Every "what netdiag does
+today" claim is verified against the code at `6dc9fe5` and against the
+running app, not assumed.
+
+The finding that prompted it is a live one, on this machine:
+**`com.netdiag.watcher` has been failing on every invocation since 11
+August and nothing said so.** `launchctl list` reports exit status 126,
+`watcher.stderr.log` holds 1,386 identical `Operation not permitted`
+lines, and `watcher.stdout.log` is 0 bytes — indistinguishable from a
+healthy quiet run. The cause is not developer-specific: the plist points
+at whatever `netdiag` on `PATH` resolves to, `install.sh` run from a
+clone points that symlink at the clone, and a launchd agent has no TCC
+grant for `~/Documents`. Anyone who clones there gets the same
+permanently-broken, silently-broken watcher. `ND-1` is proposed so the
+tool that exists to notice silent failure notices its own. (This entry
+and the design document originally called it `WD-1`, which was already
+taken by the WiFi-flapping rule; both now say `ND-1`.)
+
+The rest follows from one observation: with monitoring enabled at a 5 s
+cadence, 75 seconds of sampling wrote **zero bytes** anywhere on disk,
+and the monitor died with the app. Both behaviours are documented and
+intentional — `lib/monitor.sh:7-8` promises exactly that — but they mean
+every transition the monitor is uniquely placed to see is observed,
+rendered, used to decide whether to notify, and then discarded. An
+"incident" in `helpers/summary.py:198` is a *run that had a diagnosis*,
+not a period with a start and an end, so uptime, outage count, longest
+outage and "your connection dropped six times last night, totalling
+eleven minutes" are all unanswerable.
+
+The proposal is an append-only `events.jsonl` of *transitions* (not
+samples), written by an opt-in `--monitor --journal PATH` so the
+existing no-disk contract still holds for other consumers; one
+launchd-managed recorder that survives a reboot, with the app as a
+viewer rather than a second monitor competing for the link; and
+`sleep`/`wake` boundaries recorded as first-class events, because an
+availability figure computed over a window the Mac spent asleep tells
+the same lie `MonitorSeries` already refuses to draw as a line.
+Availability becomes a fifth judge bound by the `lib/thresholds.sh`
+rule.
+
+Also catalogued: netdiag measures the path but never the traffic on it
+(no `nettop`, no `netstat -ib` anywhere — so a D bufferbloat grade earned
+while a backup saturates the uplink is indistinguishable from one earned
+on an idle link, and the report blames the router); the `arp -an` table
+is parsed for duplicates and then discarded rather than kept as a device
+inventory; nothing asks whether the printer still answers; and the app
+is self-signed with no notarization, no DMG and no Homebrew tap, so it
+cannot be handed to anyone else.
+
+Recommended order puts the two cheap items first — the watcher
+self-check, then traffic attribution, whose data was verified available
+unprivileged — ahead of the journal, which is the only item that changes
+what netdiag is.
+
+### Fixed — `--history=N` no longer mixes two populations in one object
+
+`--limit` windowed `severity_counts`, `metric_samples` and `metric_stats`
+but not `run_count`, `check_count`, `first_seen` or `last_seen`, so one
+network object carried all-time counts beside windowed statistics with
+nothing saying which was which. On this developer's store `--history=5`
+returned `run_count: 1913` next to `severity_counts: {}` — a network with
+a long, well-recorded history of problems reporting none of them — and a
+consumer dividing one by the other got a problem rate off by two orders
+of magnitude.
+
+Every quantity now describes the window, so
+`sum(networks[].run_count) == counts.runs` and
+`sum(severity_counts.values()) == check_count` hold at every limit, and a
+network with nothing in the window is no longer listed.
+
+Identity is deliberately *not* windowed. `label`, `gateways`, `isps`,
+`ssids`, `synthesized` and `bridged_from` answer "which network is this",
+not "what is in this window"; recomputing them from a narrow window would
+rename a network, or empty the fields the app's search matches on,
+whenever the recent runs happened not to carry an ISP string.
+
+`--show` is unaffected — it answers before `--limit` is applied and
+compares a run against its network's whole population by design. The app
+is unaffected too: it always asks for the unlimited form. This is for
+every other consumer of a documented CLI surface.
+
+### Fixed — the report card no longer contradicts its own numbers
+
+An audit of everything netdiag *says* — CLI prose, the Report card, and
+the app — for output an average person would misread, and for two
+statements on one screen that disagree. Twenty findings; these are the
+ones where the app was telling the user two different things at once.
+
+**A category names the measurement a rule judges, not the cause it
+blames.** The app tints a report-card row by the category of the rules
+that fired, and that one confusion produced most of what follows.
+
+- `G1` ("gateway packet loss with weak Wi-Fi") was catalogued under
+  `wifi`, because the radio is its cause. So a Mac losing 35% of its
+  packets to its own router showed **a green all-clear dot beside the
+  words "35% loss"**, while the red mark went to a Wi-Fi row that, on an
+  unprivileged run, had no number in it at all. `G1` is now `router`,
+  matching `G2` — the same measurement, differing only in whether a weak
+  signal was available to explain it.
+- New optional `also` field on `--rules-catalog` (schema 2 → 3, additive)
+  for a rule that genuinely judges two measurements. `G1` carries
+  `"also": "wifi"` so the row with the loss figure *and* the row naming
+  the cause both light up. A consumer reading only `category` is
+  unaffected.
+- **`router` no longer bleeds into the Internet row.** It was there to
+  catch `N1`, but it also caught `G3` — whose own sentence reads "not to
+  the wider internet, so your internet service itself looks fine from
+  here", printed directly beneath an amber Internet row.
+- **`dhcp` no longer tints the DNS row.** `DH-1` is "your address lease
+  expires soon"; it was turning "6 of 6 resolvers OK" amber.
+- **`ipv6`, `topology`, `vpn` and `speed` now tint something.** They
+  matched no row at all, so a run firing `V6-1`, `NAT-1` or `WAN-1`
+  showed an entirely green card sitting above its own amber findings. The
+  card gains Packet loss, IPv6, VPN, NAT topology and Local network rows —
+  the ones `lib/headline.sh` has always had and the app had dropped.
+- `tests/test_rules_catalog.bats` now fails the build when any category
+  has no row claiming it. The old failure was silent: a new rule family
+  simply coloured nothing and the card looked healthy.
+
+**"Not measured" was answering the wrong question.** On a `--quick` run —
+the depth *both* primary buttons run — five of the card's rows read "not
+measured", which an average reader takes as *we tried and failed*. The
+truth is *we skipped it because you asked for the fast answer*, which the
+CLI's own card has always said. Absent values now name the run's depth
+("not measured (quick check)"). The Wi-Fi row says "not recorded (needs
+sudo)" rather than "not measured", because on Home it sits inches below a
+live radio reading taken from macOS directly — the card was flatly
+denying a number the same screen was showing. That live row is now
+labelled "now".
+
+**A reading the CLI told us not to trust is no longer painted as a
+measurement.** `TCP-1` and `ICMP-1` both mean real traffic is fine and
+only ping is being dropped — normal on hotel and corporate networks. The
+card showed the loss figure anyway, so a red "100% loss, no reply" row
+sat directly above the CLI's own "your internet is fine; don't worry
+about the ping numbers above", and a **green dot** sat beside "100% loss,
+no reply" whenever no internet-category rule had fired. Those rows now
+read `n/a — ping blocked`, and `n/a` counts as unmeasured, so it cannot
+earn an all-clear dot. Same treatment for an IPv6-only network, where the
+IPv4 probe cannot succeed by construction.
+
+**Bufferbloat grade C beside a D or an F was downgraded to a warning.**
+`lib/headline.sh` tested `*C*` before `*D*|*F*`, and `case` takes the
+first arm that matches — so a grade F link printed a yellow "noticeable
+lag under load" directly above `B2`'s red "enough to ruin voice/video
+calls and multiplayer games". Two severities for one fact, one screen
+apart; every C-plus-D/F pair was affected. The mapping is now a named
+function (`bufferbloat_card_verdict`) checked against `B1`/`B2` for all
+25 grade pairs. The app's "Under load" row also shows both legs now, not
+just the gateway's — its tint already came from either.
+
+**The headline sentence could describe an unrelated rule.**
+`lib/monitor.sh` appends rules in evaluation order, not severity order, so
+an `info` `VPN-1` sits ahead of a `critical` `L1`. The app took the first
+rule it could look up, and a VPN user losing most of their packets got a
+red "Detecting a network problem" card whose body read "A VPN is carrying
+your traffic right now." The worst rule now wins, asserted in `--verify`.
+
+Also: the headline now follows the same precedence as the dropdown's
+stage card (scanning and paused were missing, so a sleeping display
+showed "Monitoring paused" in one place and a stale alert in another); a
+suppressed alert is cleared when monitoring stops rather than outliving
+its condition; the menu bar no longer shows another network's speed test
+when the current one has none recorded; the Networks tab counts *checks*
+where it says "checks" (`check_count`, not every stored record — 28
+against 32 on this machine) and its list membership now matches Home's;
+Live's "Internet" number says it is a TCP connect time, not the ping the
+dropdown shows under the same word; and the Wi-Fi location banner no
+longer appears on a machine that has never had a Wi-Fi card.
+
+### Fixed — an IPv6-only network no longer reads as no network at all
+
+`V6-1` has covered broken IPv6 alongside working IPv4 for versions. The
+mirror had no rule at all — and it was not a gap, it was a confidently
+wrong critical.
+
+netdiag's `GATEWAY` comes from `route -n get default`, which is IPv4.
+So a network that is IPv6-only **by design** left it empty and the run
+fell into `N1c` ("joined with no route out") or `N1` ("no network
+connection at all"). Both critical, both exit 2, both false on a
+network working exactly as intended and carrying the user's traffic
+perfectly well. IPv6-only is normal on some mobile carriers,
+universities and newer corporate deployments, and growing.
+
+New `V6-3` heads that branch chain, which is the whole rule. It demands
+IPv6 be *proven* rather than merely present — a global address is not
+enough, since `V6-1` exists precisely because half-configured IPv6 is
+common. A real TCP connection plus a working AAAA lookup is the
+evidence; without both, an absent IPv4 gateway is a genuine outage and
+`N1`/`N1c` go on saying so.
+
+**`V6-1` is now suppressed on an IPv6-only network**, found by writing
+the test rather than by reading the code: the two contradict each other
+outright, and `V6-1` could still fire on ping loss alone, since
+`IPV6_ONLY` already requires AAAA and TCP6 to be working. Filtered
+ICMP6 is not a broken path when real traffic is getting through — the
+same false alarm `ICMP-1` exists to prevent on the v4 side.
+
+New `ipv6.only` and `ipv6.clat` in the JSON, the latter true when macOS
+synthesised a 464XLAT address (`192.0.0.0/29`, RFC 7335) so IPv4-only
+apps keep working.
+
+**Not verified against a real IPv6-only network** — this machine is
+IPv4-only (`scutil --nwi`: "No IPv6 states found"). The predicates are
+pure and fixture-tested and the CLAT range is the RFC's, but end-to-end
+behaviour on an actual NAT64 network is unconfirmed.
+
+### Added — `--history` gains a per-network verdict, so a chart can say "usually healthy" without judging anything itself
+
+`netdiag --history` has always shipped `metric_stats` — median, p10, p90
+per metric, per network — but stated no opinion about any of them. A
+GUI's Trends tab wanting to open on "this network is usually fine" had
+no field to read and, short of one, would have had to invent its own
+copy of six thresholds Swift has no business owning: exactly the
+CLAUDE.md rule this project already holds for `diagnosis[].summary` and
+`rules[].blurb`.
+
+`networks[]` now carries a `judged` sibling of `metric_stats` —
+`{"overall": "ok"|"warn"|"critical"|null, "summary": "<sentence>",
+"metrics": {key: verdict}}` — schema `1` → `2`. It judges **the median
+only**, the same discipline `--summary`'s text report has always held,
+and a verdict is `null` exactly when the corresponding `metric_stats`
+entry is: one nullability rule, gated on the same
+`THRESH_COMPARE_MIN_SAMPLES` over the same population. Only the six
+metrics with an actual policy cutoff — gateway loss, both bufferbloat
+deltas, WiFi RSSI, path MTU, clock drift — ever appear in
+`judged.metrics`; the other seven `--history` keys (gateway RTT and
+jitter, internet RTT/loss, both speed directions) have no absolute
+threshold to judge against and are never added, so their absence means
+"not judged", never "healthy". `summary` is CLI-authored prose —
+"Usually healthy across 1,913 checks.", "Usually healthy — but the
+Wi-Fi signal is often weak.", "Not enough checks on this network to
+judge it yet." — that a consumer renders verbatim rather than composing
+its own wording from the verdict map. `--show`'s own schema is
+untouched; its `comparison` block keeps judging one run at a time, as
+before.
+
+The judging logic itself lives in a new `helpers/judgement.py`, not
+inline in `history.py`: `--summary`'s text report and `--history`'s
+`judged` block were about to become two independent implementations of
+the same six comparisons, which is precisely the shape that drifts
+silently — a menu-bar app reading `judged` and a terminal reading
+`--summary` ending up with two different opinions about one network,
+with nothing to say which one lied. `judgement.py` is the one pair-table
+(metric key → warn env, crit env, direction, phrase) both
+`helpers/history.py` and `helpers/summary.py` now read; `--summary`'s
+text output is unchanged byte-for-byte (`tests/test_summary.bats`
+guards it). Every cutoff still comes from `lib/thresholds.sh` through
+the environment with no defaults — a plain `netdiag --history` now
+refuses to run (exit 3) if one of the six judging thresholds is unset,
+the same contract `metric_stats` already held for `THRESH_COMPARE_*`.
+`bin/netdiag` factors the ten-name threshold export this needs into one
+`_export_judging_thresholds()` function, called from every mode that
+now judges a network from the stored history, instead of a copy of the
+same list at each call site.
+
+`--rules-catalog`'s glossary grows to match: schema `3` → `4`, an
+optional `why_absent` field on a metric entry (present only where an
+empty chart has a knowable cause — a check mode that skips the
+measurement, or the privilege the two WiFi radio metrics need — plain
+prose migrated from and replacing `HistoryView.hint(for:)`'s Swift
+switch, rephrased neutrally since the button belongs to the GUI, not
+the CLI), and 16 new metric entries: one per `--history` metric key (the
+same 13 keys `metric_stats` and `judged.metrics` use, keyed and labelled
+to match verbatim) plus three describing `--monitor`'s Live-tab chart
+measurements (`monitor_gateway_rtt`, `monitor_internet_tcp`,
+`monitor_gateway_loss`), whose `help` is the chart-subtitle prose a GUI
+would otherwise have to author itself. `--capabilities` reports
+`history: 2` and `rules_catalog: 4`.
+
+This is the CLI half of the Live/Trends redesign; the GUI work that
+consumes `judged` and `why_absent` is a separate, later entry.
+
+## [0.12.0] - 2026-08-27
+
+### Fixed — a test that failed depending on what time it was run
+
+`tests/test_summary.bats`'s "disconnects report the busiest single run,
+never a sum" asserted that the whole report contained no `"15"` — the
+sum it was guarding against. But the report also prints a `span:` line
+carrying two ISO timestamps, so any run at a second, minute, hour or
+day containing `15` failed against a perfectly correct implementation.
+It went red in CI at `23:58:15` having passed locally minutes earlier.
+
+Scoped to the disconnect line it actually means. Pre-existing since
+`cb2142d` and unrelated to anything around it — which is the danger: a
+time-dependent test that fires once in a while trains everyone to
+assume the failure is the flake rather than reading it.
+
+Two sibling assertions in the same file guard against `"999"` and were
+already correct — they pass an explicit `24`-hour window precisely
+because the default prints `last 999999h`, with a comment saying so.
+The trap was known; this one case was missed.
+
+### Added — one check for everything else in the path
+
+`VPN-1` fires on the *default route*. So did netdiag's whole model of a
+network: **it equated "carries my traffic" with "holds the default
+route"**, and macOS stopped honouring that equation years ago. Split
+tunnels, PAC proxies and NetworkExtension content filters each sit in
+the datapath *without* taking the default route — so every measurement
+in the report still read as a clean description of "the network" while a
+different subset of it quietly stopped describing what the user's
+traffic actually does.
+
+The most expensive version of that: a corporate split-tunnel VPN
+installs routes for the company's prefixes only, so netdiag reported a
+perfectly healthy network while every work application was broken, and
+said nothing about the one component that was failing.
+
+New `lib/path.sh` — one check, not five features, because these are one
+bug wearing several disguises. It enumerates actors and says which
+measurements each undermines; it does not diagnose faults.
+
+- **`VPN-2`** — non-default routes via `utun*`/`ipsec*`/`wg*`/`ppp*`.
+  Keyed on *routes*, never on interfaces: this machine has `utun0`
+  through `utun5` all UP and carrying nothing, which is why
+  `lib/vpn.sh` already warned that "existence alone is meaningless".
+- **`PX-1`** — a web proxy or PAC file on the service carrying the
+  link. `networksetup -getwebproxy` was read nowhere before, so
+  `tcp_reach`'s direct connections were testing a path real traffic
+  never uses.
+- **`FW-1`** — NetworkExtension content filters (Zscaler, Netskope,
+  WARP, Little Snitch). Only the `network_extension` group counts; this
+  machine has camera and driver extensions installed and neither is in
+  the datapath.
+
+All three are `info` and worded as "here is something else in the path",
+never as an accusation — these are usually working exactly as their
+owner intended, and a network tool crying wolf about corporate security
+software is worse than silence. New `path_actors` block in the JSON.
+
+**Two actors deliberately absent.** iCloud Private Relay and encrypted
+DNS both belong here and neither ships, for the same reason: the
+detection has never been observed in its *positive* state. Private
+Relay was prototyped today and the mechanism works —
+`PrivacyProxyServiceStatus` decodes out of
+`com.apple.networkserviceproxy` without sudo — but only the "off" value
+(`0`) has ever been seen, so the mapping is unverified and a rule firing
+on a value nobody has observed is a rule nobody has tested. Recorded in
+the design doc, along with the constraint that the same plist holds a
+*location trail* (every network joined, by name) that netdiag must never
+read.
+
+### Fixed — a run that measured two networks no longer poisons a baseline
+
+A full check takes ~60 s. Walk out of Wi-Fi range onto ethernet at
+second 30 and the run blended two networks: a latency figure from one
+link, a speed figure from another, and a single `network.id` stamped on
+both. It then went into that network's history, where `BL-1` judged
+every future run against a baseline describing a transition. Roaming
+between two mesh APs did the same to `W1`/`W2` — one averaged RSSI
+describing neither radio.
+
+New `DQ-1` names it, and — the larger half — `lib/output.sh` now forces
+`NO_BASELINE=1` and `HISTORY_APPEND=0` on such a run. Comparing a blend
+against either network's history manufactures `BL-1` regressions out of
+the switch itself; *storing* it poisons every future comparison.
+Silently filing it under one of the two networks was what happened
+before.
+
+Detected with a cheap fingerprint (interface, gateway, SSID, BSSID)
+taken at both ends of the run, ~15 ms, rather than a second `netid_run`
+— which would mean re-running `iface`, `wifi` and `arp`, tens of
+seconds, to answer a question four fast reads settle. An unreadable
+fingerprint on either side is never a change: a warning that fires on
+every run is a warning nobody reads.
+
+### Fixed — an overnight sleep no longer reads as an overnight outage
+
+`lib/monitor.sh` states that it "stays dumb about sleep" and leaves the
+question to the GUI's `NSWorkspace` notifications. That is right for the
+GUI and wrong for everyone else: `--monitor` is documented as a stream
+for *any* program, so a laptop lid closed for eight hours emitted two
+samples eight hours apart — both reporting a healthy link, nothing in
+between — and a consumer reading that stream could not tell the silence
+from a dead network.
+
+New `gap_s` on each monitor sample: the seconds lost when the interval
+between samples exceeded its scheduled cadence by the new
+`THRESH_MON_GAP_FACTOR` (3), `null` otherwise. `null` rather than `0`,
+because `0` would mean "no time passed" where this means "no
+discontinuity". The monitor stays deliberately dumb about *why* it
+stopped looking — sleep, `SIGSTOP`, a stalled probe — and reports only
+that it did, and for how long.
+
+## [0.11.0] - 2026-08-27
+
+### Added — enough detail to diagnose the *next* Wi-Fi flapping episode
+
+Closes the instrumentation gap left by an investigation that ended
+"not reproducible". Three real episodes sit in this project's own
+history — 112, 241 and 173 disassociations inside a single hour — and
+none of them can be diagnosed after the fact. Not because the counting
+was wrong (it was checked and is sound) but because nothing captured
+what was happening while it happened, and macOS's log retention rolled
+over long before anyone looked.
+
+Three changes, none of which would have helped those three, all of
+which will help the next one:
+
+- **`WI-1`** fires when macOS withholds the SSID. The two `info` lines
+  that used to say this are suppressed in a default run, so nobody saw
+  them — and the *stored* consequence is what bites: every run on a
+  nameless network is filed under `WiFi (SSID hidden by macOS)`, so
+  runs on genuinely different networks merge into one history. All
+  three episodes are filed that way, and it cannot even be confirmed
+  they were on the same network.
+- **`wifi.privileged`** records whether the sudo-only scrape ran.
+  Without it, `rssi`/`noise`/`snr`/`channel`/`phy`/`tx_rate` coming
+  back `null` is ambiguous between "measured and quiet" and "never
+  measured" — and every radio field in those three stored spikes is
+  `null`, which is why a weak-signal drop cannot be told apart from an
+  interference drop or an AP-side problem.
+- **`wifi_disconnects.events`** stores the condensed log lines behind
+  the count, capped at the new `THRESH_WIFI_EVENTS_STORED` (50) and
+  newest last. The report still prints five, because the 2 KB-per-line
+  `airportd` dumps would drown out everything else; the record keeps
+  more. Dropped entirely under `--redact` rather than scrubbed — they
+  are raw log text that can carry a neighbouring BSSID or an SSID this
+  run never recorded, so there is no secret to match against and no
+  allow-list that makes arbitrary log text safe to publish.
+
+`WI-1` fires on the author's own machine, so it is visible in the
+re-captured `examples/sample-output.txt` — which is the point: the
+condition that made three episodes undiagnosable is present right now
+and was, until this release, invisible.
+
+**`MET-1` no longer states a guess as a fact.** Its two detection
+signals are of very different strength, and the first version of the
+rule used one wording for both. On a home LAN that happens to use
+`192.168.43.0/24` — the Android hotspot default, but also an ordinary
+private range — it would have told the user "You're online through a
+phone or tethered device", which is a confidently wrong claim about
+their own network and exactly the failure this whole batch of work
+exists to remove. New `LINK_METERED_CERTAIN` splits the two: on the
+macOS service name the rule states the fact, and on the subnet
+inference it says what it saw, why it skipped the test, and that
+nothing is wrong if the guess was wrong. Both still skip the speed
+test, because the cost of being wrong about the *skip* is small in
+either direction. Surfaced as `interface.metered_certain`.
+
+Also corrected in `docs/JSON-SCHEMA.md`: `speedtest` was documented as
+`null` unless `--speed` was passed, which stopped being true in v0.6.0
+when the speed test became a default. And in `CLAUDE.md`: the note
+about `--redact` keeping the ISP name cited `TELEFONICA BRASIL S.A` as
+what the sample shows, which has not been true since the author's ISP
+changed.
+
+### Changed — the speed test no longer spends your cellular data
+
+**Behaviour change.** `--speed` runs by default, moves hundreds of
+megabytes, and on a phone's hotspot that came out of the user's cellular
+allowance — spent by a tool they ran to ask a question, without being
+asked. The GUI made it sharper: its one automatic full check fires on
+joining a new network, and joining a hotspot is exactly that event.
+
+`speedtest_run` now skips on a metered link unless `--speed` was passed
+explicitly, and says why rather than skipping silently. New `MET-1`
+carries the reason to the Diagnosis section, where the user will
+actually read it — the same principle as "a captive portal is a
+diagnosis in a scan, not a log line".
+
+`MET-1` fires whether or not the speed test was skipped, because every
+*other* recommendation in the report changes on a tethered link: "reboot
+your router" and "check the cable" are nonsense when the router is a
+phone in someone's pocket.
+
+Detection is honest about its limits. USB and Bluetooth tethering
+announce themselves in the macOS service name and are exact. A phone's
+*Wi-Fi* hotspot is an ordinary Wi-Fi network to every command-line tool
+netdiag can reach — nothing in `scutil --nwi`, `ipconfig getsummary` or
+`system_profiler` reports it as expensive, and `NWPathMonitor`'s
+`expensive`/`constrained` flags are not exposed to any CLI — so that
+case falls back to the documented default subnets (`172.20.10.0/28` for
+iOS, `192.168.43.0/24` for Android). That is a heuristic: it misses a
+reconfigured hotspot and would match a home network using the same
+range. The asymmetry is deliberate — a false positive costs an
+announced, overridable skip; a false negative costs real money.
+
+New `interface.service` and `interface.metered` in the JSON, the latter
+being why `speedtest` may be `null` in an otherwise complete run.
+
+### Fixed — Tier 1: link facts netdiag was reporting wrongly
+
+The first items from `docs/design/networks-we-cannot-yet-describe.md`.
+Each is an existing rule firing on data that did not mean what the rule
+thought, so each removes a *confident wrong answer* rather than adding a
+check.
+
+- **A self-assigned address is no longer a healthy link. [`DH-3`]**
+  macOS assigns a `169.254.x.x` address when it asks a network for one
+  and nothing answers — the OS reporting the *absence* of a lease. It
+  arrives on the same `ifconfig` `inet` line as a real one, so
+  `linkstate_parse_ifconfig_ip` returned it, `linkstate_run` set
+  `LINK_UP=1` and stopped searching, and a total DHCP failure was
+  recorded as a configured link. The case then fell through to `N1`,
+  which told a user sitting on Wi-Fi at full signal that their Mac "has
+  no network connection at all — nothing is joined": false, and a
+  different fix from the real one. New `DH-3` names it — joined, no
+  lease, placeholder address — and is a third state from both `N1`
+  (no link) and `N1c` (real lease, no route). New
+  `interface.self_assigned_ip` in the JSON, because `ip` populated
+  alongside `link_up: false` otherwise reads as a contradiction.
+- **A slow speed test over Wi-Fi is now attributed to the Wi-Fi.
+  [`SP-1`]** The most common wrong conclusion a user draws from this
+  report: "netdiag says 75 Mb/s, I pay for 500, my ISP is cheating me."
+  When the Wi-Fi link negotiated 130 Mb/s, 75 is the *most* that link
+  can carry. Both numbers were already being collected — `WIFI_TX` and
+  `SPEEDTEST_DOWN_MBPS` — and nothing joined them; `lib/diagnosis.sh`
+  did not read the speed result at all. `info` rather than `warn`,
+  because nothing is broken: it reframes a number the user is about to
+  misread. New `THRESH_WIFI_GOODPUT_CEILING_PCT`, set to 45 —
+  deliberately below the 50–65% band real 802.11 goodput occupies,
+  because the expensive mistake is a false positive that sends someone
+  to buy a router they do not need. Needs sudo, since `WIFI_TX` is a
+  privileged field; without it the rule stays silent rather than
+  guessing.
+- **A gigabit port running at 100 Mb/s is no longer invisible.
+  [`ETH-1`, `ETH-2`]** Nothing in netdiag read `ifconfig media`, so a
+  damaged pair in a cable — which drops a 1000BASE-T link to
+  100BASE-TX — was a 10× cap visible nowhere. The speed test reported
+  ~94 Mb/s and the user called their ISP about a gigabit plan being
+  delivered correctly. `ETH-1` compares the negotiated rate against the
+  port's advertised maximum, so it needs no threshold and stays quiet on
+  an adapter that genuinely only does 100 Mb/s.
+  `ETH-2` catches half duplex, but only on a port that advertises full
+  duplex — a failed negotiation rather than an old adapter. Both come
+  off `ifconfig -m`, whose output is a superset of the plain form, so
+  `linkstate_run` gained the capability data without a second
+  subprocess. New `interface.link_mbps`, `link_max_mbps` and `duplex`
+  in the JSON, all null on Wi-Fi.
+- **`G2` and `G3` stop blaming the router for a duplex mismatch.**
+  Collisions on a half-duplex link produce heavy gateway loss, and
+  `G2`'s headline advice was "reboot the router" — power-cycling a box
+  that works. When `ETH-2` has fired, both rules now state the loss and
+  point at the negotiation rather than offering a second, contradictory
+  fix.
+- **The service order's ranking now decides which unconfigured device
+  is reported.** `linkstate_run` overwrote `LINK_DEVICE` on every active
+  device, so when none held a lease the *last* one won. Invisible while
+  the only way to reach the end of that loop was a machine with nothing
+  configured at all; wrong the moment self-assigned addresses started
+  arriving there. The walk now keeps the first such candidate and still
+  prefers any later device holding a real lease over all of them.
+
+### Docs — twenty networks netdiag cannot yet describe
+
+New `docs/design/networks-we-cannot-yet-describe.md`. Nothing implemented;
+it is a forward look at where the 38 rules in `--rules-catalog` answer
+**confidently and wrongly**, which is worse than not answering. Every
+"what netdiag does today" claim in it is verified against the code at
+`31121ba` rather than assumed.
+
+The five in Tier 1 are existing rules firing on data that does not mean
+what the rule thinks:
+
+- A `169.254.x.x` self-assigned address sets `LINK_UP=1`, because
+  `linkstate_parse_ifconfig_ip` takes the first `inet` line whatever it
+  is — so a total DHCP failure is recorded as a healthy, configured link.
+  The one state `lib/linkstate.sh` exists to name, and it is folded into
+  the healthy one.
+- A worse interface can win the service order and nothing notices. The
+  author's own Mac ranks two pairs of display glasses and a Thunderbolt
+  bridge above Wi-Fi; `linkstate_run` reads the order only as a fallback
+  and stops at the first active device.
+- A gigabit port negotiated at 100 Mb/s is invisible — nothing reads
+  `ifconfig media` — so a damaged cable pair reads as a slow ISP, and a
+  duplex mismatch reads as `G2` "reboot your router".
+- The Wi-Fi PHY rate is collected and the speed result is collected and
+  no rule joins them, so a link-rate ceiling reads as a slow internet
+  plan. Highest value per line in the document: the data is already in
+  hand.
+- Satellite, cellular and fixed-wireless are judged against terrestrial
+  cutoffs. Deferred deliberately — a per-medium profile changes the
+  `lib/thresholds.sh` contract rather than adding under it.
+
+Tier 2 collects six entries that turn out to be one bug wearing different
+clothes: **netdiag assumes the default route is the path its traffic
+takes.** Split-tunnel VPNs, iCloud Private Relay, PAC proxies,
+DoH/DoT resolvers and NetworkExtension content filters each break that
+assumption and each silently invalidate a different subset of the report.
+The document argues for one "what else is in the path" pass over five
+unrelated rules.
+
+One item is a trust question rather than a diagnostic one, and is
+recommended first on those grounds: `--speed` runs by default, and on a
+personal hotspot or iPhone USB link that spends the user's cellular
+allowance without asking — including from the GUI's automatic
+first-sighting scan, since joining a phone's hotspot is exactly that
+event.
+
+### Fixed — link state, captive portals, and a green dot over a red row
+
+Four defects, all reachable from one screenshot of a Mac sitting on hotel
+WiFi at full signal being told it had no network connection at all.
+
+- **A missing default route no longer erases the interface.** `lib/iface.sh`
+  derived both `INTERFACE` and `GATEWAY` from a single
+  `route -n get default`, and `lib/wifi.sh`, `lib/dhcp.sh` and
+  `lib/netid.sh` all gate on `INTERFACE` — so one absent route took the
+  SSID, the signal, the lease and the network identity with it, and `N1`
+  went on to state that the Mac "isn't joined to a WiFi network", a claim
+  nothing in the run had checked and one the same report contradicted
+  three lines higher. New `lib/linkstate.sh` answers association, address
+  and DHCP router from `ifconfig` and `ipconfig getpacket`, none of which
+  consults the routing table.
+- **`N1` split into `N1` and `N1c`.** `N1` is now genuinely nothing joined.
+  `N1c` is joined-and-addressed with no route out — it names the network,
+  leads with the sign-in page because that is overwhelmingly the cause,
+  and quotes the DHCP router as somewhere to point a browser. It claims no
+  portal it has not detected: with no route the canary is unreachable, so
+  there is nothing to detect and `N1c` says only what was observed.
+- **The route is re-read once before it is called missing.** Six of twelve
+  consecutive stored runs fired `N1` under network id `unknown` while runs
+  two minutes either side were filed against a live gateway on the same
+  network. A route drops for a moment during a DHCP renewal or a WiFi
+  roam; a single unlucky read turned that into the most alarming verdict
+  netdiag can produce plus a junk history entry. New
+  `THRESH_ROUTE_RECHECK_DELAY_S`; `lib/netid.sh` also falls back to the
+  DHCP-offered router so these runs stop filing under `unknown`.
+- **`CP-1` fires in a scan.** It previously existed only in
+  `lib/monitor.sh`; `lib/public.sh` set `CAPTIVE_PORTAL` and printed a warn
+  line but never called `add_diag`, so a portal never reached
+  `status.rules[]`, the exit code, or the GUI. `P1` spoke in its place —
+  *"almost certainly an outage on your ISP's side, check their status page
+  or call support"* — on networks whose fix was a browser. `CP-1` now
+  suppresses `P1`/`P2` in the scanner and the monitor alike, and is
+  critical when nothing is getting through, warn when traffic still flows.
+  `docs/DIAGNOSIS-RULES.md` carried the argument for the old behaviour;
+  that section has been corrected in place rather than quietly deleted.
+- **Portals that answer 200 are detected.** `captive_portal_classify`
+  classified on the HTTP status alone and both callers passed
+  `curl -o /dev/null`, so a hotel splash page returning 200 with its login
+  HTML — the common case — was reported as "No captive portal". The body
+  is now compared against Apple's literal success page, the way Apple's
+  own check does it, and 511 is recognised. A 200 with no body captured
+  classifies `unknown` rather than `ok`: silence beats a guess.
+- **"0 of 6 resolvers OK" no longer renders with a green dot.** `D1`
+  required `public.ok == true`, so total resolver failure on a downed
+  network fired no `dns`-category rule and `RunReportView`'s DNS row
+  stayed green beside its own red value. New `D2` covers the total case.
+  No Swift changed: per CLAUDE.md the GUI holds no diagnostic logic, so
+  the missing piece was a rule, not a renderer.
+- **New JSON fields** `interface.link_status`, `interface.link_up` and
+  `interface.dhcp_router` (`docs/JSON-SCHEMA.md`). `dhcp_router` is kept
+  under `--redact` like every other RFC1918 address, which also keeps
+  `N1c`'s "try http://…" advice actionable in a shared report; the SSID
+  `N1c` interpolates into its own prose is masked by the existing scrub.
+
+### Fixed — 171 test assertions that could never fail
+
+A failing `[[ ... ]]` does **not** abort a bats test on bats-core 1.14:
+bats reports failures through the `ERR` trap, and bash does not run that
+trap for conditional constructs. So any `[[ ]]` that was not the *last*
+statement in a test body was silently a no-op — it evaluated, its result
+was discarded, and the test passed regardless.
+
+Caught when a newly written test asserting that `CP-1` fires passed
+against an implementation that did not yet emit `CP-1` at all.
+
+Every standalone `[[ ... ]]` assertion across the 18 `.bats` files — 171
+of them — now carries `|| return 1`, which does abort. The ~10 that
+already used `|| { echo …; return 1; }`, and the `fired()` / `not_fired()`
+helper functions (a failing *function call* aborts correctly), were
+already sound and are untouched. New assertions in `tests/test_parse.bats`
+go through `assert_contains` / `assert_not_contains` helpers that print
+expected-vs-actual on failure.
+
+**All 583 tests still pass after the conversion**, so nothing was hiding
+behind the silence — but the assertions are load-bearing from here.
+Demonstrated with a paired mutation on a non-terminal assertion in
+`tests/test_monitor.bats`: falsifying it reports `not ok` with the
+`|| return 1` and `ok` without it, same line, same expression.
+
+Watch for this when adding tests: `[ ]` aborts, `[[ ]]` does not.
+
+### Added
+
+- **`Depth.full` — the app's "run every check" depth — had zero call
+  sites.** Grepping `gui/` for it found only its own two `case` arms in
+  `NetdiagRunner.swift`; every scan the app could actually launch used
+  `.quick` or the alert profile, and both skip the speed test
+  (`lib/speedtest.sh:57`), bufferbloat (`lib/bufferbloat.sh:20`) **and**
+  the MTU probe (`lib/mtu.sh:13` — a gap `--help` itself never disclosed
+  until this branch's `--help` rewrite, below). Consequence: the Report
+  card's "Under load", "Packet size (MTU)" and "Speed" rows read "not
+  measured" on every check the app ever ran, rules B1/B2/M1/BL-1 could
+  never fire, four Trends charts had no data to plot, and the dropdown's
+  throughput cells carried a fallback chain for data the app never
+  generated. `Depth.full` now has exactly two callers, both event-driven
+  and **never scheduled**: an explicit "Full check" action on Home and in
+  the dropdown, and the first join to a network, bounded once per network
+  by the existing `seenNetworks` guard. A daily background full check was
+  proposed and rejected — a daily speed test spends ~50–100 MB and
+  saturates the link for ~60 s to fill a chart nobody asked for; monitoring
+  is the always-on cheap thing, a full check is for a diagnosis moment.
+  Guarded by a new `FullCheckPolicy` (`gui/.../Support/FullCheckPolicy.swift`),
+  an allow-list over `ok`/`info`/`warn` so an empty or unrecognised
+  severity declines too; a decline runs the lighter `.alertTriggered`
+  depth instead of nothing. Also dropped the watcher plist's redundant
+  `--no-bufferbloat` (`--quick` already skips it) and rewrote the Trends
+  empty-state hints to name the new button rather than instruct opening a
+  terminal. **Verified on this machine 2026-08-25:** the exact arguments
+  `Depth.full` passes (`--json --no-gping`) produced `run_mode: full`,
+  bufferbloat grade A (-5.6 ms), MTU 1500, and 15.7 Mbps down / 13.7 Mbps
+  up — the three previously-blank rows, filled.
+- **`netdiag --share[=ID|-]` prints one stored run as a pasteable,
+  redacted report, and the app's "Copy report" button now uses it.** The
+  app's only copy affordance, `ExpertPanel`'s `Button("Copy")`, copied a
+  run's raw JSON **unredacted**: public IPv4 and IPv6 addresses, SSID,
+  BSSID, gateway MAC and city all rode along, and `RunSnapshot.swift:502`
+  had documented a "Copy shareable report" feature in a doc comment that
+  did not exist. `--redact` could not be reused against a past run:
+  `lib/output.sh:160-163` deliberately saves `REDACT`, forces it to `0`
+  while building the record appended to history, then restores it — every
+  stored run holds full detail regardless of how it was invoked — and
+  `helpers/history.py:355` drops `--redact` runs from the store entirely,
+  because a masked record's `network.id` is the literal
+  `wifi:mac=[redacted]`, shared with every other redacted run on every
+  other network. New `helpers/share.py` redacts at read time instead,
+  mirroring `emit_json.py`'s `_REDACT_ENV` substring scrub field for
+  field, with its exclusions intact: ISP and ASN kept (they name a
+  provider, which is what makes the report worth reading), country kept
+  (two letters can't be substring-replaced safely), RFC1918 addresses kept
+  (identify nobody, and blanking them would gut the router rows).
+  `--share` (bare) takes the newest stored run, `=ID` a specific one
+  (ids come from `--history`), `=-` reads a run's JSON on stdin. An empty
+  store exits 3, not 2 — 2 is reserved for a real diagnosis. Fixed a
+  `pipefail` bug found while wiring the `--show` → `share.py` pipeline:
+  without it, a bogus id fell through to a nonzero exit only by accident,
+  and leaked the helper's own stderr alongside netdiag's own error
+  message. The app's "Copy report" button now pipes the run's own bytes
+  through `--share=-`, so the redaction and every word of the pasted text
+  are the CLI's; `ExpertPanel`'s original button is relabelled "Copy raw
+  JSON (unredacted)". `NetdiagRunner.execute` gained an optional stdin,
+  written off-thread after the child starts — a report larger than the
+  64 KB pipe buffer would otherwise deadlock against our own unread
+  stdout. **Verified independently against a real stored record:** the
+  run's public IP, city, local IP and gateway MAC are all present in the
+  stored record and none reach the shared text; the ISP name survives;
+  no ANSI.
+
+### Fixed
+
+- **The monitor could not measure an outage, so an outage looked healthy.**
+  macOS `ping` waits ~10 s after its last packet before printing the
+  statistics line, and that line *is* the measurement — it carries the
+  transmitted/received counts `_mon_loss_fold` parses. Measured here, `ping
+  -q -c 5 -i 0.2` against a black-holed address took 11.0 s. The monitor
+  wraps its gateway probe in `with_timeout 6` and its internet probe in
+  `with_timeout 8`, so on a dead path both were killed *before* the summary
+  appeared. Loss and RTT came back empty; `loss_at_least` and `loss_below`
+  both (correctly) refuse to fire on an unmeasured value, so no rule fired;
+  `MON_SEVERITY` stayed `ok`. The menu bar showed a green check and "All
+  good — watching" over a connection with no internet, with every instrument
+  cell reading `—`. Every ping that parses a summary now passes `-W
+  PING_REPLY_WAIT_MS` (2000 ms, a new constant in `lib/thresholds.sh`),
+  which bounds the wait for each reply: the same probe now completes in
+  2.0 s and reports `100.0% packet loss`. 2000 ms rather than 1000 because
+  this tool has seen a real 1.6 s reply, and counting one of those as lost
+  would trade a false "unmeasured" for a false "lossy".
+- **`lib/bufferbloat.sh`'s loaded-latency probe was over its own budget for
+  the same reason** — 45 packets at 0.2 s is 9 s of sending, plus the ~10 s
+  tail, against `with_timeout 12`. A link that went dark mid-test produced
+  no loaded reading at all. `lib/gateway.sh` and `lib/internet_ping.sh`
+  cleared their 15 s wrappers by about one second and now have real margin.
+- **`curl`'s `000` was being read as a reply.** `_mon_probe_web` uses `-w
+  '%{http_code}'`, which prints `000` when the request never completed
+  (DNS failure, refused connection, timeout). The non-204 branch treated
+  that as "a canary answered, just not as expected" — a captive-portal
+  verdict — and its non-empty value satisfied `status.measurement ==
+  "measured"`, so the app's own "Checking connection…" card could never
+  appear on the outage it was written for. `000` is now the absence of an
+  answer; a redirect or a login page still reads as interception.
+- **A green dot sat beside "not measured" on the dashboard.** The Report
+  card set each row's health from whether a *rule* fired, and no rule fires
+  about a check that never ran — so "Under load", "Packet size (MTU)" and
+  "Clock" all showed the same green dot as a passing check, in a report
+  whose headline was a critical. Unmeasured rows now render a neutral grey
+  `minus.circle`. Only the all-clear is downgraded: a row that is unmeasured
+  *because* something failed keeps its warning or critical symbol, since
+  there the missing number is the finding.
+- **Total packet loss was displayed as "not measured".** The Report card's
+  formatter gave up on a `nil` RTT before it looked at the loss figure — but
+  100% loss has no average RTT by definition, every packet that would have
+  contributed one having been dropped. So the Router and Internet rows read
+  "not measured" directly under a headline quoting "100.0% of the packets".
+  They now read "100% loss, no reply", and the dropdown's Internet cell
+  shows "no reply" in red rather than a neutral em dash. The dropdown's Loss
+  cell no longer tints green unless loss is actually zero.
+- **The full-check button asserted a verdict Swift has no business
+  authoring, and undersold its own runtime.** Its tooltip claimed the
+  connection was failing *at that instant* — a verdict authored in Swift,
+  which `CLAUDE.md` reserves for the CLI — and it was false whenever
+  `FullCheckPolicy` declined for want of a sample rather than for a
+  critical reading. Separately, the button read "Full check · about a
+  minute" while running, but a decline actually runs the lighter
+  `.alertTriggered` depth (~30 s), a fact disclosed only in a hover
+  tooltip nobody had reason to open mid-run. Label and tooltip are now
+  state-aware and read straight from `FullCheckPolicy`, so Home and the
+  dropdown cannot drift apart from each other or from what actually runs;
+  the app's `--verify` harness now asserts the unsafe copy never claims a
+  failure again.
+- **`--summary` ignored network identity, blending every network it had
+  ever seen into one distribution.** Every other surface in this tool is
+  scoped per-network; `--summary` averaged, say, home and a café together
+  into a distribution describing neither. It now emits one block per
+  network, grouped by `helpers/history.py`'s own `group_key` — the same
+  function `--history`/`--show` already use, so the two views can never
+  disagree — and excludes `--redact` runs from the store for the same
+  reason `history.py` already does.
+- **`--summary` invented a disconnect count.** `wifi_disconnects.count`
+  covers a rolling 1-hour window (`WIFI_DISCONNECT_WINDOW_HOURS=1`,
+  `lib/globals.sh:42`) recomputed fresh on every run; summing that count
+  across a 24-hour window counted the same overlapping disconnects once
+  per run that observed them, and reported **173 disconnects** on this
+  machine for a window that did not see 173 disconnects. `--summary` now
+  reports the single busiest window instead of a sum, and says "no data"
+  rather than a bare `0` when nothing was recorded.
+- **`--summary` printed figures with no judgement attached** — the only
+  user-facing surface in this tool that showed numbers without saying
+  whether they were good. Each metric line now carries a `✓`/`⚠`/`×` glyph
+  judged against `lib/thresholds.sh`, making `helpers/summary.py` a
+  **fourth** file bound by the thresholds rule (`lib/diagnosis.sh`,
+  `lib/monitor.sh`, `helpers/history.py` were already the other three) —
+  the helper now refuses to start without the cutoffs rather than
+  carrying a Python-side default. The glyph judges the **median**; a worse
+  max is named on the same line rather than promoted to the glyph, so one
+  bad minute in a month does not read as a broken network. An unmeasured
+  metric takes no glyph, matching the Report card's grey `minus.circle`.
+- **`--summary` truncated its own advice at 80 characters** — mid-sentence
+  in every rule the CLI writes, so a reader got the numbers but not the
+  fix. Advice now wraps instead of truncating. Also: `(1 samples)` now
+  reads `(1 sample)`.
+- **`--summary` listed one recurring fault once per wording.** The CLI
+  interpolates its measurements into diagnosis prose, so the same fault
+  reads differently every time it is seen — "40.0% to 8.8.8.8" and "20.0%
+  to 8.8.8.8" are one problem twice — and `Counter` over the exact
+  sentences listed them separately. The 80-character truncation above had
+  hidden this; wrapping the prose in full made it unmissable, and on this
+  machine one repeated fault filled sixteen lines and pushed the metric
+  table off the screen. So the readability fix had, on its own, made the
+  section less readable. Recurrence is now keyed on the rule id where the
+  record carries one — that is exactly this concept, and it survives a
+  rewording of the prose. Most of the store predates rule ids (2,058
+  records on this machine have none), so the fallback blanks every number
+  out of the sentence: the digits are precisely what differs between two
+  sightings of one fault, and what remains is the fault. The newest
+  phrasing is the one shown, because someone acting on it now wants the
+  latest figures, not the first. On the live store this turned two
+  near-duplicate entries into five distinct faults with honest counts,
+  with the metric table back on screen.
+- **`lib/netid.sh` and `helpers/history.py` disagreed about what one
+  network is** — two defects in one nine-line block, the second hidden by
+  the first. `lib/netid.sh:60` lowercased the gateway MAC with
+  `${GW_MAC,,}`, a bash 4+ expansion; under macOS's system bash 3.2 that
+  is a fatal runtime "bad substitution" which kills the surrounding
+  subshell, so the parity test failed with "netid_group failed" rather
+  than with a value mismatch — a crash wearing a disagreement's clothes.
+  Uses `tr` now. With that fixed the real disagreement surfaced: the
+  block ordered its preference MAC, then gateway IP, then SSID,
+  contradicting both `group_key` (MAC, SSID, gateway) and this file's own
+  header, which documents a gateway IP as the weakest key because
+  "192.168.1.1 collides constantly". On Wi-Fi with a visible SSID but no
+  gateway MAC — ARP not yet resolved, or a captive network — `netid_run`
+  emitted `gw:192.168.1.1` while `group_key` derived `ssid:Cafe` from the
+  very id `netid_run` had just written, so the live join this key exists
+  to enable silently failed and split one network in two. The old
+  fixtures never carried both an SSID and a gateway at once, so nothing
+  caught it. `tests/test_history.bats` is green for the first time —
+  it has carried this one failure on `main` throughout.
+- **A network joined while another network's first check was running
+  never got its own, ever.** The first-sighting path inserted into
+  `seenNetworks` *before* calling `runScan`, and `launch()` silently
+  no-ops when a scan is already in flight — so the second network was
+  permanently marked seen with no scan behind it. Latent at ~10 s when
+  first-join ran `--quick`; reachable in ordinary use at ~60 s now that
+  it runs a full check, which is the only automatic source of that
+  network's throughput, bufferbloat and MTU history. `launch` now
+  reports whether it actually started, synchronously and before any
+  `await`, and the network is marked seen only when it did — so a
+  declined launch leaves it unseen and the next sighting retries.
+- **`--share` could publish the network's name from a field it did not
+  scrub.** Read-time redaction can only mask values the record carries,
+  and the name is written in three places: a run whose `wifi.ssid` came
+  back null still holds it in `network.label` and in the `ssid=`
+  component of `network.id`, and the CLI interpolates that name into
+  diagnosis prose. Probed directly, a record with `wifi.ssid` null and
+  label `SecretHouse` published "Trouble on SecretHouse" verbatim. Both
+  are now secret sources, with the hidden-SSID placeholder excluded so a
+  generic phrase never becomes a secret. A second pass now also masks any
+  address the path list cannot know about — `wan.load_balancing
+  .distinct_ips` keeps its own copy of the public IP, caught today only
+  because `public.ip` holds an identical string. That sweep is an
+  allow-list, not `if addr.is_global`: Python reports `203.0.113.0/24` as
+  `is_private`, so TEST-NET and several reserved blocks would have sailed
+  through, and a redactor that keeps what it does not recognise is the
+  wrong shape.
+
+### Changed
+
+- **`TCP-1` now suppresses `G1`, `G2` and `G3` instead of firing alongside
+  them.** On any ICMP-filtering network — hotel, corporate, many ISPs — both
+  fired, so the report carried "Try rebooting the router (unplug it for 30
+  seconds…)" immediately above "The network is up; don't worry about the
+  ping numbers above", let the critical one own the headline, and exited
+  `2`. TCP reaching 1.1.1.1:443 means packets *are* crossing the gateway, so
+  the gateway is forwarding and merely declining to answer pings itself;
+  `THRESH_ICMP_FILTERED_LOSS_PCT` is already set well above `LOSS_CRIT_PCT`
+  precisely so that inference is safe. No figure is lost — TCP-1's own text
+  quotes the gateway loss. Changed in `lib/diagnosis.sh` and
+  `lib/monitor.sh` in lockstep, because the invariant that matters is that
+  the two engines name the same rules for the same link, not that G2 always
+  fires; `status.icmp_filtered` and the alert engine's suppression are
+  untouched, as they solve notification rather than what the report says.
+  When TCP is *not* reaching anything, there is no evidence the gateway
+  forwards at all, TCP-1 stays quiet, and G1/G2/G3 call the loss what it is.
+- **The dropdown's "Last check" line no longer carries the scan's motive.**
+  It rendered `coordinator.scanKind`, the `reason` string passed to
+  `launch`, which for an alert-triggered scan is "checking <alert title>" —
+  producing "Last check 36m ago · checking internet connection degraded"
+  under a green all-clear, naming an alert that was already listed, with its
+  own timestamp, in the activity list directly below. The stage card now
+  states the present condition and the activity list holds the history.
+- **`--help` was one 110-line wall.** Reorganized into five sections —
+  Common / Sharing and output / Just one check / Modes / Advanced — with
+  the everyday flags first instead of alphabetical-by-accident order.
+  Kept as one `--help` rather than split into a `--help`/`--help-all`
+  pair: seven test files assert flags appear in `--help`, two of them
+  enforcing that it documents every flag in `CLAUDE.md`'s CLI surface and
+  that every advertised capability maps to a real one — a split would
+  relocate that contract rather than honour it. `--quick`'s description
+  now admits it also skips the MTU probe, which it always did but `--help`
+  never said; `--redact`'s notes that the ISP name is deliberately kept.
+- **Test position: 502 tests before this branch, 524 after** — 22 added
+  across the `--summary` fixes, `--share`, and the `FullCheckPolicy`
+  follow-up, and still exactly one failure: the pre-existing
+  `tests/test_history.bats:116` (tracker NET.2), which fails on `main` and
+  is not fixed here.
+
+## [0.10.0] - 2026-08-20
+
+### Added
+
+- **`--open=<tab>` launches the app with a dashboard tab already
+  showing** (`home`, `live`, `activity`, `trends` or `networks`). The
+  self-service verification hook: an automated check can screenshot any
+  view without a human clicking the menu bar first. Used by the
+  screenshot-based verification flow that validated the Networks tab
+  redesign.
+- **The monitor auto-starts a 2 s "investigation" burst the moment the
+  CLI's verdict turns from ok/info to warn/critical — before an alert's
+  dwell has elapsed and before any triggered scan lands.** The user's
+  mental model is that the app starts pinging constantly and fast the
+  instant something looks wrong, and this is what delivers it: the
+  monitor restarts at the 2 s latency-test floor for 60 s, so gateway
+  and internet ping arrive every 2 s rather than every 5 s while the
+  problem is being confirmed. After the burst, sustained degraded (3 s)
+  takes over for as long as severity stays warn/critical. Fires only on
+  the genuine ok/info → warn/critical edge, not on every warn/critical
+  sample, so a sustained outage gets one surge at onset and a steady 3 s
+  after, not a restart every minute. Suppressed while a scan is running
+  (a scan pauses the monitor and saturates the link; 2 s samples would
+  measure the scan's own traffic) and while paused or stopped.
+- **The app gained a `--verify` mode: a runnable test harness for the
+  GUI logic that `swift test` cannot provide on this toolchain.** The
+  Command Line Tools ship Swift Testing's `Testing.framework` but not
+  the `xctest` host, so a test target compiles here but `swift test`
+  exits 0 having run nothing — and a separate executable target cannot
+  import `NetdiagGUI` because SwiftPM does not export an executable's
+  symbols to importers. `--verify` runs inside the app process itself
+  (full internal access, no public-izing), reachable as `swift run
+  NetdiagGUI --verify` or via the bundled binary: it asserts every
+  `StageResolver` severity → stage mapping and every precedence guard,
+  offscreen-renders a stage-card stand-in per stage to PNG, prints
+  PASS/FAIL per check and exits non-zero on any failure. Wired into
+  `AppDelegate.applicationWillFinishLaunching` so it exits before the
+  monitor starts or any UI appears. The `Package.swift` test target also
+  gained the `-F` framework search path that lets `import Testing`
+  resolve at compile time on the CLT.
+
+- **The Networks tab is searchable, and ordered by recency.** A toolbar
+  search field filters the list by the things a person actually
+  recognises a network by — display name, raw label, SSID, gateway, ISP
+  — with case- and diacritic-insensitive matching so "comcast" finds
+  "Comcast" and "café" finds "Cafe" without typing either precisely.
+  macOS hides the SSID without Location Services, so the SSID is only
+  present when permission was granted at scan time; searching by the
+  user-assigned rename still works without it. The list is also
+  recency-ordered now (most-recently-seen first, falling back to
+  run-count and then name for stable ties): you go to that tab to find
+  the network you just left or the one you are on, not the one you have
+  used the most over all time.
+
+- **The Live charts snap a highlight to the point under the cursor.**
+  Hovering (or dragging) anywhere along a panel's x-axis in the Live tab
+  snaps a white highlight to the nearest measured point and floats its
+  value and wall-clock time above it; moving off the chart clears it.
+  The chart body was extracted into its own `LiveChart` so each panel
+  owns its own selection state — one `@State` per panel rather than one
+  shared across three charts that would cross-talk. The nearest-point
+  scan is O(points) per move, which is fine because the window is
+  bounded to one hour (at most a few hundred samples), so the linear
+  scan is cheaper than maintaining an index would be.
+
+- **The GUI reads the Wi-Fi network name from CoreWLAN, not the CLI.**
+  TCC attributes `ipconfig getsummary` — the bundled CLI's SSID source —
+  to `/usr/sbin/ipconfig` rather than this `.app`, so a Location Services
+  grant to netdiag unredacts the GUI's own CoreWLAN `ssid()` call but
+  leaves the CLI's reading empty or redacted. Without this, a user who
+  had granted Location saw "Wi-Fi (SSID hidden by macOS)" in the
+  dropdown even though the permission was live. The coordinator now
+  reads the SSID via CoreWLAN once per monitor sample (never in a view
+  body — it is a real syscall on an always-visible menu), adopts it as
+  the current network's display name the moment it is available
+  (overwriting only the ugly MAC-keyed `wifi:mac=…` placeholder, never a
+  user rename or a real sudo-captured SSID), and `wifiDisplayName`
+  prefers the live SSID over the CLI's redacted label. A user-assigned
+  rename still wins over everything. One consequence: a network the
+  user has granted Location for no longer sits in the Networks tab
+  labelled `wifi:mac=…` forever — its real SSID is recorded as its
+  custom name the first sample it is seen.
+- **The Dock icon and Cmd-Tab slot appear only while a window is open.**
+  The app ships as `LSUIElement` — no Dock icon, no switcher slot, which
+  is right for an always-on menu-bar monitor. But a window opened on
+  purpose should behave like a normal window while it is on screen: the
+  activation policy flips to `.regular` the moment the first real
+  `Window` scene (dashboard, settings, onboarding) appears and back to
+  `.accessory` the instant the last one closes, so the Dock icon
+  vanishes again when you are done but the menu-bar dot stays. Driven by
+  `onAppear`/`onDisappear` on each window's root view rather than
+  `NSWindow` notifications, which fire unreliably for SwiftUI `Window`
+  scenes and left the Dock icon stuck or the switcher slot missing.
+  Opening a window also activates the app so it arrives in front rather
+  than behind whatever was frontmost, and so the switcher picks up a
+  policy that just changed to `.regular` at runtime.
+
+- **`netdiag --signal-scale`** — one JSON object with the four Wi-Fi
+  signal bands this install's thresholds define: Excellent / Good / Fair
+  / Weak, each a dBm floor, a tone, and a one-sentence explanation. Exists
+  because a raw RSSI number ("-62 dBm") means nothing to almost anyone —
+  a consumer now has the CLI's own word to show instead, with the dBm
+  kept as a secondary detail rather than dropped. Boundaries are
+  `lib/thresholds.sh`'s `THRESH_WIFI_RSSI_EXCELLENT_DBM` (new, -55),
+  `THRESH_WIFI_RSSI_G1_DBM` (-70, already backing rule G1) and
+  `THRESH_WIFI_RSSI_WEAK_DBM` (-75, already backing rule W1) — reused
+  rather than duplicated, and read through the environment the way
+  `helpers/history.py`'s `--show` reads `THRESH_COMPARE_*`. New
+  `helpers/signal_scale.py`; `tests/test_signal_scale.bats` covers shape,
+  band ordering, boundaries moving with the thresholds, and refusal to
+  run without them. (GUI) A new `SignalScaleStore` fetches and caches it
+  exactly the way `RulesCatalogStore` does; `DropdownView`'s Wi-Fi
+  instrument cell and a Wi-Fi row restored to `HomeView` (see below) both
+  render the CLI's label as the value and the dBm as the unit, tinted by
+  the band's tone — never a Swift-authored word or a dBm comparison in
+  Swift.
+- **`--rules-catalog` gains a `metrics` glossary (schema 1 → 2).** A
+  sibling array to `rules`: one entry per jargon term the report card
+  shows (`router`, `internet`, `dns`, `wifi_signal`, `bufferbloat`,
+  `mtu`, `speed`, `clock`, `packet_loss`, `latency`, `jitter`), each a
+  `key`/`label`/1–2 sentence `help` explaining the term to someone who's
+  never heard it — same qualitative-only discipline as `blurb`, no
+  embedded numeric threshold. (GUI) `RunReportView`'s report card is
+  restructured into columns — label (with a `questionmark.circle`
+  `HelpHint` fed by this glossary), this run's value, the network's
+  median, and a short verdict chip (`Typical`/`Better`/`Worse`/`Best`/
+  `Worst`, straight from the comparison's own `verdict` token, full CLI
+  sentence on hover) — instead of one long CLI sentence sitting inline on
+  every row.
+- **`HomeView` regains a Wi-Fi row (network name + signal).** Investigated
+  where "the dashboard used to have the Wi-Fi name and signal" actually
+  lived: never on `HomeView`/its tabbed-window predecessor at any commit
+  — only the pre-redesign single-panel `DropdownView` (commit `9aebf71`
+  and earlier) had a combined `wifiGlanceInfo` row, and that panel split
+  into today's separate main window and menu-bar dropdown well before
+  this branch. Not a regression, not a permission-only gate — the row
+  simply never existed on Home. Restored it: name from a new
+  `NetdiagCoordinator.wifiDisplayName` (the exact logic `DropdownView`'s
+  `cleanNetworkName` had, moved to the coordinator so both views share
+  one answer instead of two that could drift), signal from the same
+  word-plus-dBm treatment as the dropdown, with the identical CoreWLAN
+  fallback when the monitor's RSSI is null and Location Services is
+  authorized. When it isn't authorized, the existing restriction banner
+  is unchanged — no blank row underneath it.
+- **`--monitor` schema 2: samples describe their own changes.** When a
+  tracked field differs from the previous sample — public IP, country,
+  ISP, VPN state/name, Wi-Fi network or AP, interface, or a diagnosis
+  rule firing/clearing — the emitted line carries a `changes` array
+  (`{id, field, from, to, summary}`) with the phrasing authored by the
+  CLI, so every consumer tells the same story. Null means "not
+  measured" and never counts as a change; the key is absent when
+  nothing changed; rule summaries use the rules catalog's plain-English
+  titles ("Router dropping packets"), not bare IDs. Gate on
+  `--capabilities` `schemas.monitor >= 2`.
+- **The menu-bar dropdown was rebuilt around monitoring** (GUI): an
+  adaptive stage (healthy / alert / testing / paused / version-skew)
+  over a fixed 4×2 instrument grid, a labeled internet-ping heartbeat
+  strip with min/avg/max, and a change timeline fed by a new persistent
+  event log (monitor changes + fired alerts, coalescing repeats).
+  Location shows only the country flag — hover reveals the public IP,
+  click copies it. One primary action remains ("Check My Connection");
+  the dashboard's Activity section is now a real event list.
+- **Releases are published from this file.** New
+  `.github/workflows/release.yml` turns a pushed `v*` tag into a GitHub
+  Release whose notes are the matching section below, extracted by a new
+  `helpers/changelog_section.py`. Before it, publishing a Release was a
+  step a human had to remember, and the memory failed for three months:
+  eleven tags were pushed and two became Releases, so the repo's front
+  page advertised v0.2.1 from May as "Latest" while `install.sh` was
+  fetching v0.9.1. The workflow refuses a tag whose version disagrees with
+  `bin/netdiag`'s `NETDIAG_VERSION`, or that has no section here — the two
+  drifts this repo has actually suffered — and can be re-run by hand
+  against an existing tag to repair its notes. `CONTRIBUTING.md` gains the
+  eight-step release checklist it enforces.
+- **`tests/test_changelog.bats`** — 11 structural guards on this file,
+  because every defect below was invisible until someone went looking and
+  none of them broke a build: a duplicate heading, a version documented
+  with no tag, a heading with no link reference, a section truncated
+  mid-sentence, and a version string in `bin/netdiag` with nothing here
+  describing it.
+
+### Changed
+
+- **Counts pluralize properly.** "175 event(s)", "2.034 runs across 6
+  network(s)", "1 check(s)" — the parenthesised shorthand read as
+  programmer furniture everywhere it appeared (Activity, Trends, the
+  Networks merge sheet, the run list). All of it now writes "175
+  events", "1 check", "2 runs were skipped", singular and plural both
+  grammatical.
+- **The Networks list shows each network's last-seen time instead of the
+  "inferred" badge.** "Inferred" says how the grouping was computed,
+  which a person scanning their networks has no use for; "3h ago" says
+  how stale the row is, which is the thing you actually scan the list
+  for. The full date is on hover. The detail pane keeps the badge, where
+  there is room for its tooltip to explain it.
+
+- **The Networks tab was redesigned into a two-column master-detail
+  layout.** The previous design was a `NavigationStack` of network cards
+  — each card carried its stats inline and a "Browse Checks" link that
+  pushed a second screen for the run list, which pushed a third for a
+  single run. Three screens deep to read one check. The tab is now a
+  list of network names on the left (clickable, searchable, arrow-key
+  cycleable — just the name and a green dot for the connected one, no
+  stats on the row) and everything about the selected network on the
+  right: the name with rename/merge/unmerge controls, the stats row
+  (checks, problems, median RTT, date range), and the checks list
+  itself — inline, no navigation push. Clicking a check swaps the right
+  pane to its detail with a back button; still one screen, the list
+  column never moves. Opens with the current network selected by
+  default. A "Problems only" checkbox replaces the segmented picker that
+  lived on the pushed screen.
+- **Network names now prefer the SSID and strip the ISP "via" suffix.**
+  `HistoryStore.displayName` was returning the CLI's raw label, which is
+  the ISP name + " via " + gateway when no SSID was captured — so the
+  Networks tab titled every network "SPACEX-STARLINK via 192.168.50.1"
+  rather than anything a person recognises. It now prefers a recorded
+  SSID (available when Location was granted at scan time), then a
+  cleaned label with the " via <gateway>" suffix stripped, so
+  "SPACEX-STARLINK via 192.168.50.1" reads "SPACEX-STARLINK". The full
+  label stays in the document and is still searched by.
+- **The dropdown's stage card now reflects the CLI's verdict the moment a
+  rule fires, not 15–25 s later when the alert's dwell elapses.** Until
+  now the card read "All good — watching" for the entire dwell window of
+  whichever alert would eventually fire, even though the menu-bar dot
+  had already turned amber/red and the change timeline below the card
+  already showed the drop — a green card over a red timeline that read
+  as a bug, and the opposite of "very reactive the moment it starts
+  detecting packet loss or bad Wi-Fi". The stage mapping was extracted
+  into a pure `StageResolver.resolve(_:)` and given a new `.watching`
+  state: `warn` severity turns the card amber with "Watching — something
+  needs attention", `critical` turns it red with "Detecting a network
+  problem", both carrying the CLI's own blurb for the worst firing rule
+  (the same source `headline` already uses) and a tertiary line
+  explaining why no alert has fired yet ("Confirming before notifying
+  you…"). An already-active alert still wins over `.watching`, so once
+  the dwell elapses the card carries the alert's prose as before. The
+  `info` severity (VPN on, ICMP filtered) still reads healthy — it is
+  not a fault. Precedence (scan > user-pause > skewed > alert > watching
+  > healthy) is preserved and now unit-checked.
+- **The live probe interval is shown in the heartbeat strip, and it
+  updates the moment the monitor's cadence does.** Reads the sample's
+  own `status.cadence_s`, so it reads "every 5s" while healthy, "every
+  3s" once degraded engages, and "every 2s · test" during a latency-test
+  burst — changing the instant the monitor's cadence changes rather than
+  from a settings snapshot. A user watching the card turn red now sees
+  the probe rate ramp up at the same time, the evidence that the app is
+  investigating.
+- **Default cadence lowered: fast 10 s → 5 s, degraded 5 s → 3 s.** An
+  always-on monitor's healthy probe was too slow to read as "watching",
+  and the degraded tier sat at the same 5 s the latency test uses —
+  leaving no ramp between healthy and a full burst. The fast tier now
+  probes every 5 s by default, degraded every 3 s, and the 2 s burst
+  (below) is the floor for active investigation. User-tunable still;
+  existing installs keep whatever they have saved.
+- **The heartbeat strip dropped its redundant "internet ping · live"
+  label.** The strip's shape is the headline; the label repeated what
+  the strip already shows, and a min/avg/max pinned to the right read
+  as a caption to nothing. The numbers now sit directly under the
+  strip's left edge; only "monitoring off" remains as a label, for when
+  there is no shape to read.
+- **The dropdown's link-path bar, glance panel, quick-action grid, and
+  contextual remedy row were retired**; their facts moved into the
+  instrument grid and the alert stage. The footer regained Open
+  Dashboard and Pause/Resume Monitoring after user testing.
+
+### Fixed
+
+- **The Trends charts' sample count carried the metric's unit** —
+  "Gateway RTT · 2027 samples (ms)" read as though "ms" counted samples.
+  The unit now sits on the metric's name ("Gateway RTT (ms) · 2027
+  samples"), where it belongs. The two Trends charts also disagreed on
+  which side their y-axis lives on (metric chart leading, incidents
+  chart trailing) — both lead now.
+- **A Wi-Fi name adopted from CoreWLAN showed on Home but not in the
+  Networks tab.** The app renames the current network under the id the
+  monitor reports, but the monitor's `network.id` is the *record* format
+  (`wifi:mac=AA:BB:…`) while `--history` groups networks under
+  canonicalized keys (`mac:aa:bb:…`) — so the rename landed on a key the
+  Networks tab never renders, and the tab kept titling the network with
+  the ISP name while Home showed the real SSID. The join is fixed at the
+  source: `lib/netid.sh`'s `netid_run` now derives `NETWORK_GROUP` — the
+  canonical group key, by the same MAC > gateway IP > SSID precedence
+  `helpers/history.py` groups records with — and the monitor emits it as
+  `network.group_id` on every sample (nullable; an older CLI omits it
+  and consumers fall back to `id`). The app joins history on
+  `historyJoinID` (`group_id`, falling back to `id`) everywhere a live
+  sample meets stored history: the SSID adoption, the rename lookup the
+  dropdown reads, the speed-test lookup, the current-network highlight
+  and default selection in the Networks tab, and the seen-networks
+  first-sighting trigger. A one-time migration rewrites renames and
+  seen-network keys recorded under the old `wifi:mac=` spelling to the
+  group key. A new bats invariant runs `netid_run` and `history.py` over
+  the same five id shapes and fails the build if the two derivations
+  ever drift apart — the copy in bash exists so the monitor does not
+  spawn python per sample, and this test is what keeps it a copy.
+- **The Networks tab did 3 full merge+sort passes on every redraw.** The
+  body evaluated `mergedNetworks` (merge + sort by run-count) for the
+  emptiness check, then `visibleNetworks` → `mergedNetworksByRecency`,
+  which called `mergedNetworks` (merge + sort by run-count *again*) and
+  re-sorted by recency — three O(networks) merge passes and two redundant
+  sorts per render, over ~2,000 runs on a real store. The merge is now
+  factored into `mergedNetworksUnsorted` (O(networks), no sort); both
+  `mergedNetworks` and `mergedNetworksByRecency` sort from that shared
+  base. The emptiness check now reads `document.networks.isEmpty` (no
+  merge at all) instead of `mergedNetworks.isEmpty`, so a render with no
+  search pays one merge + one sort, not three.
+- **The Networks tab flashed "No networks recorded yet" during the
+  initial load.** The `.task` that calls `store.load()` ran after the
+  first body, so the view rendered the empty-state before the history
+  arrived. `store.isLoading` existed but was never read. The tab now
+  shows a spinner and "Loading networks…" while `isLoading` is true and
+  the document is still empty, falling through to the real empty-state
+  only once the load finishes.
+- **The merge sheet listed networks in a different order than the tab.**
+  The sheet used `mergedNetworks` (run-count order) while the tab used
+  `mergedNetworksByRecency` (recency order), so a network near the top
+  of the tab was in a different position in the sheet. Both now use
+  recency order.
+- **The search "no match" message showed the raw untrimmed query.**
+  Typing "  comcast  " printed `No networks match   comcast  ` with the
+  whitespace intact. The query is now trimmed and quoted.
+- **A real internet outage read as a green dot for up to a minute.**
+  fast tier pings the internet every cycle, but the TCP and public probes
+  that distinguish a real outage (L1, critical) from an ICMP-filtering
+  hotel network (ICMP-1, info) run on the 60 s medium and 300 s slow tiers
+  and are carried over stale between refreshes. So for up to a minute into
+  an outage TCP and public still read "ok" from before the drop,
+  `_mon_rules` concludes ICMP-1, severity stays info, the menu-bar dot
+  stays green, and no connection-lost alert fires — a manual scan was the
+  only thing that forced fresh probes, which is why alerts appeared only
+  after "Check My Connection" was pressed. `monitor_run` now forces a
+  fresh TCP and public probe the moment the fast tier sees critical
+  internet loss with a quiet gateway, so `_mon_rules` decides L1 vs
+  ICMP-1 on fresh data within one cycle and degraded engages immediately.
+  Gated on the tier not having already run that cycle, so a cycle that
+  hit its own timers pays nothing extra, and during a sustained outage
+  the forced path fires only on cycles the scheduled tiers skipped. A
+  `test_monitor.bats` case guards the structural fix: the condition
+  exists, keys on the shared threshold variables (not inline numbers),
+  and gates the forced re-probe on the tier not having already run.
+- **The paused-monitor test no longer fails in CI on a slow runner.** It
+  slept a fixed 4 s, sent `SIGUSR1`, slept 3 s more and read the stream's
+  last line — so on a loaded runner it read an empty file and died with a
+  JSON decode error, leaving a red `bats` badge on a public README for
+  three days. It now polls for the pause marker with the same `wait_until`
+  helper the three tests directly above it already use, and whose comment
+  documents this exact failure. The neighbouring SIGHUP test got the same
+  treatment for its pre-pause wait: pausing a monitor that had not probed
+  yet would have passed while asserting nothing.
+- **This file had a second `## [Unreleased]` heading**, buried between
+  `[0.5.2]` and `[0.5.1]`, holding notes — the one-line installer,
+  `docs/JSON-SCHEMA.md`, `CONTRIBUTING.md`, CI smoke tests, the removal of
+  `netdiag-prompt.md` — that had actually shipped in 0.6.0. They have been
+  merged into `[0.6.0]`, where the commits that made them live. Its
+  trailing "Known" note about `VPN-1` never firing went with them: 0.6.0
+  is the release that fixed it.
+- **`[0.9.1]`'s heading was written over the last line of the entry above
+  it**, which ended mid-sentence at "and a real `--json --quick` run is".
+  Restored from `3458283~1`.
+- **`[0.9.1]` was missing half of what it shipped.** `--version`,
+  `--capabilities`, `--rules-catalog`, `run_id` and `metric_stats` were
+  all committed before `3458283` and are therefore inside the `v0.9.1`
+  tag, but sat under `[Unreleased]` because that release was tagged
+  without rolling the section over. Moved into `[0.9.1]`, verified by
+  `git merge-base --is-ancestor` against every entry rather than by
+  reading dates. Left where they were, the next release would have
+  claimed them as its own.
+- **Four documented versions had no tag at all** — 0.1.0, 0.4.1, 0.5.0
+  and 0.9.1 — so their entries described something a reader could not
+  check out, and `install.sh` fetched a v0.9.1 that `git` had never heard
+  of. All four are now annotated tags on their release commits, dated to
+  match. Every heading also gained the Keep a Changelog link reference it
+  was missing, so each version links to its own diff.
+
+## [0.9.1] - 2026-08-15
+
+Adds GitHub auto-update checks to the GUI, new layperson-tailored
+diagnostics for DNS and IPv6, router gateway admin quick access, and speed
+test retention — plus the four CLI surfaces a GUI needs before it can
+trust the binary it is talking to: `--version`, `--capabilities`,
+`--rules-catalog`, and `run_id`/`metric_stats` in the JSON.
+
+Those CLI entries were documented under `[Unreleased]` until well after
+this release shipped, because 0.9.1 was tagged without rolling the section
+over. They are recorded here, where the commits actually are: every one of
+them is contained in `v0.9.1`. `.github/workflows/release.yml` now refuses
+a tag whose notes are still sitting under `[Unreleased]`, so the same
+omission fails the build rather than surviving into the docs.
+
+### Added
+
+- **GitHub Auto-Update Capability**: Daily automated background update checks against `godigi/netdiag` releases and in-app updating/relaunching from Settings.
+- **`D3` Diagnostic**: Slow DNS resolver latency warning with actionable recommendation for Cloudflare (1.1.1.1) / Google (8.8.8.8).
+- **`D4` Diagnostic**: DNS NXDOMAIN hijacking and ISP search redirection detection.
+- **`V6-2` Diagnostic**: Dead IPv6 DNS resolver fallback delay warning.
+- **`double-nat` Alert**: Plain-English alert and recommendation for chained home routers (Double NAT).
+- **Router Gateway Admin Access**: Clickable router gateway IP in dropdown to instantly open the router admin page.
+- **Speed Test Retention**: Retains speed test metrics permanently in memory and dropdown view across scans.
+
+- **`netdiag --version`** — prints `netdiag VERSION` and exits 0.
+- **`netdiag --capabilities`** — a JSON handshake describing this
+  install: per-mode schema numbers, a `features` list, and which
+  optional dependencies (`jq`, `mtr`, `gping`, `speedtest`/`speedtest-cli`)
+  are actually on `PATH`. Lets a GUI detect what its CLI supports before
+  it relies on a feature, instead of parsing `--version`'s semver and
+  guessing.
+- **`netdiag --rules-catalog`** — one JSON object cataloguing every rule
+  the diagnosis engine and the monitor can emit: `title`, `category`,
+  descriptive `severity`, `scope` (`scan` / `monitor` / `both`), a
+  plain-English `blurb`, and a `doc` anchor into
+  `docs/DIAGNOSIS-RULES.md`. The GUI holds no diagnostic logic, so the
+  plain-English layer next to a rule-ID chip has to come from the CLI —
+  this is that source. `tests/test_rules_catalog.bats` diffs the catalog
+  against every `add_diag`/`_mon_add_rule` call site so the two can't
+  drift apart silently.
+  - `--capabilities`'s `schemas` now also reports `rules_catalog`, the one
+    divergence from its own "never the odd one out" docstring — every
+    other output that embeds a `"schema"` field was already listed.
+- **`--json` gains `run_id`** — the same `"<timestamp>.<8 hex>"` id
+  `netdiag --history`/`--show` will later derive for this exact run,
+  computed at run time so a GUI can deep-link to "the check that just
+  ran" from an alert without waiting for the next `--history` poll.
+  `lib/output.sh` computes it by importing `helpers/history.py`'s own
+  `canonical()`/`run_id()` rather than reimplementing the hash, from the
+  precise record about to be appended — so the two can never disagree —
+  and the record written to `baseline.jsonl` is unchanged: the build that
+  gets stored never carries a `run_id` key at all, not even `null`,
+  because a key holding a run's id can't also sit inside the bytes that
+  id is hashed from. `null` when nothing was appended this run
+  (`--no-baseline`, `--mtu-only`, `--wifi-only`) and, for a different
+  reason, under `--redact`: the record really is stored — the private,
+  unredacted build always is — but the id is a pointer back into that
+  private copy, and the "shareable" rendition shouldn't carry a working
+  key into data it otherwise took pains to mask.
+- **`--history` gains `metric_stats`** on every network: `{median, p10,
+  p90}` for each of the 13 charted metrics, over the exact population
+  `metric_samples` already counts. Reuses `--show`'s own
+  `quantile()`/median arithmetic rather than a second implementation, and
+  carries no `value`, `direction` or `verdict` — facts about the network,
+  not a judgement of any one run, which stays `--show`'s job. Below
+  `THRESH_COMPARE_MIN_SAMPLES` the whole per-metric block is `null` rather
+  than a partial object, mirroring `--show`'s `insufficient_data`; a plain
+  `netdiag --history` now needs `THRESH_COMPARE_MIN_SAMPLES`/
+  `THRESH_COMPARE_TAIL_PCTL` in the environment for this reason, the same
+  way `--show` always has.
+
+### Changed
+
+- **jq is no longer required for the speed test.** The ~10 `jq -r` calls
+  that parsed Ookla's and `speedtest-cli`'s final result JSON are now one
+  call to `helpers/speedtest_result.py`, a stdlib-only parser that reads
+  the result object on stdin and writes `down_mbps`/`up_mbps`/
+  `latency_ms`/`jitter_ms`/`server` as one tab-separated line — same
+  deny-by-default discipline the fd-3 progress translation already used
+  for the same reason: an Ookla result carries `interface.internalIp`
+  (a dual-stack Mac's public IPv6 address), `externalIp`, `macAddr` and a
+  `result.url`, none of which may reach stdout. `speedtest_will_run()`
+  and `speedtest_run()` no longer gate on `command -v jq` at all, so a
+  machine with only bash 5 and python3 now gets a real speed test instead
+  of a "brew install jq" hint. `lib/headline.sh`'s Report card drops the
+  matching hint row for the same reason. `mtr`'s sudo-only per-hop view
+  and Tailscale's VPN name are the only things jq still touches; both are
+  optional enhancers, not defaults, and are unchanged.
+  - New `tests/test_speedtest_parse.bats` (17 cases) drives the helper
+    against fixtures for both flavors — a hand-checked bandwidth
+    conversion (60875000 bytes/s → 487.0 Mbps), absent-field and
+    malformed-input handling, and a privacy test asserting the identifying
+    Ookla fields never reach stdout — plus two structural checks that
+    neither speed-test function's source still mentions jq.
+  - CI gained a broken-jq smoke test: `jq` is shadowed by a failing stub
+    earlier in `PATH` than either Homebrew prefix — jq is present and
+    resolves, it just fails — and a real `--json --quick` run is
+    asserted to exit anything but 3 and to parse with `python3`.
+
+## [0.9.0] - 2026-08-12
+
+Makes a check watchable while it runs. A full check takes ~55 s and
+showed a spinner for all of them; the monitor held an hour of samples
+nothing drew; and there was no way to ask one question without waiting
+for all 28 checks.
+
+### Added
+
+- **`netdiag --progress`** — a JSON event stream on **fd 3**: a `plan`
+  naming the phases a mode will attempt, then `start`/`done`/`skip` per
+  phase, then a closing `run` event. Emitted from `run_timed` and
+  `launch_parallel`, so all 28 checks report and so does every check
+  added later.
+  - Not stdout, which must stay exactly one object, and not stderr:
+    `launch_parallel` captures each parallel check's stderr into a
+    per-check file that nothing reads until the check finishes — which is
+    when progress stops being useful. fd 3 survives that redirect and was
+    unused across the whole tree.
+  - A plan, not a percentage. `--json` produces nothing until the end, so
+    there is no quantity a percentage could be a percentage *of*.
+  - Every event is clamped well under `PIPE_BUF`, because parallel
+    subshells share fd 3 and only sub-`PIPE_BUF` pipe writes are atomic.
+    Clamping happens *before* escaping — a cut landing between a
+    backslash and the character it escapes stops the line being JSON.
+- **Live speed-test progress**, newly possible: Ookla's `--format=jsonl`
+  streams, where the `speedtest-cli` shim it replaced emitted nothing
+  until the end. 201 events in a real run.
+- **`netdiag --speed-only`** — one measurement without the other 27
+  checks, recorded to history.
+- **`run_mode`** on every record: `full`, `quick`, `speed-only`,
+  `mtu-only`, `wifi-only`. A `--quick` run and a full check were
+  previously indistinguishable in history, which overstated what a
+  network's run count actually measured. `helpers/history.py` gains
+  `check_count` beside `run_count`; partial modes contribute their
+  metrics but not to severity or incident counts.
+- **App: a Live tab** — gateway RTT, internet RTT and router loss over
+  the last hour, drawn from samples the monitor was already keeping.
+- **App: scan progress replaces the spinner**, and on-demand speed and
+  latency tests in the dropdown.
+
+### Fixed
+
+- **Cancelling a scan reported "netdiag returned something unreadable".**
+  Terminating the child yields a signal status and empty stdout, which
+  the runner classified as corrupt output rather than as cancellation.
+- **The elapsed-seconds counter froze during a scan** — it recomputed
+  only on observation, and the monitor that drove observation is paused
+  for the duration of every scan.
+- **The expert panel's sparklines drew straight lines across monitor
+  pauses**, claiming measurements that were never taken.
+
+### Notes
+
+- Ookla's `testStart` line carries `interface.internalIp` — the
+  machine's public IPv6 address. The translation to fd 3 extracts four
+  fields by name and rebuilds the object; it never passes through and
+  never filters known-bad keys. A fixture asserts the leak, and a real
+  217-event run was scanned for every identifying field in that line.
+- The declared plan is kept in sync with the code by a bats guard that
+  plants a phase into a copy of `bin/netdiag` and proves it catches it.
+
+## [0.8.0] - 2026-08-11
+
+Makes the run history readable. `~/net-diag/baseline.jsonl` already held the
+complete JSON of every check ever run — 1,986 finished reports, each with
+its own diagnosis prose — and the app could open exactly one of them: the
+most recent. Now you can open any of them, and see how it compares to what
+is normal for that network.
+
+### Added
+
+- **`netdiag --show=<id>`** — one stored run in full, plus a `comparison`
+  block scoring each of its metrics against every other run on the same
+  network: median, p10/p90, percentile, and a verdict. ~0.14 s against a
+  1,986-record store.
+- **Stable run ids** on `--history` output: the timestamp, a dot, and eight
+  hex characters of the record's content hash. `ts` alone cannot address a
+  run — `helpers/history.py` has always deduped on *(timestamp, content)*
+  precisely because two runs can land in the same second.
+- **`THRESH_COMPARE_MIN_SAMPLES` and `THRESH_COMPARE_TAIL_PCTL`** in
+  `lib/thresholds.sh`. One symmetric tail rather than a "worse" and a
+  "better" percentile: a directional pair reads correctly for latency and
+  inverts for throughput, where the *low* percentile is the bad one.
+- **App: browse every check on a network** — Networks → Browse checks → a
+  run, showing the same report card as the Status tab plus the comparison.
+
+### Fixed
+
+- The menu-bar health dot rendered grey in every state. `MenuBarExtra` hands
+  its label to an `NSStatusItem`, which template-renders SF Symbols and
+  discards `foregroundStyle` — so the one glyph carrying the app's whole
+  status said nothing. Now rasterised with an explicit palette colour.
+- Stored records are decoded leniently. Swift's synthesized `Decodable`
+  throws on a missing key rather than using the default beside the property,
+  and only **60 of 1,986** stored records carry `network` or `timings` — the
+  rest predate those fields. A strict decode opened 3% of the history and
+  called the remainder corrupt.
+
+### Notes
+
+- `helpers/history.py` is now the third file `tests/test_thresholds.bats`
+  guards against inline numeric cutoffs, alongside `lib/diagnosis.sh` and
+  `lib/monitor.sh`. It judges now, so it lives under the same rule.
+- Percentile ranks average ties. Counting them as "at or below" puts a
+  0 %-loss run — the usual case — at the 100th percentile of a
+  lower-is-better metric and calls a flawless check *worse than usual*.
+
+## [0.7.0] - 2026-08-11
+
+Adds a native macOS menu-bar app, and the two CLI surfaces it is built on.
+The app is a **client, not a second brain**: it holds no thresholds and
+writes no diagnosis prose. Everything it says comes from the CLI.
+
+### Added
+
+- **`netdiag --monitor`** — a long-lived process emitting one compact JSON
+  object per line on stdout, flushed per sample, until stopped. The
+  machine-readable sibling of `--watch`: where `--watch` re-runs `--quick`
+  and prints prose for a person, `--monitor` streams for a program, writes
+  no log and no history record, and probes on three cadence tiers instead
+  of one — fast (gateway ping, VPN, link) 10 s, medium (DNS, TCP/443,
+  RSSI) 60 s, slow (public IP, ISP, country, captive portal) 300 s plus
+  immediately on a network change. Sample shape documented separately in
+  `docs/JSON-SCHEMA.md`; intervals overridable with
+  `--monitor-{fast,degraded,medium,slow}-interval`.
+  - Each sample carries `status.rules`: the `DIAGNOSIS-RULES.md` IDs that
+    would fire, evaluated in bash against `lib/thresholds.sh`. For any
+    given network state the monitor and a full run name the **same** rule
+    IDs, asserted by bats across eleven conditions. Consumers render the
+    list; they never re-derive it.
+  - The gateway probe sends **10** packets, not the 3 a liveness check
+    suggests. This is quantisation, not accuracy: at 3 packets the only
+    reportable losses are 0/33/67/100 %, so one dropped packet reads as
+    33 % — past the 20 % critical floor. At 10 the quantum is 10 %, so one
+    drop lands in G3's warn band and it takes two to go critical, matching
+    the shape of the scanner's 20-packet probe.
+  - Samples are emitted through a Python helper rather than bash `printf`.
+    An SSID may legally contain a quote, a backslash or a newline, and a
+    JSON-escaping bug in a stream parsed forever is a far worse trade than
+    ~50 ms of interpreter startup per cycle.
+- **`netdiag --history[=N]`** — the whole run store as one normalized,
+  network-grouped object. 5.4 MB of full snapshots becomes 467 KB.
+  - Grouping is **not** exact-string matching on `network.id`, because
+    that does not work on real data: of 1,972 records here, 1,926 predate
+    `lib/netid.sh` and carry no id at all, all 46 that do are
+    `wifi:mac=…` because macOS has redacted the SSID throughout v0.5.x,
+    and every legacy record's `wifi.ssid` is the literal `<redacted>`.
+    Groups key on the `mac=` component, backfill idless records through
+    `netid.sh`'s own precedence (marked `synthesized`), and bridge weak
+    groups into MAC groups only when gateway **and** ISP agree. Genuine
+    ambiguity is left for the app's manual merge — a wrong merge silently
+    corrupts a chart, a missing one is visible and fixable.
+  - Every metric reports its sample count, because sparse series are the
+    normal case: `gateway_rtt_ms` has 1,959 samples here and `wifi.rssi`
+    has 1. A chart that omits the count presents one reading as a trend.
+- **`lib/thresholds.sh`** — every numeric cutoff a rule fires on, moved out
+  of inline literals. There are now two things that judge a network, and
+  if they drift the app shows a green dot over a red report. A test fails
+  the build on an inline cutoff in either file. It also makes W1's −75 dBm
+  and G1's −70 dBm visibly distinct rather than four lines apart.
+- **`public.country_iso`** in both `--json` and `--monitor`. `country` is
+  the full name ("Brazil"); rendering a flag or picking a locale needs the
+  ISO-3166 alpha-2, and deriving it would mean shipping a country table in
+  every consumer.
+- **`gui/` — netdiag.app.** SwiftUI menu-bar client, SwiftPM, macOS 14+,
+  builds with Command Line Tools and no Xcode. Continuous monitoring, a
+  twelve-alert engine with dwell/cooldown/auto-resolve, Swift Charts over
+  the full history, per-network rename and merge, and four disclosure
+  layers from a menu-bar dot to a raw-JSON viewer. `make -C gui run` is
+  the dev loop; `make -C gui identity` creates the stable signing identity
+  that keeps TCC grants alive across rebuilds.
+
+### Fixed
+
+- **`--redact` no longer corrupts the history store.** `output_run`
+  appended the emitted JSON to `baseline.jsonl` *after* redaction, so
+  every `--redact` run wrote a record whose `network.id` was the literal
+  string `wifi:mac=[redacted]`. That id is the join key
+  `helpers/baseline.py` scopes history by, so such a record can never
+  match a real one: it is dead weight that also burns a slot under the
+  retention cap. Eleven exist in the author's history, two written by
+  v0.5.2. The comparison input, the history append and the archive now
+  read an unredacted build; only the `--json` copy that actually leaves
+  the machine is masked.
+- **Retention no longer deletes the history it exists to keep.**
+  `prune_history` ran `tail -n` over the file and discarded the head. At
+  the launchd watcher's 96 runs/day the 2000-line cap is about three
+  weeks, and the lines it dropped were always the oldest — the only ones a
+  multi-month chart is made of. The head now rolls into
+  `baseline-archive.jsonl`, appended *before* the truncate so a crash
+  between the two duplicates records rather than losing them.
+  `--history` reads both and dedupes; `baseline.py` still reads only the
+  live file, so per-run cost stays bounded.
+
+### Notes
+
+- The monitor is paused with **`SIGUSR1`** and resumed with `SIGUSR2`,
+  handled in-process. `SIGSTOP` from the parent — the obvious mechanism,
+  and what the plan specified — is actively unsafe here: POSIX delivers
+  `SIGHUP`+`SIGCONT` to a process group that becomes newly orphaned while
+  any member is stopped, and a stopped monitor still has live children
+  (the 2 s gateway ping, `with_timeout`'s killer subshells). Measured
+  under the GUI, the monitor died 2.1 s into every pause — exactly one
+  ping probe — and the app then restarted it *during the scan the pause
+  existed to protect*. It never reproduced from a terminal, because a
+  controlling terminal keeps the group non-orphaned, which is precisely
+  how it would have shipped.
+- **`--monitor` exits when the process that started it goes away.** Found
+  the same way: `SIGKILL` the app and the monitor was still probing 30 s
+  later, re-parented to launchd with nobody reading it. Relying on `EPIPE`
+  from a closed stdout is not enough, because a pipe fd survives in ways
+  the child cannot audit, so the parent is now checked each cycle with
+  `kill -0` — a builtin, and the only thing that works, since bash
+  captures `$PPID` once at startup and still reports a dead pid after
+  re-parenting. An unbounded network probe with no reader is the single
+  most likely reason an always-on tool gets uninstalled, and it is
+  invisible: nothing in the UI can show a process the app has forgotten.
+
+## [0.6.1] - 2026-08-11
+
+### Fixed
+
+- **`--quick` is back inside its 8 s budget: 10.6 s → 3.8 s.** A single
+  `traceroute6` in `lib/ipv6.sh` accounted for 7.4 s of that 10.6 — 70% of
+  the wall clock of the mode whose entire purpose is a fast "is it up?"
+  answer. It now only runs outside `--quick`. What it produces,
+  `IPV6_TRACE_HOPS`, feeds **no diagnosis rule**: it reaches the JSON and
+  one `info` line that default compact output doesn't print. `--quick`
+  leaves it empty, which renders as JSON `null` — "not measured", never a
+  fabricated `0`. Full runs are unaffected and still report the hop count.
+  - `parallel_batch` under `--quick` drops from 7.9 s to 1.1 s. The batch
+    is bounded by its slowest member, and `ipv6_run` was that member by a
+    factor of twelve; the other three surviving checks total 0.6 s.
+- **`traceroute6` is now bounded by `with_timeout` in every mode**, not
+  just skipped in the fast one. It was the only probe in the module with
+  no wall-clock bound — `ping6`, `dig` and `nc` are all capped — and at
+  `-m 12` hops × `-w 2` s it is a 24 s worst case on a path that
+  black-holes IPv6. An unbounded probe that can silently dominate a run is
+  the same shape as the `ping -t` bug fixed in 0.6.0. A test now asserts
+  every probe in the module carries a bound.
+
+## [0.6.0] - 2026-08-11
+
+netdiag could measure internet-side packet loss but could not diagnose it.
+`INET_LOSS` had been recorded, written to JSON, and used to colour a
+Report-card row since v0.4.0 — and no rule ever read it. Because
+`ok()`/`warn()`/`bad()` are pure printers and only `add_diag` moves
+`MAX_SEVERITY`, a connection dropping 40% of its packets printed a red
+"Latency" row directly above the words "Nothing obviously wrong — your
+network looks healthy" and exited 0.
+
+That is the exact failure users describe as "the internet is down":
+everything technically works, nothing finishes. `P1`/`P2` could not cover
+it, because they require the public reach check to have *failed*, and
+under heavy-but-partial loss `curl` still succeeds — TCP simply
+retransmits its way through.
+
+### Added
+
+- **`L1` — severe internet-side packet loss is now a critical.** Fires
+  when both public targets exceed 20% loss while the gateway is clean,
+  pointing past the user's own equipment to the line, modem, or ISP.
+- **`L2` — moderate internet-side loss (10–19%) is a warning.**
+- **`G3` — gateway loss of 10–19% is a warning.** `G1`/`G2` start at 20%,
+  and nothing covered the band beneath them, so 15% loss to the user's own
+  router also exited 0.
+- **`ICMP-1` — total loss to both targets while TCP and curl work** is
+  reported as upstream ping filtering, not an outage, and suppresses
+  `L1`/`L2`. Real 100% loss would have taken curl with it.
+- **A second, independent loss target (8.8.8.8).** `L1` escalates to
+  critical only when both it and 1.1.1.1 agree; one lossy target and one
+  clean one is far more likely to be that anycast operator's ICMP policy
+  than a fault on the line. JSON gains `internet_latency.target_alt`,
+  `.rtt_avg_ms_alt`, and `.loss_pct_alt`.
+- **A "Packet loss" row on the Report card**, showing both targets.
+- **`VPN-1` now actually fires.** `docs/DIAGNOSIS-RULES.md` and the README
+  had both promised the rule since v0.1.0 while `lib/vpn.sh` only printed
+  a section line — no `add_diag` call existed anywhere, so an active VPN
+  never reached the Diagnosis section. It is `info` severity, so it cannot
+  change the exit code; the point is to stop users blaming their router
+  for the tunnel's latency.
+- **A one-line install.** `curl -fsSL .../install.sh | bash` now works.
+  `install.sh` previously symlinked `$REPO_ROOT/bin/netdiag`, so it only
+  ran inside an existing clone and could not be piped from curl at all.
+  It now detects that it has no checkout to point at, fetches one into
+  `~/.local/share/netdiag`, and `git pull`s it on re-run. Run from inside
+  a clone it uses that clone and never touches the network. Adds
+  `--uninstall`, and creates the `--prefix` directory instead of failing
+  with a bare `ln: No such file or directory`.
+- **`docs/JSON-SCHEMA.md`** documenting every top-level key of `--json`
+  as actually emitted, the `null` (didn't run) vs `[]` (ran, found
+  nothing) convention, and the `dhcp.dns_servers` string-not-array wart.
+- **`CONTRIBUTING.md`.**
+- **CI smoke tests** — a real `netdiag --json` run whose exit status and
+  JSON shape are checked, and an install/uninstall round-trip.
+
+### Changed
+
+- **The speed test runs by default.** "Is my internet slow?" is the
+  question most runs are opened to settle, and answering it with "not
+  tested (run with `--speed`)" made the default report useless for it.
+  `--no-speed` opts out; `--quick` skips it; an explicit `--speed` still
+  forces it under `--quick`.
+  - This makes a default run substantially slower — measured at ~95 s on
+    this machine, of which the speed test alone is ~58 s. Use `--no-speed`
+    (~35 s) when the run needs to be quick. `CLAUDE.md`'s stated budget has
+    been updated to match rather than left as an aspiration.
+- **The speed test now runs last, after the Report card and the diagnoses
+  have already printed.** It is the most expensive phase by a wide margin,
+  and nothing in the diagnosis stage reads its result — only the JSON
+  emitter does, and that still runs afterwards, so `--json` and the log
+  are unchanged. Previously the user watched a spinner for a minute before
+  seeing anything at all, including when the answer was "your router is
+  dropping packets" and they could have acted on it immediately. The
+  Report card's Speed row says "measuring now — result prints below" while
+  it is pending. The test still cannot be parallelised: it saturates the
+  link deliberately and would corrupt every latency, loss, and bufferbloat
+  number it overlapped, so last is the only safe place for it.
+- **Loss probes send 20 packets instead of 8**, putting the reportable
+  quantum at 5% so the new thresholds land on a whole number of dropped
+  packets. At 8 packets one drop was 12.5% and no threshold below that
+  was expressible at all.
+- **`internet_ping_run` no longer runs in the parallel batch.** Measuring
+  loss while DNS, TCP, NTP, the WiFi scan and two WAN probes compete for
+  the same interface measures the tool, not the network. It now runs
+  serially on a quiet link, before the bufferbloat probe saturates it.
+- **Loss thresholds are shared constants** (`LOSS_WARN_PCT`,
+  `LOSS_CRIT_PCT`) used by both the rules and the Report card, so a
+  coloured row always has a matching diagnosis beneath it. The Router row
+  previously went yellow at 1% while the lowest gateway rule fired at 20%.
+
+### Fixed
+
+- **`ping -t` was corrupting every loss measurement.** On macOS, `-t` is a
+  deadline for the *whole run*, not a per-packet TTL — which is what
+  `-c 8 -t 2` looks like it means. `ping -c 20 -i 0.2 -t 2` transmitted
+  **10** packets, silently discarding half the probe; `ping -c 20 -i 0.1
+  -t 2` reported a permanent **5.0% loss** because the final reply landed
+  after the deadline. Removing the flag gives 20/20 and 0.0% on both
+  targets in every trial. Both loss probes now bound themselves with
+  `with_timeout`, which cannot corrupt the measurement, and a test greps
+  for the flag's return.
+- **The speed test never ran on machines with only `speedtest-cli`.** The
+  Python package installs a `speedtest` shim alongside `speedtest-cli`, and
+  the code took `command -v speedtest` to mean Ookla's CLI, handing it
+  `--format=json --accept-license --accept-gdpr`, which it rejects. The
+  fallback sat in an `elif` on that same test, so it was unreachable:
+  those machines reported "test ran but returned no result" every time.
+  Detection now reads the `--version` banner instead of trusting the
+  filename. Latent while the test was opt-in; a guaranteed failure on
+  every run once it wasn't.
+- **`add_diag` reported failure when adding a second diagnosis of the same
+  severity.** Its `case` arms are `[ … ] && assign`, so the guard
+  evaluating false became the function's exit status. Harmless under
+  `bin/netdiag`'s `set -u`, but any `set -e` caller aborted mid-rule-set
+  and silently truncated the diagnosis list.
+- **`P1`/`P2` required the gateway to show *exactly* zero loss.** An
+  outage measured alongside, say, 8% gateway loss matched neither them nor
+  `G1`/`G2`, so a total loss of internet produced no diagnosis at all. The
+  guard is now "the router is not the problem" rather than "the router is
+  flawless", and distinguishes a clean gateway from an unmeasured one.
+- **`.github/workflows/shellcheck.yml`** no longer carries a stale
+  `nimbalyst-local` entry in `ignore_paths`, left over from another
+  project.
+- **README no longer documents output the tool doesn't produce.** The
+  sample-output block showed a `── Diagnosis ──` section and wording
+  retired in v0.4.0; it now quotes the real Report card. The Roadmap
+  still listed the v0.3.0 module refactor as upcoming work. The rule
+  list was missing `N1`, `N1b`, `DI-2`, `WAN-1b`, `NAT-1b` and `BL-1`,
+  and listed `UP-1` without noting it is deliberately never emitted.
+- **`examples/sample-output.{txt,json}`** regenerated from real
+  `--redact` runs; the previous pair predated the current output format.
+
+### Removed
+
+- **`netdiag-prompt.md`**, the original build spec. Its JSON schema moved
+  to `docs/JSON-SCHEMA.md` (rewritten against what the emitter actually
+  produces — the spec's copy had drifted, e.g. `ping6_loss_pct` vs the
+  real `ping_loss_pct`, and predated the `wan`, `hosts_file`, `timings`
+  and `network` keys). Its acceptance criteria moved into `CLAUDE.md`.
+  Still in git history.
+
+## [0.5.2] - 2026-08-11
+
+Fixes found by running netdiag against a live dual-stack network. All three
+share a shape: a measurement silently failed, and the failure was rendered
+as a confident statement about the user's network instead of as missing
+data. Two of them told the user something untrue about their own setup.
+
+### Fixed
+
+- **The progress line no longer flickers between two captions.**
+  `_progress_spinner_pid` holds exactly one pid, so starting a spinner
+  while one was already running overwrote the only handle on the old one.
+  It was never killed and kept repainting its own label every 100 ms, so
+  the terminal alternated between "Public reachability" and the live
+  section at 10 Hz for the rest of the run. `hdr` stopped the previous
+  spinner, but the two direct `progress_spin_start` callers in
+  `bin/netdiag` did not. `progress_spin_start` is now idempotent.
+- **A finished run no longer strands a spinner on your terminal.** Because
+  nothing tracked the orphan, it outlived the orchestrator and went on
+  writing over the shell prompt; three such processes were found still
+  running from earlier sessions. `progress_spin_stop` now also runs from
+  the `EXIT` trap, so Ctrl-C and early aborts clean up too.
+- **DH-2 no longer accuses you of a DNS override you never made.** On any
+  network with IPv6 router adverts, macOS puts the router's link-local at
+  `nameserver[0]` and the DHCP-handed IPv4 server at `nameserver[1]`. The
+  check compared only `nameserver[0]`, and compared it against DHCPv4
+  option 6, which cannot carry IPv6 addresses — so it reported "somebody
+  manually overrode it" while the router's own DNS was in use the whole
+  time. It now compares the full resolver list, ignores link-local entries
+  (which are router-advertised and cannot be set by hand), and matches
+  whole addresses: `grep -F` also meant a system resolver of
+  `192.168.15.1` "matched" a DHCP list of `192.168.15.10`, hiding a real
+  override. Same fix in the `DNS` section warning.
+- **IPv6 is no longer reported as broken on every machine that has it.**
+  macOS `ping6`'s `-W` is a boolean in the `[-DdfHmnNoqrRtvwW]` cluster —
+  it selects the old 03-draft node-information format, it is not a
+  timeout. `-W 2000` made `ping6` read `2000` as the hostname, so it
+  exited with "nodename nor servname provided" before sending a packet;
+  `2>/dev/null` hid the message and the empty result was defaulted to
+  100% loss. Every IPv6-capable run therefore raised V6-1 and a warning
+  Report row, with the self-contradicting evidence "loss 100%, AAAA OK,
+  TCP6 OK". `with_timeout` now supplies the bound, and an unparseable
+  result is recorded as unknown rather than as total loss.
+
+### Added
+
+- `tests/test_regressions.bats` — 19 guards covering all three bugs,
+  including the spinner-lifecycle invariant, whole-address override
+  matching, and a `ping6` flag check that runs against loopback so it
+  needs no network.
+
+## [0.5.1] - 2026-08-11
+
+Fixes found by running every CLI mode on a live network. Three of the four
+share a root cause: focused runs skip most modules, and the consumers
+could not tell an untouched global default from a real measurement.
+
+### Fixed
+
+- **`--wifi-only` no longer reports a false critical and exits 2.** On a
+  perfectly healthy connection it printed "Your Mac has a router but
+  nothing on the public internet responded" and returned exit 2. Rule N1b
+  keyed off `PUBLIC_OK`, but `--wifi-only` never runs `public_run`, so the
+  `PUBLIC_OK=0` default from `lib/globals.sh` read as a measured failure.
+  The rule now also requires `PUBLIC_CHECKED=1`. Since exit 2 is the
+  machine-readable "something is critically wrong" contract, this misfired
+  on every scripted `--wifi-only` caller.
+- **N1b names the flag you actually passed.** Its text hardcoded
+  "without --mtu-only" even when the active focus was `--wifi-only`.
+- **`--mtu-only` no longer calls a WiFi link "wired".** The Report card
+  treated `IS_WIFI != 1` as wired, but `--mtu-only` never runs `wifi_run`,
+  so the flag never left its `0` default. The medium is now omitted when
+  it was not measured. `--json` was already correct (`interface.type`).
+- **`--redact` no longer leaks the gateway MAC.** `IPV6_GATEWAY` was left
+  intact in both the human output and `.ipv6.gateway`, but a `fe80::`
+  address is EUI-64-derived from the router's MAC — so a redacted report
+  still published the same `GW_MAC` masked one field over. Added to the
+  redaction set in `lib/common.sh` and `helpers/emit_json.py`.
+- **shellcheck passes again.** `_netdiag_on_exit` carries a
+  `disable=SC2317` for its trap-only dispatch; shellcheck 0.11.0 reports
+  that case as SC2329 instead, so `ludeeus/action-shellcheck@master`
+  (which tracks latest) failed on every push. Both codes are now listed.
+
+### Known
+
+- A full run measured 36 s against the spec's 30 s budget and `--quick`
+  8.9 s against 8 s, on a link with ~76 ms RTT to the internet. How much
+  is script overhead versus link latency is not yet separated — needs a
+  re-measure on a low-latency connection before it is treated as a
+  regression.
+
+## [0.5.0] - 2026-08-07
+
+Second correctness pass, plus the instrumentation needed to check the
+spec's runtime budget. Clears the remaining known bugs from the v0.4.1
+review.
+
+### Fixed
+
+- **Baseline history is now scoped per network.** `baseline.jsonl` was one
+  flat stream across every network the machine had ever been on, so a
+  laptop moving between home, office and a café tripped "gateway RTT ×4
+  spike", "ISP changed", "WiFi channel changed" and "path MTU changed" on
+  essentially every location change — each an `add_diag warn` that bumped
+  the exit code to 1. Runs are now compared only against prior runs on the
+  same network, identified by gateway MAC → SSID → gateway IP (see
+  `lib/netid.sh`). Filtering happens *before* the last-N window, so a batch
+  of runs elsewhere can't push a network's own history out of range.
+  Pre-0.5.0 records have no identity and are skipped rather than pooled in.
+- **`~/net-diag/` is bounded.** Nothing pruned it before: the launchd
+  watcher adds 96 log files and 96 JSONL records a day, forever, and both
+  Python helpers parsed the entire JSONL on every run. Now capped at the
+  newest 200 logs and 2000 history records, overridable via
+  `NETDIAG_KEEP_LOGS` / `NETDIAG_KEEP_HISTORY` (`0` disables).
+- **Traceroute hop numbers are traceroute's own again.** The parser
+  counted replies, so every hop after a `* * *` timeout was renumbered and
+  the JSON disagreed with what the user sees running traceroute by hand.
+  Worse, closing the gap made two private hops separated by a timeout look
+  adjacent, which could fake a double-NAT. Non-responding hops now keep
+  their slot and surface as `ip: null, responded: false`.
+- **The PMTU probe retries.** One probe per size meant a single dropped
+  packet at 1472 reported a clamped MTU — and rule M1 escalates a sub-1400
+  result to *critical*. Now three packets per size (`ping` exits 0 on any
+  reply), which is also faster in the worst case than the old single-probe
+  walk down the whole ladder.
+
+### Added
+
+- **`--redact`** masks public IP, SSID, BSSID, IPv6 address, gateway MAC
+  and city on stdout and in `--json`, so a report can be pasted into a
+  forum or ticket. ASN and ISP are kept (they name a provider, not a
+  person); RFC1918 addresses are kept (blanking them would gut the NAT and
+  ARP sections). Masking is substring-based, so a value is caught even
+  where a diagnosis sentence interpolated it. The on-disk log keeps full
+  detail — it's local, and only what you share gets masked. Implies
+  compact output: section bodies stream out before every value that needs
+  masking has been discovered, and a partially redacted transcript is
+  worse than none because it looks safe.
+- **Timing instrumentation.** The spec's "≤ 30 s full, ≤ 8 s `--quick`"
+  was asserted but never measured. Every phase is now wrapped in
+  `run_timed`; the JSON gains a `timings` object (`total_s`, `budget_s`,
+  `over_budget`, per-phase breakdown) and `--expert` prints a Timing
+  section.
+- **Rule IDs on every diagnosis.** `add_diag` now takes the rule ID (`W1`,
+  `NAT-1`, `BL-1`, …) matching a heading in `docs/DIAGNOSIS-RULES.md`. It
+  rides into the JSON as `diagnosis[].rule` so output is greppable and
+  groupable instead of string-matched against prose that gets rewritten
+  for readability. `--expert` prefixes each diagnosis with `[RULE]`;
+  default output stays prose-only.
+- `network` (`id`, `label`) and `interface.gateway_mac` in the JSON;
+  `baseline.network_id` and `baseline.skipped_other_networks`.
+- **39 tests, including the first coverage of `helpers/*.py`** —
+  `emit_json.py` is the widest interface in the project and had none, so a
+  renamed global silently produced `null` and nothing noticed. Covers the
+  JSON's top-level shape, rule-ID parsing (with the pre-0.5 fallback and a
+  summary containing `|`), hop gaps, the NAT split, timings, redaction,
+  and every branch of the baseline network scoping.
+
+### Changed
+
+- JSON shape (additive except as noted): `diagnosis[]` entries gain
+  `rule`; hop entries gain `responded` and report `ip: null` instead of an
+  empty string for a non-responding hop; new `network` and `timings`
+  objects.
+- `_print_diagnosis_paragraph` takes a rule ID as its second argument.
+
+## [0.4.1] - 2026-08-07
+
+Correctness pass. No new checks — this fixes cases where netdiag reported
+something confidently wrong, and closes three gaps against the spec in
+`netdiag-prompt.md`.
+
+### Fixed
+
+- **A Mac with no network reported "healthy" and exited 0.** Every
+  diagnosis rule guards on a measurement that only exists once there's a
+  link (`[ -n "$GW_LOSS" ]` and friends), so with WiFi off *nothing* fired
+  and the run ended with "Nothing obviously wrong — your network looks
+  healthy". New rule **N1** fires on an empty default route, states the
+  obvious, and makes the exit code 2. See `docs/DIAGNOSIS-RULES.md`.
+- **`sntp` drift was parsed positionally.** `awk '{print $1}'` assumed the
+  offset led the result line, but ntp 4.2.8 — what macOS ships — prefixes
+  it with a timestamp. On that format netdiag reported a clock "off by
+  2026-08-07 seconds" (the date, compared as a *string*, silently passed
+  the `> 1` threshold). The field is now located by the `+/-` token, and
+  validated numeric before use.
+- **Double-NAT contradicted itself on ISP transit.** Carriers routinely
+  run 10/8 between the CPE and their edge. The chain walker counted those
+  hops, so the Report card showed a yellow "double-NAT detected" directly
+  above a diagnosis explaining it wasn't a problem. The home/ISP split now
+  happens in `wan_double_nat_run`, before the card is built:
+  `WAN_DOUBLE_NAT` means *home-side* double-NAT, and ISP transit gets a
+  neutral row.
+- **Usage errors exited 2**, colliding with "≥ 1 critical diagnosis". An
+  unknown flag, a second positional TARGET, or a bare `--log` now exit 3.
+  An `EXIT` trap also remaps unplanned aborts (a `set -u` violation exits
+  1 or 127 depending on the failure) to 3, so exit 1 always means
+  "warnings only" and never "the script broke".
+- **`--quick` ran the baseline diff**, contrary to acceptance criterion 3.
+  It cost two `python3` starts plus a full parse of `baseline.jsonl` — the
+  most expensive thing left in a quick run. The comparison is now skipped;
+  the snapshot is still appended, so the `--quick`-driven launchd watcher
+  keeps building history.
+- The Report card's DNS row and rule **D1** both keyed off `DNS_OK`, which
+  defaults to 0 — a run that skipped DNS reported lookups as failing when
+  none were attempted. Both now require evidence the check ran.
+- `traceroute` output was piped `| log_pipe | sed`, so the log got
+  un-indented text and, in compact mode, `sed` ran on empty input. The
+  indent now precedes the log stage.
+- Non-numeric `wdutil` scrapes no longer reach `$((rssi - noise))` (a
+  syntax error) or the `[ -ge ]` ladder ("integer expression expected").
+- `install.sh --prefix` with no argument aborted on `$2` unbound under
+  `set -u` instead of printing a usable message.
+
+### Added
+
+- **`--mtu-only`** and **`--wifi-only`**, listed in the documented CLI
+  surface since v0.1 but never implemented — `netdiag --mtu-only` hit the
+  unknown-flag path. Each runs one section plus its prerequisites, then
+  the Report card and diagnoses over what it produced. The card filters to
+  the focused section, so a partial run can't report on checks it skipped.
+  Both suppress the baseline diff: a partial run isn't comparable to a
+  full one, and recording it would poison the history.
+- `wan.double_nat` in the JSON gains `home_chain`, `home_count`,
+  `isp_transit_chain`, and `isp_transit_count`.
+- `is_numeric` in `lib/common.sh` — the guard to use before feeding a
+  scraped value to `[ -lt ]`, `$(( ))`, or an awk comparison.
+- 24 tests: the `sntp` formats (both), `is_numeric`, the home/ISP chain
+  split, the N1 floor case, and the exit-code contract.
+
+### Changed
+
+- shellcheck is clean at default severity again. The 11 pre-existing
+  `SC2317` findings (trap handlers and the parallel-subshell function
+  overrides, all reached by indirect dispatch) now carry justified
+  disables, so the CI job reflects real problems.
+
+## [0.4.0] - 2026-06-01
+
+UX-focused release. The default report dropped from 130 lines of dense
+section bodies to a ~30-line "Report card + What we found" — scannable
+in a second, plain-English diagnoses underneath. `gping` is no longer
+the default at-end action. `--quick` now actually meets its 8-second
+spec budget (was 17 s). A live progress spinner replaces the previous
+silent wait. New always-on latency / jitter / hosts-file / VPN /
+internet-ping rows give the user more at-a-glance signal.
+
+### Added
+
+- **Compact "Report" card** by default — one column-aligned row per
+  metric category (Network, Router, Internet, Latency, DNS, IPv6,
+  Speed, Bufferbloat, Packet size, NAT topology, Router config, WiFi
+  channel, Hosts file, VPN, Clock). Severity-sorted so warnings are at
+  the top, healthy items grouped under them, neutral/skipped at the
+  bottom. Dim labels keep the value column the visual anchor.
+- **`What we found`** section replaces `Diagnosis`. Each diagnosis is
+  rendered as a wrapped paragraph (70-col `fmt`) with a blank line
+  between entries — readable instead of a wall of text.
+- **`--expert` flag** restores the v0.3 verbose section-by-section
+  output for power users. Default mode hides those bodies; expert
+  mode shows everything plus the Report card + diagnoses.
+- **`--gping` flag** + interactive prompt. gping no longer launches by
+  default. Pass `--gping` to opt in, or answer the post-report
+  `Launch live ping monitor? [y/N]` (5-second default-no timeout).
+  The prompt is suppressed under `--quiet`, `--json`, `--watch`,
+  `--watch-child`, or non-TTY stdin/stdout.
+- **Progress spinner on stderr** during every section. The orchestrator
+  was previously silent for 25-40 s in default mode; now each section's
+  name animates while it runs (`⠋ Bufferbloat (loaded vs idle latency)…`).
+  Stays out of stdout so JSON / piped consumers aren't affected.
+- **Always-on internet latency probe** (`lib/internet_ping.sh`). 8-packet
+  burst to 1.1.1.1, captures avg RTT + stddev (jitter) + loss. Report
+  row: `Latency · 1.1.1.1 · 14 ms · ±7.2 ms jitter`. New JSON object:
+  `internet_latency.{target,rtt_avg_ms,rtt_jitter_ms,loss_pct}`.
+- **Gateway jitter.** `lib/gateway.sh` parses ping's stddev too. Report
+  row gains `± X ms jitter`; JSON `gateway.rtt_jitter_ms` added.
+- **`/etc/hosts` sanity check** (`lib/hosts.sh`). Counts non-default
+  entries and flags any that redirect well-known consumer domains
+  (facebook / google / netflix / amazon / apple / microsoft / github /
+  …) to 127.0.0.1 / 0.0.0.0 / ::1 — usually an ad-blocker or
+  parental-control tool, occasionally malware. New JSON object:
+  `hosts_file.{custom_count,suspicious_redirects}`.
+- **VPN row is now always shown.** Previously only when active.
+  Defaults to `· VPN · not active`; when active, points the user at
+  the Internet row for the exit-country lookup.
+- **`tell()` helper** in `lib/common.sh` for "always visible" lines
+  (the `netdiag` banner, "Report saved to" footer) that survive the
+  new section-body gating.
+
+### Changed
+
+- **`--quick` now meets its 8-second budget** (was 17.6 s). Under
+  `--quick`: NTP probe, internet ping, and default traceroute are
+  skipped, and the gateway ping is cut from 10 to 5 packets. Side
+  effect: NAT-1 (double-NAT) doesn't fire under `--quick` because it
+  depends on TRACE_LINES — run without `--quick` for the NAT topology
+  check.
+- **`--quiet` semantics tightened.** Prints only the header + `What
+  we found`. Drop the Report card too so the diagnoses are pipe-clean
+  for mail / tickets.
+- **Diagnosis text rewritten in plain English** across every rule
+  (`lib/diagnosis.sh`, `lib/wan.sh`, `lib/output.sh` baseline-regression).
+  Pattern: visible symptom first, plain cause, concrete action, with
+  technical term parenthetical for power users. E.g. "Bufferbloat at
+  gateway (grade D, +230 ms under load) — router lacks SQM/fq_codel.
+  VOIP/Zoom will glitch under load." →
+  "Your router chokes under load — whenever someone's downloading or
+  uploading, Zoom / FaceTime / WhatsApp calls will glitch and games
+  will lag badly (extra +230 ms delay, bufferbloat grade D). Fix:
+  enable \"Smart Queue Management\" or \"QoS\" in your router's
+  admin page, or replace the router with one that supports it."
+- **Section ordering tweaked** to L2 → L3 → app: WiFi → Gateway →
+  ARP → DHCP → Public, instead of the prior DHCP-before-Gateway order.
+- **Bufferbloat / Speed / Packet size / Latency rows show "skipped"**
+  under `--quick` so the Report card stays the same shape across
+  modes (used to silently omit those rows).
+- **NTP soft-warning tier.** Clock drift between 1 s and 30 s now
+  warns instead of being silently ignored; previously only the > 30 s
+  band fired any diagnosis.
+
+### Fixed
+
+- **mktemp template bug.** `mktemp ".../netdiag-out.XXXXXX.json"`
+  doesn't substitute the X's on macOS because the suffix isn't at the
+  end — the literal-named file was being created once, then every
+  subsequent run failed with "File exists" and emitted no JSON.
+  Dropped the `.json` suffix.
+- **gping crash on non-tty stdout.** gping renders a TUI and dies
+  with "Device not configured (os error 6)" when piped to `tee` or
+  redirected to a file. `gping_run` now also requires `[ -t 1 ]`.
+- **Long IP-pair wraps cleanly in diagnoses.** The
+  `(192.168.50.1 → 192.168.1.254)` notation now breaks at the spaces
+  around `→` rather than spilling past the 70-col cap (sanitization
+  regex fix).
+- **Hosts row no longer marooned at the end** of the Report card.
+  Severity-sort places it among the other healthy items.
+
+## [0.3.0] - 2026-05-30
+
+The "architecture + NAT/WAN topology" release. `bin/netdiag` was a single
+1238-line bash file in v0.2.x; this release splits it into 23 modules
+under `lib/`, adds a parallel-launch helper so independent checks run
+concurrently, introduces a `with_timeout` wrapper to keep any one probe
+from blocking the whole run, and ships a new NAT / WAN topology section
+covering dual-WAN, double-NAT, and UPnP/NAT-PMP status.
+
+### Added
+
+- **Modular layout (lib/\*.sh).** Each section is its own module with a
+  documented "Reads / Writes / Entry" header. `bin/netdiag` is now a
+  ~230-line orchestrator. `lib/common.sh` holds shared printing,
+  diagnosis accumulator, timeout wrapper, and parallel-launch helpers;
+  `lib/globals.sh` centralises every cross-module variable.
+- **Parallel batch.** DNS, IPv6, TCP reach, NTP, WiFi neighborhood,
+  WiFi disconnect history, dual-WAN probe, and UPnP probe now run as
+  background jobs collected via a fan-in helper. Per-section stdout is
+  buffered so output order stays canonical even though execution is
+  concurrent. On this Starlink link the parallel batch is bound by
+  `system_profiler SPAirPortDataType` (~15 s); the previously-sequential
+  work that used to fill that window is now overlapped.
+- **`with_timeout SECS cmd…` helper.** macOS has no `timeout(1)`; this
+  is a small shell wrapper that kills the wrapped command after SECS
+  and returns 124 on timeout (matches GNU `timeout`). Applied to DNS
+  `dig`, TCP `nc`, `traceroute`, `mtr`, and `sntp`.
+- **NAT / WAN topology section** (`lib/wan.sh`, ~215 LOC):
+  - **WAN-1 / WAN-1b — dual-WAN / load-balancing probe.** Three
+    parallel `curl -s https://ifconfig.co/json` requests; flags if
+    they return more than one distinct ASN or more than one public IP
+    within the same ASN. Surfaces "outbound is being load-balanced
+    across N ISPs" as a `warn` (or single-ASN multi-IP as `info` —
+    likely CGNAT round-robin).
+  - **NAT-1 — double-NAT detection.** Walks the traceroute output and
+    counts consecutive RFC1918 hops before the first CGNAT or public
+    address. > 1 → `warn` with the chain printed. Pure parse; no extra
+    network call.
+  - **UP-1 — UPnP / NAT-PMP status.** Prefers Homebrew `miniupnpc`
+    (`upnpc -s`); falls back to a raw SSDP M-SEARCH via `nc -u`, then a
+    NAT-PMP probe to gateway:5351. Reports `enabled` / `disabled` /
+    `unknown`; `info` severity (disabled is the safer default but
+    games / Plex / Steam often need it).
+  - **JSON schema additions** — new top-level `wan` object with
+    `load_balancing.{distinct_asns,distinct_ips,active}`,
+    `double_nat.{detected,rfc1918_chain}`, and
+    `upnp.{state,device,url,tested_via}`. Additive only; v0.2.x
+    consumers see the same other keys.
+- **Bats fixtures + parser unit tests** (`tests/test_parse.bats`).
+  24 tests covering `grade_bufferbloat` thresholds, traceroute
+  parser (`*` skip + banner skip + renumbering), mtr first-lossy-hop
+  detection, ARP duplicate detection (with synthetic `arp_dup.txt`),
+  DHCP lease-end date math, PMTU computation, and the new double-NAT
+  RFC1918 chain walker. Fixtures captured from this Mac
+  (`tests/fixtures/{wdutil_info,ipconfig_getsummary,traceroute,arp_an,
+  system_profiler}.txt`) are sanitized — MACs, SSIDs, BSSIDs replaced
+  with synthetic values.
+- **`tests/integration_sudo.sh`** — interactive one-shot that asks for
+  sudo once, then exercises the mtr-under-sudo branch end-to-end
+  (`bats` can't drive sudo so this lives outside the suite).
+
+### Fixed
+
+- **`traceroute -n` parser dropped hop 1.** The awk skipped NR=1
+  expecting a banner, but macOS writes the "traceroute to ..." banner
+  to stderr and netdiag was redirecting stderr — so NR=1 was actually
+  hop 1. Now matches on `$1 == "traceroute"` so it skips the banner
+  only when it's actually present. This v0.2.x bug was latent because
+  no v0.2 rule walked the trace data; the new NAT-1 rule surfaced it.
+- **`with_timeout` orphaned `sleep` could pin command substitution.**
+  The killer subshell's `sleep` inherited stdout, so `$(with_timeout
+  ...)` would block for the full timeout even after the wrapped
+  command had completed. Killer subshell output now goes to /dev/null.
+
+### Changed
+
+- **JSON `version` is now `"0.3.0"`** (was `"0.2.0"` — the
+  `emit_json.py` default).
+
+## [0.2.1] - 2026-05-30
+
+Bugfix release driven by a 13-test pass of v0.2.0 on a real Starlink link.
+Surfaced spec violations (exit codes, JSON schema), broken budgets (full
+run > 30 s, `--quick` > 8 s under `--quiet`, `--quick TARGET` > 24 s), and
+a noisy WiFi-disconnect counter. All fixed; no new features.
+
+### Fixed
+
+- **Exit codes per spec (`0`/`1`/`2`/`3`).** Each diagnosis is now tagged
+  `info` / `warn` / `critical` via a new `add_diag` helper that updates
+  a `MAX_SEVERITY` global. The script `exit "$MAX_SEVERITY"` at the end.
+  Previously every run exited 0 regardless.
+- **JSON output now matches `netdiag-prompt.md`'s schema** — top-level
+  keys in the spec's order, full `traceroute.{target,hops[]}`,
+  `per_hop[]`, `mtr.{target,duration_s,hops[],first_lossy_hop}`,
+  `baseline.{compared_runs,regressions[]}`, and
+  `most_likely_root_cause` fields. Non-spec extras (`arp_gw_incomplete`,
+  `target`, `target_ping`, target traceroute) moved under `netdiag_extras`.
+- **WiFi disconnect count over-counted ~3×** because the regex caught
+  `disassoc=` substrings inside airportd dictionary dumps. Tightened to
+  `disassociated|deauthenticated|link[[:space:]]+down|disconnect[[:space:]]+reason|reassociating`.
+- **30 s budget**: full run (parallelised per-hop fallback loop) dropped
+  from 32.6 s to ~27.6 s on this Starlink link.
+- **8 s `--quick` budget**: `--quick` now also gates WiFi disconnect
+  history and the optional `TARGET` traceroute. `--quick` → 7.3 s;
+  `--quick TARGET` → 5.5 s (was 24.4 s).
+- **Diagnosis ordering** is now severity-descending (critical → warn →
+  info), preserving insertion order within each tier. The first emitted
+  line is surfaced as `most_likely_root_cause` in the JSON.
+- **`--watch` UX**: SIGINT/SIGTERM trap prints "stopped after N
+  iteration(s)" and points at the baseline file. Child invocations get
+  a new internal `--watch-child` flag that suppresses the per-iteration
+  "Report saved to" line.
+- **Diagnosis text rendering** now matches the severity: critical fires
+  red `✗`, warn fires yellow `⚠`, info fires gray `·` (was always red).
+- **PMTU rule split** into critical (< 1400) vs warn (< 1500), reflecting
+  the real severity gradient.
+
+## [0.2.0] - 2026-05-30
+
+The full 14-enhancement build out from `netdiag-prompt.md`, plus JSON
+output, the continuous-monitoring trio (--watch / --summary /
+--install-watcher), and a baseline-regression detector.
+
+### Added — diagnostic checks
+
+- **Bufferbloat** (feature 1): 10 s / 100 MB curl from
+  `speed.cloudflare.com` saturates the link while
+  ping samples to the gateway and `1.1.1.1` produce a Waveform/DSLReports
+  A–F grade per side. Diagnoses B1 (router SQM) and B2 (ISP CPE) split
+  the blame.
+- **PMTU black-hole probe** (feature 2): walks DF-set ping payloads
+  downward to find the largest that gets through; flags effective MTU
+  < 1500 (rule M1).
+- **mtr continuous loss** (feature 3): `mtr -j -c 60 -i 0.2` parsed via
+  `jq` to identify the first hop with > 2 % loss (rule MT1). Falls back
+  to the original per-hop loop when mtr / jq / sudo isn't available.
+- **IPv6 parity** (feature 4): global v6, gateway, ping6, AAAA,
+  traceroute6 hop count, TCP/443 to `ipv6.google.com`. Rule V6-1 fires
+  on v6-broken-while-v4-works (Happy Eyeballs masks it).
+- **VPN detection** (feature 5): `scutil --nc list`, `tailscale status`,
+  default-route via utun*/wg*. Surfaced at top via rule VPN-1.
+- **TCP reach panel** (feature 6): parallel `nc -G 3 -z` to a 5-host
+  panel + TARGET:443; rule TCP-1 flags "ICMP filtered, TCP fine."
+- **WiFi neighbourhood** (feature 7): `system_profiler
+  SPAirPortDataType -detailLevel full` channel utilisation. Rule WS-1
+  fires when > 3 neighbours share the current channel.
+- **WiFi disconnect history** (feature 8): `log show --predicate
+  'subsystem CONTAINS[c] "wifi" OR "airport"' --last 1h`; rule WD-1
+  on > 3 disconnects in window.
+- **Speed test** (feature 9): opt-in `--speed`. Tries Ookla `speedtest`
+  first, falls back to open-source `speedtest-cli`. Both go through `jq`.
+- **NTP drift** (feature 10): `sntp -t 3 time.apple.com`; rule NT-1 at
+  |drift| > 30 s (TLS handshakes start failing).
+- **Baseline diff** (feature 11): every run appends to
+  `~/net-diag/baseline.jsonl`; current snapshot compared against the
+  median of the last 10. Regressions tagged spike / drop / drift /
+  change and surfaced as additional diagnoses.
+- **Custom TARGET** (feature 12): `netdiag github.com` adds the host to
+  DNS, TCP-reach, traceroute, and a dedicated ping.
+- **Duplicate-IP / ARP** (feature 13): rule DI-1 on duplicates or
+  `(incomplete)` gateway entry.
+- **DHCP lease detail** (feature 14): server, lease window, time
+  remaining, DHCP-handed DNS. Rules DH-1 (lease expires within 1 h)
+  and DH-2 (DHCP DNS ≠ system resolver).
+
+### Added — output and operation
+
+- `--json` emits one schema-conformant JSON object on stdout
+  (helpers/emit_json.py). Suppresses human output unless `--log PATH`
+  is also passed.
+- `--quiet` shows only the Diagnosis section + final report line.
+- `--log PATH` overrides the default `~/net-diag/<timestamp>.log`.
+- `--baseline` / `--no-baseline` control the comparison + history append.
+- `--watch[=SEC]` runs every SEC seconds in the foreground.
+- `--summary[=HOURS]` aggregates `baseline.jsonl` into a human report
+  (helpers/summary.py).
+- `--install-watcher` / `--uninstall-watcher` drop a launchd plist that
+  runs netdiag every 15 min in the background.
+- `--no-bufferbloat` opts out of the bandwidth-heavy probe on metered
+  links.
+
+### Added — packaging
+
+- Requires bash 5 (Homebrew). `bin/netdiag` re-execs under
+  `/opt/homebrew/bin/bash` or `/usr/local/bin/bash`, fails clean with
+  install hint if neither is present. `install.sh` learns
+  `brew install bash` when missing.
+- Two Python helpers: `helpers/emit_json.py`, `helpers/baseline.py`,
+  `helpers/summary.py`. Stock /usr/bin/python3 on macOS 14+; no extra
+  packages.
+- `docs/ARCHITECTURE.md` records the bash/Python split.
+- `docs/DIAGNOSIS-RULES.md` documents every rule with rationale.
+- `examples/sample-output.{txt,json}` captured from a live Starlink run
+  (SSID/BSSID/public IP redacted).
+
+### Changed
+
+- Help block moved off the fragile `sed -n '2,10p'` extraction to a
+  heredoc that survives future inserts above.
+- Argument parser is strict about unknown `--*` flags (silently
+  accepting was masking typos).
+
+## [0.1.0] - 2026-05-30
+
+Initial repo skeleton — the 297-line starter script wrapped in proper
+repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
+(Ubuntu) and `bats-core` (macOS).
+
+[1.16.1]: https://github.com/godigi/hopwatch/compare/v1.16.0...v1.16.1
+[1.16.0]: https://github.com/godigi/hopwatch/compare/v1.15.1...v1.16.0
+[1.15.1]: https://github.com/godigi/hopwatch/compare/v1.15.0...v1.15.1
+[1.15.0]: https://github.com/godigi/hopwatch/compare/v1.14.6...v1.15.0
+[1.14.6]: https://github.com/godigi/hopwatch/compare/v1.14.5...v1.14.6
+[1.14.5]: https://github.com/godigi/hopwatch/compare/v1.14.3...v1.14.5
+[1.14.3]: https://github.com/godigi/hopwatch/compare/v1.14.2...v1.14.3
+[1.14.2]: https://github.com/godigi/hopwatch/compare/v1.14.1...v1.14.2
+[1.14.1]: https://github.com/godigi/hopwatch/compare/v1.14.0...v1.14.1
+[1.14.0]: https://github.com/godigi/hopwatch/compare/v1.13.0...v1.14.0
+[1.13.0]: https://github.com/godigi/hopwatch/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/godigi/hopwatch/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/godigi/hopwatch/compare/v1.10.10...v1.11.0
+[1.10.10]: https://github.com/godigi/hopwatch/compare/v1.10.9...v1.10.10
+[1.10.9]: https://github.com/godigi/hopwatch/compare/v1.10.8...v1.10.9
+[1.10.8]: https://github.com/godigi/hopwatch/compare/v1.10.7...v1.10.8
+[1.10.7]: https://github.com/godigi/hopwatch/compare/v1.10.6...v1.10.7
+[1.10.6]: https://github.com/godigi/hopwatch/compare/v1.10.5...v1.10.6
+[1.10.5]: https://github.com/godigi/hopwatch/compare/v1.10.4...v1.10.5
+[1.10.4]: https://github.com/godigi/hopwatch/compare/v1.10.3...v1.10.4
+[1.10.3]: https://github.com/godigi/hopwatch/compare/v1.10.2...v1.10.3
+[1.10.2]: https://github.com/godigi/hopwatch/compare/v1.10.1...v1.10.2
+[1.10.1]: https://github.com/godigi/hopwatch/compare/v1.10.0...v1.10.1
+[1.10.0]: https://github.com/godigi/hopwatch/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/godigi/hopwatch/compare/v1.8.4...v1.9.0
+[1.8.4]: https://github.com/godigi/hopwatch/compare/v1.8.3...v1.8.4
+[1.8.3]: https://github.com/godigi/hopwatch/compare/v1.8.2...v1.8.3
+[1.8.2]: https://github.com/godigi/hopwatch/compare/v1.8.1...v1.8.2
+[1.8.1]: https://github.com/godigi/hopwatch/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/godigi/hopwatch/compare/v1.7.5...v1.8.0
+[1.7.5]: https://github.com/godigi/hopwatch/compare/v1.7.4...v1.7.5
+[1.7.4]: https://github.com/godigi/hopwatch/compare/v1.7.3...v1.7.4
+[1.7.3]: https://github.com/godigi/hopwatch/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/godigi/hopwatch/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/godigi/hopwatch/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/godigi/hopwatch/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/godigi/hopwatch/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/godigi/hopwatch/compare/v1.4.3...v1.5.0
+[1.4.2]: https://github.com/godigi/hopwatch/compare/v1.4.1...v1.4.2
+[1.4.1]: https://github.com/godigi/hopwatch/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/godigi/hopwatch/compare/v1.3.3...v1.4.0
+[1.3.3]: https://github.com/godigi/hopwatch/compare/v1.3.2...v1.3.3
+[1.3.2]: https://github.com/godigi/hopwatch/compare/v1.3.1...v1.3.2
+[1.3.1]: https://github.com/godigi/hopwatch/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/godigi/hopwatch/compare/v1.2.4...v1.3.0
+[1.2.4]: https://github.com/godigi/hopwatch/compare/v1.2.3...v1.2.4
+[1.2.3]: https://github.com/godigi/hopwatch/compare/v1.2.2...v1.2.3
+[1.2.2]: https://github.com/godigi/hopwatch/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/godigi/netdiag/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/godigi/netdiag/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/godigi/netdiag/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/godigi/netdiag/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/godigi/netdiag/compare/v0.14.0...v1.0.0
+[0.14.0]: https://github.com/godigi/netdiag/compare/v0.13.1...v0.14.0
+[0.13.1]: https://github.com/godigi/netdiag/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/godigi/netdiag/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/godigi/netdiag/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/godigi/netdiag/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/godigi/netdiag/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/godigi/netdiag/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/godigi/netdiag/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/godigi/netdiag/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/godigi/netdiag/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/godigi/netdiag/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/godigi/netdiag/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/godigi/netdiag/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/godigi/netdiag/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/godigi/netdiag/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/godigi/netdiag/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/godigi/netdiag/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/godigi/netdiag/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/godigi/netdiag/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/godigi/netdiag/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/godigi/netdiag/releases/tag/v0.1.0

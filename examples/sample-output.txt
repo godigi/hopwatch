@@ -1,5 +1,5 @@
 netdiag  2026-09-01-113221
-log: /Users/bfreeman/net-diag/2026-09-01-113221.log
+log: /Users/you/net-diag/2026-09-01-113221.log
 
 ── Report ──
   ⚠  Packet size         1480 bytes · below standard · some sites may hang
@@ -52,4 +52,4 @@ log: /Users/bfreeman/net-diag/2026-09-01-113221.log
   · Server: Cyber Info Serviços de Telecomunicações Ltda
 
 Pass --expert to see the underlying measurements.
-Report saved to: /Users/bfreeman/net-diag/2026-09-01-113221.log
+Report saved to: /Users/you/net-diag/2026-09-01-113221.log

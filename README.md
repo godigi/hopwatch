@@ -22,8 +22,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/dropdown-dark.png" width="340" alt="Hopwatch Menu Bar Dropdown" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12); margin-right: 12px;" />
-  <img src="docs/assets/home-dark.png" width="460" alt="Hopwatch Dashboard Overview" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
+  <img src="docs/assets/dropdown-light.png" width="340" alt="Hopwatch Menu Bar Dropdown" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12); margin-right: 12px;" />
+  <img src="docs/assets/home-light.png" width="460" alt="Hopwatch Dashboard Overview" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
 </p>
 
 <p align="center">
@@ -92,7 +92,7 @@ regressions ("WiFi RSSI dropped from -55 to -78 since yesterday", "gateway
 RTT is 4× the 30-day median") get caught the next time you run it.
 
 Independent probes run as parallel background jobs. A default run is
-bound by the speed test — about 55 s with Ookla's `speedtest`, roughly
+bound by the speed test — about 65 s with Ookla's `speedtest`, roughly
 twice that with the `speedtest-cli` fallback, which is why the installer
 prefers Ookla. `--no-speed` brings it under 35 s and `--quick` under 8 s.
 Pass `--progress` (or use the app) to watch each check land rather than
@@ -648,19 +648,14 @@ No. Hopwatch runs 100% sudo-free for all standard diagnostics, menu bar monitori
 
 ## Roadmap
 
-Shipped: modular `lib/*.sh` (v0.3.0), NAT/WAN topology (v0.3.0),
-plain-English diagnoses and the Report card (v0.4.0), per-network
-baselines and `--redact` (v0.5.0), a one-line installer (v0.6.0),
-packet-loss diagnosis (v0.6.0), `--monitor` / `--history` and the
-menu-bar app (v0.7.0), `--show` and run browsing (v0.8.0), `--progress`,
-`--speed-only` and the Live tab (v0.9.0), in-app update checks and the
-`D3`/`D4`/`V6-2` DNS and IPv6 rules (v0.9.1), a full check reachable from
-the app (v1.0.0), pasteable redacted report via `--share` (v1.0.0),
-Homebrew Cask distribution (v1.10.0), UDP socket exhaustion `SOCK-1` and guided DNS `D6` (v1.11.0),
-one-click repair actions `quit-app`, `restart-mac`, `open-sign-in` (v1.12.0),
-connection-refusal flow flood detection `CONN-1` (v1.13.0),
-bandwidth hog attribution `HOG-1` (v1.14.0), zero-stale-reading
-network boundary transitions (v1.14.5), and sleep wake loss/DNS settling (v1.14.6).
+Shipped: plain-English diagnoses and the Report card, per-network
+baselines, `--redact` and pasteable `--share` reports, the menu-bar app
+with a Live tab, `--monitor` / `--history` / `--show`, in-app update
+checks, a one-line installer and Homebrew Cask, one-click repairs
+(`quit-app`, `restart-mac`, `open-sign-in`, `reconnect-wifi`), and rules for
+packet loss, DNS, IPv6, socket exhaustion (`SOCK-1`), connection floods
+(`CONN-1`) and bandwidth hogs (`HOG-1`). Release-by-release notes are in
+[CHANGELOG.md](./CHANGELOG.md).
 
 Next:
 
