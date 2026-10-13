@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-10-13
+
 ### Fixed
 
 - **Tags cut by the auto-version bot now become Releases.** `auto-version.yml` pushes the release commit and tag with the default `GITHUB_TOKEN`, and GitHub does not start workflows from events that token creates, so `release.yml`'s tag trigger never fired: v1.15.1, v1.16.0 and v1.16.1 were tagged with no Release and no DMG, while `Casks/hopwatch.rb` pointed at the DMG that was never built (v1.16.1 was repaired by hand). The job now dispatches `release.yml` for the tag it just pushed (`workflow_dispatch` is allowed from `GITHUB_TOKEN`; it needs `actions: write` and no new secret). A tag pushed from a maintainer's machine still triggers the release by itself and is not dispatched twice.
@@ -4274,7 +4276,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.1...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.2...HEAD
+[1.16.2]: https://github.com/godigi/hopwatch/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/godigi/hopwatch/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/godigi/hopwatch/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/godigi/hopwatch/compare/v1.15.0...v1.15.1
