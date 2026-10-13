@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.16.3] - 2026-10-13
+
 ### Changed
 
 - **Documentation tidy-up.** The screenshots in the README and `docs/SCREENSHOTS.md` are re-captured from the current app using synthetic data (`scripts/gallery-fixture.py` regenerates the fixture they render), and `docs/CHANGELOG-archive.md` now holds the release notes for every version before 1.16.2. The reference docs say Hopwatch where they still said netdiag, the README's roadmap no longer cites versions that are no longer published, and `docs/BACKLOG.md` keeps only the ideas that are still open.
@@ -26,5 +28,6 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.2...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.3...HEAD
+[1.16.3]: https://github.com/godigi/hopwatch/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/godigi/hopwatch/compare/v1.16.1...v1.16.2
