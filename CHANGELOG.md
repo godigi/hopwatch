@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-13
+
 ### Fixed
 
 - **The offline card's remaining copy now comes from the CLI.** The monitor's `link.offline` gains `reason_label`, the short caption for the reason ("Wi-Fi is off" for `wifi-off`, "Not connected" for `wifi-not-joined` and `wifi-no-address`, `null` for the rest and for a wired link). The Mac node and the signal tile render it verbatim and fall back to the neutral "No link" wording when it is absent, instead of mapping reasons to text in Swift. The "Not connected" caption under the Mac node in the menu-bar card replaces the old "Wi-Fi · not connected" so one label serves both places.
@@ -36,6 +38,7 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.3...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/godigi/hopwatch/compare/v1.16.3...v1.17.0
 [1.16.3]: https://github.com/godigi/hopwatch/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/godigi/hopwatch/compare/v1.16.1...v1.16.2
