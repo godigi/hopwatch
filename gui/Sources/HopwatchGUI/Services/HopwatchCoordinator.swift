@@ -1033,6 +1033,8 @@ final class HopwatchCoordinator {
     /// CLI's wording unnoticed. Nothing outside the gallery reads it.
     static let galleryPrecursorSummary =
         "Your router stopped responding right before Wi-Fi dropped, which usually means it restarted."
+    /// Likewise for `link.offline.reason_label` on `wifi-not-joined`.
+    static let galleryReasonLabel = "Not connected"
 
     /// Gallery fixture for the no-link state (`--gallery-no-link`): the
     /// newest sample says `link.up == false` while still *carrying* the last
@@ -1062,7 +1064,8 @@ final class HopwatchCoordinator {
                                          downDurationS: restarted ? 10 : 252,
                                          lastNetwork: restarted ? nil : "Home",
                                          precursor: restarted ? nil : "router-unreachable",
-                                         precursorSummary: restarted ? nil : Self.galleryPrecursorSummary))
+                                         precursorSummary: restarted ? nil : Self.galleryPrecursorSummary,
+                                         reasonLabel: Self.galleryReasonLabel))
         down.gateway.lossPct = 10
         down.gateway.rttJitterMs = 3
         down.status = .init(severity: "critical", measurement: "link-down", rules: ["N1"],
@@ -1523,6 +1526,14 @@ final class HopwatchCoordinator {
     func dismissRepairOutcome() {
         guard !isRepairing else { return }
         repairOutcome = nil
+    }
+
+    /// The firing rule (of `rules`, in order) that the rules catalog says can
+    /// offer the reconnect-wifi repair, or nil: none does, or the catalog has
+    /// not loaded. The offline card draws its Reconnect button from this, so
+    /// which finding offers it stays the CLI's call (lib/repairs.sh).
+    func reconnectRule(amongFiring rules: [String]) -> String? {
+        rulesCatalog.catalog?.firstRule(offering: "reconnect-wifi", among: rules)
     }
 
     /// Run the reconnect-wifi repair on demand (e.g. from an offline card button).

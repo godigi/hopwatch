@@ -339,9 +339,9 @@ struct HomeView: View {
                 if rules.contains("DH-3") {
                     return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WJ-1") {
-                    return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? "Wi-Fi dropped and hasn't rejoined"
+                    return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WF-1") {
-                    return coordinator.rulesCatalog.catalog?["WF-1"]?.title ?? "Wi-Fi is turned off"
+                    return coordinator.rulesCatalog.catalog?["WF-1"]?.title ?? NoLinkCopy.headline
                 } else {
                     return NoLinkCopy.headline
                 }
@@ -364,7 +364,11 @@ struct HomeView: View {
 
                 return subtitleParts.joined(separator: "\n")
             }()
-            let canReconnect = rules.contains("WJ-1") || rules.contains("DH-3")
+            // The CLI decides which finding offers the repair (the catalog's
+            // per-rule `repairs`); the card draws the button for whichever
+            // firing rule that names, and only once the catalog has loaded.
+            let reconnectRule = coordinator.reconnectRule(amongFiring: rules)
+            let canReconnect = reconnectRule != nil
             let actionTitle = canReconnect ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
             let secTitle: String? = canReconnect ? "Open Wi-Fi Settings" : nil
 
@@ -380,8 +384,8 @@ struct HomeView: View {
                 detectedTime: "Live",
                 actionTitle: actionTitle,
                 onAction: {
-                    if canReconnect {
-                        coordinator.reconnectWiFi(ruleID: rules.contains("DH-3") ? "DH-3" : "WJ-1")
+                    if let reconnectRule {
+                        coordinator.reconnectWiFi(ruleID: reconnectRule)
                     } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
                         NSWorkspace.shared.open(url)
                     }
@@ -1018,9 +1022,8 @@ struct HomeView: View {
     private var wifiSignalText: String {
         if linkDown {
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
-            if offline?.reason == "wifi-off" { return "Wi-Fi is off" }
-            if offline?.reason == "wifi-not-joined" || offline?.reason == "wifi-no-address" { return "Not connected" }
-            return NoLinkCopy.linkReading
+            // The CLI's caption for the reason, or the neutral one.
+            return offline?.knownReasonLabel ?? NoLinkCopy.linkReading
         }
         if coordinator.liveSample == nil && resolvedRSSI == nil { return "—" }
         if !isConnectedToWiFi { return "Ethernet" }
