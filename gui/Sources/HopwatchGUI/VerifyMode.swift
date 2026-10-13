@@ -102,6 +102,7 @@ private enum VerifyHarness {
         runNotificationManagerTests()
         runConnectionStabilityTests()
         runResolutionFeedbackTests()
+        runCacheFilePrunerTests()
         runSnapshots()
         renderArrivalCards()
         renderRepairPanels()
@@ -2776,6 +2777,40 @@ private enum VerifyHarness {
         let snap = res1.snapshot
         check(snap.title == "Wi-Fi Improved", "snapshot preserves title")
         check(snap.message == "Moved from 2.4 GHz to 5 GHz (Ch 52).", "snapshot preserves message")
+    }
+
+    private static func runCacheFilePrunerTests() {
+        print("Cache file pruning (rules-catalog / signal-scale):")
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("verify-cache-prune-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        func touch(_ name: String) { try? Data("{}".utf8).write(to: root.appendingPathComponent(name)) }
+        func names() -> Set<String> { Set((try? fm.contentsOfDirectory(atPath: root.path)) ?? []) }
+
+        check(CacheFilePruner.prune(in: root, keeping: "2.0.0").isEmpty,
+              "missing directory is a no-op, not a crash")
+
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        for v in ["1.0.0", "1.1.0", "2.0.0"] {
+            touch("rules-catalog-\(v).json")
+            touch("signal-scale-\(v).json")
+        }
+        let keepers = ["rules-catalog-2.0.0.json.bak", "rules-catalog-.json", "settings.json",
+                       "signal-scale-1.0.0.txt", "xsignal-scale-1.0.0.json"]
+        for n in keepers { touch(n) }
+        let sub = root.appendingPathComponent("signal-scale-0.5.0.json", isDirectory: true)
+        try? fm.createDirectory(at: sub, withIntermediateDirectories: true)
+
+        let removed = CacheFilePruner.prune(in: root, keeping: "2.0.0")
+        check(removed.count == 4, "old versions of both kinds are removed")
+        check(names().contains("rules-catalog-2.0.0.json") && names().contains("signal-scale-2.0.0.json"),
+              "the current version's file of each kind is kept")
+        check(keepers.allSatisfy { names().contains($0) },
+              "non-matching files (.bak, wrong prefix/suffix, empty version) are untouched")
+        var isDir: ObjCBool = false
+        check(fm.fileExists(atPath: sub.path, isDirectory: &isDir) && isDir.boolValue,
+              "a directory with a matching name is untouched")
     }
 
     private static func check(_ condition: Bool, _ name: String) {

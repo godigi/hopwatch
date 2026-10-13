@@ -149,11 +149,11 @@ struct DashboardStatusHeroView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(headline)
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(iconTint == Theme.ColorToken.green ? Color(red: 0.08, green: 0.5, blue: 0.24) : Theme.ColorToken.ink)
+                    .foregroundStyle(iconTint == Theme.ColorToken.green ? Theme.ColorToken.green : Theme.ColorToken.ink)
 
                 Text(subtitle)
                     .font(.system(size: 11))
-                    .foregroundStyle(iconTint == Theme.ColorToken.green ? Color(red: 0.09, green: 0.4, blue: 0.2) : Theme.ColorToken.muted)
+                    .foregroundStyle(Theme.ColorToken.muted)
                     .lineLimit(2)
             }
 

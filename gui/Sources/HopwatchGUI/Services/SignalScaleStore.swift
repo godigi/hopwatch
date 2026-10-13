@@ -60,6 +60,7 @@ final class SignalScaleStore {
             scale = cached
             loadedForVersion = version
             log.debug("signal scale v\(version, privacy: .public) loaded from disk cache")
+            Self.pruneStaleCaches(keeping: version)
             return
         }
 
@@ -73,14 +74,15 @@ final class SignalScaleStore {
         scale = decoded
         loadedForVersion = version
         Self.persist(rawJSON: out, version: version)
+        Self.pruneStaleCaches(keeping: version)
         log.debug("signal scale v\(version, privacy: .public) fetched from the CLI and cached")
     }
 
     // MARK: - Disk cache
     //
     // ~/Library/Application Support/<bundle id>/signal-scale-<version>.json
-    // — see RulesCatalogStore's identical cache for why one file per
-    // version, never pruned.
+    // — see RulesCatalogStore's identical cache; stale versions are pruned
+    // by `CacheFilePruner` once the current one is on disk.
 
     private static var cacheDirectory: URL? {
         guard let base = FileManager.default.urls(
@@ -89,6 +91,14 @@ final class SignalScaleStore {
             Bundle.main.bundleIdentifier ?? "com.godigi.hopwatch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// Drops every other version's cache files, of both kinds, once the
+    /// current version's own file is known to be on disk (just read or just
+    /// written). Only ever touches this app's Application Support directory.
+    private static func pruneStaleCaches(keeping version: String) {
+        guard let dir = cacheDirectory else { return }
+        CacheFilePruner.prune(in: dir, keeping: version)
     }
 
     private static func cacheFileURL(version: String) -> URL? {

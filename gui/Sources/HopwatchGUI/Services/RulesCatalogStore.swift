@@ -98,6 +98,7 @@ final class RulesCatalogStore {
             catalog = cached
             loadedForVersion = version
             log.debug("rules catalog v\(version, privacy: .public) loaded from disk cache")
+            Self.pruneStaleCaches(keeping: version)
             return
         }
 
@@ -111,17 +112,17 @@ final class RulesCatalogStore {
         catalog = decoded
         loadedForVersion = version
         Self.persist(rawJSON: out, version: version)
+        Self.pruneStaleCaches(keeping: version)
         log.debug("rules catalog v\(version, privacy: .public) fetched from the CLI and cached")
     }
 
     // MARK: - Disk cache
     //
     // ~/Library/Application Support/<bundle id>/rules-catalog-<version>.json
-    // — one file per CLI version ever seen, so a downgrade (or a second
-    // machine's older CLI read over a synced ~/Library) finds its own
-    // cache untouched rather than colliding with a newer one. Nothing
-    // prunes old versions' files; they're a few KB of JSON each and the
-    // set of versions one Mac ever runs this app against is small.
+    // — one file per CLI version, so a different version never collides
+    // with this one's cache. Once the current version's file is on disk,
+    // `CacheFilePruner` removes every other version's file (of both this
+    // kind and SignalScaleStore's); a downgrade just re-fetches once.
 
     private static var cacheDirectory: URL? {
         guard let base = FileManager.default.urls(
@@ -130,6 +131,14 @@ final class RulesCatalogStore {
             Bundle.main.bundleIdentifier ?? "com.godigi.hopwatch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// Drops every other version's cache files, of both kinds, once the
+    /// current version's own file is known to be on disk (just read or just
+    /// written). Only ever touches this app's Application Support directory.
+    private static func pruneStaleCaches(keeping version: String) {
+        guard let dir = cacheDirectory else { return }
+        CacheFilePruner.prune(in: dir, keeping: version)
     }
 
     private static func cacheFileURL(version: String) -> URL? {
