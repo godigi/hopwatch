@@ -6,6 +6,8 @@ All notable changes to Hopwatch are recorded here. Format follows
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-10-13
+
 ### Fixed
 
 - **The app never read `link.offline`, so the offline card's extra lines never appeared.** `MonitorSample.Link` declared the monitor's `link.offline` block, but its lenient decoder skipped it, so `offline` was always nil. It is now decoded leniently (a missing, null or malformed block, or a single malformed field in it, never drops the sample or the other fields), which switches on the "Offline for X · last on Y" line and the router-restart sentence on the menu-bar and Home cards, and the "Wi-Fi is off" / "Not connected" readings. The two cards now build that line from one shared function.
@@ -4266,7 +4268,8 @@ repo structure, MIT licence, and GitHub Actions CI for `shellcheck`
      version with no tag has no diff a reader can follow, which is how
      0.1.0, 0.4.1, 0.5.0 and 0.9.1 ended up documented but unreachable. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/godigi/hopwatch/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/godigi/hopwatch/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/godigi/hopwatch/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/godigi/hopwatch/compare/v1.14.6...v1.15.0
