@@ -8,6 +8,35 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-10-14
+
+### Changes
+
+- Merge pull request #11 from godigi/fix/audit-2026-10
+- Merge branch 'worktree-agent-a8c3d8446d66a25db' into fix/audit-2026-10
+- Merge branch 'worktree-agent-a012de52df3eb1733' into fix/audit-2026-10
+- refactor(thresholds): move baseline cutoffs and run budgets into lib/thresholds.sh
+- docs(architecture): mtr no longer implies sudo
+- docs(schema): netdiag_extras is the real key; document browser_health
+- fix(headline): show the Router row at 100% loss; judge the MTU row like rule M1
+- fix(monitor): free the stream on stop, init MON_INET_RTT, report emit failure, move loss floors to thresholds
+- fix(probes): bound pings with -W, bound ping6 with SIGINT, unknown hop is not clean, fix ::1 filter
+- fix(gui): harden the self-updater
+- fix(gui): don't drop the first monitor sample in the second after a boundary
+- fix(gui): serialise event-log writes and drop stale history loads
+- fix(gui): scope the Live view's last event to the current network
+- fix(gui): do not cache a failed capability handshake for the session
+- fix(helpers): never emit NaN/Infinity; summary skips non-object JSONL lines
+- fix(wifi): keep empty Wi-Fi fields in their slot with a non-whitespace separator
+- fix(gui): alert pause state, event announcements and same-network roams
+- fix(traffic): difference nettop counters per (name, pid), then sum by name
+- fix(browser): bind helper-process matching to the browser's own bundle
+- fix(events): keep both rule-cleared rows from one sample
+- fix(launchd,watch): escape plist XML, check launchctl load, stop calling exit 1/2 a failure
+- fix(gui): ignore SIGPIPE and cancel scans through their whole process group
+- fix(redact): close share --json, WAN IP and watcher-path leaks under --redact
+- fix(sudo): make sudo opt-in and a last resort
+
 ## [1.17.1] - 2026-10-13
 
 ### Fixed
@@ -46,8 +75,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.1...HEAD
-[1.17.1]: https://github.com/godigi/hopwatch/releases/tag/v1.17.1
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.2...HEAD
+[1.17.2]: https://github.com/godigi/hopwatch/releases/tag/v1.17.2
+[1.17.1]: https://github.com/godigi/hopwatch/commit/d4be4f91116203ba65f20e05eaed87f59c8a6517
 [1.17.0]: https://github.com/godigi/hopwatch/commit/685ef4f5e4695ff17a34c5b986f0c877165168fe
 [1.16.3]: https://github.com/godigi/hopwatch/commit/7bf928d274434b04483d7a59f5f308785749d242
 [1.16.2]: https://github.com/godigi/hopwatch/commit/23379af98d37b28f6b8aed9946c7b103b93dfe9f
