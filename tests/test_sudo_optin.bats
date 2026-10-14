@@ -71,8 +71,12 @@ SHIM_EOF
   id() { echo 0; }
   EMPTY="$BATS_TEST_TMPDIR/no-sudo-here"
   mkdir -p "$EMPTY"
+  # Restore PATH before asserting: bats' own teardown runs `rm`, and an empty
+  # PATH left behind makes the whole run exit 1 even with every test ok.
+  saved_path="$PATH"
   PATH="$EMPTY"
   HOPWATCH_ALLOW_SUDO=1 run hopwatch_sudo_allowed
+  PATH="$saved_path"
   [ "$status" -ne 0 ]
 }
 
