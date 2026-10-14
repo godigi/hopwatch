@@ -48,7 +48,12 @@ _PROC = re.compile(r"^(?P<name>.+)\.(?P<pid>\d+)$")
 
 
 def parse_snapshots(text):
-    """Two {process name: (bytes_in, bytes_out)} dicts, oldest first.
+    """Two {(process name, pid): (bytes_in, bytes_out)} dicts, oldest first.
+
+    Keyed by pid as well as name: a browser runs a dozen helpers under one
+    name, and when one exits between the snapshots, a name-keyed sum goes
+    *down* — which deltas() has to read as a reused pid and discard,
+    reporting a busy machine as moving 0 Mbps.
 
     Tolerates one snapshot (nettop killed early, or a machine where it
     refuses to run twice) by returning what it has; the caller decides
@@ -77,32 +82,36 @@ def parse_snapshots(text):
             bytes_out = int(fields[3])
         except ValueError:
             continue
-        name = match.group("name")
+        key = (match.group("name"), int(match.group("pid")))
         # One process can appear more than once (nettop lists per-connection
         # rows for some). Sum rather than overwrite.
-        prev_in, prev_out = current.get(name, (0, 0))
-        current[name] = (prev_in + bytes_in, prev_out + bytes_out)
+        prev_in, prev_out = current.get(key, (0, 0))
+        current[key] = (prev_in + bytes_in, prev_out + bytes_out)
     return snapshots
 
 
 def deltas(first, last):
-    """Per-process (down_bytes, up_bytes) between two cumulative snapshots.
+    """Per-process-name (down_bytes, up_bytes) between two snapshots.
 
-    A process present in only the last snapshot started mid-window; its
-    whole count is the delta. A negative delta — a counter that went
-    backwards, which happens when a pid is reused inside the window — is
-    dropped rather than clamped to zero, because a reused pid means the
-    two numbers describe different processes and neither difference means
-    anything.
+    The differencing is done per (name, pid); only then are the results
+    summed by name for reporting. A process present in only the last
+    snapshot started mid-window; its whole count is the delta. One present
+    only in the first exited mid-window and contributes nothing — its
+    traffic cannot be measured, but it no longer drags a sibling's number
+    below zero. A negative delta — a counter that went backwards, which
+    happens when a pid is reused inside the window — is dropped rather than
+    clamped to zero, because a reused pid means the two numbers describe
+    different processes and neither difference means anything.
     """
     out = {}
-    for name, (in_last, out_last) in last.items():
-        in_first, out_first = first.get(name, (0, 0))
+    for (name, pid), (in_last, out_last) in last.items():
+        in_first, out_first = first.get((name, pid), (0, 0))
         d_in, d_out = in_last - in_first, out_last - out_first
         if d_in < 0 or d_out < 0:
             continue
         if d_in or d_out:
-            out[name] = (d_in, d_out)
+            prev_in, prev_out = out.get(name, (0, 0))
+            out[name] = (prev_in + d_in, prev_out + d_out)
     return out
 
 

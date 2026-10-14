@@ -116,6 +116,45 @@ assert d['down_mbps'] == 0.0, d['down_mbps']
   [ "$output" = '{"measured":false}' ]
 }
 
+@test "a helper that exits mid-window does not zero out its same-named siblings" {
+  # Deltas used to be keyed by name alone, so two "Browser Helper"
+  # processes were one summed counter; when one exited the sum went down,
+  # the negative delta was dropped as a reused pid, and a link moving
+  # 8 Mb/s was reported as measured-and-idle.
+  printf '%s\n' \
+    'time,,bytes_in,bytes_out,' \
+    '1,Browser Helper.11,5000000,0,' \
+    '1,Browser Helper.12,1000,0,' \
+    'time,,bytes_in,bytes_out,' \
+    '3,Browser Helper.12,2001000,0,' > "$BATS_TEST_TMPDIR/exit.txt"
+  run bash -c "python3 '$REPO/helpers/traffic.py' 2 < '$BATS_TEST_TMPDIR/exit.txt'"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['measured'] is True, d
+assert d['down_mbps'] == 8.0, d
+assert [p['name'] for p in d['top_processes']] == ['Browser Helper'], d
+"
+}
+
+@test "same-named processes that both ran are summed into one talker" {
+  printf '%s\n' \
+    'time,,bytes_in,bytes_out,' \
+    '1,Browser Helper.11,1000,0,' \
+    '1,Browser Helper.12,1000,0,' \
+    'time,,bytes_in,bytes_out,' \
+    '3,Browser Helper.11,1001000,0,' \
+    '3,Browser Helper.12,1001000,0,' > "$BATS_TEST_TMPDIR/two.txt"
+  run bash -c "python3 '$REPO/helpers/traffic.py' 2 < '$BATS_TEST_TMPDIR/two.txt'"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['down_mbps'] == 8.0, d
+assert len(d['top_processes']) == 1, d
+"
+}
+
 @test "the helper rejects a non-numeric window rather than dividing by it" {
   run bash -c "python3 '$REPO/helpers/traffic.py' banana < '$FIX/nettop_busy.txt'"
   [ "$status" -eq 3 ]
