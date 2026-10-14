@@ -68,6 +68,7 @@ private enum VerifyHarness {
         runStaleDataTests()
         runAlertAttributionTests()
         runAlertSettleTests()
+        runHistoryLoadOverlapTests()
         runEventAlertDwellTests()
         runAlertNotificationAuthorityTests()
         runPublicIPEventTests()
@@ -856,6 +857,48 @@ private enum VerifyHarness {
         }
 
         func body(_ id: String = "wifi-unstable") -> String? { engine.active[id]?.body }
+    }
+
+    /// `HistoryStore.load()` against a stand-in CLI that answers `--history`
+    /// after a second. The launch load is still in flight when the dropdown
+    /// opens a second load and then closes (cancelling it): the first must
+    /// still publish, with no error, or hydration runs on an empty document.
+    private static func runHistoryLoadOverlapTests() {
+        print("History load overlap")
+        let dir = NSTemporaryDirectory() + "hopwatch-verify-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let shim = dir + "/hopwatch"
+        let script = """
+        #!/bin/sh
+        case "$1" in
+          --capabilities) echo '{"schema":1,"version":"0","features":["history","show","monitor","progress","share"]}' ;;
+          --history*) sleep 1; echo '{"schema":2,"metrics":[],"counts":{"records_read":7,"duplicates_dropped":0,"redacted_dropped":0,"unparseable_dropped":0,"runs":0,"networks":0},"networks":[],"runs":[]}' ;;
+          *) exit 3 ;;
+        esac
+        """
+        guard (try? script.write(toFile: shim, atomically: true, encoding: .utf8)) != nil else {
+            check(false, "history overlap: shim written"); return
+        }
+        _ = try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim)
+        let saved = Defaults.binaryPath
+        Defaults.binaryPath = shim
+        defer { Defaults.binaryPath = saved }
+
+        let store = HistoryStore()
+        let a = Task { @MainActor in await store.load() }
+        spin(0.4)
+        let b = Task { @MainActor in await store.load() }
+        spin(0.3)
+        b.cancel()
+        spin(6.0, until: { store.document.counts.recordsRead == 7 && !store.isLoading })
+        _ = a
+        equal(store.document.counts.recordsRead, 7,
+              "the earlier load still publishes when a later load is cancelled")
+        check(store.lastError == nil,
+              "a cancelled load is not reported as an error (\(store.lastError ?? "none"))")
+        check(!store.isLoading, "isLoading settles once every load has ended")
+        print("")
     }
 
     /// A banner may say it is checking only while a check is. Every path by
