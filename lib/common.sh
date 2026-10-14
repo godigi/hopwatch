@@ -68,14 +68,30 @@ _redact_line() {
   # IPV6_GATEWAY is masked even though it is link-local and unroutable: a
   # fe80:: address is EUI-64-derived from the router's MAC, so publishing
   # it leaks the very GW_MAC listed on the line below.
+  #
+  # WAN_LB_IPS is a space-separated list of every public address a
+  # load-balanced WAN handed out, and WAN-1b's prose interpolates them
+  # (an IPv6 there identifies a household), so each word is masked. The
+  # watcher's program path names the user's checkout.
+  local -a _lb_ips=()
+  read -r -a _lb_ips <<< "${WAN_LB_IPS:-}"
   for v in "${PUB_IP:-}" "${LOCAL_IP:-}" "${WIFI_SSID:-}" "${WIFI_BSSID:-}" \
            "${IPV6_GLOBAL_ADDR:-}" "${IPV6_GATEWAY:-}" "${GW_MAC:-}" \
-           "${PUB_CITY:-}"; do
+           "${PUB_CITY:-}" "${WATCHER_PROGRAM:-}" "${_lb_ips[@]+"${_lb_ips[@]}"}"; do
     # Skip empties (would match everywhere) and 1-2 char values (too short
     # to replace without corrupting unrelated text).
     [ "${#v}" -ge 3 ] || continue
     s="${s//"$v"/[redacted]}"
   done
+  # $HOME carries the account name (/Users/<name>/net-diag/...log in the
+  # header and the "Report saved to:" line). Shown as ~, which reads as a
+  # path and says nothing about who owns it. Done last so a longer value
+  # under $HOME (the watcher path) is masked whole first.
+  local _tilde="~"
+  v="${HOME:-}"
+  if [ "${#v}" -ge 3 ]; then
+    s="${s//"$v"/$_tilde}"
+  fi
   printf '%s' "$s"
 }
 
@@ -1192,22 +1208,58 @@ with_timeout() {
 # SECS should be (packets x interval) + the longest reply wait to count.
 # SIGTERM follows 2 s later if SIGINT was somehow ignored.
 ping_sigint_bound() {
-  local secs="$1" tmp pid killer
+  local secs="$1" dir saved_dir="${NETDIAG_TMP_DIR:-}"
   shift
-  tmp="$(mktemp "${TMPDIR:-/tmp}/hopwatch-ping.XXXXXX")" || return 1
-  # A background job in a non-interactive shell starts with SIGINT ignored
-  # (and a shell script cannot re-enable it). ping and ping6 install their
-  # own SIGINT handler, which overrides the inherited ignore, so the signal
-  # still lands; the `trap - INT` only covers a launcher that set a trap.
-  ( trap - INT; exec "$@" ) >"$tmp" 2>/dev/null &
-  pid=$!
-  ( sleep "$secs"; kill -INT "$pid" 2>/dev/null; sleep 2; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
-  killer=$!
-  wait "$pid" 2>/dev/null
-  kill "$killer" 2>/dev/null
-  wait "$killer" 2>/dev/null
-  cat "$tmp"
-  rm -f "$tmp"
+  # The output file lives in a registered scratch directory, so an abort
+  # (Ctrl-C, SIGHUP) that reaches a shell holding the registry still has it
+  # removed by the EXIT trap. NETDIAG_TMP_DIR is every caller's "the dir I
+  # just made" handoff, so leave it as it was found.
+  netdiag_mktemp_dir hopwatch-ping || return 1
+  dir="$NETDIAG_TMP_DIR"
+  NETDIAG_TMP_DIR="$saved_dir"
+  # The work runs in a subshell of its own because this is normally called
+  # inside `$( … )`, whose shell the registry never reaches: the subshell
+  # carries its own trap, so a signal that ends it also ends the ping, the
+  # killer and the scratch dir instead of leaving them behind.
+  (
+    local pid="" killer=""
+    # shellcheck disable=SC2317,SC2329  # reached via the trap below
+    _ping_bound_cleanup() {
+      # Each step is allowed to fail (the group signal that got us here has
+      # usually killed them already) without stopping the ones after it,
+      # including under a caller's `set -e`.
+      if [ -n "$killer" ]; then kill "$killer" 2>/dev/null || true; fi
+      if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null || true; fi
+      rm -rf "$dir"
+    }
+    trap _ping_bound_cleanup EXIT
+    trap 'exit 130' INT TERM HUP
+    # A background job in a non-interactive shell starts with SIGINT ignored
+    # (and a shell script cannot re-enable it). ping and ping6 install their
+    # own SIGINT handler, which overrides the inherited ignore, so the signal
+    # still lands; the `trap - INT` only covers a launcher that set a trap.
+    ( trap - INT; exec "$@" ) >"$dir/out" 2>/dev/null &
+    pid=$!
+    # The killer waits on its own `sleep` so that ending the killer (TERM)
+    # also ends the sleep: killing a subshell that is mid-`sleep $secs`
+    # left that sleep running, orphaned, for up to $secs more seconds.
+    (
+      sp=""
+      trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+      sleep "$secs" & sp=$!; wait "$sp"
+      kill -INT "$pid" 2>/dev/null
+      sleep 2 & sp=$!; wait "$sp"
+      kill -TERM "$pid" 2>/dev/null
+    ) >/dev/null 2>&1 &
+    killer=$!
+    wait "$pid" 2>/dev/null
+    kill "$killer" 2>/dev/null
+    wait "$killer" 2>/dev/null
+    killer=""; pid=""
+    cat "$dir/out"
+  )
+  rm -rf "$dir"
+  netdiag_tmp_forget "$dir"
   return 0
 }
 
@@ -1226,8 +1278,12 @@ ping_sigint_bound() {
 # prompt (or we already are root). Never asks for a password.
 hopwatch_sudo_allowed() {
   [ "${HOPWATCH_ALLOW_SUDO:-0}" = "1" ] || return 1
-  [ "$(id -u)" -eq 0 ] && return 0
+  # sudo has to exist even for root: the caller goes on to run `sudo -n …`,
+  # which fails with "command not found" where sudo is not installed, so a
+  # root session answering yes here sent every gated caller down a path
+  # that could not work.
   command -v sudo >/dev/null 2>&1 || return 1
+  [ "$(id -u)" -eq 0 ] && return 0
   sudo -n true 2>/dev/null
 }
 

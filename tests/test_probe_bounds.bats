@@ -8,6 +8,10 @@
 # path-MTU, per-hop loss and TARGET probes reporting "unmeasured" exactly when
 # there was loss to measure.
 
+teardown() {
+  pkill -f "sleep 413[789]" 2>/dev/null || true
+}
+
 setup() {
   REPO="${BATS_TEST_DIRNAME}/.."
   JSON_MODE=0 QUIET=0 QUICK=0 EXPERT=0 REDACT=0 LOG=/dev/null
@@ -123,6 +127,45 @@ FAKE_EOF
   elapsed=$((SECONDS - start))
   [[ "$output" == *"0.0% packet loss"* ]]
   [ "$elapsed" -le 3 ]
+}
+
+@test "ping_sigint_bound: leaves no killer sleep, scratch file or registry entry behind" {
+  fake="$BATS_TEST_TMPDIR/fastping"
+  printf '#!/bin/sh\necho "5 packets transmitted, 5 packets received, 0.0%% packet loss"\n' >"$fake"
+  chmod +x "$fake"
+  export TMPDIR="$BATS_TEST_TMPDIR"
+  NETDIAG_TMP_DIR="sentinel"
+  # 4137 is a value nothing else sleeps for, so the pgrep below sees only
+  # this function's killer.
+  out="$(ping_sigint_bound 4137 "$fake")"
+  [[ "$out" == *"0.0% packet loss"* ]]
+  # The handoff variable every caller reads is untouched, and the registry
+  # no longer lists the scratch directory.
+  [ "$NETDIAG_TMP_DIR" = "sentinel" ]
+  [ -z "$_NETDIAG_TMP_DIRS" ]
+  [ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'hopwatch-ping.*')" ]
+  ! pgrep -f 'sleep 4137' >/dev/null
+}
+
+@test "ping_sigint_bound: a signal to its process group takes the ping, killer sleep and scratch dir with it" {
+  fake="$BATS_TEST_TMPDIR/stalledping"
+  printf '#!/bin/sh\nexec sleep 4138.5\n' >"$fake"
+  chmod +x "$fake"
+  export TMPDIR="$BATS_TEST_TMPDIR"
+  # Job control gives the background job its own process group, which is
+  # what a Ctrl-C or `launchctl stop` signals: the whole group at once.
+  set -m
+  ( ping_sigint_bound 4139 "$fake" ) >/dev/null 2>&1 3>&- &
+  bg=$!
+  sleep 1
+  pgrep -f 'sleep 4139' >/dev/null   # the killer is genuinely waiting
+  kill -TERM -- "-$bg"
+  wait "$bg" 2>/dev/null || true
+  set +m
+  sleep 1
+  ! pgrep -f 'sleep 4139' >/dev/null
+  ! pgrep -f 'sleep 4138.5' >/dev/null
+  [ -z "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'hopwatch-ping.*')" ]
 }
 
 @test "ipv6_run bounds ping6 with ping_sigint_bound and never passes it -W" {

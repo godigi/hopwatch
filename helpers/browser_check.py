@@ -272,14 +272,29 @@ def main() -> int:
         print(json.dumps({"findings": findings, "count": len(findings)}))
         return 0
 
+    # Fields are separated by ASCII Unit Separator (0x1f), not a tab. The
+    # shell reads this with `IFS=<sep> read -r a b c ...`, and a tab is IFS
+    # whitespace, so consecutive tabs collapse: an empty version field
+    # shifted the PID into the version slot. 0x1f is not whitespace, so
+    # every empty field keeps its place. Any 0x1f inside a value (an app
+    # name comes off a process list) is dropped so it cannot forge a field.
+    sep = "\x1f"
+
+    def _field(value: object) -> str:
+        return str(value).replace(sep, "")
+
     if not findings:
         # Clean: emit "OK"
-        print("OK\t0\t\t\t")
+        print(sep.join(["OK", "0", "", "", "", ""]))
         return 0
 
-    # Emit first desync finding in TSV format: DESYNC\tCOUNT\tAPP\tRUNNING_VER\tDISK_VER\tPID
+    # Emit first desync finding: DESYNC<US>COUNT<US>APP<US>RUNNING_VER<US>DISK_VER<US>PID
     first = findings[0]
-    print(f"DESYNC\t{len(findings)}\t{first['app']}\t{first['running_version']}\t{first['disk_version']}\t{first['pid']}")
+    print(sep.join([
+        "DESYNC", str(len(findings)), _field(first["app"]),
+        _field(first["running_version"]), _field(first["disk_version"]),
+        _field(first["pid"]),
+    ]))
     return 0
 
 

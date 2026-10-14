@@ -77,18 +77,29 @@ final class HistoryStore {
     /// Bumped by every `load()`. Loads overlap (a network event, a wake and
     /// a finished scan can each ask within a second), and each is a child
     /// process of unpredictable duration, so they can finish out of order:
-    /// the older, slower answer would then overwrite the newer one. Only the
-    /// load that is still the latest when it returns may publish.
+    /// the older, slower answer must not overwrite a newer one that already
+    /// published. A result is therefore dropped only when something *newer*
+    /// is already on screen (`publishedGeneration`) — not merely because a
+    /// newer load has been *started*: that newer load may yet be cancelled
+    /// (the dropdown closing mid-load), and dropping the older one for it
+    /// would leave the document empty.
     private var loadGeneration = 0
+    private var publishedGeneration = 0
+    private var loadsInFlight = 0
 
     func load() async {
         loadGeneration += 1
         let generation = loadGeneration
+        loadsInFlight += 1
         isLoading = true
-        defer { if generation == loadGeneration { isLoading = false } }
+        defer {
+            loadsInFlight -= 1
+            if loadsInFlight == 0 { isLoading = false }
+        }
         do {
             let loaded = try await NetdiagRunner.history()
-            guard generation == loadGeneration else { return }
+            guard generation > publishedGeneration else { return }
+            publishedGeneration = generation
             document = loaded
             lastError = nil
             lastLoadedAt = Date()
@@ -99,8 +110,12 @@ final class HistoryStore {
             canonicalIDCache.removeAll()
             medianCache.removeAll()
             invalidateNetworkCaches()
+        } catch is CancellationError {
+            // The caller went away (a view disappeared). Not a failure of
+            // the store, and not worth an error banner.
+            return
         } catch {
-            guard generation == loadGeneration else { return }
+            guard generation > publishedGeneration else { return }
             lastError = error.localizedDescription
         }
     }

@@ -110,11 +110,11 @@ struct RunReportView: View {
             diagnoses
         }
         .contextMenu {
-            Button("Copy Redacted Report") { copyShareableReport() }
+            Button("Copy Redacted Report") { copyShareableReport() }.disabled(!coordinator.supportsShare)
             Button("Copy for Support / Front Desk") { copySupportSummary() }
             Divider()
-            Button("Save as Markdown (.md)…") { saveMarkdownReport() }
-            Button("Save Redacted JSON (.json)…") { saveJSONReport() }
+            Button("Save as Markdown (.md)…") { saveMarkdownReport() }.disabled(!coordinator.supportsShare)
+            Button("Save Redacted JSON (.json)…") { saveJSONReport() }.disabled(!coordinator.supportsShare)
         }
     }
 
@@ -170,6 +170,7 @@ struct RunReportView: View {
                 Button("Copy Redacted Report") {
                     copyShareableReport()
                 }
+                .disabled(!coordinator.supportsShare)
                 Button("Copy for Support / Front Desk") {
                     copySupportSummary()
                 }
@@ -177,9 +178,11 @@ struct RunReportView: View {
                 Button("Save as Markdown (.md)…") {
                     saveMarkdownReport()
                 }
+                .disabled(!coordinator.supportsShare)
                 Button("Save Redacted JSON (.json)…") {
                     saveJSONReport()
                 }
+                .disabled(!coordinator.supportsShare)
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: didCopy ? "checkmark" : "square.and.arrow.up")

@@ -172,7 +172,14 @@ final class AlertEngine {
         // A scan saturates the link on purpose (speed test, bufferbloat).
         // Alerting on latency the app itself caused is the worst possible
         // false positive: it is self-inflicted and perfectly reproducible.
-        if scanInProgress { return "a check is running" }
+        //
+        // A scan-only alert is the exception: it is judged from a *finished*
+        // run (`evaluate(run:)`, which the coordinator calls while
+        // `scanInProgress` is still true), so the traffic the flag guards
+        // against has already stopped, and holding it here would suppress
+        // every one of them — clock drift, IP conflict, double NAT, lease
+        // expiry, slower-than-usual — on exactly the path that raises them.
+        if scanInProgress && !def.scanOnly { return "a check is running" }
         if monitoringPaused { return "monitoring paused" }
         // DHCP, DNS and the default route land a beat apart after a switch.
         // Probes in the first seconds measure a half-configured stack.

@@ -241,6 +241,7 @@ struct HopwatchRunner {
     /// wording are the CLI's; this returns its bytes untouched, per
     /// CLAUDE.md on where the app is allowed to have an opinion.
     static func share(rawJSON: String? = nil) async throws -> String {
+        try await CapabilityStore.shared.requireSupport(for: .share)
         let args = rawJSON != nil ? ["--share=-"] : ["--share"]
         let (out, err, status) = try await execute(arguments: args, stdin: rawJSON)
         guard status == 0 else {
@@ -252,6 +253,7 @@ struct HopwatchRunner {
 
     /// Renders one stored run or piped JSON as redacted JSON.
     static func shareJSON(rawJSON: String? = nil) async throws -> String {
+        try await CapabilityStore.shared.requireSupport(for: .share)
         let args = rawJSON != nil ? ["--share=-", "--json"] : ["--share", "--json"]
         let (out, err, status) = try await execute(arguments: args, stdin: rawJSON)
         guard status == 0 else {
@@ -288,14 +290,22 @@ struct HopwatchRunner {
         stdin: String? = nil,
         stderrLines: AsyncStream<String>.Continuation? = nil
     ) async throws -> (String, String, Int32) {
-        guard let binary = BinaryLocator.resolve() else { throw NetdiagError.binaryNotFound }
+        // Every early throw below must end the progress stream first: its
+        // consumer (`runScan`'s progress task) only stops when it finishes.
+        guard let binary = BinaryLocator.resolve() else {
+            stderrLines?.finish()
+            throw NetdiagError.binaryNotFound
+        }
 
         // A cancel that lands before the child exists must not be lost:
         // `onCancel` can fire at any moment, including before `spawn` has
         // produced a PID to signal, so the request is parked in `box` and
         // honoured the instant the child is attached.
         let box = CancelBox()
-        if Task.isCancelled { throw CancellationError() }
+        if Task.isCancelled {
+            stderrLines?.finish()
+            throw CancellationError()
+        }
 
         let collector = OutputCollector()
         let splitter = stderrLines.map { sink in

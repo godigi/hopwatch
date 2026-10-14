@@ -24,6 +24,15 @@ final class HopwatchCoordinator {
     /// `RuleChip` and every category-driven report row reads
     /// `rulesCatalog.catalog` directly rather than awaiting anything.
     let rulesCatalog = RulesCatalogStore()
+    /// Whether the CLI in use advertises `share` in its capabilities
+    /// handshake. The share buttons read this; it starts true so they are
+    /// not greyed out for the moment before the first probe lands (and
+    /// `NetdiagRunner.share` re-checks regardless).
+    private(set) var supportsShare = true
+
+    func refreshShareSupport() async {
+        supportsShare = await CapabilityStore.shared.supports(.share)
+    }
     /// The CLI's Wi-Fi signal scale — see that store's header. Same
     /// synchronous-read shape as `rulesCatalog`: the Wi-Fi cell on Home and
     /// in the dropdown reads `signalScale.scale` directly from a view body.
@@ -259,9 +268,15 @@ final class HopwatchCoordinator {
         // after the app is gone — the exact misbehaviour that gets an
         // always-on app uninstalled.
         NotificationCenter.default.addObserver(
-            forName: .netdiagWillTerminate, object: nil, queue: .main
+            // `queue: nil`: delivered synchronously on the posting thread
+            // (main, from applicationWillTerminate), so the flush below has
+            // finished before the process is allowed to exit.
+            forName: .netdiagWillTerminate, object: nil, queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
+            MainActor.assumeIsolated {
+                self?.stop()
+                self?.eventLog.flush()
+            }
         }
 
         Task {
@@ -271,6 +286,7 @@ final class HopwatchCoordinator {
                 log.info("Uninstalling legacy 15-minute background watcher")
                 await watcher.uninstall()
             }
+            await refreshShareSupport()
             await history.load()
             await hydrateFromHistoryIfNeeded()
         }
@@ -690,7 +706,8 @@ final class HopwatchCoordinator {
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
                 networkName: liveSSID ?? sample.network.label ?? "Network",
-                latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs
+                latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs,
+                activeIDs: Set(alerts.active.keys)
             )
         }
         evaluateResolutions(sample: sample)
@@ -2038,10 +2055,16 @@ final class HopwatchCoordinator {
         }
     }
 
-    var currentNetworkEvents: [NetworkEvent] {
+    var currentNetworkEvents: [NetworkEvent] { currentNetworkEvents(withinHours: 24) }
+
+    /// The current network's events over `hours`, or the whole retained log
+    /// when `nil`. Never another network's: a surface that must not cap at
+    /// 24 h (the "nothing has changed in…" line) still scopes by identity.
+    func currentNetworkEvents(withinHours hours: Double?) -> [NetworkEvent] {
         guard let id = confirmedNetworkID else { return [] }
         let canonical = history.canonicalID(id)
-        return eventLog.within(hours: 24).filter {
+        let pool = hours.map { eventLog.within(hours: $0) } ?? eventLog.events
+        return pool.filter {
             $0.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
                 || $0.network.map(history.canonicalID) == canonical
         }

@@ -308,3 +308,34 @@ JSON
   [[ "$output" != *"3c:4d:5e"* && "$output" != *"AA-BB-CC"* ]] || { echo "$output"; return 1; }
   [[ "$output" == *"2026-08-25T12:00:00Z"* ]] || { echo "timestamp was mangled"; echo "$output"; return 1; }
 }
+
+@test "share sweeps IPv6 prefixes and addresses that end in '::'" {
+  # A `\b`-anchored IPv6 pattern has no boundary after a trailing "::", so
+  # it matched a shorter invalid fragment and left the real prefix behind.
+  cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z",
+ "diagnosis":[{"severity":"info","summary":"Delegated 2804:d4b:a9e0:7f00::/64 and 2804:d4b:a9e0:7f01:: (also 2001:db8:77::5.) via fe80::1 and 2606:4700:4700::1111."}]}
+JSON
+  for mode in "--json" ""; do
+    run python3 "$REPO/helpers/share.py" $mode < "$RUN"
+    [ "$status" -eq 0 ]
+    for leak in "2804:d4b" "a9e0" "2001:db8:77" "7f01" "2606:4700"; do
+      [[ "$output" != *"$leak"* ]] || { echo "leaked $leak ($mode)"; echo "$output"; return 1; }
+    done
+    # The suffix of the prefix and the kept link-local address survive.
+    [[ "$output" == *"[redacted]/64"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"fe80::1"* ]] || { echo "link-local masked"; echo "$output"; return 1; }
+    [[ "$output" == *"2026-08-25T12:00:00Z"* ]] || { echo "timestamp was mangled"; echo "$output"; return 1; }
+  done
+}
+
+@test "share does not carve a MAC out of a longer IPv6 chain" {
+  cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z",
+ "diagnosis":[{"severity":"info","summary":"Address 1:2:3:4:5:6:7:8 seen."}]}
+JSON
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  # Masked whole, not half-masked with ':7:8' left behind.
+  [[ "$output" != *":7:8"* ]] || { echo "$output"; return 1; }
+}

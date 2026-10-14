@@ -405,7 +405,11 @@ def _budget_s() -> float | None:
             return None
 
     mode = _env("RUN_MODE") or ""
-    if _bool("QUICK"):
+    # `--quick --speed` is a quick run that kept the speed test (lib/speedtest.sh:
+    # an explicit --speed beats --quick's skip). The test alone costs more than
+    # the whole 8 s quick budget, so holding that run to it reported every such
+    # run over budget; it is judged by what it ran, like any other.
+    if _bool("QUICK") and not _bool("SPEED_EXPLICIT"):
         return pick("THRESH_RUN_BUDGET_QUICK_S")
     focused_without_speed = mode.endswith("-only") and mode != "speed-only"
     if _bool("NO_SPEED") or focused_without_speed:

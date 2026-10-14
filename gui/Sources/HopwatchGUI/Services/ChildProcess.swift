@@ -148,14 +148,31 @@ final class ChildProcess: @unchecked Sendable {
     private final class ExitFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var value = false
-        func set() { lock.lock(); value = true; lock.unlock() }
+        private var at: UInt64 = 0
+        func set() {
+            lock.lock()
+            if !value { value = true; at = DispatchTime.now().uptimeNanoseconds }
+            lock.unlock()
+        }
         var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+        /// Seconds since `set()`, or 0 while the child is still running.
+        var secondsSinceSet: Double {
+            lock.lock(); defer { lock.unlock() }
+            guard value else { return 0 }
+            return Double(DispatchTime.now().uptimeNanoseconds &- at) / 1_000_000_000
+        }
     }
+
+    /// How long readers keep draining after the child has exited. Long enough
+    /// for everything the child wrote before exiting to be read; short enough
+    /// that a grandchild which keeps writing cannot hold `onExit` forever.
+    private static let drainGrace: Double = 0.25
 
     /// Reads until EOF, or until the child has exited and the pipe is empty.
     private static func drain(fd: Int32, exited: ExitFlag, sink: @Sendable (Data) -> Void) {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
+            if exited.secondsSinceSet > drainGrace { return }
             // Sampled *before* polling: data written before the exit is in
             // the pipe by now, so an empty pipe after this point is final.
             let wasExited = exited.isSet
@@ -185,9 +202,15 @@ final class ChildProcess: @unchecked Sendable {
     /// Writes `data` to the child's stdin on a background thread and closes
     /// it. EPIPE (the child has already gone) is expected and swallowed.
     func feed(_ data: Data) {
-        lock.lock(); let fd = stdinFD; lock.unlock()
+        // Ownership of the descriptor moves to the writer, atomically with
+        // clearing `stdinFD`. After this `closeStdin()` is a no-op, so no one
+        // else can close the fd number while the writer still holds it (and
+        // a recycled number can never receive this payload). A write stuck on
+        // a full pipe is released by EPIPE once the child — or, on cancel,
+        // its killed process group — drops the read end.
+        lock.lock(); let fd = stdinFD; stdinFD = -1; lock.unlock()
         guard fd >= 0 else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [self] in
+        DispatchQueue.global(qos: .userInitiated).async {
             data.withUnsafeBytes { raw in
                 var offset = 0
                 while offset < raw.count {
@@ -197,10 +220,12 @@ final class ChildProcess: @unchecked Sendable {
                     break                                // EPIPE or worse: give up quietly
                 }
             }
-            closeStdin()
+            close(fd)
         }
     }
 
+    /// Closes stdin if no `feed` has taken ownership of it; otherwise the
+    /// writer closes it itself when it finishes.
     func closeStdin() {
         lock.lock()
         let fd = stdinFD

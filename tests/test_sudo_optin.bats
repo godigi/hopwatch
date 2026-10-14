@@ -65,6 +65,28 @@ SHIM_EOF
   [ "$status" -eq 0 ]
 }
 
+@test "hopwatch_sudo_allowed: root without sudo installed is refused, not waved through" {
+  # Root used to short-circuit before the sudo check, so callers went on to
+  # run `sudo -n …` on a machine with no sudo.
+  id() { echo 0; }
+  EMPTY="$BATS_TEST_TMPDIR/no-sudo-here"
+  mkdir -p "$EMPTY"
+  # Restore PATH before asserting: bats' own teardown runs `rm`, and an empty
+  # PATH left behind makes the whole run exit 1 even with every test ok.
+  saved_path="$PATH"
+  PATH="$EMPTY"
+  HOPWATCH_ALLOW_SUDO=1 run hopwatch_sudo_allowed
+  PATH="$saved_path"
+  [ "$status" -ne 0 ]
+}
+
+@test "hopwatch_sudo_allowed: root with sudo present is allowed without calling it" {
+  id() { echo 0; }
+  HOPWATCH_ALLOW_SUDO=1 run hopwatch_sudo_allowed
+  [ "$status" -eq 0 ]
+  [ ! -e "$SUDO_LOG" ]
+}
+
 @test "monitor wifi probe never calls sudo by default" {
   MON_IFACE_TYPE=wifi
   _mon_probe_wifi_signal
