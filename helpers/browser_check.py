@@ -103,12 +103,24 @@ def find_running_version(
     fw_name: str,
     app_support: str,
     ps_text: str,
+    bundle_aliases: tuple[str, ...] = (),
 ) -> str | None:
-    """Identify the framework version the running browser process loaded."""
+    """Identify the framework version the running browser process loaded.
+
+    Every path match is bound to this browser's own bundle. Chrome and
+    Chrome Canary ship a framework with the same name ("Google Chrome
+    Framework.framework"), so matching on the framework name alone let a
+    Canary helper at one version answer for a stable Chrome at another and
+    raise a DESYNC that was not there. `bundle_aliases` are the other
+    spellings of the bundle path (ps prints the path as exec'd, which need
+    not be the realpath).
+    """
+    prefixes = sorted({bundle_path, *bundle_aliases}, key=len, reverse=True)
+    bundle_re = "(?:" + "|".join(re.escape(b) for b in prefixes) + ")"
+    fw_re = bundle_re + "/Contents/Frameworks/" + re.escape(fw_name)
+
     # 1. Search ps output for running helper processes from this bundle
-    helper_pattern = re.compile(
-        re.escape(fw_name) + r"/Versions/([0-9.]+)/Helpers/"
-    )
+    helper_pattern = re.compile(fw_re + r"/Versions/([0-9.]+)/Helpers/")
     for line in ps_text.splitlines():
         m = helper_pattern.search(line)
         if m:
@@ -134,9 +146,7 @@ def find_running_version(
             stderr=subprocess.DEVNULL,
             timeout=2.0,
         )
-        lsof_pattern = re.compile(
-            re.escape(fw_name) + r"/Versions/([0-9.]+)/"
-        )
+        lsof_pattern = re.compile(fw_re + r"/Versions/([0-9.]+)/")
         m = lsof_pattern.search(lsof_out)
         if m:
             return m.group(1)
@@ -204,11 +214,15 @@ def inspect_browsers(ps_text: str | None = None) -> list[dict[str, object]]:
             if current_uid is not None and p_uid is not None and p_uid != current_uid:
                 continue
 
-            bundle_path = os.path.realpath(exe_path.split("/Contents/MacOS/")[0])
+            raw_bundle = exe_path.split("/Contents/MacOS/")[0]
+            bundle_path = os.path.realpath(raw_bundle)
             if not os.path.isdir(bundle_path):
                 continue
 
-            running_ver = find_running_version(pid, bundle_path, fw_name, app_support, ps_text)
+            running_ver = find_running_version(
+                pid, bundle_path, fw_name, app_support, ps_text,
+                bundle_aliases=(raw_bundle,),
+            )
             if not running_ver or not re.match(r"^[0-9.]+$", running_ver):
                 continue
 
