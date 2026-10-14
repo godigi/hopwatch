@@ -64,6 +64,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var lastNotifiedAt: [String: Date] = [:]
     /// Tracks active faults that were announced via notification
     private(set) var announcedFaults: Set<String> = []
+    /// The subset of `announcedFaults` that was an outage. Only these may be
+    /// followed by a "Restored" notice: a degradation that clears is told
+    /// with its own "— resolved", and "Wi-Fi Restored" over a slow-but-up
+    /// link claims a reconnect that never happened.
+    private(set) var announcedOutages: Set<String> = []
 
     /// Notification posting handler, overridable for testing
     var onPostNotification: ((_ id: String, _ title: String, _ body: String, _ isSilent: Bool) -> Void)?
@@ -267,7 +272,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         body: String,
         isOutage: Bool,
         now: Date = Date(),
-        replacing: Bool = false
+        replacing: Bool = false,
+        announce: Bool = true
     ) -> Bool {
         let check = canNotify(id: id, isOutage: isOutage, now: now, replacing: replacing)
         guard check.allowed else {
@@ -276,7 +282,15 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
         if !replacing { lastNotifiedAt[id] = now }
-        announcedFaults.insert(id)
+        // `announce: false` is for an event: something that happened and is
+        // over (public IP changed). It has no fault to clear and no
+        // resolution to announce, so recording it here would let the next
+        // healthy sample "restore" it: a false "Wi-Fi Restored", and the
+        // event's own notification deleted from Notification Centre.
+        if announce {
+            announcedFaults.insert(id)
+            if isOutage { announcedOutages.insert(id) }
+        }
 
         if let handler = onPostNotification {
             handler("netdiag.\(id)", title, body, replacing)
@@ -302,7 +316,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         latencyMs: Double? = nil,
         now: Date = Date()
     ) -> Bool {
-        guard !announcedFaults.isEmpty else { return false }
+        guard !announcedOutages.isEmpty else { return false }
         guard notificationsEnabled && isAuthorized else {
             clearAnnouncedFaults()
             return false
@@ -313,6 +327,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             removeNotification(id: "netdiag.\(faultID)")
         }
         announcedFaults.removeAll()
+        announcedOutages.removeAll()
 
         let title = latencyMs != nil ? "Wi-Fi Restored" : "Network Restored"
         let body: String
@@ -367,6 +382,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func deliverAlertResolved(id: String, title: String) {
         guard announcedFaults.contains(id) else { return }
         announcedFaults.remove(id)
+        announcedOutages.remove(id)
 
         removeNotification(id: "netdiag.\(id)")
 
@@ -395,5 +411,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// Reset tracking (e.g. on new network or session restart)
     func clearAnnouncedFaults() {
         announcedFaults.removeAll()
+        announcedOutages.removeAll()
     }
 }

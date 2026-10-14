@@ -494,6 +494,16 @@ final class MonitorStream {
 
     var isPausedForAnyReason: Bool { !pauseHolders.isEmpty }
 
+    /// Whether anything other than `reason` holds the monitor paused.
+    ///
+    /// The alert engine needs this shape rather than `isPausedForAnyReason`:
+    /// a scan pauses the monitor too, but a scan is already suppressed
+    /// separately and briefly (`scanInProgress`) and must not make the
+    /// engine drop the alert that triggered it.
+    func isPaused(besides reason: String) -> Bool {
+        !pauseHolders.subtracting([reason]).isEmpty
+    }
+
     /// Sends `SIGALRM` to force an immediate cycle refresh without waiting for timers.
     ///
     /// Held back until the child has produced a sample, like the pause
