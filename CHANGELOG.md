@@ -8,6 +8,30 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-10-14
+
+### Changes
+
+- Merge pull request #12 from godigi/fix/audit-round2
+- test: restore PATH after the no-sudo test so bats teardown can find rm
+- fix(gui): Copy redacted report actually puts the report on the pasteboard
+- Merge branch 'worktree-agent-aa35901282fead524' into fix/audit-round2
+- feat(gui): gate the share actions on a new 'share' capability
+- fix(gui): flush the event log synchronously on quit
+- fix(gui): scan-only alerts are no longer suppressed by their own scan
+- fix(gui): Home's quiet line scopes to the current network without the 24 h cap
+- fix(gui): drop stale announced faults without posting 'Restored'
+- fix(gui): Settings re-check restarts the monitor now and clears the stale error
+- fix(gui): HistoryStore.load publishes the newest finished load, ignores cancellation
+- fix(gui): finish the progress stream before execute's early throws
+- fix(gui): ChildProcess.feed owns its stdin fd; bound drain after exit
+- fix(common): ping_sigint_bound cleans up after itself; sudo gate needs sudo even for root
+- fix(json): --quick --speed is budgeted by what ran, not the 8 s quick budget
+- fix(wifi): strip 0x1f from scraped values and stop reading tab-separated records
+- fix(share): mask IPv6 prefixes and addresses ending in '::'
+- fix(monitor): a signal-induced emit failure exits 0, not 3
+- fix(redact): mask $HOME, watcher path and every WAN_LB_IPS address in text mode
+
 ## [1.17.2] - 2026-10-14
 
 ### Changes
@@ -75,8 +99,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.17.2...HEAD
-[1.17.2]: https://github.com/godigi/hopwatch/releases/tag/v1.17.2
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/godigi/hopwatch/releases/tag/v1.18.0
+[1.17.2]: https://github.com/godigi/hopwatch/commit/34aeb710049da8eb73bcf66e116bf3ad05e4695f
 [1.17.1]: https://github.com/godigi/hopwatch/commit/d4be4f91116203ba65f20e05eaed87f59c8a6517
 [1.17.0]: https://github.com/godigi/hopwatch/commit/685ef4f5e4695ff17a34c5b986f0c877165168fe
 [1.16.3]: https://github.com/godigi/hopwatch/commit/7bf928d274434b04483d7a59f5f308785749d242
