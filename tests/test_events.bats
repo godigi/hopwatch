@@ -545,6 +545,28 @@ assert json.load(sys.stdin)['counts']['events'] == 1
 "
 }
 
+@test "two rules clearing in the same sample both survive the dedupe" {
+  # A rule-cleared has `to: null`, so (t, seq, kind, to) was identical for
+  # two rules clearing together and the second was dropped as a "duplicate":
+  # its episode then stayed ongoing forever. `from` tells them apart.
+  ev rule-fired   2026-08-28T03:00:00Z 10 G2
+  ev rule-fired   2026-08-28T03:00:00Z 11 G3
+  ev rule-cleared 2026-08-28T03:10:00Z 20 G2
+  # Same timestamp and seq as the G2 clear: one sample, two changes.
+  ev rule-cleared 2026-08-28T03:10:00Z 20 G3
+  run read_events
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for rule in ('G2', 'G3'):
+    eps = [e for e in d['episodes'] if e['rule'] == rule]
+    assert len(eps) == 1, d['episodes']
+    assert eps[0]['ongoing'] is False, eps[0]
+    assert eps[0]['ended_by'] == 'cleared', eps[0]
+"
+}
+
 @test "an absent journal is an empty answer, not an error" {
   run python3 "$EVENTS" --journal "$BATS_TEST_TMPDIR/nope.jsonl" --version test
   [ "$status" -eq 0 ]

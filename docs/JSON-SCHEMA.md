@@ -191,7 +191,9 @@ lines the oldest roll into `events-archive.jsonl` rather than being
 deleted, and `--events` reads both. The roll appends to the archive
 *before* truncating the live file, so a crash between the two duplicates
 lines rather than dropping them — which is safe only because the reader
-dedupes on `(t, seq, kind, to)`.
+dedupes on `(t, seq, kind, from, to)`. `from` is in the key because a
+`rule-cleared` has `to: null`: two rules clearing in one sample would
+otherwise collide, and the second would be dropped as a duplicate.
 
 ### `--events[=HOURS]`
 

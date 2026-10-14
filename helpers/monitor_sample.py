@@ -428,7 +428,7 @@ def _journal_prune(path: str) -> None:
     it happens is duplicated lines, never lost ones — the archive is
     appended before the live file is truncated, so a crash between the two
     duplicates rather than drops, and helpers/events.py dedupes on
-    (timestamp, seq, kind) for exactly that reason.
+    (timestamp, seq, kind, from, to) for exactly that reason.
     """
     try:
         keep = int(os.environ.get("NETDIAG_KEEP_EVENTS", "5000"))

@@ -173,10 +173,16 @@ def _parse_ts(value):
 def load(paths):
     """Every readable event line from `paths`, oldest first, deduped.
 
-    Deduped on (t, seq, kind, to) because the archive roll appends before
-    it truncates — see `_journal_prune` in helpers/monitor_sample.py. A
-    crash between those two steps duplicates lines rather than dropping
+    Deduped on (t, seq, kind, from, to) because the archive roll appends
+    before it truncates — see `_journal_prune` in helpers/monitor_sample.py.
+    A crash between those two steps duplicates lines rather than dropping
     them, which is the safe failure precisely because this dedupes.
+
+    `from` is part of the key because a `rule-cleared` has `to: null`: two
+    rules clearing in the same sample share (t, seq, kind, to), so without
+    `from` the second was dropped as a "duplicate" and its episode stayed
+    ongoing forever. A real archive-roll duplicate is byte-identical, so it
+    still collapses.
     """
     seen = set()
     rows = []
@@ -196,7 +202,7 @@ def load(paths):
                     if not isinstance(row, dict):
                         continue
                     key = (row.get("t"), row.get("seq"), row.get("kind"),
-                           row.get("to"))
+                           row.get("from"), row.get("to"))
                     if key in seen:
                         continue
                     seen.add(key)
