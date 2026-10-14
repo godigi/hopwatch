@@ -853,7 +853,11 @@ private enum VerifyHarness {
             run.diagnosis = diagnosis.map {
                 RunSnapshot.Diagnosis(severity: $0.severity, rule: $0.rule, summary: $0.summary)
             }
+            // As in production: a run lands while its own scan's flag is
+            // still up (the coordinator clears it only in its task's tail).
+            engine.scanInProgress = true
             engine.evaluate(run: run)
+            engine.scanInProgress = false
         }
 
         func body(_ id: String = "wifi-unstable") -> String? { engine.active[id]?.body }
@@ -997,6 +1001,13 @@ private enum VerifyHarness {
         event.land([("W5", "warn", "SUMMARY-W5")])
         equal(event.body("captive-portal"), captive.interimBody,
               "and neither a landed nor an ended scan rewrites it")
+
+        // A scan-only alert is raised from the run, which lands while the
+        // scan's own flag is still set; that flag must not swallow it.
+        let scanOnly = AlertRig(catalog: catalog, scanStarts: true)
+        scanOnly.land([("NT-1", "warn", "SUMMARY-NT1")])
+        check(scanOnly.engine.active["clock-drift"] != nil,
+              "a scan-only alert (clock-drift) is raised by the run that lands mid-scan")
         print("")
     }
 
