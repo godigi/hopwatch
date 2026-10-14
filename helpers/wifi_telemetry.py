@@ -4,8 +4,15 @@
 Queries the default Wi-Fi interface for RSSI, noise, channel, Tx rate, and
 PHY mode without requiring root or sudo privileges.
 
-Outputs seven tab-separated fields:
-  rssi \t noise \t channel \t tx_rate \t phy \t ssid \t bssid
+Outputs seven fields separated by ASCII Unit Separator (0x1f):
+  rssi <US> noise <US> channel <US> tx_rate <US> phy <US> ssid <US> bssid
+
+The separator is deliberately not a tab. Callers split the line with
+`IFS=<sep> read -r ...`, and a tab is IFS whitespace, so consecutive tabs
+collapse into one: an empty SSID shifted the BSSID into the SSID slot and
+"phy" into the tx-rate slot. A non-whitespace separator keeps empty fields
+where they are. Values are scrubbed of the separator, newlines and tabs so a
+hostile SSID cannot forge a field either.
 """
 
 from __future__ import annotations
@@ -106,13 +113,27 @@ def get_wifi_telemetry() -> dict[str, str | int] | None:
     }
 
 
+FIELD_SEP = "\x1f"
+
+
+def _clean(value: object) -> str:
+    """Stringify a field, replacing anything that could forge a field or line."""
+    text = str(value)
+    for bad in (FIELD_SEP, "\t", "\r", "\n"):
+        text = text.replace(bad, " ")
+    return text
+
+
+def format_line(t: dict[str, str | int]) -> str:
+    keys = ("rssi", "noise", "chan", "tx", "phy", "ssid", "bssid")
+    return FIELD_SEP.join(_clean(t[k]) for k in keys)
+
+
 def main() -> int:
     try:
         t = get_wifi_telemetry()
         if t:
-            print(
-                f"{t['rssi']}\t{t['noise']}\t{t['chan']}\t{t['tx']}\t{t['phy']}\t{t['ssid']}\t{t['bssid']}"
-            )
+            print(format_line(t))
     except Exception:
         # Never crash or exit non-zero; callers treat empty output as unavailable
         pass

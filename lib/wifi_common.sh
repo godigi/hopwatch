@@ -16,6 +16,17 @@
 #
 # Sourced by lib/wifi.sh and lib/monitor.sh. Depends on nothing.
 
+# The field separator for every multi-field result below: ASCII Unit
+# Separator (0x1f). It has to be a character that is *not* IFS whitespace.
+# These records are consumed with `IFS=<sep> read -r a b c`, and a tab (or a
+# space) is IFS whitespace, so consecutive tabs collapse into one separator:
+# an empty SSID turned "\t<bssid>\tWPA2" into two fields and put the BSSID
+# in the SSID slot, and the shifted SSID then fed the network id. A
+# non-whitespace separator keeps every empty field in its place. 0x1f cannot
+# appear in a real SSID, BSSID or rate. awk prints it as the octal "\037".
+# shellcheck disable=SC2034  # read by wifi.sh, wifi_scan.sh, monitor.sh, netid.sh
+WIFI_FS=$'\037'
+
 # The hardware-port name for a network device ("Wi-Fi", "Ethernet", …).
 # $1 = device (en0), $2 = optional pre-read `networksetup -listallhardwareports`
 # output. Prints "" when the device is unknown.
@@ -47,14 +58,14 @@ wifi_primary_device() {
 }
 
 # SSID / BSSID / Security from `ipconfig getsummary <iface>` output ($1).
-# Prints them TAB-separated; any field may be empty. No trimming: the
+# Prints them $WIFI_FS-separated; any field may be empty. No trimming: the
 # ipconfig values are used verbatim everywhere today.
 wifi_parse_ipconfig_summary() {
   printf '%s\n' "$1" | awk -F': ' '
     /^[[:space:]]*SSID[[:space:]]*:/     {ssid=$2}
     /^[[:space:]]*BSSID[[:space:]]*:/    {bssid=$2}
     /^[[:space:]]*Security[[:space:]]*:/ {sec=$2}
-    END{printf "%s\t%s\t%s\n", ssid, bssid, sec}'
+    END{printf "%s\037%s\037%s\n", ssid, bssid, sec}'
 }
 
 # The network's name and where it came from, TAB-separated.
@@ -85,7 +96,7 @@ wifi_resolve_ssid() {
   fi
 }
 
-# Fields from `sudo wdutil info` output ($1). Prints seven TAB-separated
+# Fields from `wdutil info` output ($1). Prints seven $WIFI_FS-separated
 # fields: rssi, noise, channel, tx_rate, phy, ssid, bssid — any of which
 # may be empty. RSSI/noise come back as bare numbers ("−55", not "−55 dBm").
 # wdutil's SSID/BSSID arrive "<redacted>" without Location Services; the
@@ -105,13 +116,13 @@ wifi_parse_wdutil() {
     /Tx Rate/ {
       v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
     /PHY Mode/{phy=$2}
-    END{printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+    END{printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n",
         rssi, noise, chan, tx, phy, ssid, bssid}'
 }
 
 # Multi-AP detection and candidate access point scrape from `system_profiler SPAirPortDataType`.
 # $1 = system_profiler output, $2 = target SSID, $3 = current BSSID (optional).
-# Prints 7 TAB-separated fields:
+# Prints 7 $WIFI_FS-separated fields:
 #   multi_ap (1 or 0), candidate_bssid, candidate_rssi, candidate_ssid,
 #   candidate_5g_bssid, candidate_5g_rssi, candidate_5g_chan
 # Best candidate is chosen as the AP on the same SSID (with different BSSID) with highest RSSI.
@@ -195,7 +206,7 @@ wifi_parse_candidates() {
       flush_entry()
       cand_rssi_str = (best_rssi > -999) ? best_rssi "" : ""
       cand_5g_rssi_str = (best_5g_rssi > -999) ? best_5g_rssi "" : ""
-      printf "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", multi_ap, best_bssid, cand_rssi_str, best_ssid, best_5g_bssid, cand_5g_rssi_str, best_5g_chan
+      printf "%d\037%s\037%s\037%s\037%s\037%s\037%s\n", multi_ap, best_bssid, cand_rssi_str, best_ssid, best_5g_bssid, cand_5g_rssi_str, best_5g_chan
     }
   '
 }

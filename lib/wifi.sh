@@ -29,7 +29,7 @@ wifi_run() {
       local summary ssid bssid sec
       summary="$(ipconfig getsummary "$INTERFACE" 2>/dev/null)"
       {
-        IFS=$'\t' read -r ssid bssid sec
+        IFS="$WIFI_FS" read -r ssid bssid sec
       } <<<"$(wifi_parse_ipconfig_summary "$summary")"
       WIFI_SSID="$ssid"
       WIFI_BSSID="$bssid"
@@ -68,7 +68,7 @@ wifi_run() {
       local rssi noise chan tx phy w_ssid w_bssid
       # One parse for the whole scrape.
       {
-        IFS=$'\t' read -r rssi noise chan tx phy w_ssid w_bssid
+        IFS="$WIFI_FS" read -r rssi noise chan tx phy w_ssid w_bssid
       } <<<"$telemetry_out"
       # wdutil's SSID/BSSID is unredacted *if* the calling process has
       # Wi-Fi-access entitlement (Terminal with Location Services granted).

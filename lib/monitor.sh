@@ -395,7 +395,7 @@ _mon_probe_link() {
       local summary
       summary="$(ipconfig getsummary "$MON_INTERFACE" 2>/dev/null || true)"
       {
-        IFS=$'\t' read -r ssid bssid _
+        IFS="$WIFI_FS" read -r ssid bssid _
       } <<<"$(wifi_parse_ipconfig_summary "$summary")"
       MON_SSID="$ssid"
       MON_BSSID="$bssid"
@@ -818,7 +818,7 @@ _mon_probe_wifi_signal() {
   local rssi noise chan _
   {
     # Fields 1-3 only; the parser's SSID/BSSID tail is scanner policy.
-    IFS=$'\t' read -r rssi noise chan _
+    IFS="$WIFI_FS" read -r rssi noise chan _
   } <<<"$out"
   is_numeric "$rssi"  || rssi=""
   is_numeric "$noise" || noise=""
