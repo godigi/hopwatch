@@ -396,6 +396,46 @@ THRESH_SPEED_CONFIRM_RUNS=2
 # point.
 THRESH_BASELINE_GW_RTT_FLOOR_MS=25
 
+# ── Baseline ratio tests and history depth (BL-1) ─────────────────────────
+# The rest of what helpers/baseline.py judges with. These used to be
+# literals in that file (a `3.0` in its METRICS table, a `>= 3` in three
+# places), which is the one place a cutoff must never live: tuning this file
+# would not have reached them. Read through the environment with no default,
+# like everything above, and exported by lib/output.sh.
+#
+# THRESH_BASELINE_MIN_RUNS — how many prior runs on the same network a
+# comparison needs before it may speak at all: for a median, for a "usual
+# value" majority, and for the whole stage. Below it a median is one
+# reading counted as a habit.
+# THRESH_BASELINE_WINDOW_RUNS — how many of the most recent same-network
+# runs form the baseline.
+# *_SPIKE_FACTOR — a metric is a regression only once it reaches this
+# multiple of its own median (and, where one exists, its absolute floor
+# above). Loss gets the smaller factor: a median of 2 % going to 4 % is a
+# doubling that matters, where 3 ms going to 6 ms is not.
+THRESH_BASELINE_MIN_RUNS=3
+THRESH_BASELINE_WINDOW_RUNS=10
+THRESH_BASELINE_RTT_SPIKE_FACTOR=3
+THRESH_BASELINE_LOSS_SPIKE_FACTOR=2
+THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR=3
+THRESH_BASELINE_LAN_SPIKE_FACTOR=3
+
+# ── Run-time budgets (timings.over_budget) ────────────────────────────────
+# What a run is promised to take, per depth, so `timings.over_budget` is a
+# checkable claim rather than folklore. emit_json.py picks one by what the
+# run actually did. These are the figures CLAUDE.md states, measured:
+#   quick     ~8 s ceiling, never saturates the link
+#   no-speed  <= 35 s: the full battery minus the speed test
+#   full      the default run includes the speed test and is bound by
+#             whichever speedtest CLI is installed — ~65 s with Ookla's,
+#             ~115 s with speedtest-cli. 120 s clears the slower one
+#             without waving through a hung run.
+# The old single 30 s budget predated the speed test being on by default,
+# which left every default run reporting over_budget: true.
+THRESH_RUN_BUDGET_QUICK_S=8
+THRESH_RUN_BUDGET_NO_SPEED_S=35
+THRESH_RUN_BUDGET_FULL_S=120
+
 # The latency gate. Both cutoffs are values the project already judged on
 # other evidence, referenced rather than copied so they cannot drift apart.
 # THRESH_HOG_GW_RTT_MS is the BL-1 gateway-RTT floor: the 25 ms that data

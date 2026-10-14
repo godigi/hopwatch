@@ -49,10 +49,15 @@ from typing import Any
 from history import group_key, is_redacted
 
 # (path, human label, kind, factor)
-#   spike: flag when current > median * factor
+#   spike: flag when current >= median * factor
 #   drop:  flag when current < median * factor, and — for speed only, see
 #          evaluate() — when the confirmation requirement also holds
 #   change: flag when value != prior majority
+#
+# The fourth column is the *name of the lib/thresholds.sh variable* that
+# holds the factor, not the factor: a literal 3.0 here is a cutoff with a
+# second home, and lib/thresholds.sh could be tuned without this file ever
+# finding out. main() resolves each name through the environment.
 #
 # (The "drift" kind, which fired on |current - median|/|median| > 0.5, was
 # removed along with ntp.drift_seconds — sub-second sntp jitter swamped the
@@ -86,16 +91,16 @@ from history import group_key, is_redacted
 # nothing to a non-technical user who saw them. "router" / "ISP" match the
 # vocabulary gui/Sources/NetdiagGUI/Views/RunReportView.swift and
 # helpers/history.py already use for the same two numbers.
-METRICS: list[tuple[str, str, str, float | None]] = [
-    ("gateway.rtt_avg_ms",        "time to reach your router",           "spike", 3.0),
-    ("gateway.loss_pct",          "packet loss to your router",          "spike", 2.0),
-    ("bufferbloat.gw_delta_ms",   "extra delay to your router under load", "spike", 3.0),
-    ("bufferbloat.inet_delta_ms", "extra delay to your ISP under load",  "spike", 3.0),
+METRICS: list[tuple[str, str, str, str | None]] = [
+    ("gateway.rtt_avg_ms",        "time to reach your router",           "spike", "THRESH_BASELINE_RTT_SPIKE_FACTOR"),
+    ("gateway.loss_pct",          "packet loss to your router",          "spike", "THRESH_BASELINE_LOSS_SPIKE_FACTOR"),
+    ("bufferbloat.gw_delta_ms",   "extra delay to your router under load", "spike", "THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR"),
+    ("bufferbloat.inet_delta_ms", "extra delay to your ISP under load",  "spike", "THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR"),
     ("mtu.effective",             "largest packet size",                 "change", None),
     ("speedtest.down_mbps",       "download speed",                      "drop", None),
     ("speedtest.up_mbps",         "upload speed",                        "drop", None),
     ("public.isp",                "your internet provider",              "change", None),
-    ("lan.arp_active_count",      "active devices on your network",      "spike", 3.0),
+    ("lan.arp_active_count",      "active devices on your network",      "spike", "THRESH_BASELINE_LAN_SPIKE_FACTOR"),
 ]
 
 # path -> absolute floor in the metric's own unit. Built in main() from
@@ -157,9 +162,11 @@ def load_jsonl(p: Path) -> list[dict]:
 
 def evaluate(current: dict, history: list[dict],
             speed_drop_factor: float, speed_confirm_runs: int,
-            floors: dict[str, float]) -> list[dict]:
+            floors: dict[str, float],
+            factors: dict[str, float], min_runs: int) -> list[dict]:
     regressions: list[dict] = []
-    for path, label, kind, factor in METRICS:
+    for path, label, kind, _factor_var in METRICS:
+        factor = factors.get(path)
         cur = get_nested(current, path)
         if cur is None:
             continue
@@ -173,7 +180,7 @@ def evaluate(current: dict, history: list[dict],
             for v in hist_clean:
                 counts[v] = counts.get(v, 0) + 1
             majority = max(counts.items(), key=lambda kv: kv[1])
-            if majority[1] >= max(3, len(hist_clean) // 2) and cur != majority[0]:
+            if majority[1] >= max(min_runs, len(hist_clean) // 2) and cur != majority[0]:
                 if path == "mtu.effective":
                     # Packet size increasing is an improvement, never BL-1.
                     if (not isinstance(cur, (int, float))
@@ -187,7 +194,7 @@ def evaluate(current: dict, history: list[dict],
             continue
 
         nums = [float(v) for v in hist_clean if isinstance(v, (int, float))]
-        if len(nums) < 3:
+        if len(nums) < min_runs:
             continue
         med = statistics.median(nums)
         try:
@@ -241,7 +248,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--history", required=True, type=Path)
     ap.add_argument("--current", required=True, type=Path)
-    ap.add_argument("--n", type=int, default=10)
+    ap.add_argument("--n", type=int, default=None,
+                    help="How many prior runs to consider "
+                         "(default: THRESH_BASELINE_WINDOW_RUNS).")
     args = ap.parse_args()
 
     # Read once, here, before any parsing of a (possibly large) history
@@ -249,6 +258,14 @@ def main() -> None:
     # a broken install says so immediately rather than after the work.
     speed_drop_factor = env_threshold("THRESH_SPEED_DROP_FACTOR", float)
     speed_confirm_runs = env_threshold("THRESH_SPEED_CONFIRM_RUNS", int)
+    min_runs = env_threshold("THRESH_BASELINE_MIN_RUNS", int)
+    window_runs = (args.n if args.n is not None
+                   else env_threshold("THRESH_BASELINE_WINDOW_RUNS", int))
+    # path -> spike factor, resolved from the variable names METRICS holds.
+    factors: dict[str, float] = {
+        path: env_threshold(var, float)
+        for path, _label, _kind, var in METRICS if var is not None
+    }
 
     # Absolute floors for the four "spike" metrics that have one — see the
     # METRICS comment above. gateway.rtt_avg_ms and the two bufferbloat
@@ -289,10 +306,11 @@ def main() -> None:
         same_network = []
     skipped = len(history_all) - len(same_network)
 
-    history = same_network[-args.n:] if same_network else []
+    history = same_network[-window_runs:] if same_network else []
 
-    regressions = (evaluate(current, history, speed_drop_factor, speed_confirm_runs, floors)
-                  if len(history) >= 3 else [])
+    regressions = (evaluate(current, history, speed_drop_factor, speed_confirm_runs,
+                            floors, factors, min_runs)
+                   if len(history) >= min_runs else [])
     out = {
         "compared_runs": len(history),
         "network_id": network_id,

@@ -24,7 +24,10 @@ setup() {
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
   export THRESH_SPEED_DROP_FACTOR THRESH_SPEED_CONFIRM_RUNS \
-         THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS
+         THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS \
+         THRESH_BASELINE_MIN_RUNS THRESH_BASELINE_WINDOW_RUNS \
+         THRESH_BASELINE_RTT_SPIKE_FACTOR THRESH_BASELINE_LOSS_SPIKE_FACTOR \
+         THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR THRESH_BASELINE_LAN_SPIKE_FACTOR
 }
 
 # Run emit_json.py with only the NETDIAG_* vars given as KEY=VALUE args,
@@ -166,18 +169,54 @@ warn|M1|Path MTU is clamped.'
   [ "$(printf '%s' "$output" | jq_get wan.double_nat.isp_transit_count)" = "1" ]
 }
 
+# The budgets come from lib/thresholds.sh via the environment, exactly as
+# lib/output.sh hands them over. `emit` runs under env -i, so each test
+# passes them in.
+budgets() {
+  printf 'THRESH_RUN_BUDGET_QUICK_S=%s THRESH_RUN_BUDGET_NO_SPEED_S=%s THRESH_RUN_BUDGET_FULL_S=%s' \
+    "$THRESH_RUN_BUDGET_QUICK_S" "$THRESH_RUN_BUDGET_NO_SPEED_S" "$THRESH_RUN_BUDGET_FULL_S"
+}
+
 @test "emit_json: timings report the budget the run was measured against" {
+  # shellcheck disable=SC2046
   run emit NETDIAG_TIMING_LINES='iface|0.02
-mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0
+mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=1 $(budgets)
   [ "$(printf '%s' "$output" | jq_get timings.total_s)" = "42.0" ]
-  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "30.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "35.0" ]
   [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "true" ]
   [ "$(printf '%s' "$output" | jq_get timings.phases.mtu)" = "12.5" ]
 }
 
-@test "emit_json: --quick runs are measured against the 8 s budget" {
-  run emit NETDIAG_RUN_ELAPSED_S=7.5 NETDIAG_QUICK=1
+@test "emit_json: a default run includes the speed test and is not over budget at 69 s" {
+  # The old flat 30 s budget made every default run over_budget: true.
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=full NETDIAG_RUN_ELAPSED_S=69.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=0 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=full NETDIAG_RUN_ELAPSED_S=130.0 NETDIAG_QUICK=0 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "true" ]
+}
+
+@test "emit_json: a focused run that never runs the speed test gets the no-speed budget" {
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=mtu-only NETDIAG_RUN_ELAPSED_S=10 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "35.0" ]
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=speed-only NETDIAG_RUN_ELAPSED_S=10 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
+}
+
+@test "emit_json: --quick runs are measured against the quick budget" {
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_ELAPSED_S=7.5 NETDIAG_QUICK=1 $(budgets)
   [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "8.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
+}
+
+@test "emit_json: with no budget in the environment the budget is unknown, not invented" {
+  run emit NETDIAG_RUN_ELAPSED_S=500 NETDIAG_QUICK=0
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "null" ]
   [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
 }
 

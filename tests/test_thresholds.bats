@@ -47,6 +47,11 @@ setup() {
            THRESH_COMPARE_TAIL_PCTL THRESH_MON_LOSS_CONFIRM_CYCLES \
            THRESH_SPEED_DROP_FACTOR THRESH_SPEED_CONFIRM_RUNS \
            THRESH_BASELINE_GW_RTT_FLOOR_MS \
+           THRESH_BASELINE_MIN_RUNS THRESH_BASELINE_WINDOW_RUNS \
+           THRESH_BASELINE_RTT_SPIKE_FACTOR THRESH_BASELINE_LOSS_SPIKE_FACTOR \
+           THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR THRESH_BASELINE_LAN_SPIKE_FACTOR \
+           THRESH_RUN_BUDGET_QUICK_S THRESH_RUN_BUDGET_NO_SPEED_S \
+           THRESH_RUN_BUDGET_FULL_S \
            THRESH_MTR_HOP_LOSS_PCT THRESH_WIFI_GOODPUT_CEILING_PCT \
            THRESH_WIFI_EVENTS_STORED THRESH_MON_GAP_FACTOR \
            THRESH_MON_GAP_MIN_S \
@@ -346,6 +351,36 @@ setup() {
   # where a change to lib/thresholds.sh would never reach it.
   run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$REPO/helpers/events.py"
   [ "$status" -ne 0 ] || { echo "inline cutoff in events.py:"; echo "$output"; return 1; }
+}
+
+@test "helpers/baseline.py carries no inline numeric cutoff either" {
+  # BL-1's ratio tests and "enough history" counts were literals in this
+  # file (a 3.0 in METRICS, a `>= 3` in three places), so tuning
+  # lib/thresholds.sh never reached them. They are THRESH_BASELINE_* now.
+  run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$REPO/helpers/baseline.py"
+  [ "$status" -ne 0 ] || { echo "inline cutoff in baseline.py:"; echo "$output"; return 1; }
+  # And no numeric factor left in the METRICS table's fourth column.
+  run grep -nE '"(spike|drop)", *[0-9]' "$REPO/helpers/baseline.py"
+  [ "$status" -ne 0 ] || { echo "literal factor in baseline.py METRICS:"; echo "$output"; return 1; }
+}
+
+@test "the guard would actually catch a cutoff planted in baseline.py" {
+  cp "$REPO/helpers/baseline.py" "$BATS_TEST_TMPDIR/planted_baseline.py"
+  printf '\nif False:\n    pass  # if len(nums) < 3:\n' >> "$BATS_TEST_TMPDIR/planted_baseline.py"
+  run grep -nE '(<=|>=|<|>) *-?[1-9][0-9]*' "$BATS_TEST_TMPDIR/planted_baseline.py"
+  [ "$status" -eq 0 ]
+}
+
+@test "emit_json.py's run-time budget is not a literal" {
+  # timings.budget_s was `8.0 if QUICK else 30.0`, stale the day the speed
+  # test became default-on. The budgets are THRESH_RUN_BUDGET_* now.
+  run grep -nE 'budget[^#]*= *[0-9]|else +[0-9]+\.[0-9]' "$REPO/helpers/emit_json.py"
+  [ "$status" -ne 0 ] || { echo "literal budget in emit_json.py:"; echo "$output"; return 1; }
+}
+
+@test "the run budgets are ordered quick < no-speed < full" {
+  [ "$THRESH_RUN_BUDGET_QUICK_S" -lt "$THRESH_RUN_BUDGET_NO_SPEED_S" ]
+  [ "$THRESH_RUN_BUDGET_NO_SPEED_S" -lt "$THRESH_RUN_BUDGET_FULL_S" ]
 }
 
 @test "the guard would actually catch a cutoff planted in events.py" {

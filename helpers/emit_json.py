@@ -384,11 +384,42 @@ def build_mtr() -> dict:
     }
 
 
-def build_timings() -> dict:
-    """Per-phase wall-clock, plus the spec budget this run was measured against.
+def _budget_s() -> float | None:
+    """The wall-clock this run was promised, by what it actually did.
 
-    `over_budget` is the checkable form of the spec's "<= 30 s full run,
-    <= 8 s --quick" promise — previously asserted but never measured.
+    The three figures live in lib/thresholds.sh (THRESH_RUN_BUDGET_*) and
+    arrive through the environment from lib/output.sh, with no default here:
+    a literal would be a second home for a cutoff. Absent (this helper run
+    by hand) the budget is unknown, and None is the honest answer.
+
+    Depth, not flags alone: --quick has its own budget; a run that skipped
+    the speed test (--no-speed, or a focused mode other than --speed-only,
+    none of which ever run it) is held to the no-speed one; everything
+    else includes the speed test, which dominates the clock.
+    """
+    def pick(name: str) -> float | None:
+        raw = os.environ.get(name, "").strip()
+        try:
+            return _finite_float(raw) if raw else None
+        except ValueError:
+            return None
+
+    mode = _env("RUN_MODE") or ""
+    if _bool("QUICK"):
+        return pick("THRESH_RUN_BUDGET_QUICK_S")
+    focused_without_speed = mode.endswith("-only") and mode != "speed-only"
+    if _bool("NO_SPEED") or focused_without_speed:
+        return pick("THRESH_RUN_BUDGET_NO_SPEED_S")
+    return pick("THRESH_RUN_BUDGET_FULL_S")
+
+
+def build_timings() -> dict:
+    """Per-phase wall-clock, plus the budget this run was measured against.
+
+    `over_budget` is the checkable form of the project's per-depth time
+    promises (CLAUDE.md: quick, --no-speed, and a full run that includes
+    the speed test). `budget_s` is null, and `over_budget` false, when the
+    budget is not known rather than guessed.
     """
     phases: dict[str, float] = {}
     for line in _list_lines("TIMING_LINES"):
@@ -398,11 +429,11 @@ def build_timings() -> dict:
         except ValueError:
             continue
     total = _maybe_float("RUN_ELAPSED_S")
-    budget = 8.0 if _bool("QUICK") else 30.0
+    budget = _budget_s()
     return {
         "total_s": total,
         "budget_s": budget,
-        "over_budget": (total is not None and total > budget),
+        "over_budget": (total is not None and budget is not None and total > budget),
         "phases": phases,
     }
 
