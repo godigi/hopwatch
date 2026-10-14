@@ -222,10 +222,39 @@ _KEEP_NETWORKS = tuple(ipaddress.ip_network(n) for n in (
     "::1/128", "fe80::/10", "fc00::/7",                # IPv6 equivalents
 ))
 
+# IPv4, or a maximal run of hex digits and colons that is *candidate* IPv6.
+# The IPv6 arm is deliberately loose and anchored by lookarounds rather than
+# `\b`: an address or prefix ending in "::" (2804:d4b:a9e0:7f00::/64, a bare
+# "2001:db8::") has no word boundary after its last colon, so a `\b` anchor
+# silently backtracked to a shorter, invalid fragment and left the real
+# address standing. `ip_address` decides whether the run is one; see
+# `_ipv6_candidate`.
 _IP_RE = re.compile(
     r"\b\d{1,3}(?:\.\d{1,3}){3}\b"          # IPv4
-    r"|\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b"  # IPv6-ish
+    r"|(?<![0-9A-Za-z:])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:)[0-9A-Fa-f:]{3,}"
+    r"(?![0-9A-Za-z]|\.[0-9A-Za-z])"        # IPv6-ish run, 2+ colons
 )
+
+
+def _ipv6_candidate(raw: str):
+    """Return (address, leading, trailing) for a colon run, or None.
+
+    A run lifted out of prose can carry one stray colon from the sentence
+    around it ("gateway:2001:db8::1:" ...), which makes the whole run an
+    invalid address; peel a single leading/trailing colon (never half of a
+    "::") and retry before giving up.
+    """
+    for lead, trail in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        body = raw[lead:len(raw) - trail]
+        if lead and (raw[:2] == "::" or not raw.startswith(":")):
+            continue
+        if trail and (raw[-2:] == "::" or not raw.endswith(":")):
+            continue
+        try:
+            return ipaddress.ip_address(body), raw[:lead], raw[len(raw) - trail:]
+        except ValueError:
+            continue
+    return None
 
 
 def sweep_public_addresses(text: str) -> str:
@@ -248,18 +277,27 @@ def sweep_public_addresses(text: str) -> str:
         raw = match.group(0)
         if raw in _PROBE_TARGETS:
             return raw
-        try:
-            addr = ipaddress.ip_address(raw)
-        except ValueError:
-            # Not an address after all — a version string, a duration, a
-            # colon-separated fragment caught by a deliberately loose
-            # regex. Leave it exactly as it was; `ip_address` is what
-            # decides, not the pattern.
-            return raw
+        lead = trail = ""
+        if ":" in raw:
+            found = _ipv6_candidate(raw)
+            if found is None:
+                # Not an address after all — a duration, a colon-separated
+                # fragment caught by a deliberately loose regex. Leave it
+                # exactly as it was; `ip_address` is what decides, not the
+                # pattern.
+                return raw
+            addr, lead, trail = found
+            if raw[len(lead):len(raw) - len(trail)] in _PROBE_TARGETS:
+                return raw
+        else:
+            try:
+                addr = ipaddress.ip_address(raw)
+            except ValueError:
+                return raw
         if any(addr in net for net in _KEEP_NETWORKS
                if net.version == addr.version):
             return raw
-        return REDACTED
+        return lead + REDACTED + trail
 
     return _IP_RE.sub(mask, text)
 
@@ -268,7 +306,11 @@ def sweep_public_addresses(text: str) -> str:
 # form macOS prints, e.g. 0:1a:2b:3c:4d:5e). Every one of them names a
 # device, and a neighbour's BSSID is as identifying as our own, so unlike
 # IPs there is no keep-list.
-_MAC_RE = re.compile(r"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{1,2}([:-]))(?:[0-9A-Fa-f]{1,2}\1){4}[0-9A-Fa-f]{1,2}(?![0-9A-Za-z])")
+# The trailing `:hex` guard stops it carving six short groups out of the
+# front of a longer colon chain (an IPv6 such as 1:2:3:4:5:6:7:8) and
+# leaving the tail behind; a chain it cannot take whole is left for the IP
+# sweep, which masks it as an address. Over-masking beats mangling.
+_MAC_RE = re.compile(r"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{1,2}([:-]))(?:[0-9A-Fa-f]{1,2}\1){4}[0-9A-Fa-f]{1,2}(?![0-9A-Za-z]|:[0-9A-Fa-f])")
 
 
 def sweep_macs(text: str) -> str:
