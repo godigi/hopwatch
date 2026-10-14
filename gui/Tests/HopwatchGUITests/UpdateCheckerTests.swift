@@ -23,6 +23,14 @@ struct UpdateCheckerTests {
         #expect(vWithTail == v0_14_0)
     }
 
+    @Test("only the extension of an asset name is trusted")
+    func archiveExtensionIgnoresTheName() {
+        #expect(UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch-1.0.zip") == "zip")
+        #expect(UpdateChecker.archiveExtension(forAssetNamed: "../../etc/Hopwatch.DMG") == "dmg")
+        #expect(UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch.tar.gz") == nil)
+        #expect(UpdateChecker.archiveExtension(forAssetNamed: nil) == nil)
+    }
+
     @Test("github release JSON decoding and short notes extraction")
     func releaseDecodingAndNotes() throws {
         let json = """

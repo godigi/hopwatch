@@ -2742,6 +2742,10 @@ private enum VerifyHarness {
               "an outage does produce one")
         check(mgr.announcedOutages.isEmpty, "and clears the outage record")
 
+        check(UpdateChecker.archiveExtension(forAssetNamed: "../../x/Hopwatch.ZIP") == "zip"
+              && UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch.tar.gz") == nil,
+              "the updater trusts only an asset's extension, never its name as a path")
+
         // alerts.monitoringPaused follows the real pause holders, and a
         // scan's own pause does not count (the scan has its own suppressor).
         let pc = HopwatchCoordinator()
