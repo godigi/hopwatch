@@ -6,6 +6,31 @@
 # Uses:   watchdog_path_blocked, watchdog_plist_path (lib/watchdog.sh)
 # Entry:  install_watcher_run, uninstall_watcher_run (each exits)
 
+# Escape a value for interpolation into a plist <string>. A log directory or
+# checkout path containing & or < (legal in a macOS path) would otherwise
+# produce a plist launchd refuses to parse.
+_plist_xml_escape() {
+  local v="$1"
+  v="${v//&/&amp;}"
+  v="${v//</&lt;}"
+  v="${v//>/&gt;}"
+  printf '%s' "$v"
+}
+
+# Load a plist and say so if launchd refused it. `launchctl load` prints its
+# complaint and can still exit 0, so both the status and the text count.
+# $1 = plist path. Returns 0 on success; prints the reason to stderr otherwise.
+_launchd_load() {
+  local plist="$1" out rc=0
+  out="$(launchctl load "$plist" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -qiE 'fail|error|invalid|not found'; then
+    printf 'launchctl could not load %s (exit %d)\n' "$plist" "$rc" >&2
+    [ -n "$out" ] && printf '  %s\n' "$out" >&2
+    return 1
+  fi
+  return 0
+}
+
 install_watcher_run() {
   local plist; plist="$(watchdog_plist_path)"
 
@@ -37,6 +62,9 @@ install_watcher_run() {
   fi
 
   mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
+  local x_script x_log
+  x_script="$(_plist_xml_escape "$SCRIPT_PATH")"
+  x_log="$(_plist_xml_escape "$LOG_DIR")"
   # NETDIAG_WATCHER is what lets a run know it *is* the watcher, so
   # watchdog_heartbeat records a completed run. Without it the only
   # evidence a watcher ever ran would be launchd's exit status, which
@@ -49,7 +77,7 @@ install_watcher_run() {
   <key>Label</key><string>$WATCHER_LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$SCRIPT_PATH</string>
+    <string>$x_script</string>
     <string>--quick</string>
     <string>--no-gping</string>
     <string>--no-bufferbloat</string>
@@ -61,8 +89,8 @@ install_watcher_run() {
   </dict>
   <key>StartInterval</key><integer>$THRESH_WATCHER_INTERVAL_S</integer>
   <key>RunAtLoad</key><false/>
-  <key>StandardOutPath</key><string>$LOG_DIR/watcher.stdout.log</string>
-  <key>StandardErrorPath</key><string>$LOG_DIR/watcher.stderr.log</string>
+  <key>StandardOutPath</key><string>$x_log/watcher.stdout.log</string>
+  <key>StandardErrorPath</key><string>$x_log/watcher.stderr.log</string>
 </dict>
 </plist>
 PLIST_EOF
@@ -72,7 +100,10 @@ PLIST_EOF
     rm -f "$HOME/Library/LaunchAgents/com.netdiag.watcher.plist"
   fi
   launchctl unload "$plist" 2>/dev/null || true
-  launchctl load "$plist"
+  if ! _launchd_load "$plist"; then
+    printf 'the plist was written to %s but launchd did not load it, so nothing is running.\n' "$plist" >&2
+    exit 3
+  fi
   printf 'installed: %s (runs every %s min)\n' \
     "$plist" "$(( THRESH_WATCHER_INTERVAL_S / 60 ))"
   printf 'tail log:   tail -f %s/watcher.stdout.log\n' "$LOG_DIR"
@@ -130,6 +161,9 @@ install_recorder_run() {
   fi
 
   mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
+  local x_script x_log
+  x_script="$(_plist_xml_escape "$SCRIPT_PATH")"
+  x_log="$(_plist_xml_escape "$LOG_DIR")"
   cat > "$plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -138,16 +172,16 @@ install_recorder_run() {
   <key>Label</key><string>$RECORDER_LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$SCRIPT_PATH</string>
+    <string>$x_script</string>
     <string>--monitor</string>
     <string>--journal</string>
-    <string>$LOG_DIR/events.jsonl</string>
+    <string>$x_log/events.jsonl</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
   <key>StandardOutPath</key><string>/dev/null</string>
-  <key>StandardErrorPath</key><string>$LOG_DIR/recorder.stderr.log</string>
+  <key>StandardErrorPath</key><string>$x_log/recorder.stderr.log</string>
 </dict>
 </plist>
 PLIST_EOF
@@ -157,7 +191,10 @@ PLIST_EOF
     rm -f "$HOME/Library/LaunchAgents/com.netdiag.recorder.plist"
   fi
   launchctl unload "$plist" 2>/dev/null || true
-  launchctl load "$plist"
+  if ! _launchd_load "$plist"; then
+    printf 'the plist was written to %s but launchd did not load it, so nothing is running.\n' "$plist" >&2
+    exit 3
+  fi
   printf 'installed: %s\n' "$plist"
   printf 'journal:    %s/events.jsonl\n' "$LOG_DIR"
   printf 'read it:    hopwatch --events=24\n'
