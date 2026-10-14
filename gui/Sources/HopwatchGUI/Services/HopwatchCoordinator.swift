@@ -259,9 +259,15 @@ final class HopwatchCoordinator {
         // after the app is gone — the exact misbehaviour that gets an
         // always-on app uninstalled.
         NotificationCenter.default.addObserver(
-            forName: .netdiagWillTerminate, object: nil, queue: .main
+            // `queue: nil`: delivered synchronously on the posting thread
+            // (main, from applicationWillTerminate), so the flush below has
+            // finished before the process is allowed to exit.
+            forName: .netdiagWillTerminate, object: nil, queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
+            MainActor.assumeIsolated {
+                self?.stop()
+                self?.eventLog.flush()
+            }
         }
 
         Task {
