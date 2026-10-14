@@ -18,19 +18,36 @@ _MTR_LOSS_THRESHOLD="$THRESH_MTR_HOP_LOSS_PCT"
 # replies fast enough, not a real forwarding failure. Real loss propagates
 # to every hop past the bad one.
 #
+# An empty loss% means the hop was never measured (no ping summary came back).
+# That is *unknown*, not 0% and not clean: awk reads "" as 0, so without the
+# explicit checks below an unmeasured downstream hop counted as proof that
+# traffic got through, and a real fault upstream of it was dismissed as
+# "likely ICMP rate-limit".
+#
 # Args: $1 = current hop's loss%, $2... = downstream hops' loss%s.
-# Echoes: "rate_limited" or empty string.
+# Echoes: "rate_limited" (lossy, but a measured downstream hop is clean),
+#         "unknown" (this hop was not measured, or it is lossy and every
+#         downstream hop was unmeasured so rate-limit cannot be told from
+#         real loss), or an empty string (not lossy / real loss).
 _classify_hop_loss() {
   local cur_loss="$1"; shift
+  [ -n "$cur_loss" ] || { printf 'unknown'; return; }
   awk -v l="$cur_loss" -v t="$_MTR_LOSS_THRESHOLD" 'BEGIN{exit !(l+0 > t)}' \
     || { printf ''; return; }
-  local d
+  local d measured=0
   for d in "$@"; do
+    [ -n "$d" ] || continue
+    measured=1
     if awk -v l="$d" -v t="$_MTR_LOSS_THRESHOLD" 'BEGIN{exit !(l+0 <= t)}'; then
       printf 'rate_limited'
       return
     fi
   done
+  # Downstream hops exist but none produced a number: no evidence either way.
+  if [ "$#" -gt 0 ] && [ "$measured" -eq 0 ]; then
+    printf 'unknown'
+    return
+  fi
   printf ''
 }
 
@@ -46,8 +63,16 @@ _emit_per_hop_results() {
     avg_disp="${HOP_AVGS[$n]:-?}"
     hop_line="$(printf 'hop %2d  %-15s  %5s%% loss  %7s ms' \
       "${HOP_NUMS[$n]}" "${HOP_IPS[$n]}" "${HOP_LOSSES[$n]:-?}" "$avg_disp")"
-    if awk -v l="${HOP_LOSSES[$n]}" -v t="$_MTR_LOSS_THRESHOLD" 'BEGIN{exit !(l+0 > t)}'; then
-      if [ "$status" = "rate_limited" ]; then
+    if [ -z "${HOP_LOSSES[$n]}" ]; then
+      # Never measured: say so rather than print a clean-looking row.
+      info "$hop_line  (not measured)"
+    elif awk -v l="${HOP_LOSSES[$n]}" -v t="$_MTR_LOSS_THRESHOLD" 'BEGIN{exit !(l+0 > t)}'; then
+      if [ "$status" = "unknown" ]; then
+        # Lossy, but nothing downstream was measured, so this cannot be told
+        # from ICMP rate-limiting. Shown, but not named as the first lossy
+        # hop: that feeds a diagnosis, and a guess should not.
+        warn "$hop_line  (downstream hops not measured — cannot tell rate-limit from real loss)"
+      elif [ "$status" = "rate_limited" ]; then
         # Downstream is healthy; this hop just deprioritises ICMP TTL replies.
         info "$hop_line  (likely ICMP rate-limit, downstream is clean)"
       else
@@ -83,7 +108,10 @@ _run_per_hop_fallback() {
     # macOS ping's -t is a deadline for the whole run, not a per-reply
     # timeout. The old flag could truncate this probe before five packets
     # were sent and turn a healthy hop into a fabricated loss reading.
-    with_timeout 4 ping -c 5 -i 0.2 "$h" > "$hop_tmp/hop-$i" 2>&1 &
+    # -W bounds the wait for the last reply: without it macOS ping prints its
+    # statistics ~10 s after the last packet, after this 4 s kill, so any
+    # lost reply left the hop "unmeasured". See PING_REPLY_WAIT_MS.
+    with_timeout 4 ping -c 5 -i 0.2 -W "$PING_REPLY_WAIT_MS" "$h" > "$hop_tmp/hop-$i" 2>&1 &
     ping_pids+=("$!")
   done
   local pid

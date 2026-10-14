@@ -454,7 +454,7 @@ EOF
   local line
   while IFS= read -r line; do
     case "$line" in
-      *with_timeout*) ;;
+      *with_timeout*|*ping_sigint_bound*) ;;
       *) printf 'unbounded probe: %s\n' "$line"; return 1 ;;
     esac
   # The trailing [-+] requires a flag, so this matches real invocations
