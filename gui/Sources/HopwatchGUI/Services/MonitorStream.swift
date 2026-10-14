@@ -594,7 +594,18 @@ final class MonitorStream {
         restartAttempts = 0
         // A paused sample carries values from before the pause; it is the
         // monitor saying it is not looking, not a reading.
-        if let awaitingSince, sample.timestamp < awaitingSince { return }
+        //
+        // The comparison is at whole-second resolution because the sample's
+        // `ts` has none (docs/JSON-SCHEMA.md: ISO 8601, no fractional
+        // seconds) while `awaitingSince` is a `Date()`. Compared exactly, a
+        // genuine sample taken in the same second as the boundary — the
+        // first one after a resume, which the child emits at once — reads
+        // as earlier than it and was dropped, leaving the dot "awaiting"
+        // for a full cadence.
+        if let awaitingSince,
+           sample.timestamp < Date(timeIntervalSince1970: awaitingSince.timeIntervalSince1970.rounded(.down)) {
+            return
+        }
         if !sample.status.paused { awaitingSince = nil }
         // Backstop for the burst deadline. The timer is the normal path;
         // this catches the case where it was lost with a cancelled task
