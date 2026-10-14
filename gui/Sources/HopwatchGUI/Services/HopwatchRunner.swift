@@ -288,14 +288,22 @@ struct HopwatchRunner {
         stdin: String? = nil,
         stderrLines: AsyncStream<String>.Continuation? = nil
     ) async throws -> (String, String, Int32) {
-        guard let binary = BinaryLocator.resolve() else { throw NetdiagError.binaryNotFound }
+        // Every early throw below must end the progress stream first: its
+        // consumer (`runScan`'s progress task) only stops when it finishes.
+        guard let binary = BinaryLocator.resolve() else {
+            stderrLines?.finish()
+            throw NetdiagError.binaryNotFound
+        }
 
         // A cancel that lands before the child exists must not be lost:
         // `onCancel` can fire at any moment, including before `spawn` has
         // produced a PID to signal, so the request is parked in `box` and
         // honoured the instant the child is attached.
         let box = CancelBox()
-        if Task.isCancelled { throw CancellationError() }
+        if Task.isCancelled {
+            stderrLines?.finish()
+            throw CancellationError()
+        }
 
         let collector = OutputCollector()
         let splitter = stderrLines.map { sink in
