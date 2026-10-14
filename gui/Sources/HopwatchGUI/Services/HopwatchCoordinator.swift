@@ -690,7 +690,8 @@ final class HopwatchCoordinator {
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
                 networkName: liveSSID ?? sample.network.label ?? "Network",
-                latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs
+                latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs,
+                activeIDs: Set(alerts.active.keys)
             )
         }
         evaluateResolutions(sample: sample)

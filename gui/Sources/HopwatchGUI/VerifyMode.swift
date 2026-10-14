@@ -2785,6 +2785,24 @@ private enum VerifyHarness {
               "an outage does produce one")
         check(mgr.announcedOutages.isEmpty, "and clears the outage record")
 
+        // A fault the engine no longer holds, with no outage among them: no
+        // 'Restored' notice, but the stale record and its banner are dropped
+        // so the caller stops asking on every healthy sample — while a fault
+        // still active is left alone.
+        removed.removeAll()
+        _ = mgr.deliverDegradation(id: "internet-degraded", title: "Slow", body: "x",
+                                   isOutage: false, now: evT.addingTimeInterval(400))
+        _ = mgr.deliverDegradation(id: "wifi-unstable", title: "W", body: "x",
+                                   isOutage: false, now: evT.addingTimeInterval(401))
+        check(!mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10, activeIDs: ["wifi-unstable"]),
+              "stale non-outage faults produce no 'Restored' notice")
+        check(!mgr.announcedFaults.contains("internet-degraded")
+              && removed.contains("netdiag.internet-degraded"),
+              "…but the inactive fault's record and banner are dropped")
+        check(mgr.announcedFaults.contains("wifi-unstable") && !removed.contains("netdiag.wifi-unstable"),
+              "…and a fault still active is left alone")
+        mgr.clearAnnouncedFaults()
+
         check(UpdateChecker.archiveExtension(forAssetNamed: "../../x/Hopwatch.ZIP") == "zip"
               && UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch.tar.gz") == nil,
               "the updater trusts only an asset's extension, never its name as a path")
