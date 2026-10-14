@@ -207,6 +207,19 @@ mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=1 $(budge
   [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
 }
 
+@test "emit_json: --quick --speed is judged by what ran, not the 8 s quick budget" {
+  # An explicit --speed keeps the speed test under --quick, and that test
+  # alone outlasts the quick budget.
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=quick NETDIAG_RUN_ELAPSED_S=70 NETDIAG_QUICK=1 NETDIAG_SPEED_EXPLICIT=1 NETDIAG_NO_SPEED=0 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
+  # ...and if --no-speed also won, the run skipped it after all.
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=quick NETDIAG_RUN_ELAPSED_S=10 NETDIAG_QUICK=1 NETDIAG_SPEED_EXPLICIT=1 NETDIAG_NO_SPEED=1 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "35.0" ]
+}
+
 @test "emit_json: --quick runs are measured against the quick budget" {
   # shellcheck disable=SC2046
   run emit NETDIAG_RUN_ELAPSED_S=7.5 NETDIAG_QUICK=1 $(budgets)
