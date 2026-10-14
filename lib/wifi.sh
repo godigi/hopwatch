@@ -133,7 +133,7 @@ wifi_run() {
     # lib/globals.sh and wifi.ssid_source in the JSON.
     local resolved_ssid resolved_src
     {
-      IFS=$'\t' read -r resolved_ssid resolved_src
+      IFS="$WIFI_FS" read -r resolved_ssid resolved_src
     } <<<"$(wifi_resolve_ssid "$WIFI_SSID" "${NETDIAG_SSID_HINT:-}")"
     WIFI_SSID="$resolved_ssid"
     WIFI_SSID_SOURCE="$resolved_src"

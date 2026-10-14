@@ -786,36 +786,36 @@ assert_not_contains() {
 @test "wifi_resolve_ssid: a measured name wins over a supplied one" {
   run wifi_resolve_ssid "Home" "Something Else"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf 'Home\tsystem')" ]
+  [ "$output" = "$(printf 'Home\037system')" ]
 }
 
 @test "wifi_resolve_ssid: a redacted name falls back to the caller's hint" {
   run wifi_resolve_ssid "<redacted>" "Cafe Jeri hotel"
-  [ "$output" = "$(printf 'Cafe Jeri hotel\tcaller')" ]
+  [ "$output" = "$(printf 'Cafe Jeri hotel\037caller')" ]
 }
 
 @test "wifi_resolve_ssid: an empty name falls back to the caller's hint" {
   run wifi_resolve_ssid "" "Cafe Jeri hotel"
-  [ "$output" = "$(printf 'Cafe Jeri hotel\tcaller')" ]
+  [ "$output" = "$(printf 'Cafe Jeri hotel\037caller')" ]
 }
 
 @test "wifi_resolve_ssid: no hint leaves the redaction and no source" {
   # The source is empty rather than "system": nothing was measured, and
   # claiming otherwise is exactly what the field exists to prevent.
   run wifi_resolve_ssid "<redacted>" ""
-  [ "$output" = "$(printf '<redacted>\t')" ]
+  [ "$output" = "$(printf '<redacted>\037')" ]
 }
 
 @test "wifi_resolve_ssid: a redacted hint is not a name" {
   # A caller passing through its own placeholder must not turn the
   # string "<redacted>" into a network called "<redacted>".
   run wifi_resolve_ssid "" "<redacted>"
-  [ "$output" = "$(printf '\t')" ]
+  [ "$output" = "$(printf '\037')" ]
 }
 
 @test "wifi_resolve_ssid: an SSID with spaces survives the round trip" {
   run wifi_resolve_ssid "" "Cafe Jeri  hotel 5G"
-  [ "$output" = "$(printf 'Cafe Jeri  hotel 5G\tcaller')" ]
+  [ "$output" = "$(printf 'Cafe Jeri  hotel 5G\037caller')" ]
 }
 
 # ── WI-1: macOS is withholding the network's name ────────────────────────

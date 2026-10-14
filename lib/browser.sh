@@ -39,7 +39,7 @@ browser_run() {
   fi
 
   local status count app running_ver disk_ver pid
-  IFS=$'\t' read -r status count app running_ver disk_ver pid <<< "$out"
+  IFS=$'\037' read -r status count app running_ver disk_ver pid <<< "$out"
 
   if [ "$status" = "DESYNC" ] && [ "${count:-0}" -gt 0 ]; then
     BROWSER_DESYNC_COUNT="$count"

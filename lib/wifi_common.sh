@@ -22,8 +22,12 @@
 # space) is IFS whitespace, so consecutive tabs collapse into one separator:
 # an empty SSID turned "\t<bssid>\tWPA2" into two fields and put the BSSID
 # in the SSID slot, and the shifted SSID then fed the network id. A
-# non-whitespace separator keeps every empty field in its place. 0x1f cannot
-# appear in a real SSID, BSSID or rate. awk prints it as the octal "\037".
+# non-whitespace separator keeps every empty field in its place. An SSID is
+# arbitrary bytes, though, so 0x1f *can* appear in one: a hostile access
+# point named "x<US>aa:bb:cc:dd:ee:ff<US>WPA3" would otherwise forge the
+# BSSID and security fields of the record. Every parser below therefore
+# strips 0x1f from each value it extracts, so the separator is unambiguous
+# on the way out. awk prints it as the octal "\037".
 # shellcheck disable=SC2034  # read by wifi.sh, wifi_scan.sh, monitor.sh, netid.sh
 WIFI_FS=$'\037'
 
@@ -62,19 +66,22 @@ wifi_primary_device() {
 # ipconfig values are used verbatim everywhere today.
 wifi_parse_ipconfig_summary() {
   printf '%s\n' "$1" | awk -F': ' '
-    /^[[:space:]]*SSID[[:space:]]*:/     {ssid=$2}
-    /^[[:space:]]*BSSID[[:space:]]*:/    {bssid=$2}
-    /^[[:space:]]*Security[[:space:]]*:/ {sec=$2}
+    function clean(v) { gsub(/\037/, "", v); return v }
+    /^[[:space:]]*SSID[[:space:]]*:/     {ssid=clean($2)}
+    /^[[:space:]]*BSSID[[:space:]]*:/    {bssid=clean($2)}
+    /^[[:space:]]*Security[[:space:]]*:/ {sec=clean($2)}
     END{printf "%s\037%s\037%s\n", ssid, bssid, sec}'
 }
 
-# The network's name and where it came from, TAB-separated.
+# The network's name and where it came from, $WIFI_FS-separated (not a tab:
+# a tab is IFS whitespace, so `read` would collapse an empty name into the
+# source slot, and an SSID may legitimately contain one).
 #
 # $1 = the SSID this process managed to read ("" or "<redacted>" when
 #      macOS withheld it), $2 = the optional NETDIAG_SSID_HINT a calling
 #      app supplied.
 #
-# Prints "<ssid>\t<source>" where source is "system" (measured here),
+# Prints "<ssid><US><source>" where source is "system" (measured here),
 # "caller" (taken from the hint) or "" (no name at all, and the SSID
 # field is whatever the caller should keep displaying).
 #
@@ -86,13 +93,14 @@ wifi_parse_ipconfig_summary() {
 # Here rather than inline in lib/wifi.sh so it can be tested without a
 # radio — the rest of wifi_run is unmockable subprocess output.
 wifi_resolve_ssid() {
-  local measured="$1" hint="${2:-}"
+  local measured="${1//$WIFI_FS/}" hint="${2:-}"
+  hint="${hint//$WIFI_FS/}"
   if [ -n "$measured" ] && [ "$measured" != "<redacted>" ]; then
-    printf '%s\t%s\n' "$measured" "system"
+    printf '%s%s%s\n' "$measured" "$WIFI_FS" "system"
   elif [ -n "$hint" ] && [ "$hint" != "<redacted>" ]; then
-    printf '%s\t%s\n' "$hint" "caller"
+    printf '%s%s%s\n' "$hint" "$WIFI_FS" "caller"
   else
-    printf '%s\t%s\n' "$measured" ""
+    printf '%s%s%s\n' "$measured" "$WIFI_FS" ""
   fi
 }
 
@@ -104,18 +112,19 @@ wifi_resolve_ssid() {
 # scanner overrides only on a real value, the monitor ignores the field).
 wifi_parse_wdutil() {
   printf '%s\n' "$1" | awk -F': ' '
+    function clean(v) { gsub(/\037/, "", v); return v }
     /^[[:space:]]*SSID[[:space:]]*:/ {
-      v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); ssid=v }
+      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); ssid=v }
     /^[[:space:]]*BSSID[[:space:]]*:/ {
-      v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); bssid=v }
+      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); bssid=v }
     /^[[:space:]]*RSSI[[:space:]]*:/ {
-      v=$2; gsub(/[[:space:]]*dBm/,"",v); rssi=v }
+      v=clean($2); gsub(/[[:space:]]*dBm/,"",v); rssi=v }
     /^[[:space:]]*Noise[[:space:]]*:/ {
-      v=$2; gsub(/[[:space:]]*dBm/,"",v); noise=v }
-    /^[[:space:]]*Channel[[:space:]]*:/ {chan=$2}
+      v=clean($2); gsub(/[[:space:]]*dBm/,"",v); noise=v }
+    /^[[:space:]]*Channel[[:space:]]*:/ {chan=clean($2)}
     /Tx Rate/ {
-      v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
-    /PHY Mode/{phy=$2}
+      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
+    /PHY Mode/{phy=clean($2)}
     END{printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n",
         rssi, noise, chan, tx, phy, ssid, bssid}'
 }
@@ -135,6 +144,7 @@ wifi_parse_candidates() {
       best_rssi = -999; best_bssid = ""; best_ssid = ""; multi_ap = 0
       best_5g_rssi = -999; best_5g_bssid = ""; best_5g_chan = ""
     }
+    function clean(v) { gsub(/\037/, "", v); return v }
     function flush_entry() {
       if (in_other && cur_ssid != "") {
         if (target != "" && target != "<redacted>" && cur_ssid == target) {
@@ -171,7 +181,7 @@ wifi_parse_candidates() {
       line = $0
       sub(/^[[:space:]]+/, "", line)
       sub(/:[[:space:]]*$/, "", line)
-      cur_ssid = line
+      cur_ssid = clean(line)
       next
     }
     in_other && cur_ssid != "" {
@@ -179,7 +189,7 @@ wifi_parse_candidates() {
         line = $0
         sub(/^[[:space:]]+(BSSID|MAC Address):[[:space:]]*/, "", line)
         sub(/[[:space:]]+$/, "", line)
-        cur_bssid_entry = line
+        cur_bssid_entry = clean(line)
       } else if ($0 ~ /^[[:space:]]+Channel:[[:space:]]*/) {
         line = $0
         if (match(line, /[0-9]+/)) {

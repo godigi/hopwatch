@@ -860,7 +860,7 @@ _mon_probe_browser() {
   out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
   [ -n "$out" ] || return 0
   local status count _
-  IFS=$'\t' read -r status count _ <<< "$out"
+  IFS=$'\037' read -r status count _ <<< "$out"
   case "$status" in
     OK) MON_BROWSER_CHECKED=1 ;;
     DESYNC) [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] \
