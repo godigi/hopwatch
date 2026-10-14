@@ -1920,6 +1920,19 @@ _mon_kill_sleep() {
   fi
 }
 
+# Record that _mon_emit failed, unless a stop was already requested. A
+# process-group SIGINT/SIGTERM (Ctrl-C, launchctl stop) also lands on the
+# monitor_sample.py child mid-write, so the emit that failed was a
+# casualty of the shutdown, not a fault: that is a clean exit 0, as it was
+# before the emit failure was made loud. Only a failure with no stop
+# pending is a real one (exit 3).
+_mon_note_emit_failed() {
+  if [ "$MON_STOP" -eq 0 ]; then
+    MON_EMIT_FAILED=1
+  fi
+  return 0
+}
+
 # All three are reached via trap, an indirect dispatch static analysis
 # can't follow.
 # shellcheck disable=SC2317,SC2329
@@ -2001,7 +2014,7 @@ monitor_run() {
         MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
         _mon_auto_reconnect_reset
         MON_SEQ=$((MON_SEQ + 1))
-        _mon_emit "$MONITOR_FAST_INTERVAL" || { MON_EMIT_FAILED=1; break; }
+        _mon_emit "$MONITOR_FAST_INTERVAL" || { _mon_note_emit_failed; break; }
         _mon_snapshot_prev
       fi
       # One second at a time so SIGUSR2 resumes promptly. The trap fires
@@ -2222,7 +2235,7 @@ monitor_run() {
     # here, so the stop is reported (stderr, exit 3) rather than passed off
     # as a clean exit 0: a recorder agent that quietly stopped sampling
     # looked exactly like one that had finished.
-    _mon_emit "$cadence" || { MON_EMIT_FAILED=1; break; }
+    _mon_emit "$cadence" || { _mon_note_emit_failed; break; }
     _mon_snapshot_prev
 
     if [ "$MONITOR_COUNT" -gt 0 ] && [ "$MON_SEQ" -ge "$MONITOR_COUNT" ]; then

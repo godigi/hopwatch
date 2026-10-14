@@ -105,6 +105,24 @@ PY
   [ "$status" -eq 3 ]
 }
 
+@test "monitor_run: an emit that fails because a stop signal already arrived exits 0, not 3" {
+  # A process-group SIGINT/SIGTERM kills the sampler child mid-emit as well
+  # as setting MON_STOP; that casualty is not a fault.
+  _stub_probes
+  _mon_emit() { MON_STOP=1; return 1; }
+  run monitor_run
+  [ "$status" -eq 0 ] || { echo "status=$status: $output"; return 1; }
+  [[ "$output" != *"a sample could not be written"* ]]
+}
+
+@test "monitor_run: a stop-signalled failing emit on the pause announcement also exits 0" {
+  _stub_probes
+  MON_PAUSED=1
+  _mon_emit() { MON_STOP=1; return 1; }
+  run monitor_run
+  [ "$status" -eq 0 ] || { echo "status=$status: $output"; return 1; }
+}
+
 @test "monitor_run: a normal --monitor-count stop still returns 0" {
   _stub_probes
   _mon_emit() { :; }
