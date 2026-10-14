@@ -997,7 +997,9 @@ struct DropdownView: View {
     private func copyShareableReport() {
         Task { @MainActor in
             do {
-                _ = try await coordinator.shareCurrentReportText()
+                let text = try await coordinator.shareCurrentReportText()
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
                 shareFeedback = "Diagnostic report copied"
                 didShare = true
                 try? await Task.sleep(for: .seconds(2))

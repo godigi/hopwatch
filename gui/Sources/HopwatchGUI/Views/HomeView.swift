@@ -1655,7 +1655,9 @@ struct HomeView: View {
 
     private func copyShareableReport() {
         Task { @MainActor in
-            _ = try? await coordinator.shareCurrentReportText()
+            guard let text = try? await coordinator.shareCurrentReportText() else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
         }
     }
 
