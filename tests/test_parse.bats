@@ -1598,7 +1598,7 @@ v6_setup() {
               Signal / Noise: -65 dBm / -96 dBm"
   run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '1\t11:22:33:44:55:66\t-50\tHomeWiFi\t\t\t')" ]
+  [ "$output" = "$(printf '1\03711:22:33:44:55:66\037-50\037HomeWiFi\037\037\037')" ]
 }
 
 @test "wifi_parse_candidates: extracts 5GHz candidate AP on same SSID" {
@@ -1617,7 +1617,7 @@ v6_setup() {
               Signal / Noise: -55 dBm / -96 dBm"
   run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '1\t11:22:33:44:55:66\t-55\tHomeWiFi\t11:22:33:44:55:66\t-55\t36')" ]
+  [ "$output" = "$(printf '1\03711:22:33:44:55:66\037-55\037HomeWiFi\03711:22:33:44:55:66\037-55\03736')" ]
 }
 
 @test "wifi_parse_candidates: ignores same BSSID as current" {
@@ -1629,7 +1629,7 @@ v6_setup() {
               Signal / Noise: -50 dBm / -96 dBm"
   run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '0\t\t\t\t\t\t')" ]
+  [ "$output" = "$(printf '0\037\037\037\037\037\037')" ]
 }
 
 @test "wifi_parse_candidates: returns single AP when target not in other networks" {
@@ -1640,7 +1640,7 @@ v6_setup() {
               Signal / Noise: -55 dBm / -96 dBm"
   run wifi_parse_candidates "$sp" "HomeWiFi" "aa:bb:cc:dd:ee:ff"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '0\t\t\t\t\t\t')" ]
+  [ "$output" = "$(printf '0\037\037\037\037\037\037')" ]
 }
 
 @test "diagnosis: W3 fires as info when associated with distant AP on multi-AP network" {

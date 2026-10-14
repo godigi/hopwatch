@@ -497,7 +497,7 @@ struct HomeView: View {
 
     private var quietLine: String {
         var parts: [String] = []
-        if let since = NetworkEvent.timeSinceLast(coordinator.eventLog.events, now: .now) {
+        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents, now: .now) {
             if since < 60 {
                 parts.append("Nothing has changed in under a minute")
             } else {

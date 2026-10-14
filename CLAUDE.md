@@ -11,7 +11,7 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
 - **Platform:** macOS 14+ (Sonoma/Sequoia/Tahoe), Apple Silicon and Intel. No Linux portability for v1.
 - **Shell:** must work under both zsh (default) and Homebrew bash 5+. Declare bash in the shebang if needed.
 - **Dependencies:** prefer macOS built-ins (`ipconfig`, `networksetup`, `route`, `scutil`, `wdutil`, `dig`, `traceroute`, `ping`, `nc`, `arp`, `log`, `sntp`, `system_profiler`, `curl`). Acceptable Homebrew extras: `mtr`, `gping`, `speedtest` (or `speedtest-cli`), `jq`. Detect missing deps → skip with hint, never hard-fail.
-- **Permissions:** monitoring and diagnosis are 100% sudo-free. Hopwatch never prompts for root to look at a network and never nudges users to cache sudo credentials. All standard diagnostics, latency tests, and monitoring run in user space. The one exception is a **repair** the user starts by pressing its button — see `docs/design/2026-10-07-repair-actions-design.md`. A repair may ask for an admin password, says so before it does, and root never executes anything a user-level process can rewrite. There is exactly one further exception to *who starts it*, recorded under Read-only below.
+- **Permissions:** monitoring and diagnosis are sudo-free by default. Hopwatch never prompts for root to look at a network and never nudges users to cache sudo credentials. All standard diagnostics, latency tests, and monitoring run in user space, and by default nothing in `lib/` ever calls `sudo`. **The one opt-in exception:** if the user sets `HOPWATCH_ALLOW_SUDO=1` (or passes `--allow-sudo`), a check may use `sudo -n` — never a prompt — and only as a last resort, after its unprivileged path produced nothing (`wdutil` in `lib/wifi.sh` / `lib/monitor.sh`, `mtr` in `lib/mtr.sh`). Every such call is gated by `hopwatch_sudo_allowed` in `lib/common.sh`; `tests/test_sudo_optin.bats` fails the build if a default run executes `sudo`. The other exception is a **repair** the user starts by pressing its button — see `docs/design/2026-10-07-repair-actions-design.md`. A repair may ask for an admin password, says so before it does, and root never executes anything a user-level process can rewrite. There is exactly one further exception to *who starts it*, recorded under Read-only below.
 - **Parallelism:** run independent checks concurrently via background jobs + `wait`. Target ≤ 35s for `--no-speed`, ≤ 8s `--quick`. A default run now includes the speed test and is bound by whichever speedtest CLI is installed — measured at ~115s with `speedtest-cli` and ~65s with Ookla's `speedtest`, which is why the installer prefers Ookla. `--no-speed` is the flag to reach for when the run needs to be fast.
   - Two checks must **not** be parallelised, because both measure a property of a quiet link: `internet_ping_run` (packet loss / latency) and `bufferbloat_run` (which saturates the link deliberately). Running the loss probe inside the parallel batch made it report 30% loss on a healthy network.
 - **Read-only:** monitoring and diagnosis never modify routing, DNS, WiFi, or ARP state. Only a user-started repair may, and never automatically: not on a timer, not on arrival, not from an alert. A repair that leaves a lasting change stays visible in the app with an undo.
@@ -74,7 +74,7 @@ Grown from a ~300-line bash starter into a modular `lib/*.sh` CLI with 14 diagno
 netdiag [TARGET] [--quick] [--quiet] [--json] [--expert] [--redact]
         [--gping] [--no-gping] [--no-bufferbloat]
         [--speed] [--no-speed] [--mtu-only] [--wifi-only] [--speed-only]
-        [--progress]
+        [--progress] [--allow-sudo]
         [--baseline] [--no-baseline] [--log PATH] [-h|--help]
 netdiag --watch[=SEC] | --summary[=HOURS] | --history[=N] | --show=ID
         | --share[=ID|-] | --events[=HOURS]
@@ -203,7 +203,7 @@ All 11 must hold before declaring the project shippable:
 1. `netdiag` runs end-to-end on macOS with all 14 sections, no shellcheck warnings, no uncaught errors.
 2. `netdiag --json` produces valid JSON matching `docs/JSON-SCHEMA.md`; `netdiag --json | jq .` succeeds.
 3. `netdiag --quick` skips bufferbloat, mtr, speed test, baseline diff, and WiFi scan; finishes in ≤ 8 s on a healthy network.
-4. WiFi diagnostics capture SSID, BSSID, security, channel, and neighborhood scan completely sudo-free.
+4. WiFi diagnostics capture SSID, BSSID, security, channel, and neighborhood scan completely sudo-free (by default; see the opt-in under Permissions).
 5. `netdiag github.com` adds the target to ping, traceroute, TCP-reach, and DNS.
 6. Exit codes work as specified (0/1/2/3).
 7. A successful run writes a parseable human-readable log to `~/net-diag/<timestamp>.log`.

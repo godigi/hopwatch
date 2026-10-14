@@ -68,7 +68,7 @@ public_run() {
     local tp_out
     # As elsewhere, macOS ping's -t is a deadline for the entire probe. Use
     # the shared outer timeout so the target probe sends all five packets.
-    tp_out="$(with_timeout 8 ping -c 5 -i 0.2 "$TARGET" 2>/dev/null || true)"
+    tp_out="$(with_timeout 8 ping -c 5 -i 0.2 -W "$PING_REPLY_WAIT_MS" "$TARGET" 2>/dev/null || true)"
     local tp_parsed
     tp_parsed="$(ping_parse_summary "$tp_out")"
     IFS='|' read -r TARGET_PING_LOSS TARGET_PING_RTT _ <<<"$tp_parsed"

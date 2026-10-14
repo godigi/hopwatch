@@ -113,6 +113,18 @@ MONITOR_INET_PING_COUNT=20
 # smoothly toward the thresholds, and routine noise decays out.
 MONITOR_LOSS_WINDOW_PROBES=10
 
+# Warm-up floors for the windowed loss figure. While a window is still
+# filling, its denominator is small and one or two dropped packets quantise
+# to a large percentage (1 of 20 sent reads 5%, 2 of 20 reads 10%) — movement
+# of the probe, not of the network. A window that has sent fewer than this
+# many packets reports a single drop (ONE_DROP) or a pair of drops (TWO_DROP)
+# as 0% instead. They are deliberately small: 80 and 50 are well under the
+# 100 packets a full gateway window holds, so the suppression ends within a
+# few cycles of start-up and cannot hide sustained loss. Never raise them
+# toward the full window size — that would let the monitor hide real loss.
+MONITOR_LOSS_ONE_DROP_MIN_SENT=80
+MONITOR_LOSS_TWO_DROP_MIN_SENT=50
+
 # A single cycle's loss is a blip, not a condition: at MONITOR_PING_COUNT=10
 # one dropped packet reads as 10%, exactly LOSS_WARN_PCT. Requiring the same
 # band on consecutive cycles turns a lost packet into a fact about the link
@@ -395,6 +407,46 @@ THRESH_SPEED_CONFIRM_RUNS=2
 # split the data actually supports, so 25 replaces the 50 ms starting
 # point.
 THRESH_BASELINE_GW_RTT_FLOOR_MS=25
+
+# ── Baseline ratio tests and history depth (BL-1) ─────────────────────────
+# The rest of what helpers/baseline.py judges with. These used to be
+# literals in that file (a `3.0` in its METRICS table, a `>= 3` in three
+# places), which is the one place a cutoff must never live: tuning this file
+# would not have reached them. Read through the environment with no default,
+# like everything above, and exported by lib/output.sh.
+#
+# THRESH_BASELINE_MIN_RUNS — how many prior runs on the same network a
+# comparison needs before it may speak at all: for a median, for a "usual
+# value" majority, and for the whole stage. Below it a median is one
+# reading counted as a habit.
+# THRESH_BASELINE_WINDOW_RUNS — how many of the most recent same-network
+# runs form the baseline.
+# *_SPIKE_FACTOR — a metric is a regression only once it reaches this
+# multiple of its own median (and, where one exists, its absolute floor
+# above). Loss gets the smaller factor: a median of 2 % going to 4 % is a
+# doubling that matters, where 3 ms going to 6 ms is not.
+THRESH_BASELINE_MIN_RUNS=3
+THRESH_BASELINE_WINDOW_RUNS=10
+THRESH_BASELINE_RTT_SPIKE_FACTOR=3
+THRESH_BASELINE_LOSS_SPIKE_FACTOR=2
+THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR=3
+THRESH_BASELINE_LAN_SPIKE_FACTOR=3
+
+# ── Run-time budgets (timings.over_budget) ────────────────────────────────
+# What a run is promised to take, per depth, so `timings.over_budget` is a
+# checkable claim rather than folklore. emit_json.py picks one by what the
+# run actually did. These are the figures CLAUDE.md states, measured:
+#   quick     ~8 s ceiling, never saturates the link
+#   no-speed  <= 35 s: the full battery minus the speed test
+#   full      the default run includes the speed test and is bound by
+#             whichever speedtest CLI is installed — ~65 s with Ookla's,
+#             ~115 s with speedtest-cli. 120 s clears the slower one
+#             without waving through a hung run.
+# The old single 30 s budget predated the speed test being on by default,
+# which left every default run reporting over_budget: true.
+THRESH_RUN_BUDGET_QUICK_S=8
+THRESH_RUN_BUDGET_NO_SPEED_S=35
+THRESH_RUN_BUDGET_FULL_S=120
 
 # The latency gate. Both cutoffs are values the project already judged on
 # other evidence, referenced rather than copied so they cannot drift apart.

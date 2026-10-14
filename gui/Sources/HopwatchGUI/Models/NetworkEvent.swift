@@ -100,6 +100,13 @@ extension NetworkEvent {
         Array(events.sorted { $0.date > $1.date }.prefix(cap))
     }
 
+    /// The newest event describing a network condition, ignoring internal
+    /// monitor-started restart markers and evidence refreshes. `events`
+    /// must be newest-first.
+    static func latestCondition(in events: [NetworkEvent]) -> NetworkEvent? {
+        events.first(where: { $0.kind != "monitor-started" && $0.kind != "rule-updated" })
+    }
+
     /// Interval since the newest network change, or nil when there is none.
     /// Excludes internal monitor-started lifecycle events so monitor restarts
     /// do not reset the headline reassurance time.

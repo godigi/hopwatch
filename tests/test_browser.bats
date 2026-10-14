@@ -66,6 +66,35 @@ PS
   [[ "$output" =~ ^OK ]]
 }
 
+@test "browser_check: a Canary helper at another version is not read as Chrome's" {
+  # Chrome and Chrome Canary share the framework name "Google Chrome
+  # Framework.framework". Matching helpers on that name alone let a
+  # Canary helper (the first ps line here) answer for stable Chrome and
+  # raise a DESYNC between two perfectly healthy, unrelated browsers.
+  local chrome="$BATS_TEST_TMPDIR/Google Chrome.app"
+  local canary="$BATS_TEST_TMPDIR/Google Chrome Canary.app"
+  local app v
+  for app in "$chrome:153.0.8010.48" "$canary:155.0.8100.1"; do
+    v="${app##*:}"; app="${app%:*}"
+    mkdir -p "$app/Contents/Frameworks/Google Chrome Framework.framework/Versions/$v"
+    ln -s "$v" "$app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current"
+    mkdir -p "$app/Contents/MacOS"
+  done
+  touch "$chrome/Contents/MacOS/Google Chrome" "$canary/Contents/MacOS/Google Chrome Canary"
+
+  local tmp_ps="$BATS_TEST_TMPDIR/canary_ps.txt"
+  cat << PS > "$tmp_ps"
+  4321 $canary/Contents/Frameworks/Google Chrome Framework.framework/Versions/155.0.8100.1/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=gpu-process
+  1234 $chrome/Contents/MacOS/Google Chrome
+  5678 $chrome/Contents/Frameworks/Google Chrome Framework.framework/Versions/153.0.8010.48/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer) --type=renderer
+  8765 $canary/Contents/MacOS/Google Chrome Canary
+PS
+
+  run python3 "$HELPERS_DIR/browser_check.py" --ps-file "$tmp_ps"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^OK ]] || { echo "false desync: $output"; return 1; }
+}
+
 accuracy_baseline() {
   GATEWAY=192.168.1.1
   GW_LOSS=0 GW_LATENCY=2.5 GW_JITTER=0.3

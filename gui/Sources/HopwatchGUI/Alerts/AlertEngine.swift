@@ -485,7 +485,7 @@ final class AlertEngine {
             if let last = lastNotifiedAt[def.id], now.timeIntervalSince(last) < def.cooldown { return }
             lastNotifiedAt[def.id] = now
             deliver(id: def.id, title: def.title, body: bodyOverride ?? def.interimBody,
-                    isOutage: def.isOutage, replacing: false)
+                    isOutage: def.isOutage, replacing: false, isEvent: true)
             log.info("event: \(def.id, privacy: .public)")
             _ = def.scanOnly ? false : (onAlertFired?(def, firingRules) ?? false)
             return
@@ -550,14 +550,16 @@ final class AlertEngine {
     /// Hands over the engine's clock, not the wall clock: the cooldown that
     /// decided to notify and the storm guard under it must read the same
     /// time, or `--verify` cannot walk an alert through both.
-    private func deliver(id: String, title: String, body: String, isOutage: Bool, replacing: Bool) {
+    private func deliver(id: String, title: String, body: String, isOutage: Bool, replacing: Bool,
+                         isEvent: Bool = false) {
         notificationManager.deliverDegradation(
             id: id,
             title: title,
             body: body,
             isOutage: isOutage,
             now: now(),
-            replacing: replacing
+            replacing: replacing,
+            announce: !isEvent
         )
     }
 

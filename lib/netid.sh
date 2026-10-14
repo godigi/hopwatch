@@ -208,7 +208,7 @@ netid_fingerprint_live() {
   if [ -n "$iface" ]; then
     local summary
     summary="$(ipconfig getsummary "$iface" 2>/dev/null || true)"
-    { IFS=$'\t' read -r ssid bssid _; } \
+    { IFS="${WIFI_FS:-$'\037'}" read -r ssid bssid _; } \
       <<<"$(wifi_parse_ipconfig_summary "$summary")"
   fi
   netid_fingerprint "$iface" "$gw" "$ssid" "$bssid"

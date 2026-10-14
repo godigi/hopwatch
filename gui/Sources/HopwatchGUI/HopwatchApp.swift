@@ -194,6 +194,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// `applicationWillFinishLaunching` precedes scene setup entirely.
     @MainActor
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // A write to a pipe whose reader has gone (`--share=-` against a CLI
+        // that exited early, a monitor that died mid-line) raises SIGPIPE,
+        // whose default action kills the whole app. Nothing here wants that:
+        // every write path handles EPIPE as an ordinary error. `ChildProcess`
+        // restores the default disposition in its children, so this does not
+        // change how the CLI behaves under `cmd | head`.
+        signal(SIGPIPE, SIG_IGN)
         // `--gallery` queues its render and lets the app launch normally —
         // unlike `--verify`, which exits before any scene exists. It needs
         // the real `NSApp.run()` loop, because that is what drives the

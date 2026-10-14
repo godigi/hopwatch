@@ -11,6 +11,9 @@
 #
 # Reads:  MONITOR_* interval flags set by bin/netdiag's argparse
 # Entry:  monitor_run (loops until SIGINT/SIGTERM or stdout closes)
+# Shell:  bash 5+ only (BASH_REMATCH, `+=`, EPOCHSECONDS). bin/hopwatch
+#         re-execs under Homebrew bash when launched by an older one; this
+#         file is not zsh-compatible and is not sourced from zsh.
 #
 # ── Three cadence tiers ────────────────────────────────────────────────
 # Probing everything on the fastest interval would be both rude to the
@@ -123,6 +126,12 @@ MON_GW_LOSS=""
 MON_INET_LOSS=""
 MON_INET_LOSS_ALT=""
 MON_GW_RTT=""
+# Read by _mon_emit even on a cycle that never probed (the "paused" sample
+# the loop announces before its first probe), and bin/hopwatch runs under
+# `set -u`: an unset one aborted the monitor with "unbound variable".
+MON_INET_RTT=""
+MON_GW_JITTER=""
+MON_INET_JITTER=""
 # How many consecutive cycles the warn-band loss condition has held for
 # each leg — gateway and internet — used to confirm G3/L2 before either
 # fires (see THRESH_MON_LOSS_CONFIRM_CYCLES in lib/thresholds.sh). Declared
@@ -176,9 +185,11 @@ MON_HOG_DIR="" MON_HOG_RATE="" MON_HOG_DOM_PCT=""
 MON_HOG_GW_RTT="" MON_HOG_GW_JITTER="" MON_HOG_INET_JITTER=""
 # Rolling loss windows, one per leg: newest-last "sent:lost" pairs, one per
 # completed probe, trimmed to MONITOR_LOSS_WINDOW_PROBES entries. Plain
-# space-separated scalars rather than arrays — this file must run under
-# zsh AND bash, and array syntax (and even subscript origin) differs
-# between them. The reported MON_GW_LOSS / MON_INET_LOSS are computed over
+# space-separated scalars rather than arrays: they are trimmed and summed in
+# one awk pass, and a string survives being handed between functions and
+# tests without array-copy ceremony. (This file is bash-only — it uses
+# BASH_REMATCH, `+=` and EPOCHSECONDS — and is not zsh-compatible, whatever
+# the plain scalars might suggest.) The reported MON_GW_LOSS / MON_INET_LOSS are computed over
 # the whole window, which is what makes the percentage a property of the
 # link rather than of one burst; see _mon_loss_summarize.
 MON_GW_HIST=""
@@ -234,6 +245,11 @@ MON_REFRESHED=""
 MON_STOP=0
 MON_PAUSED=0
 MON_REFRESH_REQUESTED=0
+# The pid of the interruptible sleep in _mon_sleep, so a stop signal can end it.
+MON_SLEEP_PID=""
+# Set when _mon_emit failed and the loop stopped on it; see the end of
+# monitor_run.
+MON_EMIT_FAILED=0
 MON_HW_PORTS=""
 # launchd's pid. Named rather than written as a bare 1 so the orphan check
 # below reads as the sentinel it is, and so tests/test_thresholds.bats's
@@ -395,7 +411,7 @@ _mon_probe_link() {
       local summary
       summary="$(ipconfig getsummary "$MON_INTERFACE" 2>/dev/null || true)"
       {
-        IFS=$'\t' read -r ssid bssid _
+        IFS="$WIFI_FS" read -r ssid bssid _
       } <<<"$(wifi_parse_ipconfig_summary "$summary")"
       MON_SSID="$ssid"
       MON_BSSID="$bssid"
@@ -552,12 +568,17 @@ _mon_loss_summarize() {
 # Report a leg's windowed loss percentage from its totals. Kept separate
 # so the rounding rule lives in exactly one place.
 _mon_loss_pct() {
-  awk -v s="$1" -v l="$2" 'BEGIN {
+  awk -v s="$1" -v l="$2" \
+      -v one="$MONITOR_LOSS_ONE_DROP_MIN_SENT" \
+      -v two="$MONITOR_LOSS_TWO_DROP_MIN_SENT" 'BEGIN {
     if (s <= 0) exit
     # Suppress quantization spikes on warm-up samples when denominator is small
     # so routine 1-2 drop bursts do not falsely swing the percentage into warning bands.
-    if (l == 1 && s < 80) { print "0"; exit }
-    if (l == 2 && s < 50) { print "0"; exit }
+    # Both floors live in lib/thresholds.sh (MONITOR_LOSS_ONE_DROP_MIN_SENT,
+    # MONITOR_LOSS_TWO_DROP_MIN_SENT): they decide how much real loss the
+    # monitor is allowed to hide, so they are judgement cutoffs like any other.
+    if (l == 1 && s < one) { print "0"; exit }
+    if (l == 2 && s < two) { print "0"; exit }
     printf "%.0f", l * 100 / s
   }'
 }
@@ -807,7 +828,9 @@ _mon_probe_wifi_signal() {
   if [ -f "$helper" ]; then
     out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
   fi
-  if [ -z "$out" ] && { [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+  # Last resort, opt-in only: see hopwatch_sudo_allowed in lib/common.sh.
+  # Never on a default run, and never before the CoreWLAN helper has failed.
+  if [ -z "$out" ] && hopwatch_sudo_allowed; then
     local raw
     raw="$(with_timeout 4 sudo -n wdutil info 2>/dev/null || true)"
     [ -n "$raw" ] && out="$(wifi_parse_wdutil "$raw")"
@@ -816,7 +839,7 @@ _mon_probe_wifi_signal() {
   local rssi noise chan _
   {
     # Fields 1-3 only; the parser's SSID/BSSID tail is scanner policy.
-    IFS=$'\t' read -r rssi noise chan _
+    IFS="$WIFI_FS" read -r rssi noise chan _
   } <<<"$out"
   is_numeric "$rssi"  || rssi=""
   is_numeric "$noise" || noise=""
@@ -1878,14 +1901,29 @@ _mon_sleep() {
     MON_REFRESH_REQUESTED=0
     return 0
   fi
-  sleep "$1" &
-  wait $! 2>/dev/null || true
+  # Redirected away from the stream: a background child inherits stdout, and
+  # a `sleep` still holding the GUI's pipe after SIGTERM kept the reader from
+  # seeing EOF for up to a whole cadence (measured 16.5 s) even though this
+  # process had already exited.
+  sleep "$1" >/dev/null 2>&1 &
+  MON_SLEEP_PID=$!
+  wait "$MON_SLEEP_PID" 2>/dev/null || true
+  MON_SLEEP_PID=""
+}
+
+# End the interruptible sleep now, if one is running. Called from the signal
+# handlers: the sleep is ours to kill, and leaving it behind would orphan a
+# process for up to one cadence.
+_mon_kill_sleep() {
+  if [ -n "$MON_SLEEP_PID" ]; then
+    kill "$MON_SLEEP_PID" 2>/dev/null || true
+  fi
 }
 
 # All three are reached via trap, an indirect dispatch static analysis
 # can't follow.
 # shellcheck disable=SC2317,SC2329
-_mon_on_signal() { MON_STOP=1; }
+_mon_on_signal() { MON_STOP=1; _mon_kill_sleep; }
 # shellcheck disable=SC2317,SC2329
 _mon_on_pause()  { MON_PAUSED=1; }
 # shellcheck disable=SC2317,SC2329
@@ -1909,6 +1947,7 @@ monitor_run() {
   # runs every tier anyway) never counts as a change.
   local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
   local dns_recheck_pending=0
+  MON_EMIT_FAILED=0
   MON_BROWSER_DESYNC_COUNT=0
   _mon_carry_stage "${HOPWATCH_MONITOR_CARRY:-}" "$EPOCHSECONDS" "${HOPWATCH_MONITOR_LAST_NETWORK:-}"
   # Read once; nothing this process starts needs it.
@@ -1962,7 +2001,7 @@ monitor_run() {
         MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
         _mon_auto_reconnect_reset
         MON_SEQ=$((MON_SEQ + 1))
-        _mon_emit "$MONITOR_FAST_INTERVAL" || break
+        _mon_emit "$MONITOR_FAST_INTERVAL" || { MON_EMIT_FAILED=1; break; }
         _mon_snapshot_prev
       fi
       # One second at a time so SIGUSR2 resumes promptly. The trap fires
@@ -2177,9 +2216,13 @@ monitor_run() {
     MON_SEQ=$((MON_SEQ + 1))
     MON_PREV_CYCLE_TS="$now"
     MON_PREV_CADENCE="$cadence"
-    # A failed emit means stdout is gone — the GUI exited, or a `| head -5`
-    # closed the pipe. Either way there is no one left to talk to.
-    _mon_emit "$cadence" || break
+    # A failed emit usually means stdout is gone — the GUI exited, or a
+    # `| head -5` closed the pipe — and there is no one left to talk to. It
+    # can equally be monitor_sample.py failing, which looks identical from
+    # here, so the stop is reported (stderr, exit 3) rather than passed off
+    # as a clean exit 0: a recorder agent that quietly stopped sampling
+    # looked exactly like one that had finished.
+    _mon_emit "$cadence" || { MON_EMIT_FAILED=1; break; }
     _mon_snapshot_prev
 
     if [ "$MONITOR_COUNT" -gt 0 ] && [ "$MON_SEQ" -ge "$MONITOR_COUNT" ]; then
@@ -2199,5 +2242,10 @@ monitor_run() {
     [ "$remain" -lt "$min_rest" ] && remain="$min_rest"
     _mon_sleep "$remain"
   done
+  _mon_kill_sleep
+  if [ "$MON_EMIT_FAILED" -eq 1 ]; then
+    printf 'hopwatch: monitor stopped: a sample could not be written (the reader closed the stream, or monitor_sample.py failed)\n' >&2
+    return 3
+  fi
   return 0
 }

@@ -25,6 +25,7 @@ Conventions match the full schema:
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 
@@ -48,6 +49,20 @@ def _get_rule_title(rid: str) -> str | None:
     return _RULE_TITLES.get(rid)
 
 
+def _finite_float(v) -> float:
+    """float(v), but a NaN or an infinity raises ValueError like garbage does.
+
+    json.dump writes them as the bare tokens NaN / Infinity, which are not
+    JSON: Foundation's decoder rejects the whole document, so one "nan"
+    from a probe would blank the GUI's view of the run. Every caller already
+    treats ValueError as "not a number" and yields null.
+    """
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError(f"non-finite number: {v!r}")
+    return f
+
+
 def _env(name: str) -> str | None:
     v = os.environ.get(f"NETDIAG_MON_{name}")
     if not v:
@@ -63,7 +78,7 @@ def _f(name: str) -> float | None:
     if v is None:
         return None
     try:
-        return float(v)
+        return _finite_float(v)
     except ValueError:
         return None
 
@@ -113,7 +128,7 @@ def build_tcp() -> list[dict]:
         }
         if len(parts) > 3 and parts[3]:
             try:
-                entry["elapsed_ms"] = float(parts[3])
+                entry["elapsed_ms"] = _finite_float(parts[3])
             except ValueError:
                 pass
         out.append(entry)
@@ -428,7 +443,7 @@ def _journal_prune(path: str) -> None:
     it happens is duplicated lines, never lost ones — the archive is
     appended before the live file is truncated, so a crash between the two
     duplicates rather than drops, and helpers/events.py dedupes on
-    (timestamp, seq, kind) for exactly that reason.
+    (timestamp, seq, kind, from, to) for exactly that reason.
     """
     try:
         keep = int(os.environ.get("NETDIAG_KEEP_EVENTS", "5000"))

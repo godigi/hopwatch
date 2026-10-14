@@ -19,8 +19,23 @@ double_nat, upnp.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
+
+
+def _finite_float(v) -> float:
+    """float(v), but a NaN or an infinity raises ValueError like garbage does.
+
+    json.dump writes them as the bare tokens NaN / Infinity, which are not
+    JSON: Foundation's decoder rejects the whole document, so one "nan"
+    from a probe would blank the GUI's view of the run. Every caller already
+    treats ValueError as "not a number" and yields null.
+    """
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError(f"non-finite number: {v!r}")
+    return f
 
 
 def _env(name: str) -> str | None:
@@ -61,7 +76,7 @@ def _maybe_float(name: str) -> float | None:
     if v is None:
         return None
     try:
-        return float(v)
+        return _finite_float(v)
     except ValueError:
         return None
 
@@ -102,7 +117,7 @@ def build_tcp_reach() -> list[dict]:
         entry = {"host": host, "port": int(port) if port.isdigit() else port, "ok": status == "OK"}
         if status == "OK" and len(parts) > 2:
             try:
-                entry["elapsed_ms"] = float(parts[2])
+                entry["elapsed_ms"] = _finite_float(parts[2])
             except ValueError:
                 pass
         out.append(entry)
@@ -183,16 +198,16 @@ def build_hops(env_name: str) -> list[dict]:
         entry: dict = {"n": n, "ip": ip, "responded": ip is not None}
         if env_name == "PER_HOP_LINES" and len(parts) >= 4:
             try:
-                entry["loss_pct"] = float(parts[2]) if parts[2] else None
+                entry["loss_pct"] = _finite_float(parts[2]) if parts[2] else None
             except ValueError:
                 entry["loss_pct"] = None
             try:
-                entry["avg_ms"] = float(parts[3]) if parts[3] else None
+                entry["avg_ms"] = _finite_float(parts[3]) if parts[3] else None
             except ValueError:
                 entry["avg_ms"] = None
         elif len(parts) >= 3:
             try:
-                entry["rtt_ms"] = float(parts[2]) if parts[2] else None
+                entry["rtt_ms"] = _finite_float(parts[2]) if parts[2] else None
             except ValueError:
                 entry["rtt_ms"] = None
         out.append(entry)
@@ -369,25 +384,56 @@ def build_mtr() -> dict:
     }
 
 
-def build_timings() -> dict:
-    """Per-phase wall-clock, plus the spec budget this run was measured against.
+def _budget_s() -> float | None:
+    """The wall-clock this run was promised, by what it actually did.
 
-    `over_budget` is the checkable form of the spec's "<= 30 s full run,
-    <= 8 s --quick" promise — previously asserted but never measured.
+    The three figures live in lib/thresholds.sh (THRESH_RUN_BUDGET_*) and
+    arrive through the environment from lib/output.sh, with no default here:
+    a literal would be a second home for a cutoff. Absent (this helper run
+    by hand) the budget is unknown, and None is the honest answer.
+
+    Depth, not flags alone: --quick has its own budget; a run that skipped
+    the speed test (--no-speed, or a focused mode other than --speed-only,
+    none of which ever run it) is held to the no-speed one; everything
+    else includes the speed test, which dominates the clock.
+    """
+    def pick(name: str) -> float | None:
+        raw = os.environ.get(name, "").strip()
+        try:
+            return _finite_float(raw) if raw else None
+        except ValueError:
+            return None
+
+    mode = _env("RUN_MODE") or ""
+    if _bool("QUICK"):
+        return pick("THRESH_RUN_BUDGET_QUICK_S")
+    focused_without_speed = mode.endswith("-only") and mode != "speed-only"
+    if _bool("NO_SPEED") or focused_without_speed:
+        return pick("THRESH_RUN_BUDGET_NO_SPEED_S")
+    return pick("THRESH_RUN_BUDGET_FULL_S")
+
+
+def build_timings() -> dict:
+    """Per-phase wall-clock, plus the budget this run was measured against.
+
+    `over_budget` is the checkable form of the project's per-depth time
+    promises (CLAUDE.md: quick, --no-speed, and a full run that includes
+    the speed test). `budget_s` is null, and `over_budget` false, when the
+    budget is not known rather than guessed.
     """
     phases: dict[str, float] = {}
     for line in _list_lines("TIMING_LINES"):
         name, _, secs = line.partition("|")
         try:
-            phases[name] = float(secs)
+            phases[name] = _finite_float(secs)
         except ValueError:
             continue
     total = _maybe_float("RUN_ELAPSED_S")
-    budget = 8.0 if _bool("QUICK") else 30.0
+    budget = _budget_s()
     return {
         "total_s": total,
         "budget_s": budget,
-        "over_budget": (total is not None and total > budget),
+        "over_budget": (total is not None and budget is not None and total > budget),
         "phases": phases,
     }
 
@@ -402,7 +448,11 @@ def build_wan() -> dict:
     return {
         "load_balancing": {
             "distinct_asns": lb_asns,
-            "distinct_ips": lb_ips,
+            # Dropped under --redact: these are the machine's public
+            # addresses, and the IPv6 one never equals PUB_IP (that comes
+            # from a `curl -4`), so the substring scrub cannot know it.
+            # The ASNs still say what the load-balancing was between.
+            "distinct_ips": [] if _bool("REDACT") else lb_ips,
             "active": _bool("WAN_LB_ACTIVE"),
         },
         # `detected` counts home-side routers only. ISP-side 10/8 transit is
@@ -464,11 +514,27 @@ def _scrub(node, secrets: list[str]):
     return node
 
 
+# Space-separated *lists* of identifying values. The field that carries
+# each one is dropped under --redact, but the same strings are interpolated
+# into diagnosis prose (WAN-1b names every public IP it saw), so each
+# element is a secret for the substring scrub too.
+_REDACT_ENV_LISTS = ("WAN_LB_IPS",)
+
+
 def redact(data: dict) -> dict:
     # Substrings shorter than 3 chars are skipped — replacing them would
     # corrupt unrelated text rather than protect anything.
+    found = {v for name in _REDACT_ENV if (v := _env(name)) and len(v) >= 3}
+    for name in _REDACT_ENV_LISTS:
+        found.update(v for v in (_env(name) or "").split() if len(v) >= 3)
+    # WATCHER_PROGRAM is an absolute path under $HOME. Its own field is
+    # nulled below, but the ND-1 summary quotes it, and the account name
+    # rides along in the path.
+    prog = _env("WATCHER_PROGRAM")
+    if prog and len(prog) >= 3:
+        found.add(prog)
     secrets = sorted(
-        {v for name in _REDACT_ENV if (v := _env(name)) and len(v) >= 3},
+        found,
         key=len, reverse=True,   # longest first: mask the SSID before a
     )                            # shorter value that happens to be inside it
     return _scrub(data, secrets)
@@ -789,11 +855,15 @@ def main() -> None:
         "wan": build_wan(),
         "hosts_file": {
             "custom_count": _maybe_int("HOSTS_CUSTOM_COUNT"),
-            "suspicious_redirects": [
+            # Dropped under --redact, like the disconnect lines: they are
+            # raw /etc/hosts text, which names whatever private hosts the
+            # user keeps there, and no secret in this document matches
+            # them. `custom_count` still says there were some.
+            "suspicious_redirects": ([] if _bool("REDACT") else [
                 line.strip() for line in
                 (os.environ.get("NETDIAG_HOSTS_SUSPICIOUS_LINES", "") or "").splitlines()
                 if line.strip()
-            ],
+            ]),
         },
         "browser_health": {
             "desync": (_maybe_int("BROWSER_DESYNC_COUNT") or 0) > 0,

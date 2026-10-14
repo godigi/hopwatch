@@ -24,7 +24,10 @@ setup() {
   # shellcheck source=../lib/thresholds.sh
   . "$REPO/lib/thresholds.sh"
   export THRESH_SPEED_DROP_FACTOR THRESH_SPEED_CONFIRM_RUNS \
-         THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS
+         THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS \
+         THRESH_BASELINE_MIN_RUNS THRESH_BASELINE_WINDOW_RUNS \
+         THRESH_BASELINE_RTT_SPIKE_FACTOR THRESH_BASELINE_LOSS_SPIKE_FACTOR \
+         THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR THRESH_BASELINE_LAN_SPIKE_FACTOR
 }
 
 # Run emit_json.py with only the NETDIAG_* vars given as KEY=VALUE args,
@@ -166,18 +169,54 @@ warn|M1|Path MTU is clamped.'
   [ "$(printf '%s' "$output" | jq_get wan.double_nat.isp_transit_count)" = "1" ]
 }
 
+# The budgets come from lib/thresholds.sh via the environment, exactly as
+# lib/output.sh hands them over. `emit` runs under env -i, so each test
+# passes them in.
+budgets() {
+  printf 'THRESH_RUN_BUDGET_QUICK_S=%s THRESH_RUN_BUDGET_NO_SPEED_S=%s THRESH_RUN_BUDGET_FULL_S=%s' \
+    "$THRESH_RUN_BUDGET_QUICK_S" "$THRESH_RUN_BUDGET_NO_SPEED_S" "$THRESH_RUN_BUDGET_FULL_S"
+}
+
 @test "emit_json: timings report the budget the run was measured against" {
+  # shellcheck disable=SC2046
   run emit NETDIAG_TIMING_LINES='iface|0.02
-mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0
+mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=1 $(budgets)
   [ "$(printf '%s' "$output" | jq_get timings.total_s)" = "42.0" ]
-  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "30.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "35.0" ]
   [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "true" ]
   [ "$(printf '%s' "$output" | jq_get timings.phases.mtu)" = "12.5" ]
 }
 
-@test "emit_json: --quick runs are measured against the 8 s budget" {
-  run emit NETDIAG_RUN_ELAPSED_S=7.5 NETDIAG_QUICK=1
+@test "emit_json: a default run includes the speed test and is not over budget at 69 s" {
+  # The old flat 30 s budget made every default run over_budget: true.
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=full NETDIAG_RUN_ELAPSED_S=69.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=0 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=full NETDIAG_RUN_ELAPSED_S=130.0 NETDIAG_QUICK=0 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "true" ]
+}
+
+@test "emit_json: a focused run that never runs the speed test gets the no-speed budget" {
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=mtu-only NETDIAG_RUN_ELAPSED_S=10 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "35.0" ]
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_MODE=speed-only NETDIAG_RUN_ELAPSED_S=10 $(budgets)
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "120.0" ]
+}
+
+@test "emit_json: --quick runs are measured against the quick budget" {
+  # shellcheck disable=SC2046
+  run emit NETDIAG_RUN_ELAPSED_S=7.5 NETDIAG_QUICK=1 $(budgets)
   [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "8.0" ]
+  [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
+}
+
+@test "emit_json: with no budget in the environment the budget is unknown, not invented" {
+  run emit NETDIAG_RUN_ELAPSED_S=500 NETDIAG_QUICK=0
+  [ "$(printf '%s' "$output" | jq_get timings.budget_s)" = "null" ]
   [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "false" ]
 }
 
@@ -513,6 +552,42 @@ _write_speed_history() {
   [ "$(printf '%s' "$output" | jq_get run_id)" = "null" ]
 }
 
+@test "emit_json redact: wan.load_balancing.distinct_ips does not leak, in the field or in prose" {
+  # The IPv6 entry comes from a non-`-4` curl, so it never equals PUB_IP
+  # and the substring scrub had nothing to match it with.
+  run emit NETDIAG_REDACT=1 NETDIAG_PUB_IP=203.0.113.42 \
+           NETDIAG_WAN_LB_ASNS='AS64496' \
+           NETDIAG_WAN_LB_IPS='203.0.113.42 2001:db8:77::5' \
+           NETDIAG_DIAGNOSIS_LINES='info|WAN-1b|handing your traffic 203.0.113.42 2001:db8:77::5 each time'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"2001:db8:77::5"* ]] || { echo "IPv6 leaked"; echo "$output"; return 1; }
+  [[ "$output" != *"203.0.113.42"* ]] || { echo "IPv4 leaked"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_ips)" = "[]" ]
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_asns)" = '["AS64496"]' ]
+}
+
+@test "emit_json: without --redact distinct_ips is kept" {
+  run emit NETDIAG_WAN_LB_IPS='203.0.113.42 2001:db8:77::5'
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_ips)" = '["203.0.113.42", "2001:db8:77::5"]' ]
+}
+
+@test "emit_json redact: the watcher's path is scrubbed out of the ND-1 prose too" {
+  run emit NETDIAG_REDACT=1 NETDIAG_WATCHER_INSTALLED=1 NETDIAG_WATCHER_STATE=blocked \
+           NETDIAG_WATCHER_PROGRAM=/Users/someone/Documents/netdiag/bin/hopwatch \
+           NETDIAG_DIAGNOSIS_LINES='warn|ND-1|it runs from /Users/someone/Documents/netdiag/bin/hopwatch, and macOS refuses'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"someone"* ]] || { echo "$output"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get watcher.program)" = "null" ]
+}
+
+@test "emit_json redact: drops the suspicious hosts lines, keeps the count" {
+  run emit NETDIAG_REDACT=1 NETDIAG_HOSTS_CUSTOM_COUNT=1 \
+           NETDIAG_HOSTS_SUSPICIOUS_LINES='10.9.8.7 secret-host.internal'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"secret-host"* ]] || { echo "$output"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get hosts_file.custom_count)" = "1" ]
+}
+
 # ── captive_portal_classify: status alone is not enough ──────────────────
 # The probe used to pass `curl -o /dev/null` and classify on the HTTP
 # status only: 3xx portal, 2xx ok. Apple's own captive check compares the
@@ -685,20 +760,56 @@ assert json.load(sys.stdin)['wifi_disconnects']['events'] == []
 
 # ── wifi_telemetry.py ──────────────────────────────────────────────────
 
-@test "wifi_telemetry: helper exits 0 and produces valid tab-separated format" {
+@test "wifi_telemetry: helper exits 0 and produces valid unit-separator format" {
   run python3 "$HELPERS/wifi_telemetry.py"
   [ "$status" -eq 0 ]
   # If empty (on non-wifi or unassociated machine), output is empty
   [ -z "$output" ] && return 0
-  # When telemetry is available, it must have 7 tab-separated fields
+  # When telemetry is available, it must have 7 fields separated by 0x1f
+  # (never a tab: IFS whitespace collapses, which shifted empty fields).
   printf '%s\n' "$output" | python3 -c "
 import sys
 line = sys.stdin.read().rstrip('\n')
-fields = line.split('\t')
+assert '\t' not in line
+fields = line.split('\x1f')
 assert len(fields) == 7, f'expected 7 fields, got {len(fields)}: {fields}'
 rssi, noise, chan, tx, phy, ssid, bssid = fields
 # RSSI is a non-zero integer (typically -100 to -20 dBm)
 val = int(rssi)
 assert val < 0, f'expected negative RSSI, got {val}'
+"
+}
+
+# ── NaN / Infinity never reach the JSON ──────────────────────────────────
+# json.dump writes them as bare NaN / Infinity tokens, which are not JSON:
+# Foundation's decoder rejects the whole document, so a single "nan" from a
+# probe blanks the GUI's entire view of the run.
+
+@test "emit_json: a NaN or infinite number becomes null, not a bare NaN token" {
+  run emit NETDIAG_GW_LOSS=nan NETDIAG_GW_LATENCY=inf NETDIAG_INET_RTT_AVG=-Infinity \
+           NETDIAG_TCP_REACH_LINES='example.com:443|OK|nan' \
+           NETDIAG_TIMING_LINES='dns|nan'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *NaN* && "$output" != *Infinity* ]] || { echo "$output"; return 1; }
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+assert d['gateway']['loss_pct'] is None, d['gateway']
+assert d['gateway']['rtt_avg_ms'] is None, d['gateway']
+"
+}
+
+@test "monitor_sample: a NaN or infinite number becomes null, not a bare NaN token" {
+  run env -i PATH="$PATH" NETDIAG_MON_SEQ=1 NETDIAG_MON_GW_LOSS=nan \
+      NETDIAG_MON_GW_RTT=inf NETDIAG_MON_INET_RTT=2.5 \
+      python3 "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *NaN* && "$output" != *Infinity* ]] || { echo "$output"; return 1; }
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['gateway']['loss_pct'] is None, d['gateway']
+assert d['gateway']['rtt_avg_ms'] is None, d['gateway']
+assert d['internet']['rtt_avg_ms'] == 2.5, d['internet']
 "
 }

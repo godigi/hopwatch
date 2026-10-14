@@ -263,3 +263,48 @@ JSON
     }
   done
 }
+
+# ── --json mirrors emit_json's --redact drops ────────────────────────────
+
+@test "share --json drops the raw-text fields emit_json drops under --redact" {
+  # The app shares through this path, so a field emit_json refuses to
+  # publish must not leak here just because the record was stored whole.
+  cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z",
+ "wifi_disconnects":{"count":2,"events":["x disassociated from 11:22:33:44:55:66 NeighbourNet"]},
+ "watcher":{"state":"blocked","program":"/Users/someone/Documents/netdiag/bin/hopwatch"},
+ "hosts_file":{"custom_count":1,"suspicious_redirects":["10.9.8.7 secret-host.internal"]},
+ "diagnosis":[{"severity":"warn","rule":"ND-1",
+   "summary":"it runs from /Users/someone/Documents/netdiag/bin/hopwatch, and macOS refuses"}]}
+JSON
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  for leak in "11:22:33:44:55:66" "NeighbourNet" "someone" "secret-host"; do
+    [[ "$output" != *"$leak"* ]] || { echo "leaked: $leak"; echo "$output"; return 1; }
+  done
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['wifi_disconnects']['events'] == [], d
+assert d['wifi_disconnects']['count'] == 2, d      # the count is not identifying
+assert d['watcher']['program'] is None, d
+assert d['watcher']['state'] == 'blocked', d
+assert d['hosts_file']['suspicious_redirects'] == [], d
+assert d['hosts_file']['custom_count'] == 1, d
+"
+}
+
+@test "share sweeps MAC addresses it could not have known about" {
+  # A neighbour's BSSID sits in free text no field-sourced secret matches.
+  cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z",
+ "diagnosis":[{"severity":"warn","summary":"Roamed to 0:1a:2b:3c:4d:5e and AA-BB-CC-DD-EE-FF today."}]}
+JSON
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"3c:4d:5e"* && "$output" != *"AA-BB-CC"* ]] || { echo "$output"; return 1; }
+  run python3 "$REPO/helpers/share.py" < "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"3c:4d:5e"* && "$output" != *"AA-BB-CC"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"2026-08-25T12:00:00Z"* ]] || { echo "timestamp was mangled"; echo "$output"; return 1; }
+}

@@ -315,6 +315,7 @@ final class HopwatchCoordinator {
             return blurb
         }
         if Defaults.monitoringEnabled { monitor.start() }
+        syncAlertPauseState()
         startStaleWatch()
 
         // Wire update notification hook
@@ -548,8 +549,26 @@ final class HopwatchCoordinator {
 
     func setMonitoring(enabled: Bool) {
         Defaults.monitoringEnabled = enabled
-        alerts.monitoringPaused = !enabled
         if enabled { monitor.start() } else { monitor.stop() }
+        syncAlertPauseState()
+    }
+
+    /// The reason a scan holds the monitor paused under. One constant so the
+    /// holder and the alert engine's "pause that isn't a scan" agree.
+    static let scanPauseReason = "a check is running"
+
+    /// Re-derives `alerts.monitoringPaused` from what actually holds the
+    /// monitor paused, instead of each pause/resume site guessing.
+    ///
+    /// It used to be assigned by hand in four places, and a scan's own pause
+    /// released through a path that never reassigned it: wake the display
+    /// mid-scan and `isPausedForAnyReason` was still true (the scan), so the
+    /// flag was set to true; the scan then ended, and nothing set it back.
+    /// With it stuck, `AlertEngine` suppressed every alert until relaunch.
+    /// Call this after every pause or resume, whatever the holder.
+    func syncAlertPauseState() {
+        alerts.monitoringPaused = !Defaults.monitoringEnabled
+            || monitor.isPaused(besides: Self.scanPauseReason)
     }
 
     /// Apply changed cadence settings. A restart rather than a signal,
@@ -1282,6 +1301,23 @@ final class HopwatchCoordinator {
     }
 
     private func handleNetworkEvent(_ event: NetworkEventWatcher.Event) {
+        // A roam between access points of the same network, or a link
+        // flap on it, is not a new connection: the report on screen is
+        // still about this network, and a full check running on it is
+        // still measuring it. Invalidating here wiped the report and
+        // cancelled the scan every time the Mac roamed. Only a resample is
+        // wanted; if the network really did change, the monitor's next
+        // sample carries a different identity and `reconcileNetworkIdentity`
+        // invalidates then, on evidence rather than on a CoreWLAN callback.
+        // (An SSID change and a path change still invalidate below.)
+        switch event {
+        case .bssidChanged, .linkChanged:
+            log.debug("same-network roam or link change — forcing monitor refresh only")
+            monitor.forceRefresh()
+            return
+        case .ssidChanged, .pathChanged:
+            break
+        }
         invalidateCurrentConnection()
         if Defaults.monitoringEnabled { monitor.restart() }
         // CoreWLAN and NWPathMonitor are near-instant where the monitor
@@ -1417,7 +1453,7 @@ final class HopwatchCoordinator {
         //
         // The pause is SIGUSR1, not SIGSTOP. See MonitorStream for why the
         // obvious mechanism kills the process 2 s in.
-        monitor.pause(reason: "a check is running")
+        monitor.pause(reason: Self.scanPauseReason)
         alerts.scanInProgress = true
 
         scanTask = Task { [weak self] in
@@ -1433,7 +1469,8 @@ final class HopwatchCoordinator {
                 // scan failed, was cancelled, or never landed — the banner
                 // must not go on saying it is checking once the child is gone.
                 self.alerts.scanEnded()
-                self.monitor.resume(reason: "a check is running")
+                self.monitor.resume(reason: Self.scanPauseReason)
+                self.syncAlertPauseState()
                 // Whatever happened — a clean exit, a crash, Cancel — the
                 // child is gone, so no phase can report again. Without this
                 // a cancelled run leaves its rows spinning forever.
@@ -1689,7 +1726,7 @@ final class HopwatchCoordinator {
             Task { @MainActor in
                 guard Defaults.pauseOnDisplaySleep else { return }
                 self?.monitor.pause(reason: "the display is asleep")
-                self?.alerts.monitoringPaused = true
+                self?.syncAlertPauseState()
             }
         }
         nc.addObserver(forName: NSWorkspace.screensDidWakeNotification,
@@ -1697,7 +1734,7 @@ final class HopwatchCoordinator {
             Task { @MainActor in
                 self?.events.markSettling()
                 self?.monitor.resume(reason: "the display is asleep")
-                self?.alerts.monitoringPaused = self?.monitor.isPausedForAnyReason ?? false
+                self?.syncAlertPauseState()
             }
         }
         // System sleep pauses regardless of the display-sleep preference:
@@ -1707,7 +1744,7 @@ final class HopwatchCoordinator {
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 self?.monitor.pause(reason: "your Mac is asleep")
-                self?.alerts.monitoringPaused = true
+                self?.syncAlertPauseState()
             }
         }
         nc.addObserver(forName: NSWorkspace.didWakeNotification,
@@ -1717,7 +1754,7 @@ final class HopwatchCoordinator {
                 self?.invalidateCurrentConnection()
                 self?.monitor.resume(reason: "your Mac is asleep")
                 if Defaults.monitoringEnabled { self?.monitor.restart() }
-                self?.alerts.monitoringPaused = self?.monitor.isPausedForAnyReason ?? false
+                self?.syncAlertPauseState()
                 // The world may be entirely different after a wake, and
                 // the monitor's own timers do not know that.
                 await self?.history.load()
@@ -2008,6 +2045,12 @@ final class HopwatchCoordinator {
             $0.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
                 || $0.network.map(history.canonicalID) == canonical
         }
+    }
+
+    /// The newest condition event on the network the Mac is on now (last
+    /// 24 h), for any surface that shows "what happened last".
+    var latestCurrentNetworkEvent: NetworkEvent? {
+        NetworkEvent.latestCondition(in: currentNetworkEvents)
     }
 
     var vpnFreshness: String {

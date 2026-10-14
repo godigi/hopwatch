@@ -149,6 +149,8 @@ final class MonitorStream {
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "monitor")
     private let decoder = JSONDecoder()
     private static let recentCapacity = 360
+    /// Pause before re-asking a CLI whose capability handshake failed.
+    private static let handshakeRetryDelay: TimeInterval = 30
 
     /// Called for every decoded sample. The alert engine subscribes here.
     var onSample: ((MonitorSample) -> Void)?
@@ -194,14 +196,24 @@ final class MonitorStream {
     /// spawn over a newer start's process.
     private func startAfterCapabilityCheck(generation: Int) async {
         guard !isRunning else { return }
-        do {
-            try await CapabilityStore.shared.requireSupport(for: .monitor)
-        } catch {
-            guard !Task.isCancelled, startGeneration == generation else { return }
-            restartPending = false
-            lastError = error.localizedDescription
-            log.error("monitor not started: \(error.localizedDescription, privacy: .public)")
-            return
+        while true {
+            do {
+                try await CapabilityStore.shared.requireSupport(for: .monitor)
+                break
+            } catch {
+                guard !Task.isCancelled, startGeneration == generation else { return }
+                restartPending = false
+                lastError = error.localizedDescription
+                log.error("monitor not started: \(error.localizedDescription, privacy: .public)")
+                // A handshake that could not be completed (as opposed to
+                // one that completed and found an old CLI) is usually a bad
+                // moment, not a verdict. Give up on it for good and the
+                // monitor stays off until relaunch, with nothing on screen
+                // to say it will ever come back; try again instead.
+                guard await CapabilityStore.shared.isUnavailable() else { return }
+                try? await Task.sleep(for: .seconds(Self.handshakeRetryDelay))
+                guard !Task.isCancelled, !isRunning, startGeneration == generation else { return }
+            }
         }
         guard !Task.isCancelled, !isRunning, startGeneration == generation else { return }
         // Resolve again now that the gate has passed. The gate re-resolves
@@ -494,6 +506,16 @@ final class MonitorStream {
 
     var isPausedForAnyReason: Bool { !pauseHolders.isEmpty }
 
+    /// Whether anything other than `reason` holds the monitor paused.
+    ///
+    /// The alert engine needs this shape rather than `isPausedForAnyReason`:
+    /// a scan pauses the monitor too, but a scan is already suppressed
+    /// separately and briefly (`scanInProgress`) and must not make the
+    /// engine drop the alert that triggered it.
+    func isPaused(besides reason: String) -> Bool {
+        !pauseHolders.subtracting([reason]).isEmpty
+    }
+
     /// Sends `SIGALRM` to force an immediate cycle refresh without waiting for timers.
     ///
     /// Held back until the child has produced a sample, like the pause
@@ -572,7 +594,18 @@ final class MonitorStream {
         restartAttempts = 0
         // A paused sample carries values from before the pause; it is the
         // monitor saying it is not looking, not a reading.
-        if let awaitingSince, sample.timestamp < awaitingSince { return }
+        //
+        // The comparison is at whole-second resolution because the sample's
+        // `ts` has none (docs/JSON-SCHEMA.md: ISO 8601, no fractional
+        // seconds) while `awaitingSince` is a `Date()`. Compared exactly, a
+        // genuine sample taken in the same second as the boundary — the
+        // first one after a resume, which the child emits at once — reads
+        // as earlier than it and was dropped, leaving the dot "awaiting"
+        // for a full cadence.
+        if let awaitingSince,
+           sample.timestamp < Date(timeIntervalSince1970: awaitingSince.timeIntervalSince1970.rounded(.down)) {
+            return
+        }
         if !sample.status.paused { awaitingSince = nil }
         // Backstop for the burst deadline. The timer is the normal path;
         // this catches the case where it was lost with a cancelled task

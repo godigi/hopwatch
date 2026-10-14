@@ -2718,6 +2718,51 @@ private enum VerifyHarness {
         check(restored, "restoration notification delivers after fault")
         check(removed.contains("netdiag.wifi-unstable"), "previous degradation banner removed on restoration")
         check(mgr.announcedFaults.isEmpty, "announced faults cleared on restoration")
+
+        // An event is not a fault: it must not be announced, so a later
+        // healthy sample cannot "restore" it or delete its notification.
+        delivered.removeAll(); removed.removeAll()
+        let evT = t0.addingTimeInterval(40_000)
+        let evPosted = mgr.deliverDegradation(id: "public-ip-changed", title: "IP", body: "",
+                                              isOutage: false, now: evT, announce: false)
+        check(evPosted && delivered.count == 1, "an event notification is delivered")
+        check(mgr.announcedFaults.isEmpty, "…but is not recorded as an announced fault")
+        check(!mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10) && removed.isEmpty,
+              "…so no 'Restored' notice follows it and its banner is left alone")
+
+        // A degradation that was never an outage is told as 'resolved', not 'Restored'.
+        _ = mgr.deliverDegradation(id: "internet-degraded", title: "Slow", body: "x",
+                                   isOutage: false, now: evT.addingTimeInterval(100))
+        check(!mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10),
+              "a non-outage degradation does not produce a 'Wi-Fi Restored' notice")
+        mgr.deliverAlertResolved(id: "internet-degraded", title: "Slow")
+        _ = mgr.deliverDegradation(id: "connection-lost", title: "Down", body: "x",
+                                   isOutage: true, now: evT.addingTimeInterval(200))
+        check(mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10),
+              "an outage does produce one")
+        check(mgr.announcedOutages.isEmpty, "and clears the outage record")
+
+        check(UpdateChecker.archiveExtension(forAssetNamed: "../../x/Hopwatch.ZIP") == "zip"
+              && UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch.tar.gz") == nil,
+              "the updater trusts only an asset's extension, never its name as a path")
+
+        // alerts.monitoringPaused follows the real pause holders, and a
+        // scan's own pause does not count (the scan has its own suppressor).
+        let pc = HopwatchCoordinator()
+        if Defaults.monitoringEnabled {
+            pc.monitor.pause(reason: HopwatchCoordinator.scanPauseReason)
+            pc.syncAlertPauseState()
+            check(!pc.alerts.monitoringPaused, "a scan's pause alone does not mark monitoring paused")
+            pc.monitor.pause(reason: "the display is asleep")
+            pc.syncAlertPauseState()
+            check(pc.alerts.monitoringPaused, "display sleep during a scan does")
+            pc.monitor.resume(reason: "the display is asleep")
+            pc.syncAlertPauseState()
+            check(!pc.alerts.monitoringPaused, "waking the display mid-scan clears it again (it used to stick)")
+            pc.monitor.resume(reason: HopwatchCoordinator.scanPauseReason)
+            pc.syncAlertPauseState()
+            check(!pc.alerts.monitoringPaused, "and it stays clear after the scan ends")
+        }
     }
 
     private static func runConnectionStabilityTests() {

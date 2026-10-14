@@ -1184,6 +1184,53 @@ with_timeout() {
   return "$rc"
 }
 
+# Run a ping that cannot be given -W and print its output, ending it with
+# SIGINT after SECS so it prints its statistics line. ping6 on macOS is the
+# case: its -W is a boolean, and it otherwise waits ~10 s after the last
+# packet, which any with_timeout (SIGTERM, no summary) loses. Usage:
+#   ping_sigint_bound SECS ping6 -c 5 -i 0.2 ADDR
+# SECS should be (packets x interval) + the longest reply wait to count.
+# SIGTERM follows 2 s later if SIGINT was somehow ignored.
+ping_sigint_bound() {
+  local secs="$1" tmp pid killer
+  shift
+  tmp="$(mktemp "${TMPDIR:-/tmp}/hopwatch-ping.XXXXXX")" || return 1
+  # A background job in a non-interactive shell starts with SIGINT ignored
+  # (and a shell script cannot re-enable it). ping and ping6 install their
+  # own SIGINT handler, which overrides the inherited ignore, so the signal
+  # still lands; the `trap - INT` only covers a launcher that set a trap.
+  ( trap - INT; exec "$@" ) >"$tmp" 2>/dev/null &
+  pid=$!
+  ( sleep "$secs"; kill -INT "$pid" 2>/dev/null; sleep 2; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  killer=$!
+  wait "$pid" 2>/dev/null
+  kill "$killer" 2>/dev/null
+  wait "$killer" 2>/dev/null
+  cat "$tmp"
+  rm -f "$tmp"
+  return 0
+}
+
+# ── Opt-in privileged fallback ───────────────────────────────────────────
+# Monitoring and scans are sudo-free: every check has an unprivileged path
+# and that is the only one used by default. `sudo` is a last resort that a
+# user must ask for, with HOPWATCH_ALLOW_SUDO=1 (or `--allow-sudo`), and even
+# then it is reached only after the unprivileged path produced nothing.
+#
+# `sudo -n` never prompts, which is the reason it used to be called freely:
+# "it can't hurt". It can — it quietly runs a privileged command whenever
+# sudo credentials happen to be cached or NOPASSWD is configured, on every
+# monitor cycle, for a user who never asked for that.
+#
+# Returns 0 only when the user opted in AND sudo would run without a
+# prompt (or we already are root). Never asks for a password.
+hopwatch_sudo_allowed() {
+  [ "${HOPWATCH_ALLOW_SUDO:-0}" = "1" ] || return 1
+  [ "$(id -u)" -eq 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 || return 1
+  sudo -n true 2>/dev/null
+}
+
 # ── Temp-dir registry ────────────────────────────────────────────────────
 # The orchestrator owns the parallel scratch directory. On an abort
 # (Ctrl-C, SIGHUP, or a killed parallel check) collect_parallel never gets

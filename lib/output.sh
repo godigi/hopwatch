@@ -210,6 +210,10 @@ build_json() {
   NETDIAG_TIMING_LINES="$TIMING_LINES" \
   NETDIAG_RUN_ELAPSED_S="${_run_elapsed_frozen:-$(run_elapsed_s)}" \
   NETDIAG_QUICK="$QUICK" \
+  NETDIAG_NO_SPEED="${NO_SPEED:-0}" \
+  THRESH_RUN_BUDGET_QUICK_S="$THRESH_RUN_BUDGET_QUICK_S" \
+  THRESH_RUN_BUDGET_NO_SPEED_S="$THRESH_RUN_BUDGET_NO_SPEED_S" \
+  THRESH_RUN_BUDGET_FULL_S="$THRESH_RUN_BUDGET_FULL_S" \
   NETDIAG_REDACT="$REDACT" \
   python3 "$HELPERS_DIR/emit_json.py"
 }
@@ -515,10 +519,16 @@ output_run() {
     # part of baseline.py: the absolute floors that keep a "spike" from
     # firing on a difference that's real but too small to matter. See
     # lib/thresholds.sh's "Baseline absolute floors" section.
+    #
+    # THRESH_BASELINE_{MIN_RUNS,WINDOW_RUNS,*_SPIKE_FACTOR} are the ratio
+    # tests and history depth that used to be literals in baseline.py.
     export THRESH_SPEED_DROP_FACTOR THRESH_SPEED_CONFIRM_RUNS \
-           THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS
+           THRESH_BASELINE_GW_RTT_FLOOR_MS LOSS_WARN_PCT THRESH_BUFFERBLOAT_A_MS \
+           THRESH_BASELINE_MIN_RUNS THRESH_BASELINE_WINDOW_RUNS \
+           THRESH_BASELINE_RTT_SPIKE_FACTOR THRESH_BASELINE_LOSS_SPIKE_FACTOR \
+           THRESH_BASELINE_BUFFERBLOAT_SPIKE_FACTOR THRESH_BASELINE_LAN_SPIKE_FACTOR
     baseline_out="$(python3 "$HELPERS_DIR/baseline.py" \
-      --history "$LOG_DIR/baseline.jsonl" --current "$json_tmp" --n 10 2>/dev/null || true)"
+      --history "$LOG_DIR/baseline.jsonl" --current "$json_tmp" --n "$THRESH_BASELINE_WINDOW_RUNS" 2>/dev/null || true)"
     BASELINE_JSON="$baseline_out"
     if [ -n "$baseline_out" ]; then
       baseline_lines="$(printf '%s' "$baseline_out" | python3 -c "

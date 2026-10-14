@@ -62,7 +62,7 @@ wifi_scan_run() {
   local sp_cand_parsed
   sp_cand_parsed="$(wifi_parse_candidates "$sp_out" "${WIFI_SSID:-}" "${WIFI_BSSID:-}")"
   {
-    IFS=$'\t' read -r WIFI_MULTI_AP WIFI_CANDIDATE_BSSID WIFI_CANDIDATE_RSSI WIFI_CANDIDATE_SSID \
+    IFS="$WIFI_FS" read -r WIFI_MULTI_AP WIFI_CANDIDATE_BSSID WIFI_CANDIDATE_RSSI WIFI_CANDIDATE_SSID \
       WIFI_CANDIDATE_5GHZ_BSSID WIFI_CANDIDATE_5GHZ_RSSI WIFI_CANDIDATE_5GHZ_CHAN
   } <<<"$sp_cand_parsed"
   if [ "${WIFI_MULTI_AP:-0}" -eq 1 ]; then

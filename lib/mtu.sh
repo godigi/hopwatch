@@ -18,11 +18,13 @@ mtu_run() {
   # this is a retry: one ordinary dropped packet at 1472 used to report a
   # clamped MTU, and rule M1 escalates a sub-1400 result to *critical*
   # ("most websites won't load fully"). A genuinely blocked size still
-  # fails all three. `-t 2` caps each size at 2 s, so this is also faster
-  # in the worst case than three separate 2 s probes would have been.
+  # fails all three. `-W` caps the wait for a reply (without it a blocked size
+  # costs ping's ~10 s tail, which the 4 s wall-clock kill below cut off
+  # mid-run, so a size with one lost reply read as a hard failure), keeping
+  # each size under ~3 s. (-t would be a deadline for the whole run on macOS.)
   local size
   for size in 1472 1452 1432 1412 1392 1372 1352 1300 1200; do
-    if with_timeout 4 ping -D -c 3 -i 0.2 -s "$size" 1.1.1.1 >/dev/null 2>&1; then
+    if with_timeout 4 ping -D -c 3 -i 0.2 -W "$PING_REPLY_WAIT_MS" -s "$size" 1.1.1.1 >/dev/null 2>&1; then
       MTU_PATH_SIZE="$size"
       break
     fi

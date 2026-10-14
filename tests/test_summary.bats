@@ -386,3 +386,14 @@ summarise_judged() {
   line="$(printf '%s\n' "$output" | grep 'NTP drift')"
   [[ "$line" == *"× worst -120.0"* ]] || { echo "$line"; return 1; }
 }
+
+@test "a JSONL line that is not an object is skipped, not a crash" {
+  # A torn write or a stray line can parse as a list, a string or a number;
+  # every consumer calls .get() on each record.
+  rec 2026-01-01T00:00:00Z wifi:mac=aa:bb:cc:dd:ee:01 '"gateway":{"rtt_avg_ms":3}'
+  printf '[1,2,3]\n"just a string"\n42\nnull\n' >> "$STORE"
+  rec 2026-01-01T01:00:00Z wifi:mac=aa:bb:cc:dd:ee:01 '"gateway":{"rtt_avg_ms":4}'
+  run summarise
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"2 runs"* ]] || { echo "$output"; return 1; }
+}

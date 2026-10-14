@@ -58,12 +58,13 @@ is in [`../examples/sample-output.json`](../examples/sample-output.json).
 | `availability` | object | How this network has behaved over the last `THRESH_AV_WINDOW_HOURS`, from the event journal — `window_hours`, `outages`, `downtime_s`, `longest_outage_s`, `short_drops`, `unobserved_pct`. **`null` when no journal exists**, which is emphatically not "no outages": without a recorder there is no record. See `DIAGNOSIS-RULES.md#av-1--this-connection-keeps-dropping`. |
 | `traffic` | object | What this Mac itself was putting on the link while the path was measured — `sampled_s`, `down_mbps`, `up_mbps`, `top_processes[]`. **`null` under `--quick`** (the sample is skipped for budget) and whenever `nettop` gave nothing to difference: "not measured" and "measured zero" are different claims. Process names survive `--redact`; they identify software, not a person. See `DIAGNOSIS-RULES.md#tr-1--your-own-mac-was-using-the-connection`. |
 | `watcher` | object | hopwatch's own launchd watcher, or **`null` when none is installed** — which is most runs. The only object here that describes hopwatch rather than the network. See below. |
-| `timings` | object | `total_s`, `budget_s`, `over_budget`, and `phases{}` per stage |
+| `browser_health` | object | Whether a browser was updated on disk while still running the old version (rule `BR-1`) — `desync` (bool), `desync_count`, and, when one is found, `app`, `running_version`, `disk_version`, `pid` (all `null` otherwise). Always present; `desync: false` with a `null` `app` is the healthy case. See `DIAGNOSIS-RULES.md#br-1--browser-may-not-work-correctly-after-background-update`. |
+| `timings` | object | `total_s`, `budget_s`, `over_budget`, and `phases{}` per stage. `budget_s` is chosen by what the run did and read from `lib/thresholds.sh` (`THRESH_RUN_BUDGET_*`): quick 8 s; a run that skipped the speed test (`--no-speed`, or a focused mode other than `--speed-only`) 35 s; otherwise 120 s, because the default run includes the speed test (~65 s with Ookla, ~115 s with `speedtest-cli`). `budget_s` is `null` (and `over_budget` `false`) when the helper was run without the budgets in its environment. |
 | `baseline` | object | comparison against history, or `null` — see below |
 | `diagnosis` | array | `severity` (`info`/`warn`/`critical`), `rule`, `summary` |
 | `suitability` | array | one entry per activity — `activity`, `label`, `verdict` (`good`/`degraded`/`broken`/`unmeasured`), `because` (rule IDs), `unmeasured_reason`. Five entries, fixed order, always present. See below. |
 | `most_likely_root_cause` | string | the highest-severity diagnosis summary, first by insertion order |
-| `hopwatch_extras` | object | `arp_gw_incomplete`, `network_changed_mid_run`, plus `target*` keys when a positional TARGET was given. `network_changed_mid_run` is `true` when the Mac changed networks between the start and end of the run, so the measurements straddle two — such a run is deliberately **absent from `baseline.jsonl`**, so this field is only ever seen on stdout (see `DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks`). |
+| `netdiag_extras` | object | `arp_gw_incomplete`, `network_changed_mid_run`, plus `target*` keys when a positional TARGET was given. `network_changed_mid_run` is `true` when the Mac changed networks between the start and end of the run, so the measurements straddle two — such a run is deliberately **absent from `baseline.jsonl`**, so this field is only ever seen on stdout (see `DIAGNOSIS-RULES.md#dq-1--the-run-measured-two-networks`). |
 
 ## `suitability` — what this network is good for
 
@@ -191,7 +192,9 @@ lines the oldest roll into `events-archive.jsonl` rather than being
 deleted, and `--events` reads both. The roll appends to the archive
 *before* truncating the live file, so a crash between the two duplicates
 lines rather than dropping them — which is safe only because the reader
-dedupes on `(t, seq, kind, to)`.
+dedupes on `(t, seq, kind, from, to)`. `from` is in the key because a
+`rule-cleared` has `to: null`: two rules clearing in one sample would
+otherwise collide, and the second would be dropped as a duplicate.
 
 ### `--events[=HOURS]`
 
@@ -596,6 +599,14 @@ hopwatch --json | jq -r '.dhcp.dns_servers | split(" ")'
 gateway MAC and city in the emitted object. ASN, ISP name and RFC1918
 addresses are deliberately kept — they identify a provider or a private
 range, not a person, and removing them would gut the NAT and ARP data.
+Four fields are **dropped** rather than masked, because they carry raw text
+or addresses no known secret matches: `wifi_disconnects.events` (`[]`),
+`hosts_file.suspicious_redirects` (`[]`), `wan.load_balancing.distinct_ips`
+(`[]` — one of them is an IPv6 address `PUB_IP` never equals) and
+`watcher.program` (`null`). The strings they held are still scrubbed out of
+diagnosis prose (WAN-1b, ND-1). `--share --json` applies the same drops to a
+stored run, and additionally masks every MAC address and every
+globally-routable IP address left anywhere in the document.
 See the README's "Sharing a report" section.
 
 ## Exit codes
@@ -1515,6 +1526,9 @@ from stdin or the store.
 | `wifi.bssid` | masked | identifies the router |
 | `ipv6.global_addr` | masked | identifies the household |
 | `ipv6.gateway` | masked | EUI-64-derived from the router's MAC, so leaving it in republishes `interface.gateway_mac` sitting right next to it |
+| `watcher.program` | dropped, and scrubbed from prose | an absolute path under `$HOME`; the ND-1 summary quotes it |
+| `wifi_disconnects.events`, `hosts_file.suspicious_redirects` | dropped | raw log / hosts text — no secret matches a neighbour's BSSID or a private hostname |
+| any MAC address (`aa:bb:cc:dd:ee:ff`), anywhere | masked by a final sweep | a neighbour's BSSID identifies a device as surely as our own |
 | `public.isp` | kept, deliberately | names a provider, not a person — needed to reason about the fault |
 | `public.asn` | kept, deliberately | same reason as `isp` |
 | `public.country` / `public.country_iso` | kept, deliberately | two characters is too short to substring-replace safely without corrupting unrelated text |
