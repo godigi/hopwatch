@@ -1254,6 +1254,7 @@ struct MenuFooterView: View {
     let onSaveMarkdown: () -> Void
     let onSaveJSON: () -> Void
     let onQuit: () -> Void
+    var canShare: Bool = true
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1281,11 +1282,11 @@ struct MenuFooterView: View {
                 .buttonStyle(.plain)
 
                 Menu {
-                    Button("Copy Redacted Report", action: onCopyReport)
+                    Button("Copy Redacted Report", action: onCopyReport).disabled(!canShare)
                     Button("Copy for Support", action: onCopySupport)
                     Divider()
-                    Button("Save as Markdown (.md)…", action: onSaveMarkdown)
-                    Button("Save Redacted JSON (.json)…", action: onSaveJSON)
+                    Button("Save as Markdown (.md)…", action: onSaveMarkdown).disabled(!canShare)
+                    Button("Save Redacted JSON (.json)…", action: onSaveJSON).disabled(!canShare)
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 11))

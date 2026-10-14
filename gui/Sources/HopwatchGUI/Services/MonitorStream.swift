@@ -189,6 +189,18 @@ final class MonitorStream {
         }
     }
 
+    /// Starts now, abandoning a handshake retry that is sleeping out its
+    /// 30 s delay. Settings > Re-check calls this: `start()` alone would be
+    /// a no-op while `startTask` is still parked in that sleep, so a user who
+    /// had just fixed the CLI would wait up to half a minute for nothing.
+    /// The superseded task sees its generation is stale and returns.
+    func restartNow() {
+        guard !isRunning else { return }
+        startTask?.cancel()
+        startTask = nil
+        start()
+    }
+
     /// The async half of `start()`. Re-checks cancellation, `isRunning`
     /// and its own generation after the one `await`, because `stop()`
     /// cancels `startTask` but has no way to interrupt an in-flight actor
@@ -199,6 +211,9 @@ final class MonitorStream {
         while true {
             do {
                 try await CapabilityStore.shared.requireSupport(for: .monitor)
+                // The probe that failed earlier has now succeeded; the
+                // error it left behind is no longer true.
+                if startGeneration == generation { lastError = nil }
                 break
             } catch {
                 guard !Task.isCancelled, startGeneration == generation else { return }

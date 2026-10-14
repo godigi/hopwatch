@@ -138,7 +138,7 @@ assert json.load(sys.stdin)['deps']['speedtest'] in ('ookla', 'cli')
   printf '%s' "$output" | python3 -c "
 import json, sys
 f = json.load(sys.stdin)['features']
-for name in ('monitor', 'history', 'show', 'progress'):
+for name in ('monitor', 'history', 'show', 'progress', 'share'):
     assert name in f, name
 "
 }

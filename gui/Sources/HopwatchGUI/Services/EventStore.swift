@@ -147,6 +147,12 @@ final class EventStore {
         guard let url else { return }
         writer.submit(events, to: url)
     }
+
+    /// Writes any snapshot still waiting for the background writer, and
+    /// returns only when it is on disk. Called on quit: the writer runs on a
+    /// utility queue, and an event recorded in the last moments (the outage
+    /// that made the user quit, say) would otherwise die with the process.
+    func flush() { writer.flush() }
 }
 
 /// Writes the event log one snapshot at a time, newest wins.
@@ -172,18 +178,41 @@ private final class EventWriter: @unchecked Sendable {
         DispatchQueue.global(qos: .utility).async { [self] in drain() }
     }
 
+    /// Serialises disk writes *and* the choice of which snapshot to write:
+    /// whoever holds it takes the newest pending snapshot, so an older one
+    /// can never land after a newer one — not from `drain()`, not from
+    /// `flush()`.
+    private let writeLock = NSLock()
+
     private func drain() {
         while true {
+            writeLock.lock()
             lock.lock()
             guard let next = pending else {
                 draining = false
                 lock.unlock()
+                writeLock.unlock()
                 return
             }
             pending = nil
             lock.unlock()
-            guard let data = try? JSONEncoder().encode(next.events) else { continue }
-            try? data.write(to: next.url, options: .atomic)
+            if let data = try? JSONEncoder().encode(next.events) {
+                try? data.write(to: next.url, options: .atomic)
+            }
+            writeLock.unlock()
         }
+    }
+
+    /// Synchronous: writes the waiting snapshot (if any) on the calling
+    /// thread, after any write already in flight has finished.
+    func flush() {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        lock.lock()
+        let next = pending
+        pending = nil
+        lock.unlock()
+        guard let next, let data = try? JSONEncoder().encode(next.events) else { return }
+        try? data.write(to: next.url, options: .atomic)
     }
 }

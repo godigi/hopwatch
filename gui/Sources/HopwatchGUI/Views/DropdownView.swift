@@ -49,11 +49,11 @@ struct DropdownView: View {
             footerSection
         }
         .contextMenu {
-            Button("Copy Redacted Report") { copyShareableReport() }
+            Button("Copy Redacted Report") { copyShareableReport() }.disabled(!coordinator.supportsShare)
             Button("Copy for Support") { copySupportSummary() }
             Divider()
-            Button("Save as Markdown (.md)…") { saveMarkdownReport() }
-            Button("Save Redacted JSON (.json)…") { saveJSONReport() }
+            Button("Save as Markdown (.md)…") { saveMarkdownReport() }.disabled(!coordinator.supportsShare)
+            Button("Save Redacted JSON (.json)…") { saveJSONReport() }.disabled(!coordinator.supportsShare)
         }
         .task {
             coordinator.refreshLocationState()
@@ -825,7 +825,8 @@ struct DropdownView: View {
             onQuit: {
                 coordinator.stop()
                 NSApp.terminate(nil)
-            }
+            },
+            canShare: coordinator.supportsShare
         )
     }
 

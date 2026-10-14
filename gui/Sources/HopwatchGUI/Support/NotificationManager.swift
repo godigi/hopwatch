@@ -309,25 +309,43 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Delivers an immediate recovery notification when the network stabilizes,
-    /// but only if an alert was previously announced.
+    /// but only if an outage was previously announced.
+    ///
+    /// Either way it also retires what the engine no longer holds: any
+    /// announced fault whose id is not in `activeIDs` (an alert that cleared
+    /// without a "resolved" notice — one that does not `resolves`, or one
+    /// dropped when monitoring paused) has its delivered banner removed and
+    /// its record dropped. Left alone, such an entry would sit in
+    /// `announcedFaults` forever, keep its banner in Notification Centre, and
+    /// make the caller ask again on every healthy sample.
     @discardableResult
     func deliverRestored(
         networkName: String,
         latencyMs: Double? = nil,
+        activeIDs: Set<String> = [],
         now: Date = Date()
     ) -> Bool {
-        guard !announcedOutages.isEmpty else { return false }
+        let stale = announcedFaults.subtracting(activeIDs)
+        let hadOutage = !announcedOutages.subtracting(activeIDs).isEmpty
+        guard hadOutage else {
+            // No outage to announce the end of; just tidy up.
+            for faultID in stale { removeNotification(id: "netdiag.\(faultID)") }
+            announcedFaults.subtract(stale)
+            announcedOutages.subtract(stale)
+            return false
+        }
         guard notificationsEnabled && isAuthorized else {
-            clearAnnouncedFaults()
+            announcedFaults.subtract(stale)
+            announcedOutages.subtract(stale)
             return false
         }
 
         // Clean up previously announced degradation banners
-        for faultID in announcedFaults {
+        for faultID in stale {
             removeNotification(id: "netdiag.\(faultID)")
         }
-        announcedFaults.removeAll()
-        announcedOutages.removeAll()
+        announcedFaults.subtract(stale)
+        announcedOutages.subtract(stale)
 
         let title = latencyMs != nil ? "Wi-Fi Restored" : "Network Restored"
         let body: String

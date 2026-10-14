@@ -68,6 +68,7 @@ private enum VerifyHarness {
         runStaleDataTests()
         runAlertAttributionTests()
         runAlertSettleTests()
+        runHistoryLoadOverlapTests()
         runEventAlertDwellTests()
         runAlertNotificationAuthorityTests()
         runPublicIPEventTests()
@@ -852,10 +853,56 @@ private enum VerifyHarness {
             run.diagnosis = diagnosis.map {
                 RunSnapshot.Diagnosis(severity: $0.severity, rule: $0.rule, summary: $0.summary)
             }
+            // As in production: a run lands while its own scan's flag is
+            // still up (the coordinator clears it only in its task's tail).
+            engine.scanInProgress = true
             engine.evaluate(run: run)
+            engine.scanInProgress = false
         }
 
         func body(_ id: String = "wifi-unstable") -> String? { engine.active[id]?.body }
+    }
+
+    /// `HistoryStore.load()` against a stand-in CLI that answers `--history`
+    /// after a second. The launch load is still in flight when the dropdown
+    /// opens a second load and then closes (cancelling it): the first must
+    /// still publish, with no error, or hydration runs on an empty document.
+    private static func runHistoryLoadOverlapTests() {
+        print("History load overlap")
+        let dir = NSTemporaryDirectory() + "hopwatch-verify-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let shim = dir + "/hopwatch"
+        let script = """
+        #!/bin/sh
+        case "$1" in
+          --capabilities) echo '{"schema":1,"version":"0","features":["history","show","monitor","progress","share"]}' ;;
+          --history*) sleep 1; echo '{"schema":2,"metrics":[],"counts":{"records_read":7,"duplicates_dropped":0,"redacted_dropped":0,"unparseable_dropped":0,"runs":0,"networks":0},"networks":[],"runs":[]}' ;;
+          *) exit 3 ;;
+        esac
+        """
+        guard (try? script.write(toFile: shim, atomically: true, encoding: .utf8)) != nil else {
+            check(false, "history overlap: shim written"); return
+        }
+        _ = try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim)
+        let saved = Defaults.binaryPath
+        Defaults.binaryPath = shim
+        defer { Defaults.binaryPath = saved }
+
+        let store = HistoryStore()
+        let a = Task { @MainActor in await store.load() }
+        spin(0.4)
+        let b = Task { @MainActor in await store.load() }
+        spin(0.3)
+        b.cancel()
+        spin(6.0, until: { store.document.counts.recordsRead == 7 && !store.isLoading })
+        _ = a
+        equal(store.document.counts.recordsRead, 7,
+              "the earlier load still publishes when a later load is cancelled")
+        check(store.lastError == nil,
+              "a cancelled load is not reported as an error (\(store.lastError ?? "none"))")
+        check(!store.isLoading, "isLoading settles once every load has ended")
+        print("")
     }
 
     /// A banner may say it is checking only while a check is. Every path by
@@ -954,6 +1001,13 @@ private enum VerifyHarness {
         event.land([("W5", "warn", "SUMMARY-W5")])
         equal(event.body("captive-portal"), captive.interimBody,
               "and neither a landed nor an ended scan rewrites it")
+
+        // A scan-only alert is raised from the run, which lands while the
+        // scan's own flag is still set; that flag must not swallow it.
+        let scanOnly = AlertRig(catalog: catalog, scanStarts: true)
+        scanOnly.land([("NT-1", "warn", "SUMMARY-NT1")])
+        check(scanOnly.engine.active["clock-drift"] != nil,
+              "a scan-only alert (clock-drift) is raised by the run that lands mid-scan")
         print("")
     }
 
@@ -2741,6 +2795,24 @@ private enum VerifyHarness {
         check(mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10),
               "an outage does produce one")
         check(mgr.announcedOutages.isEmpty, "and clears the outage record")
+
+        // A fault the engine no longer holds, with no outage among them: no
+        // 'Restored' notice, but the stale record and its banner are dropped
+        // so the caller stops asking on every healthy sample — while a fault
+        // still active is left alone.
+        removed.removeAll()
+        _ = mgr.deliverDegradation(id: "internet-degraded", title: "Slow", body: "x",
+                                   isOutage: false, now: evT.addingTimeInterval(400))
+        _ = mgr.deliverDegradation(id: "wifi-unstable", title: "W", body: "x",
+                                   isOutage: false, now: evT.addingTimeInterval(401))
+        check(!mgr.deliverRestored(networkName: "HomeNet", latencyMs: 10, activeIDs: ["wifi-unstable"]),
+              "stale non-outage faults produce no 'Restored' notice")
+        check(!mgr.announcedFaults.contains("internet-degraded")
+              && removed.contains("netdiag.internet-degraded"),
+              "…but the inactive fault's record and banner are dropped")
+        check(mgr.announcedFaults.contains("wifi-unstable") && !removed.contains("netdiag.wifi-unstable"),
+              "…and a fault still active is left alone")
+        mgr.clearAnnouncedFaults()
 
         check(UpdateChecker.archiveExtension(forAssetNamed: "../../x/Hopwatch.ZIP") == "zip"
               && UpdateChecker.archiveExtension(forAssetNamed: "Hopwatch.tar.gz") == nil,

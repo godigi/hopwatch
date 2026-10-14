@@ -44,7 +44,8 @@ struct HomeView: View {
                     onCopyRedacted: { copyShareableReport() },
                     onCopySupport: { copySupportSummary() },
                     onSaveMarkdown: { saveMarkdownReport() },
-                    onSaveJSON: { saveJSONReport() }
+                    onSaveJSON: { saveJSONReport() },
+                    canShare: coordinator.supportsShare
                 )
 
                 // Location Banner (if location permissions are restricted on Wi-Fi)
@@ -229,7 +230,8 @@ struct HomeView: View {
                         appVersion: AppVersion.display,
                         onViewRawJSON: { showRawJSONSheet = true },
                         onCopyRedacted: { copyShareableReport() },
-                        onSaveMarkdown: { saveMarkdownReport() }
+                        onSaveMarkdown: { saveMarkdownReport() },
+                        canShare: coordinator.supportsShare
                     )
                     .frame(maxWidth: .infinity)
                 }
@@ -497,12 +499,16 @@ struct HomeView: View {
 
     private var quietLine: String {
         var parts: [String] = []
-        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents, now: .now) {
+        // Scoped to the network the Mac is on, but not capped at 24 h: a
+        // quiet two days is exactly what this line should say, and another
+        // network's event must never reset it.
+        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents(withinHours: nil), now: .now) {
             if since < 60 {
                 parts.append("Nothing has changed in under a minute")
             } else {
                 let f = DateComponentsFormatter()
-                f.allowedUnits = since >= 3600 ? [.hour, .minute] : [.minute]
+                f.allowedUnits = since >= 86_400 ? [.day, .hour]
+                    : since >= 3600 ? [.hour, .minute] : [.minute]
                 f.unitsStyle = .abbreviated
                 if let s = f.string(from: since) {
                     parts.append("Nothing has changed in \(s)")

@@ -15,6 +15,9 @@ struct DashboardHeadingView: View {
     let onCopySupport: () -> Void
     let onSaveMarkdown: () -> Void
     let onSaveJSON: () -> Void
+    /// False when the CLI does not advertise `share`; the redacted-report
+    /// actions are then disabled rather than failing on press.
+    var canShare: Bool = true
 
     var body: some View {
         HStack(alignment: .center) {
@@ -50,11 +53,11 @@ struct DashboardHeadingView: View {
 
             HStack(spacing: 10) {
                 Menu {
-                    Button("Copy redacted report", action: onCopyRedacted)
+                    Button("Copy redacted report", action: onCopyRedacted).disabled(!canShare)
                     Button("Copy for support / front desk", action: onCopySupport)
                     Divider()
-                    Button("Save Markdown…", action: onSaveMarkdown)
-                    Button("Save redacted JSON…", action: onSaveJSON)
+                    Button("Save Markdown…", action: onSaveMarkdown).disabled(!canShare)
+                    Button("Save redacted JSON…", action: onSaveJSON).disabled(!canShare)
                     Divider()
                     Text("Network name, IP addresses and precise location are masked.")
                 } label: {
@@ -2209,6 +2212,7 @@ struct DashboardTechnicalPanel: View {
     let onViewRawJSON: () -> Void
     let onCopyRedacted: () -> Void
     let onSaveMarkdown: () -> Void
+    var canShare: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2254,6 +2258,7 @@ struct DashboardTechnicalPanel: View {
                 Button("Copy Redacted Report") {
                     onCopyRedacted()
                 }
+                .disabled(!canShare)
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.blue)
@@ -2261,6 +2266,7 @@ struct DashboardTechnicalPanel: View {
                 Button("Save Markdown…") {
                     onSaveMarkdown()
                 }
+                .disabled(!canShare)
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.blue)
