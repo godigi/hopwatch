@@ -138,7 +138,11 @@ headline_run() {
   fi
 
   # ── Router (gateway) — loss / latency / jitter ────────────────────────
-  if [ -n "$GATEWAY" ] && [ -n "$GW_LOSS" ] && [ -n "$GW_LATENCY" ]; then
+  # Shown whenever the loss figure exists, latency or not: at 100% loss no
+  # reply ever came back, so there is no latency, and requiring one made the
+  # row vanish in exactly the case where it is the most important thing on
+  # the card (G1, "can't reach your router", still fired below it).
+  if [ -n "$GATEWAY" ] && [ -n "$GW_LOSS" ]; then
     # Thresholds are the shared LOSS_* constants, so a coloured row always
     # has a matching diagnosis below it. They used to diverge: the row went
     # yellow at 1% while the lowest gateway rule fired at 20%, so the band
@@ -148,7 +152,14 @@ headline_run() {
     loss_at_least "$GW_LOSS" "$LOSS_WARN_PCT" && sev=warn
     loss_at_least "$GW_LOSS" "$LOSS_CRIT_PCT" && sev=bad
     local rline
-    rline="$GATEWAY · ${GW_LOSS%.*}% loss · $(printf '%.1f' "$GW_LATENCY" 2>/dev/null || printf '%s' "$GW_LATENCY") ms"
+    rline="$GATEWAY · ${GW_LOSS%.*}% loss"
+    if [ -n "$GW_LATENCY" ]; then
+      rline="$rline · $(printf '%.1f' "$GW_LATENCY" 2>/dev/null || printf '%s' "$GW_LATENCY") ms"
+    elif loss_at_least "$GW_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
+      rline="$rline · no replies"
+    else
+      rline="$rline · latency not measured"
+    fi
     [ -n "$GW_JITTER" ] && rline="$rline · ±$(printf '%.1f' "$GW_JITTER" 2>/dev/null || printf '%s' "$GW_JITTER") ms jitter"
     _row "$sev" "Router" "$rline"
   fi
@@ -271,10 +282,24 @@ headline_run() {
 
   # ── MTU (packet size) ────────────────────────────────────────────────
   if [ -n "$MTU_EFFECTIVE" ]; then
+    # The same judgement as rule M1 in lib/diagnosis.sh, so a coloured row
+    # always has a diagnosis under it and a green one never hides one. It
+    # used to cut at 1400/1500: PPPoE (1492) and every VPN (~1380-1420)
+    # showed yellow or red with no finding to explain it.
+    #   no VPN:  < THRESH_MTU_CRIT       -> bad  (M1 critical)
+    #            < THRESH_MTU_STANDARD   -> warn (M1 warning)
+    #   VPN or split tunnel: tunnel headers legitimately shrink the MTU, so
+    #            only < THRESH_MTU_CRIT  -> warn (M1's VPN wording).
     local mtu_sev=ok mtu_note="standard"
-    if [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_STANDARD" ]; then
+    if [ "${VPN_ACTIVE:-0}" -eq 1 ] || [ "${PATH_SPLIT_TUNNEL:-0}" -eq 1 ]; then
+      if [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_CRIT" ]; then
+        mtu_sev=warn; mtu_note="below the IPv6 minimum · some sites may fail"
+      elif [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_ETHERNET" ]; then
+        mtu_note="VPN / tunnel overhead (normal)"
+      fi
+    elif [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_CRIT" ]; then
       mtu_sev=bad; mtu_note="severely clamped · many sites broken"
-    elif [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_ETHERNET" ]; then
+    elif [ "$MTU_EFFECTIVE" -lt "$THRESH_MTU_STANDARD" ]; then
       mtu_sev=warn; mtu_note="below standard · some sites may hang"
     fi
     _row "$mtu_sev" "Packet size" "$MTU_EFFECTIVE bytes · $mtu_note"

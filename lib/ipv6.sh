@@ -18,11 +18,20 @@ ipv6_parse_ping_loss() {
   printf '%s\n' "${parsed%%|*}"
 }
 
+# The first global-scope IPv6 address in `ifconfig <iface> inet6` output ($1).
+# Link-local (fe80::) and scoped (%) addresses are skipped, and so is the
+# loopback ::1 — compared as the whole address. An unanchored /::1/ also
+# matched any address merely *containing* "::1" (2001:db8::1a2b, …::10,
+# …::1f), so a host with such an address read as "v4-only".
+ipv6_pick_global_addr() {
+  printf '%s\n' "$1" \
+    | awk '/inet6 / && !/fe80::/ && $2 != "::1" && !/%/ {print $2; exit}'
+}
+
 ipv6_run() {
   hdr "IPv6"
   if [ -n "$INTERFACE" ]; then
-    IPV6_GLOBAL_ADDR="$(ifconfig "$INTERFACE" inet6 2>/dev/null \
-      | awk '/inet6 / && !/fe80::/ && !/::1/ && !/%/ {print $2; exit}')"
+    IPV6_GLOBAL_ADDR="$(ipv6_pick_global_addr "$(ifconfig "$INTERFACE" inet6 2>/dev/null)")"
   fi
   if [ -z "$IPV6_GLOBAL_ADDR" ]; then
     info "No global IPv6 on $INTERFACE — v4-only network."
@@ -40,8 +49,14 @@ ipv6_run() {
     # servname provided" before sending a single packet. 2>/dev/null hid the
     # message and the empty result was defaulted to 100% loss, so every
     # IPv6-capable machine reported a permanently broken IPv6 stack.
-    # with_timeout supplies the wall-clock bound -W was meant to provide.
-    ping6_out="$(with_timeout 6 ping6 -c 5 -i 0.2 2606:4700:4700::1111 2>/dev/null || true)"
+    #
+    # But a wall-clock kill (SIGTERM) lands before ping6 prints its
+    # statistics whenever a reply is lost — measured, ping6 waits ~10.6 s
+    # after the last packet — so any loss at all read as "no statistics".
+    # ping_sigint_bound interrupts it with SIGINT instead, which makes ping6
+    # print the summary immediately: the same bound -W gives ping(8).
+    local ping6_bound=$(( 1 + (PING_REPLY_WAIT_MS + 999) / 1000 ))
+    ping6_out="$(ping_sigint_bound "$ping6_bound" ping6 -c 5 -i 0.2 2606:4700:4700::1111 || true)"
     IPV6_PING_LOSS="$(ipv6_parse_ping_loss "$ping6_out")"
     if [ -z "$IPV6_PING_LOSS" ]; then
       # Empty means the measurement itself failed, which is not evidence

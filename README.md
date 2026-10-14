@@ -237,6 +237,8 @@ hopwatch --signal-scale           # Wi-Fi signal scale thresholds (dBm floors & 
 |                      | is a compact Report card + diagnoses only.             |
 | `--gping`            | launch live ping monitor on the discovered hops at end |
 | `--no-gping`         | skip the gping prompt (scripts / watchers)             |
+| `--allow-sudo`       | let a check retry with `sudo -n` (never prompts) after |
+|                      | its unprivileged path failed. Off by default           |
 | `--no-bufferbloat`   | skip the 100 MB / 10 s probe (metered link)            |
 | `--speed`            | run the speedtest even under `--quick`, or on a        |
 |                      | metered link (it is already on by default otherwise)   |
@@ -512,7 +514,9 @@ Missing optional deps degrade gracefully with a one-line install hint.
 
 ## Permissions
 
-Hopwatch is completely sudo-free. It never prompts for elevated privileges and performs all diagnostics, latency tests, speed tests, and background monitoring in standard user space.
+Hopwatch is sudo-free by default. It never prompts for elevated privileges and performs all diagnostics, latency tests, speed tests, and background monitoring in standard user space, and it never calls `sudo` on its own.
+
+There is one opt-in escape hatch. If you set `HOPWATCH_ALLOW_SUDO=1` (or pass `--allow-sudo`), a check whose unprivileged path produced nothing may retry with `sudo -n` (`wdutil` for Wi-Fi signal, `mtr` for per-hop loss). `-n` means it never asks for a password: it only works if you already have sudo credentials cached.
 
 ## Continuous Monitoring & Outage Logging
 
@@ -644,7 +648,7 @@ Yes. Run `hopwatch --redact` or `hopwatch --share`. Hopwatch masks identifying p
 Standard tools test only a single variable (e.g. `ping` checks reachability; `speedtest` checks bandwidth; `wdutil` checks radio stats) without context. Hopwatch runs all checks in parallel, correlates them, scores the results against your network's historical baseline, and tells you what to do in plain English.
 
 ### Does Hopwatch require `sudo`?
-No. Hopwatch runs 100% sudo-free for all standard diagnostics, menu bar monitoring, speed tests, and per-hop path analysis. It never prompts for elevated privileges.
+No. Hopwatch runs sudo-free for all standard diagnostics, menu bar monitoring, speed tests, and per-hop path analysis, and it never prompts for elevated privileges. `sudo` is used only if you opt in with `HOPWATCH_ALLOW_SUDO=1` or `--allow-sudo`, only as a last resort after the unprivileged path failed, and only as `sudo -n` (no prompt).
 
 ## Roadmap
 
