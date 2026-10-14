@@ -24,6 +24,15 @@ final class HopwatchCoordinator {
     /// `RuleChip` and every category-driven report row reads
     /// `rulesCatalog.catalog` directly rather than awaiting anything.
     let rulesCatalog = RulesCatalogStore()
+    /// Whether the CLI in use advertises `share` in its capabilities
+    /// handshake. The share buttons read this; it starts true so they are
+    /// not greyed out for the moment before the first probe lands (and
+    /// `NetdiagRunner.share` re-checks regardless).
+    private(set) var supportsShare = true
+
+    func refreshShareSupport() async {
+        supportsShare = await CapabilityStore.shared.supports(.share)
+    }
     /// The CLI's Wi-Fi signal scale — see that store's header. Same
     /// synchronous-read shape as `rulesCatalog`: the Wi-Fi cell on Home and
     /// in the dropdown reads `signalScale.scale` directly from a view body.
@@ -277,6 +286,7 @@ final class HopwatchCoordinator {
                 log.info("Uninstalling legacy 15-minute background watcher")
                 await watcher.uninstall()
             }
+            await refreshShareSupport()
             await history.load()
             await hydrateFromHistoryIfNeeded()
         }

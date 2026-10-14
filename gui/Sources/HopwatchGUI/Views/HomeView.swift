@@ -44,7 +44,8 @@ struct HomeView: View {
                     onCopyRedacted: { copyShareableReport() },
                     onCopySupport: { copySupportSummary() },
                     onSaveMarkdown: { saveMarkdownReport() },
-                    onSaveJSON: { saveJSONReport() }
+                    onSaveJSON: { saveJSONReport() },
+                    canShare: coordinator.supportsShare
                 )
 
                 // Location Banner (if location permissions are restricted on Wi-Fi)
@@ -229,7 +230,8 @@ struct HomeView: View {
                         appVersion: AppVersion.display,
                         onViewRawJSON: { showRawJSONSheet = true },
                         onCopyRedacted: { copyShareableReport() },
-                        onSaveMarkdown: { saveMarkdownReport() }
+                        onSaveMarkdown: { saveMarkdownReport() },
+                        canShare: coordinator.supportsShare
                     )
                     .frame(maxWidth: .infinity)
                 }

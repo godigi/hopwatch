@@ -86,6 +86,10 @@ FEATURES = [
     # consumer checking for "repair" is asking whether a diagnosis's
     # `repairs` entries can actually be run on this build.
     "repair",
+    # `--share[=ID|-]`: one run as redacted, pasteable text (or JSON with
+    # --json). A consumer checking for "share" is asking whether the
+    # "Copy redacted report" / "Save…" actions can run on this build.
+    "share",
 ]
 
 

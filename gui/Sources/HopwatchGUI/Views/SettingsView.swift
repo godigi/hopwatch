@@ -1256,6 +1256,7 @@ struct SettingsView: View {
                !coordinator.monitor.isRunning {
                 coordinator.monitor.restartNow()
             }
+            await coordinator.refreshShareSupport()
             await coordinator.rulesCatalog.refresh()
             isRechecking = false
         }

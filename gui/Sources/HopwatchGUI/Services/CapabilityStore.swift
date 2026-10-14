@@ -45,6 +45,8 @@ actor CapabilityStore {
         case signalScale = "signal-scale"
         /// `--repair=ID`: the user-started "Fix it" tier.
         case repair
+        /// `--share[=ID|-]`: the redacted, pasteable rendering of a run.
+        case share
     }
 
     private var resolvedPath: String?
