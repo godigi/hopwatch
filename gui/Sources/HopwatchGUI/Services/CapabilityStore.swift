@@ -66,8 +66,33 @@ actor CapabilityStore {
     func current() async -> CapabilityState {
         let resolved = BinaryLocator.resolve()
         if let probing, probing.path == resolved { return await probing.task.value }
-        if resolved == resolvedPath { return state }
+        if resolved == resolvedPath {
+            // `.unavailable` is "the probe couldn't establish anything" — a
+            // spawn failure, a timeout, a launch while the disk was busy.
+            // Remembering that for the whole session turned one bad
+            // moment into a monitor that never started and a Settings
+            // screen that blamed the CLI until relaunch. It is held only
+            // briefly, so a genuinely broken CLI is not re-spawned on every
+            // call, and then asked again.
+            if case .unavailable = state, let at = unavailableSince,
+               Date().timeIntervalSince(at) >= Self.unavailableTTL {
+                return await beginProbe(path: resolved)
+            }
+            return state
+        }
         return await beginProbe(path: resolved)
+    }
+
+    /// How long a failed handshake is believed. Short on purpose.
+    static let unavailableTTL: TimeInterval = 10
+    private var unavailableSince: Date?
+
+    /// True when the handshake could not be completed at all — as opposed
+    /// to completing and finding an old CLI. This is the one answer worth
+    /// retrying later; a `.legacy` answer will not change by itself.
+    func isUnavailable() async -> Bool {
+        if case .unavailable = await current() { return true }
+        return false
     }
 
     /// Forces a fresh probe of whatever path is resolved right now, even
@@ -120,6 +145,7 @@ actor CapabilityStore {
         if probing?.task == task {
             resolvedPath = path
             state = result
+            if case .unavailable = result { unavailableSince = Date() } else { unavailableSince = nil }
             probing = nil
         }
         return result

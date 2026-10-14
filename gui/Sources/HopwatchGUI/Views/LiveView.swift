@@ -149,7 +149,7 @@ struct LiveView: View {
                 Text(connectedHeadline)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
-                if let latest = coordinator.eventLog.latestNetworkEvent {
+                if let latest = coordinator.latestCurrentNetworkEvent {
                     HStack(spacing: 4) {
                         Text(latest.summary)
                         Text("·")

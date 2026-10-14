@@ -74,11 +74,22 @@ final class HistoryStore {
         document = d
     }
 
+    /// Bumped by every `load()`. Loads overlap (a network event, a wake and
+    /// a finished scan can each ask within a second), and each is a child
+    /// process of unpredictable duration, so they can finish out of order:
+    /// the older, slower answer would then overwrite the newer one. Only the
+    /// load that is still the latest when it returns may publish.
+    private var loadGeneration = 0
+
     func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == loadGeneration { isLoading = false } }
         do {
-            document = try await NetdiagRunner.history()
+            let loaded = try await NetdiagRunner.history()
+            guard generation == loadGeneration else { return }
+            document = loaded
             lastError = nil
             lastLoadedAt = Date()
             // A fresh document invalidates every memoized median: the
@@ -89,6 +100,7 @@ final class HistoryStore {
             medianCache.removeAll()
             invalidateNetworkCaches()
         } catch {
+            guard generation == loadGeneration else { return }
             lastError = error.localizedDescription
         }
     }

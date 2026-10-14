@@ -265,7 +265,10 @@ struct HopwatchRunner {
 
     /// One child process, awaited. Returns (stdout, stderr, exit status).
     ///
-    /// stdout and stderr are drained on background queues rather than read
+    /// The child runs in its own process group (see `ChildProcess`), so a cancel reaches
+    /// its grandchildren too.
+    ///
+    /// stdout and stderr are drained on background threads rather than read
     /// after `waitUntilExit`: netdiag can emit a few hundred KB of JSON,
     /// which is more than a pipe buffer holds, and reading afterwards
     /// deadlocks the moment it is.
@@ -287,85 +290,95 @@ struct HopwatchRunner {
     ) async throws -> (String, String, Int32) {
         guard let binary = BinaryLocator.resolve() else { throw NetdiagError.binaryNotFound }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = arguments
-        process.environment = BinaryLocator.environment()
-
-        let outPipe = Pipe(), errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        // Feeding stdin needs its own pipe, and the write has to happen
-        // off this thread *after* the process is running: a JSON body
-        // larger than the pipe buffer (64 KB on macOS) blocks the writer
-        // until the child drains it, and the child cannot drain while we
-        // are blocked here not reading its stdout. Deadlock, on exactly
-        // the large reports worth sharing.
-        var inPipe: Pipe?
-        if stdin != nil {
-            let pipe = Pipe()
-            inPipe = pipe
-            process.standardInput = pipe
-        }
+        // A cancel that lands before the child exists must not be lost:
+        // `onCancel` can fire at any moment, including before `spawn` has
+        // produced a PID to signal, so the request is parked in `box` and
+        // honoured the instant the child is attached.
+        let box = CancelBox()
+        if Task.isCancelled { throw CancellationError() }
 
         let collector = OutputCollector()
         let splitter = stderrLines.map { sink in
             LineSplitter { line in _ = sink.yield(line) }
         }
-        outPipe.fileHandleForReading.readabilityHandler = { handle in
-            let d = handle.availableData
-            if !d.isEmpty { collector.appendOut(d) }
-        }
-        errPipe.fileHandleForReading.readabilityHandler = { handle in
-            let d = handle.availableData
-            if !d.isEmpty {
-                collector.appendErr(d)
-                splitter?.feed(d)
-            }
-        }
 
-        return try await withTaskCancellationHandler {
+        let result: ChildProcess.Result = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                process.terminationHandler = { proc in
-                    outPipe.fileHandleForReading.readabilityHandler = nil
-                    errPipe.fileHandleForReading.readabilityHandler = nil
-                    // Whatever landed between the last readability callback
-                    // and exit. Without this the tail of a large JSON body
-                    // is silently truncated and the decode fails on a run
-                    // that actually succeeded.
-                    collector.appendOut(outPipe.fileHandleForReading.availableData)
-                    let tail = errPipe.fileHandleForReading.availableData
-                    collector.appendErr(tail)
-                    splitter?.feed(tail)
-                    // The final `run done` event can land in that tail, so
-                    // flush before closing: a consumer that never sees it
-                    // is a consumer whose phase rows never stop spinning.
-                    splitter?.flush()
-                    stderrLines?.finish()
-                    continuation.resume(returning: (collector.stdoutString,
-                                                    collector.stderrString,
-                                                    proc.terminationStatus))
-                }
+                let child: ChildProcess
                 do {
-                    try process.run()
-                    if let inPipe, let stdin, let data = stdin.data(using: .utf8) {
-                        DispatchQueue.global(qos: .userInitiated).async {
-                            inPipe.fileHandleForWriting.write(data)
-                            try? inPipe.fileHandleForWriting.close()
-                        }
-                    }
+                    child = try ChildProcess(
+                        path: binary,
+                        arguments: arguments,
+                        environment: BinaryLocator.environment(),
+                        // The write happens off this thread *after* the
+                        // process is running: a JSON body larger than the
+                        // pipe buffer (64 KB on macOS) blocks the writer
+                        // until the child drains it.
+                        feedsStdin: stdin != nil,
+                        onStdout: { collector.appendOut($0) },
+                        onStderr: { chunk in
+                            collector.appendErr(chunk)
+                            splitter?.feed(chunk)
+                        },
+                        onExit: { status in
+                            // The final `run done` event can sit in the last
+                            // chunk, so flush before closing: a consumer
+                            // that never sees it is one whose phase rows
+                            // never stop spinning.
+                            splitter?.flush()
+                            stderrLines?.finish()
+                            continuation.resume(returning: ChildProcess.Result(
+                                stdout: collector.stdoutData,
+                                stderr: collector.stderrData,
+                                status: status))
+                        })
                 } catch {
-                    outPipe.fileHandleForReading.readabilityHandler = nil
-                    errPipe.fileHandleForReading.readabilityHandler = nil
                     stderrLines?.finish()
-                    continuation.resume(throwing: NetdiagError.scriptError(error.localizedDescription))
+                    continuation.resume(throwing: NetdiagError.scriptError(
+                        "couldn't start hopwatch (\(error))"))
+                    return
                 }
+                // Checked immediately after the child exists: a cancel that
+                // arrived first is applied now rather than lost.
+                box.attach(child)
+                if let stdin, let data = stdin.data(using: .utf8) { child.feed(data) }
             }
         } onCancel: {
-            if process.isRunning { process.terminate() }
+            box.cancel()
         }
+
+        // A cancelled run is reported as cancellation, never as the
+        // signal-killed exit status it happened to produce.
+        if box.wasCancelled { throw CancellationError() }
+        return (String(decoding: result.stdout, as: UTF8.self),
+                String(decoding: result.stderr, as: UTF8.self),
+                result.status)
     }
+}
+
+/// Hands a cancel request to a child that may not exist yet.
+private final class CancelBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var child: ChildProcess?
+    private var cancelled = false
+
+    func attach(_ child: ChildProcess) {
+        lock.lock()
+        self.child = child
+        let pending = cancelled
+        lock.unlock()
+        if pending { child.cancel() }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let child = self.child
+        lock.unlock()
+        child?.cancel()
+    }
+
+    var wasCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 }
 
 /// Reassembles whole lines from arbitrary pipe chunks.
@@ -417,12 +430,6 @@ private final class OutputCollector: @unchecked Sendable {
     func appendOut(_ d: Data) { lock.lock(); out.append(d); lock.unlock() }
     func appendErr(_ d: Data) { lock.lock(); err.append(d); lock.unlock() }
 
-    var stdoutString: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: out, encoding: .utf8) ?? ""
-    }
-    var stderrString: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: err, encoding: .utf8) ?? ""
-    }
+    var stdoutData: Data { lock.lock(); defer { lock.unlock() }; return out }
+    var stderrData: Data { lock.lock(); defer { lock.unlock() }; return err }
 }

@@ -117,10 +117,13 @@ final class EventStore {
         if changed { save() }
     }
 
-    /// The newest event describing a network condition, ignoring internal
-    /// monitor-started restart markers.
+    /// The newest event describing a network condition, on *any* network,
+    /// ignoring internal monitor-started restart markers. Not for display:
+    /// an unlabelled event from the network you were on an hour ago reads
+    /// as being about this one. Screens use
+    /// `HopwatchCoordinator.latestCurrentNetworkEvent`.
     var latestNetworkEvent: NetworkEvent? {
-        events.first(where: { $0.kind != "monitor-started" && $0.kind != "rule-updated" })
+        NetworkEvent.latestCondition(in: events)
     }
 
     var lastEventDate: Date? { latestNetworkEvent?.date }
@@ -138,12 +141,49 @@ final class EventStore {
         events = NetworkEvent.trimmed(stored, cap: Self.cap)
     }
 
+    private let writer = EventWriter()
+
     private func save() {
         guard let url else { return }
-        let currentEvents = events
-        Task.detached(priority: .utility) {
-            guard let data = try? JSONEncoder().encode(currentEvents) else { return }
-            try? data.write(to: url, options: .atomic)
+        writer.submit(events, to: url)
+    }
+}
+
+/// Writes the event log one snapshot at a time, newest wins.
+///
+/// `save()` used to spawn a detached task per call. Two calls close together
+/// (a rule firing and clearing in one sample) wrote concurrently, and the
+/// older snapshot could land last — silently dropping the newest event from
+/// disk. Here at most one write runs at a time, and anything submitted while
+/// it runs replaces the single waiting snapshot, so the file always ends on
+/// the latest state and a burst costs two writes, not fifty.
+private final class EventWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: (events: [NetworkEvent], url: URL)?
+    private var draining = false
+
+    func submit(_ events: [NetworkEvent], to url: URL) {
+        lock.lock()
+        pending = (events, url)
+        let startDrain = !draining
+        draining = true
+        lock.unlock()
+        guard startDrain else { return }
+        DispatchQueue.global(qos: .utility).async { [self] in drain() }
+    }
+
+    private func drain() {
+        while true {
+            lock.lock()
+            guard let next = pending else {
+                draining = false
+                lock.unlock()
+                return
+            }
+            pending = nil
+            lock.unlock()
+            guard let data = try? JSONEncoder().encode(next.events) else { continue }
+            try? data.write(to: next.url, options: .atomic)
         }
     }
 }

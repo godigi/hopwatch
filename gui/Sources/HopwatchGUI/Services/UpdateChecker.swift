@@ -168,51 +168,49 @@ final class UpdateChecker {
                 self.downloadProgress = 0.9
                 self.statusMessage = "Extracting update…"
 
-                let archivePath = tempDir.appendingPathComponent(asset?.name ?? "update.zip")
+                // The asset name comes from the release JSON and is attacker-
+                // influenced if the release were ever tampered with: a name
+                // like "../../x.zip" would have walked out of the temp
+                // directory. Only the extension is used; the file name is ours.
+                guard let ext = Self.archiveExtension(forAssetNamed: asset?.name) else {
+                    self.openReleasePage()
+                    return
+                }
+                let archivePath = tempDir.appendingPathComponent("update.\(ext)")
                 try FileManager.default.moveItem(at: downloadedURL, to: archivePath)
 
                 // Unpack archive
                 let extractDir = tempDir.appendingPathComponent("Extracted")
                 try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
 
-                let ext = archivePath.pathExtension.lowercased()
                 var appPath: String?
 
+                // `ditto`, `hdiutil` and the app copy all run off the main
+                // actor (a 30 MB unzip used to freeze the UI and the menu bar
+                // dot) and each exit status is checked: a failed unpack used
+                // to fall through to "no .app found" with no cause logged.
                 if ext == "zip" {
-                    let ditto = Process()
-                    ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                    ditto.arguments = ["-xk", archivePath.path, extractDir.path]
-                    try ditto.run()
-                    ditto.waitUntilExit()
-
+                    try await Self.runTool("/usr/bin/ditto", ["-xk", archivePath.path, extractDir.path])
                     appPath = findApp(in: extractDir)
                 } else if ext == "dmg" {
                     // Mount DMG without user interaction
                     let mountPoint = tempDir.appendingPathComponent("Volume")
                     try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
-
-                    let hdiutil = Process()
-                    hdiutil.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-                    hdiutil.arguments = ["attach", archivePath.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet", "-noautoopen"]
-                    try hdiutil.run()
-                    hdiutil.waitUntilExit()
-
-                    defer {
-                        // Unmount when finished
-                        let detach = Process()
-                        detach.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-                        detach.arguments = ["detach", mountPoint.path, "-force", "-quiet"]
-                        try? detach.run()
-                        detach.waitUntilExit()
+                    try await Self.runTool("/usr/bin/hdiutil", [
+                        "attach", archivePath.path, "-mountpoint", mountPoint.path,
+                        "-nobrowse", "-quiet", "-noautoopen"])
+                    do {
+                        if let sourceApp = findApp(in: mountPoint) {
+                            let copiedApp = extractDir.appendingPathComponent(
+                                URL(fileURLWithPath: sourceApp).lastPathComponent)
+                            try await Self.runTool("/usr/bin/ditto", [sourceApp, copiedApp.path])
+                            appPath = copiedApp.path
+                        }
+                    } catch {
+                        try? await Self.runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force", "-quiet"])
+                        throw error
                     }
-
-                    if let sourceApp = findApp(in: mountPoint) {
-                        let sourceURL = URL(fileURLWithPath: sourceApp)
-                        let copiedApp = extractDir.appendingPathComponent(sourceURL.lastPathComponent)
-                        try? FileManager.default.removeItem(at: copiedApp)
-                        try FileManager.default.copyItem(at: sourceURL, to: copiedApp)
-                        appPath = copiedApp.path
-                    }
+                    try? await Self.runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force", "-quiet"])
                 }
 
                 if let appPath {
@@ -230,6 +228,42 @@ final class UpdateChecker {
                 self.openReleasePage()
             }
         }
+    }
+
+    /// The archive kind to unpack, taken from a release asset's name, or nil
+    /// when it is not one this installer can open. Only the extension is
+    /// trusted: the name itself is release metadata and never becomes a path.
+    nonisolated static func archiveExtension(forAssetNamed name: String?) -> String? {
+        guard let name else { return nil }
+        let lower = name.lowercased()
+        if lower.hasSuffix(".zip") { return "zip" }
+        if lower.hasSuffix(".dmg") { return "dmg" }
+        return nil
+    }
+
+    struct ToolFailure: LocalizedError {
+        let tool: String
+        let status: Int32
+        var errorDescription: String? { "\(tool) exited with status \(status)" }
+    }
+
+    /// Runs a system tool to completion on a background thread and throws
+    /// unless it exits 0. Output is discarded: these tools are run with
+    /// `-quiet`, and an unread pipe would stall them.
+    nonisolated static func runTool(_ path: String, _ arguments: [String]) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw ToolFailure(tool: (path as NSString).lastPathComponent,
+                                  status: process.terminationStatus)
+            }
+        }.value
     }
 
     /// Determines the installation destination for the updated app bundle.
@@ -302,8 +336,16 @@ final class UpdateChecker {
 
         let currentPID = ProcessInfo.processInfo.processIdentifier
 
+        // Every path reaches the script as a positional argument ($1..$3),
+        // never as text spliced into it: an app name or install location
+        // containing a quote, `$(`, or a newline would otherwise be
+        // executed rather than copied.
         let script = """
-        PARENT_PID="\(currentPID)"
+        PARENT_PID="$1"
+        TARGET="$2"
+        NEW_APP="$3"
+        TARGET_DIR="$(dirname "$TARGET")"
+
         # Wait up to 10 seconds for current app process to exit
         for i in {1..50}; do
             if ! kill -0 "$PARENT_PID" 2>/dev/null; then
@@ -313,17 +355,18 @@ final class UpdateChecker {
         done
         sleep 0.3
 
-        TARGET="\(targetPath)"
-        NEW_APP="\(newAppPath)"
-        TARGET_DIR="\(targetDir)"
-
         mkdir -p "$TARGET_DIR" 2>/dev/null || true
         TMP_STAGING="${TARGET}.new.$$"
         BACKUP="${TARGET}.old.$$"
 
         rm -rf "$TMP_STAGING" "$BACKUP"
         # Preserve all code signatures, extended attributes, and permissions with ditto
-        /usr/bin/ditto "$NEW_APP" "$TMP_STAGING" || exit 1
+        if ! /usr/bin/ditto "$NEW_APP" "$TMP_STAGING"; then
+            rm -rf "$TMP_STAGING"
+            # The old app is untouched: put the user back in it.
+            open "$TARGET"
+            exit 1
+        fi
 
         # Strip Gatekeeper quarantine & provenance attributes recursively
         xattr -cr "$TMP_STAGING" 2>/dev/null || true
@@ -337,6 +380,7 @@ final class UpdateChecker {
         elif [ -d "$BACKUP" ]; then
             # Rollback if move failed
             mv "$BACKUP" "$TARGET" 2>/dev/null || true
+            open "$TARGET"
             exit 1
         fi
 
@@ -347,8 +391,22 @@ final class UpdateChecker {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
-        try? process.run()
+        // "hopwatch-update" is $0; the three values follow as $1, $2, $3.
+        process.arguments = ["-c", script, "hopwatch-update",
+                             String(currentPID), targetPath, newAppPath]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            // Quitting now would leave the user with no app and nothing
+            // running to bring one back. Stay open and say so.
+            self.log.error("Could not start the update script: \(error.localizedDescription, privacy: .public)")
+            self.errorMessage = "Couldn't start the installer. Please update manually."
+            self.statusMessage = "Update failed"
+            self.openReleasePage()
+            return
+        }
 
         NSApp.terminate(nil)
     }
