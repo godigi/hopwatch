@@ -113,6 +113,18 @@ MONITOR_INET_PING_COUNT=20
 # smoothly toward the thresholds, and routine noise decays out.
 MONITOR_LOSS_WINDOW_PROBES=10
 
+# Warm-up floors for the windowed loss figure. While a window is still
+# filling, its denominator is small and one or two dropped packets quantise
+# to a large percentage (1 of 20 sent reads 5%, 2 of 20 reads 10%) — movement
+# of the probe, not of the network. A window that has sent fewer than this
+# many packets reports a single drop (ONE_DROP) or a pair of drops (TWO_DROP)
+# as 0% instead. They are deliberately small: 80 and 50 are well under the
+# 100 packets a full gateway window holds, so the suppression ends within a
+# few cycles of start-up and cannot hide sustained loss. Never raise them
+# toward the full window size — that would let the monitor hide real loss.
+MONITOR_LOSS_ONE_DROP_MIN_SENT=80
+MONITOR_LOSS_TWO_DROP_MIN_SENT=50
+
 # A single cycle's loss is a blip, not a condition: at MONITOR_PING_COUNT=10
 # one dropped packet reads as 10%, exactly LOSS_WARN_PCT. Requiring the same
 # band on consecutive cycles turns a lost packet into a fact about the link

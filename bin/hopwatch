@@ -957,9 +957,12 @@ if [ "$MONITOR" -eq 1 ]; then
   . "$LIB_DIR/vpn.sh"
   # shellcheck source=lib/monitor.sh
   . "$LIB_DIR/monitor.sh"
-  monitor_run
+  # 0 on a normal stop (signal, parent gone, --monitor-count reached), 3 when
+  # a sample could not be written. Not swallowed: see the end of monitor_run.
+  _monitor_rc=0
+  monitor_run || _monitor_rc=$?
   NETDIAG_COMPLETED=1
-  exit 0
+  exit "$_monitor_rc"
 fi
 
 # ── Log file setup ─────────────────────────────────────────────────────────
