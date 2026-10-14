@@ -596,6 +596,14 @@ hopwatch --json | jq -r '.dhcp.dns_servers | split(" ")'
 gateway MAC and city in the emitted object. ASN, ISP name and RFC1918
 addresses are deliberately kept — they identify a provider or a private
 range, not a person, and removing them would gut the NAT and ARP data.
+Four fields are **dropped** rather than masked, because they carry raw text
+or addresses no known secret matches: `wifi_disconnects.events` (`[]`),
+`hosts_file.suspicious_redirects` (`[]`), `wan.load_balancing.distinct_ips`
+(`[]` — one of them is an IPv6 address `PUB_IP` never equals) and
+`watcher.program` (`null`). The strings they held are still scrubbed out of
+diagnosis prose (WAN-1b, ND-1). `--share --json` applies the same drops to a
+stored run, and additionally masks every MAC address and every
+globally-routable IP address left anywhere in the document.
 See the README's "Sharing a report" section.
 
 ## Exit codes
@@ -1515,6 +1523,9 @@ from stdin or the store.
 | `wifi.bssid` | masked | identifies the router |
 | `ipv6.global_addr` | masked | identifies the household |
 | `ipv6.gateway` | masked | EUI-64-derived from the router's MAC, so leaving it in republishes `interface.gateway_mac` sitting right next to it |
+| `watcher.program` | dropped, and scrubbed from prose | an absolute path under `$HOME`; the ND-1 summary quotes it |
+| `wifi_disconnects.events`, `hosts_file.suspicious_redirects` | dropped | raw log / hosts text — no secret matches a neighbour's BSSID or a private hostname |
+| any MAC address (`aa:bb:cc:dd:ee:ff`), anywhere | masked by a final sweep | a neighbour's BSSID identifies a device as surely as our own |
 | `public.isp` | kept, deliberately | names a provider, not a person — needed to reason about the fault |
 | `public.asn` | kept, deliberately | same reason as `isp` |
 | `public.country` / `public.country_iso` | kept, deliberately | two characters is too short to substring-replace safely without corrupting unrelated text |

@@ -402,7 +402,11 @@ def build_wan() -> dict:
     return {
         "load_balancing": {
             "distinct_asns": lb_asns,
-            "distinct_ips": lb_ips,
+            # Dropped under --redact: these are the machine's public
+            # addresses, and the IPv6 one never equals PUB_IP (that comes
+            # from a `curl -4`), so the substring scrub cannot know it.
+            # The ASNs still say what the load-balancing was between.
+            "distinct_ips": [] if _bool("REDACT") else lb_ips,
             "active": _bool("WAN_LB_ACTIVE"),
         },
         # `detected` counts home-side routers only. ISP-side 10/8 transit is
@@ -464,11 +468,27 @@ def _scrub(node, secrets: list[str]):
     return node
 
 
+# Space-separated *lists* of identifying values. The field that carries
+# each one is dropped under --redact, but the same strings are interpolated
+# into diagnosis prose (WAN-1b names every public IP it saw), so each
+# element is a secret for the substring scrub too.
+_REDACT_ENV_LISTS = ("WAN_LB_IPS",)
+
+
 def redact(data: dict) -> dict:
     # Substrings shorter than 3 chars are skipped — replacing them would
     # corrupt unrelated text rather than protect anything.
+    found = {v for name in _REDACT_ENV if (v := _env(name)) and len(v) >= 3}
+    for name in _REDACT_ENV_LISTS:
+        found.update(v for v in (_env(name) or "").split() if len(v) >= 3)
+    # WATCHER_PROGRAM is an absolute path under $HOME. Its own field is
+    # nulled below, but the ND-1 summary quotes it, and the account name
+    # rides along in the path.
+    prog = _env("WATCHER_PROGRAM")
+    if prog and len(prog) >= 3:
+        found.add(prog)
     secrets = sorted(
-        {v for name in _REDACT_ENV if (v := _env(name)) and len(v) >= 3},
+        found,
         key=len, reverse=True,   # longest first: mask the SSID before a
     )                            # shorter value that happens to be inside it
     return _scrub(data, secrets)
@@ -789,11 +809,15 @@ def main() -> None:
         "wan": build_wan(),
         "hosts_file": {
             "custom_count": _maybe_int("HOSTS_CUSTOM_COUNT"),
-            "suspicious_redirects": [
+            # Dropped under --redact, like the disconnect lines: they are
+            # raw /etc/hosts text, which names whatever private hosts the
+            # user keeps there, and no secret in this document matches
+            # them. `custom_count` still says there were some.
+            "suspicious_redirects": ([] if _bool("REDACT") else [
                 line.strip() for line in
                 (os.environ.get("NETDIAG_HOSTS_SUSPICIOUS_LINES", "") or "").splitlines()
                 if line.strip()
-            ],
+            ]),
         },
         "browser_health": {
             "desync": (_maybe_int("BROWSER_DESYNC_COUNT") or 0) > 0,

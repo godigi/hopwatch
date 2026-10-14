@@ -299,3 +299,30 @@ PLIST
   [[ "$output" == "1 "* ]] || { echo "got: $output"; return 1; }
   [[ "$output" != *absent* ]] || { echo "got: $output"; return 1; }
 }
+
+# ── ND-1 prose under --redact ────────────────────────────────────────────
+
+nd1_fire() {
+  # shellcheck source=../lib/diagnosis.sh
+  . "$REPO/lib/diagnosis.sh"
+  GATEWAY=192.168.1.1 IS_WIFI=0 PUBLIC_OK=1 GW_LOSS=0
+  DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
+  WATCHER_STATE=blocked WATCHER_PROGRAM="/Users/someone/Documents/netdiag/bin/hopwatch"
+  REDACT="$1"
+  diagnosis_run >/dev/null
+}
+
+@test "ND-1: the blocked-watcher sentence quotes the path normally" {
+  nd1_fire 0
+  [[ "${DIAG[*]}" == *"/Users/someone/Documents/netdiag/bin/hopwatch"* ]] \
+    || { echo "path missing from ND-1: ${DIAG[*]}"; return 1; }
+}
+
+@test "ND-1: under --redact the account name in the watcher path is not printed" {
+  # The prose is printed as-is, not run through a secret list, and
+  # WATCHER_PROGRAM is an absolute path under $HOME (the account name).
+  # emit_json nulls watcher.program but the sentence kept the path.
+  nd1_fire 1
+  [[ "${DIAG[*]}" == *"isn't running"* ]] || { echo "ND-1 did not fire: ${DIAG[*]}"; return 1; }
+  [[ "${DIAG[*]}" != *"someone"* ]] || { echo "account name leaked: ${DIAG[*]}"; return 1; }
+}

@@ -513,6 +513,42 @@ _write_speed_history() {
   [ "$(printf '%s' "$output" | jq_get run_id)" = "null" ]
 }
 
+@test "emit_json redact: wan.load_balancing.distinct_ips does not leak, in the field or in prose" {
+  # The IPv6 entry comes from a non-`-4` curl, so it never equals PUB_IP
+  # and the substring scrub had nothing to match it with.
+  run emit NETDIAG_REDACT=1 NETDIAG_PUB_IP=203.0.113.42 \
+           NETDIAG_WAN_LB_ASNS='AS64496' \
+           NETDIAG_WAN_LB_IPS='203.0.113.42 2001:db8:77::5' \
+           NETDIAG_DIAGNOSIS_LINES='info|WAN-1b|handing your traffic 203.0.113.42 2001:db8:77::5 each time'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"2001:db8:77::5"* ]] || { echo "IPv6 leaked"; echo "$output"; return 1; }
+  [[ "$output" != *"203.0.113.42"* ]] || { echo "IPv4 leaked"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_ips)" = "[]" ]
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_asns)" = '["AS64496"]' ]
+}
+
+@test "emit_json: without --redact distinct_ips is kept" {
+  run emit NETDIAG_WAN_LB_IPS='203.0.113.42 2001:db8:77::5'
+  [ "$(printf '%s' "$output" | jq_get wan.load_balancing.distinct_ips)" = '["203.0.113.42", "2001:db8:77::5"]' ]
+}
+
+@test "emit_json redact: the watcher's path is scrubbed out of the ND-1 prose too" {
+  run emit NETDIAG_REDACT=1 NETDIAG_WATCHER_INSTALLED=1 NETDIAG_WATCHER_STATE=blocked \
+           NETDIAG_WATCHER_PROGRAM=/Users/someone/Documents/netdiag/bin/hopwatch \
+           NETDIAG_DIAGNOSIS_LINES='warn|ND-1|it runs from /Users/someone/Documents/netdiag/bin/hopwatch, and macOS refuses'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"someone"* ]] || { echo "$output"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get watcher.program)" = "null" ]
+}
+
+@test "emit_json redact: drops the suspicious hosts lines, keeps the count" {
+  run emit NETDIAG_REDACT=1 NETDIAG_HOSTS_CUSTOM_COUNT=1 \
+           NETDIAG_HOSTS_SUSPICIOUS_LINES='10.9.8.7 secret-host.internal'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"secret-host"* ]] || { echo "$output"; return 1; }
+  [ "$(printf '%s' "$output" | jq_get hosts_file.custom_count)" = "1" ]
+}
+
 # ── captive_portal_classify: status alone is not enough ──────────────────
 # The probe used to pass `curl -o /dev/null` and classify on the HTTP
 # status only: 3xx portal, 2xx ok. Apple's own captive check compares the

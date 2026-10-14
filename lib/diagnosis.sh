@@ -994,10 +994,15 @@ diagnosis_run() {
   # The state itself is decided once, in watchdog_run, so this rule and
   # the Report card row can never describe it differently. Here it is
   # only turned into a sentence.
-  local _nd_why=""
+  local _nd_why="" _nd_where=""
   case "${WATCHER_STATE:-absent}" in
     blocked)
-      _nd_why="it runs from ${WATCHER_PROGRAM}, and macOS keeps background agents out of Documents, Desktop and Downloads — so every attempt fails with \"Operation not permitted\" before netdiag even starts" ;;
+      # The path is an absolute one under $HOME, so it carries the account
+      # name. Under --redact it is not quoted: the prose is printed as-is,
+      # and no secret list can be relied on to catch a path.
+      _nd_where="${WATCHER_PROGRAM}"
+      [ "${REDACT:-0}" -eq 1 ] && _nd_where="a folder under your home directory"
+      _nd_why="it runs from ${_nd_where}, and macOS keeps background agents out of Documents, Desktop and Downloads — so every attempt fails with \"Operation not permitted\" before netdiag even starts" ;;
     failing)
       _nd_why="launchd reports that its last run exited ${WATCHER_LAST_EXIT}" ;;
     never)

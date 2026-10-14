@@ -64,6 +64,11 @@ _REDACT_PATHS = (
     "ipv6.gateway",
     "interface.gateway_mac",
     "public.city",
+    # An absolute path under $HOME: the account name rides in it, and the
+    # ND-1 prose quotes it verbatim. The field itself is dropped below
+    # (_drop_under_redact); the string is listed here so the copy inside
+    # a diagnosis summary is masked too.
+    "watcher.program",
 )
 
 
@@ -161,8 +166,33 @@ def scrub(node, secrets: list[str]):
     return node
 
 
+# Fields emit_json.py drops outright under --redact rather than masking:
+# raw log / hosts-file text can carry a neighbour's BSSID, a MAC, an SSID
+# or a private hostname this record holds no secret to match against, and
+# the account name rides in the watcher's program path. (path, empty value)
+_DROP_UNDER_REDACT = (
+    (("wifi_disconnects", "events"), []),
+    (("watcher", "program"), None),
+    (("hosts_file", "suspicious_redirects"), []),
+)
+
+
+def _drop_under_redact(record: dict) -> None:
+    """Blank the fields emit_json.py drops under --redact, in place."""
+    for path, empty in _DROP_UNDER_REDACT:
+        cur = record
+        for k in path[:-1]:
+            cur = cur.get(k) if isinstance(cur, dict) else None
+        if isinstance(cur, dict) and path[-1] in cur:
+            cur[path[-1]] = empty
+
+
 def redact(record: dict) -> dict:
-    return scrub(record, secrets_in(record))
+    # Secrets are read before the drops: the watcher's program path has to
+    # be known to be scrubbed out of prose even though its own field goes.
+    out = scrub(record, secrets_in(record))
+    _drop_under_redact(out)
+    return out
 
 
 # The addresses netdiag deliberately probes. They are targets, not
@@ -232,6 +262,24 @@ def sweep_public_addresses(text: str) -> str:
         return REDACTED
 
     return _IP_RE.sub(mask, text)
+
+
+# A MAC in any common spelling (aa:bb:..., aa-bb-..., and the unpadded
+# form macOS prints, e.g. 0:1a:2b:3c:4d:5e). Every one of them names a
+# device, and a neighbour's BSSID is as identifying as our own, so unlike
+# IPs there is no keep-list.
+_MAC_RE = re.compile(r"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{1,2}([:-]))(?:[0-9A-Fa-f]{1,2}\1){4}[0-9A-Fa-f]{1,2}(?![0-9A-Za-z])")
+
+
+def sweep_macs(text: str) -> str:
+    """Mask every MAC address still standing in the output."""
+    return _MAC_RE.sub(REDACTED, text)
+
+
+def sweep(text: str) -> str:
+    """The last-resort pass: MACs first (an IPv6-ish pattern would
+    otherwise half-match them), then globally-routable IPs."""
+    return sweep_public_addresses(sweep_macs(text))
 
 
 _NOT_MEASURED = "not measured"
@@ -441,9 +489,9 @@ def main() -> None:
     redacted = redact(record)
     if args.json:
         dumped = json.dumps(redacted, indent=2)
-        print(sweep_public_addresses(dumped))
+        print(sweep(dumped))
     else:
-        print(sweep_public_addresses(render(redacted)))
+        print(sweep(render(redacted)))
 
 
 if __name__ == "__main__":
