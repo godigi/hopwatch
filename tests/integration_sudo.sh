@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # tests/integration_sudo.sh — exercise the mtr-under-sudo code path.
 #
-# The mtr branch in lib/mtr.sh activates only when mtr is installed AND
-# sudo creds are cached AND jq is available. The bats suite can't trigger
-# this without interactive auth, so this script does it as a one-shot
-# integration check.
+# sudo is opt-in and a last resort (HOPWATCH_ALLOW_SUDO=1 / --allow-sudo; see
+# hopwatch_sudo_allowed in lib/common.sh). The `sudo -n mtr` branch in
+# lib/mtr.sh activates only when the user opted in, an unprivileged mtr
+# failed, sudo creds are cached AND jq is available. The bats suite can't
+# trigger this without interactive auth, so this script does it as a one-shot
+# integration check. (tests/test_sudo_optin.bats proves the default is that
+# sudo is never called.)
 #
 # Run: ./tests/integration_sudo.sh
 # Will prompt for sudo once, then run a 6-cycle (-c 6) mtr to keep the
@@ -51,9 +54,9 @@ fi
 
 printf 'integration_sudo: OK — mtr reported %s hops via cached sudo.\n' "$HOP_COUNT"
 
-# Smoke-run hopwatch itself with cached sudo so the orchestrator hits the
+# Smoke-run hopwatch itself, opted in, with cached sudo so the orchestrator hits the
 # mtr branch and writes per_hop entries to JSON.
-JSON_OUT="$(./bin/hopwatch --json --no-gping --no-bufferbloat --no-baseline 2>/dev/null)"
+JSON_OUT="$(./bin/hopwatch --allow-sudo --json --no-gping --no-bufferbloat --no-baseline 2>/dev/null)"
 if [ -z "$JSON_OUT" ]; then
   printf 'integration_sudo: FAIL — hopwatch --json produced no output.\n' >&2
   exit 1

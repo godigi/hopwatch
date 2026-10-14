@@ -1184,6 +1184,26 @@ with_timeout() {
   return "$rc"
 }
 
+# ── Opt-in privileged fallback ───────────────────────────────────────────
+# Monitoring and scans are sudo-free: every check has an unprivileged path
+# and that is the only one used by default. `sudo` is a last resort that a
+# user must ask for, with HOPWATCH_ALLOW_SUDO=1 (or `--allow-sudo`), and even
+# then it is reached only after the unprivileged path produced nothing.
+#
+# `sudo -n` never prompts, which is the reason it used to be called freely:
+# "it can't hurt". It can — it quietly runs a privileged command whenever
+# sudo credentials happen to be cached or NOPASSWD is configured, on every
+# monitor cycle, for a user who never asked for that.
+#
+# Returns 0 only when the user opted in AND sudo would run without a
+# prompt (or we already are root). Never asks for a password.
+hopwatch_sudo_allowed() {
+  [ "${HOPWATCH_ALLOW_SUDO:-0}" = "1" ] || return 1
+  [ "$(id -u)" -eq 0 ] && return 0
+  command -v sudo >/dev/null 2>&1 || return 1
+  sudo -n true 2>/dev/null
+}
+
 # ── Temp-dir registry ────────────────────────────────────────────────────
 # The orchestrator owns the parallel scratch directory. On an abort
 # (Ctrl-C, SIGHUP, or a killed parallel check) collect_parallel never gets

@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # lib/wifi.sh — WiFi info: SSID/BSSID/security via ipconfig getsummary,
-# plus RSSI/noise/channel/PHY/tx-rate via wdutil (which needs cached sudo).
+# plus RSSI/noise/channel/PHY/tx-rate from the CoreWLAN helper. wdutil (which
+# needs root) is an opt-in last resort only; see hopwatch_sudo_allowed.
 #
 # Reads:  INTERFACE
 # Writes: IS_WIFI, WIFI_SSID, WIFI_BSSID, WIFI_SEC, WIFI_RSSI, WIFI_NOISE,
@@ -50,8 +51,9 @@ wifi_run() {
     if [ -f "$helper" ]; then
       telemetry_out="$(with_timeout 3 python3 "$helper" 2>/dev/null || true)"
     fi
-    # Opportunistic fallback to wdutil if helper produced nothing and root credentials exist
-    if [ -z "$telemetry_out" ] && { [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+    # Last resort, opt-in only (HOPWATCH_ALLOW_SUDO=1 / --allow-sudo): wdutil
+    # needs root, and is tried only when the CoreWLAN helper gave nothing.
+    if [ -z "$telemetry_out" ] && hopwatch_sudo_allowed; then
       local wdutil_raw
       wdutil_raw="$(with_timeout 5 sudo -n wdutil info 2>/dev/null || true)"
       [ -n "$wdutil_raw" ] && telemetry_out="$(wifi_parse_wdutil "$wdutil_raw")"

@@ -131,7 +131,9 @@ mtr_run() {
   if command -v mtr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     if mtr -c 1 127.0.0.1 >/dev/null 2>&1; then
       mtr_cmd=(mtr)
-    elif sudo -n true 2>/dev/null; then
+    elif hopwatch_sudo_allowed; then
+      # mtr's raw sockets need root on some installs. Opt-in last resort
+      # only, reached after the unprivileged probe above already failed.
       mtr_cmd=(sudo -n mtr)
     fi
   fi

@@ -807,7 +807,9 @@ _mon_probe_wifi_signal() {
   if [ -f "$helper" ]; then
     out="$(with_timeout 2 python3 "$helper" 2>/dev/null || true)"
   fi
-  if [ -z "$out" ] && { [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+  # Last resort, opt-in only: see hopwatch_sudo_allowed in lib/common.sh.
+  # Never on a default run, and never before the CoreWLAN helper has failed.
+  if [ -z "$out" ] && hopwatch_sudo_allowed; then
     local raw
     raw="$(with_timeout 4 sudo -n wdutil info 2>/dev/null || true)"
     [ -n "$raw" ] && out="$(wifi_parse_wdutil "$raw")"

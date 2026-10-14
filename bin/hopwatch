@@ -104,6 +104,11 @@ _resolve_path() {
 }
 SCRIPT_PATH="$(_resolve_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+# Always absolute. A relative invocation (`bin/hopwatch --install-watcher`)
+# would otherwise write a relative path into the launchd plist and hand a
+# relative path to watchdog_path_blocked, whose ~/Documents TCC guard
+# matches on an absolute prefix and so waved the install through.
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "$SCRIPT_PATH")"
 HELPERS_DIR="${SCRIPT_DIR}/../helpers"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 
@@ -320,6 +325,7 @@ while [ "$#" -gt 0 ]; do
     --bufferbloat-only) _set_focus bufferbloat ;;
     --ping-only)      _set_focus ping ;;
     --progress)       PROGRESS=1 ;;
+    --allow-sudo)     HOPWATCH_ALLOW_SUDO=1; export HOPWATCH_ALLOW_SUDO ;;
     --log)            _take_value=1 ;;
     --log=*)          LOG_OVERRIDE="${1#--log=}" ;;
     --baseline)       BASELINE=1 ;;
@@ -483,9 +489,12 @@ Just one check:
   --ping-only       run only gateway and internet latency / packet loss probes
 
 Repairs (the only thing here that changes anything, and only when you ask):
-  --repair=ID              run one repair: quit-app, restart-mac or
-                           open-sign-in. Nothing runs unless you ask for it;
-                           no scan, timer or alert ever starts one.
+  --repair=ID              run one repair: quit-app, restart-mac,
+                           open-sign-in or reconnect-wifi. Nothing runs
+                           unless you ask for it; no scan, timer or alert
+                           ever starts one (the one opt-in exception, the
+                           app's automatic Wi-Fi reconnect, runs only
+                           reconnect-wifi).
                              --repair-param KEY=VALUE   a parameter, repeatable
                                 (quit-app takes bundle_id=<app's bundle id>)
                              --dry-run   print exactly what would run and
@@ -565,6 +574,10 @@ Advanced:
                     this flag you'll be prompted; default is no.
   --no-gping        skip the gping prompt entirely (used by scripts /
                     watchers; equivalent to answering "no" upfront)
+  --allow-sudo      let a check fall back to `sudo -n` (never a prompt) when
+                    its unprivileged path produced nothing: wdutil for Wi-Fi
+                    signal, mtr for per-hop loss. Off by default; the same as
+                    HOPWATCH_ALLOW_SUDO=1. Never used by repairs or by default.
   --baseline        compare this run against medians of the last 10 runs
                     in ~/hopwatch/baseline.jsonl (default on)
   --no-baseline     skip the baseline comparison and don't append to history
