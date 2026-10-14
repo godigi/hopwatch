@@ -562,6 +562,36 @@ TSV
   grep -q '203.0.113.42' "$tmplog"
 }
 
+@test "--redact text path: \$HOME, watcher path, every WAN_LB_IPS address and the SSID stay off stdout" {
+  # shellcheck source=../lib/diagnosis.sh
+  . "$REPO/lib/diagnosis.sh"
+  HOME="/Users/testuser"
+  tmplog="$HOME/net-diag/2026-10-14-101010.log"
+  LOG="$BATS_TEST_TMPDIR/x.log"; REDACT=1; JSON_MODE=0; QUIET=0; EXPERT=0; DIAGNOSIS_REACHED=1
+  PUB_IP="203.0.113.42"; WIFI_SSID="HiddenSsidName"; WIFI_BSSID=""; PUB_CITY=""
+  LOCAL_IP=""; IPV6_GLOBAL_ADDR=""; GW_MAC=""
+  WATCHER_PROGRAM="/Users/testuser/.local/share/netdiag/bin/netdiag"
+  WAN_LB_ASNS="AS64500"; WAN_LB_ACTIVE=0
+  WAN_LB_IPS="203.0.113.42 2001:db8:77::5 2001:db8:77::6"
+  DIAG=(); DIAG_SEV=(); DIAG_RULE=(); MAX_SEVERITY=0
+  wan_diagnosis_run
+  out="$({
+    tell "log: $tmplog"
+    say "Report saved to: $tmplog"
+    say "watcher runs $WATCHER_PROGRAM on HiddenSsidName"
+    _print_diagnosis_paragraph info WAN-1b "${DIAG[0]}"
+  })"
+  [[ "$out" == *"shared-address"* ]] || return 1
+  [[ "$out" != *"testuser"* ]] || return 1
+  [[ "$out" != *"2001:db8:77"* ]] || return 1
+  [[ "$out" != *"203.0.113.42"* ]] || return 1
+  [[ "$out" != *"HiddenSsidName"* ]] || return 1
+  # The path stays readable: only the account name goes.
+  [[ "$out" == *"log: ~/net-diag/2026-10-14-101010.log"* ]] || return 1
+  # The on-disk log is the user's own copy and keeps the real values.
+  grep -q '/Users/testuser/net-diag' "$LOG"
+}
+
 # ── Focused runs must not report unmeasured checks as measured ───────────
 # --mtu-only and --wifi-only skip most modules, leaving their globals at
 # the defaults in globals.sh. Those defaults are indistinguishable from a

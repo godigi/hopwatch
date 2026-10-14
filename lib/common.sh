@@ -68,14 +68,30 @@ _redact_line() {
   # IPV6_GATEWAY is masked even though it is link-local and unroutable: a
   # fe80:: address is EUI-64-derived from the router's MAC, so publishing
   # it leaks the very GW_MAC listed on the line below.
+  #
+  # WAN_LB_IPS is a space-separated list of every public address a
+  # load-balanced WAN handed out, and WAN-1b's prose interpolates them
+  # (an IPv6 there identifies a household), so each word is masked. The
+  # watcher's program path names the user's checkout.
+  local -a _lb_ips=()
+  read -r -a _lb_ips <<< "${WAN_LB_IPS:-}"
   for v in "${PUB_IP:-}" "${LOCAL_IP:-}" "${WIFI_SSID:-}" "${WIFI_BSSID:-}" \
            "${IPV6_GLOBAL_ADDR:-}" "${IPV6_GATEWAY:-}" "${GW_MAC:-}" \
-           "${PUB_CITY:-}"; do
+           "${PUB_CITY:-}" "${WATCHER_PROGRAM:-}" "${_lb_ips[@]+"${_lb_ips[@]}"}"; do
     # Skip empties (would match everywhere) and 1-2 char values (too short
     # to replace without corrupting unrelated text).
     [ "${#v}" -ge 3 ] || continue
     s="${s//"$v"/[redacted]}"
   done
+  # $HOME carries the account name (/Users/<name>/net-diag/...log in the
+  # header and the "Report saved to:" line). Shown as ~, which reads as a
+  # path and says nothing about who owns it. Done last so a longer value
+  # under $HOME (the watcher path) is masked whole first.
+  local _tilde="~"
+  v="${HOME:-}"
+  if [ "${#v}" -ge 3 ]; then
+    s="${s//"$v"/$_tilde}"
+  fi
   printf '%s' "$s"
 }
 
