@@ -149,6 +149,8 @@ final class MonitorStream {
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "monitor")
     private let decoder = JSONDecoder()
     private static let recentCapacity = 360
+    /// Pause before re-asking a CLI whose capability handshake failed.
+    private static let handshakeRetryDelay: TimeInterval = 30
 
     /// Called for every decoded sample. The alert engine subscribes here.
     var onSample: ((MonitorSample) -> Void)?
@@ -194,14 +196,24 @@ final class MonitorStream {
     /// spawn over a newer start's process.
     private func startAfterCapabilityCheck(generation: Int) async {
         guard !isRunning else { return }
-        do {
-            try await CapabilityStore.shared.requireSupport(for: .monitor)
-        } catch {
-            guard !Task.isCancelled, startGeneration == generation else { return }
-            restartPending = false
-            lastError = error.localizedDescription
-            log.error("monitor not started: \(error.localizedDescription, privacy: .public)")
-            return
+        while true {
+            do {
+                try await CapabilityStore.shared.requireSupport(for: .monitor)
+                break
+            } catch {
+                guard !Task.isCancelled, startGeneration == generation else { return }
+                restartPending = false
+                lastError = error.localizedDescription
+                log.error("monitor not started: \(error.localizedDescription, privacy: .public)")
+                // A handshake that could not be completed (as opposed to
+                // one that completed and found an old CLI) is usually a bad
+                // moment, not a verdict. Give up on it for good and the
+                // monitor stays off until relaunch, with nothing on screen
+                // to say it will ever come back; try again instead.
+                guard await CapabilityStore.shared.isUnavailable() else { return }
+                try? await Task.sleep(for: .seconds(Self.handshakeRetryDelay))
+                guard !Task.isCancelled, !isRunning, startGeneration == generation else { return }
+            }
         }
         guard !Task.isCancelled, !isRunning, startGeneration == generation else { return }
         // Resolve again now that the gate has passed. The gate re-resolves
