@@ -2039,10 +2039,16 @@ final class HopwatchCoordinator {
         }
     }
 
-    var currentNetworkEvents: [NetworkEvent] {
+    var currentNetworkEvents: [NetworkEvent] { currentNetworkEvents(withinHours: 24) }
+
+    /// The current network's events over `hours`, or the whole retained log
+    /// when `nil`. Never another network's: a surface that must not cap at
+    /// 24 h (the "nothing has changed in…" line) still scopes by identity.
+    func currentNetworkEvents(withinHours hours: Double?) -> [NetworkEvent] {
         guard let id = confirmedNetworkID else { return [] }
         let canonical = history.canonicalID(id)
-        return eventLog.within(hours: 24).filter {
+        let pool = hours.map { eventLog.within(hours: $0) } ?? eventLog.events
+        return pool.filter {
             $0.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
                 || $0.network.map(history.canonicalID) == canonical
         }
