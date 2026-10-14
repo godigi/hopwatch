@@ -2047,6 +2047,12 @@ final class HopwatchCoordinator {
         }
     }
 
+    /// The newest condition event on the network the Mac is on now (last
+    /// 24 h), for any surface that shows "what happened last".
+    var latestCurrentNetworkEvent: NetworkEvent? {
+        NetworkEvent.latestCondition(in: currentNetworkEvents)
+    }
+
     var vpnFreshness: String {
         guard let sample = liveSample else { return "Awaiting reading" }
         let age = Date().timeIntervalSince(sample.timestamp)
