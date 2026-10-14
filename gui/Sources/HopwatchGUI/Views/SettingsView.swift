@@ -1254,7 +1254,7 @@ struct SettingsView: View {
             if case .modern = capabilities,
                appSettings.monitoringEnabled,
                !coordinator.monitor.isRunning {
-                coordinator.monitor.start()
+                coordinator.monitor.restartNow()
             }
             await coordinator.rulesCatalog.refresh()
             isRechecking = false
