@@ -57,9 +57,13 @@ def load_jsonl(p: Path) -> list[dict]:
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                rec = json.loads(line)
             except json.JSONDecodeError:
-                pass
+                continue
+            # A line that parses to a list, a string or a number is not a
+            # record; every caller does r.get(...) and would crash on it.
+            if isinstance(rec, dict):
+                out.append(rec)
     return out
 
 

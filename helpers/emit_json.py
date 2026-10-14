@@ -19,8 +19,23 @@ double_nat, upnp.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
+
+
+def _finite_float(v) -> float:
+    """float(v), but a NaN or an infinity raises ValueError like garbage does.
+
+    json.dump writes them as the bare tokens NaN / Infinity, which are not
+    JSON: Foundation's decoder rejects the whole document, so one "nan"
+    from a probe would blank the GUI's view of the run. Every caller already
+    treats ValueError as "not a number" and yields null.
+    """
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError(f"non-finite number: {v!r}")
+    return f
 
 
 def _env(name: str) -> str | None:
@@ -61,7 +76,7 @@ def _maybe_float(name: str) -> float | None:
     if v is None:
         return None
     try:
-        return float(v)
+        return _finite_float(v)
     except ValueError:
         return None
 
@@ -102,7 +117,7 @@ def build_tcp_reach() -> list[dict]:
         entry = {"host": host, "port": int(port) if port.isdigit() else port, "ok": status == "OK"}
         if status == "OK" and len(parts) > 2:
             try:
-                entry["elapsed_ms"] = float(parts[2])
+                entry["elapsed_ms"] = _finite_float(parts[2])
             except ValueError:
                 pass
         out.append(entry)
@@ -183,16 +198,16 @@ def build_hops(env_name: str) -> list[dict]:
         entry: dict = {"n": n, "ip": ip, "responded": ip is not None}
         if env_name == "PER_HOP_LINES" and len(parts) >= 4:
             try:
-                entry["loss_pct"] = float(parts[2]) if parts[2] else None
+                entry["loss_pct"] = _finite_float(parts[2]) if parts[2] else None
             except ValueError:
                 entry["loss_pct"] = None
             try:
-                entry["avg_ms"] = float(parts[3]) if parts[3] else None
+                entry["avg_ms"] = _finite_float(parts[3]) if parts[3] else None
             except ValueError:
                 entry["avg_ms"] = None
         elif len(parts) >= 3:
             try:
-                entry["rtt_ms"] = float(parts[2]) if parts[2] else None
+                entry["rtt_ms"] = _finite_float(parts[2]) if parts[2] else None
             except ValueError:
                 entry["rtt_ms"] = None
         out.append(entry)
@@ -379,7 +394,7 @@ def build_timings() -> dict:
     for line in _list_lines("TIMING_LINES"):
         name, _, secs = line.partition("|")
         try:
-            phases[name] = float(secs)
+            phases[name] = _finite_float(secs)
         except ValueError:
             continue
     total = _maybe_float("RUN_ELAPSED_S")

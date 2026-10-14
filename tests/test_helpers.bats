@@ -738,3 +738,37 @@ val = int(rssi)
 assert val < 0, f'expected negative RSSI, got {val}'
 "
 }
+
+# ── NaN / Infinity never reach the JSON ──────────────────────────────────
+# json.dump writes them as bare NaN / Infinity tokens, which are not JSON:
+# Foundation's decoder rejects the whole document, so a single "nan" from a
+# probe blanks the GUI's entire view of the run.
+
+@test "emit_json: a NaN or infinite number becomes null, not a bare NaN token" {
+  run emit NETDIAG_GW_LOSS=nan NETDIAG_GW_LATENCY=inf NETDIAG_INET_RTT_AVG=-Infinity \
+           NETDIAG_TCP_REACH_LINES='example.com:443|OK|nan' \
+           NETDIAG_TIMING_LINES='dns|nan'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *NaN* && "$output" != *Infinity* ]] || { echo "$output"; return 1; }
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+assert d['gateway']['loss_pct'] is None, d['gateway']
+assert d['gateway']['rtt_avg_ms'] is None, d['gateway']
+"
+}
+
+@test "monitor_sample: a NaN or infinite number becomes null, not a bare NaN token" {
+  run env -i PATH="$PATH" NETDIAG_MON_SEQ=1 NETDIAG_MON_GW_LOSS=nan \
+      NETDIAG_MON_GW_RTT=inf NETDIAG_MON_INET_RTT=2.5 \
+      python3 "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *NaN* && "$output" != *Infinity* ]] || { echo "$output"; return 1; }
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['gateway']['loss_pct'] is None, d['gateway']
+assert d['gateway']['rtt_avg_ms'] is None, d['gateway']
+assert d['internet']['rtt_avg_ms'] == 2.5, d['internet']
+"
+}
