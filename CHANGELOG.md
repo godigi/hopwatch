@@ -8,6 +8,12 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-10-15
+
+### Changes
+
+- docs: hosting moved from vps2 to prod1 (#14)
+
 ## [1.18.0] - 2026-10-14
 
 ### Changes
@@ -99,8 +105,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.18.0...HEAD
-[1.18.0]: https://github.com/godigi/hopwatch/releases/tag/v1.18.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.18.1...HEAD
+[1.18.1]: https://github.com/godigi/hopwatch/releases/tag/v1.18.1
+[1.18.0]: https://github.com/godigi/hopwatch/commit/7b9d11733bda2a37fed505b27c7e81178b50fe61
 [1.17.2]: https://github.com/godigi/hopwatch/commit/34aeb710049da8eb73bcf66e116bf3ad05e4695f
 [1.17.1]: https://github.com/godigi/hopwatch/commit/d4be4f91116203ba65f20e05eaed87f59c8a6517
 [1.17.0]: https://github.com/godigi/hopwatch/commit/685ef4f5e4695ff17a34c5b986f0c877165168fe
