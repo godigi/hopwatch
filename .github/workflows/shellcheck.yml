@@ -1,6 +1,6 @@
 name: shellcheck
 
-# Runs on a self-hosted runner (the VPS) — see godigi/vps2's
+# Runs on a self-hosted runner (on prod1) — see godigi/vps2's
 # deploy/gha-runners/README.md. ludeeus/action-shellcheck is a Docker-based
 # action; running it would need the runner user in the `docker` group, which
 # is root-equivalent. shellcheck is pre-installed on the runner host, so call
