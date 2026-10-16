@@ -29,6 +29,7 @@ enum HealthResolver {
 
     struct Inputs: Sendable {
         let isScanning: Bool
+        let isArrivalCheck: Bool
         let monitoringEnabled: Bool
         let isPausedForAnyReason: Bool
         let monitorRunning: Bool
@@ -43,13 +44,18 @@ enum HealthResolver {
         /// The newest sample is older than `SampleFreshness` allows while
         /// monitoring is on and not paused. Never green.
         let sampleStale: Bool
+        /// True while the connection baseline is actively being determined.
+        let isChecking: Bool
 
-        init(isScanning: Bool, monitoringEnabled: Bool,
+        init(isScanning: Bool, isArrivalCheck: Bool = false,
+             monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, monitorRunning: Bool,
              activeAlert: StageResolver.AlertSnapshot? = nil,
              sampleHealth: Health?, runHealth: Health?,
-             linkDown: Bool = false, sampleStale: Bool = false) {
+             linkDown: Bool = false, sampleStale: Bool = false,
+             isChecking: Bool = false) {
             self.isScanning = isScanning
+            self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
             self.monitorRunning = monitorRunning
@@ -58,17 +64,20 @@ enum HealthResolver {
             self.runHealth = runHealth
             self.linkDown = linkDown
             self.sampleStale = sampleStale
+            self.isChecking = isChecking
         }
     }
 
     static func resolve(_ i: Inputs) -> Health {
         // A scan is the app looking harder, not looking away. Hold the last
         // reading rather than greying out for its duration.
+        // Exception: an arrival check on a new network is determining the connection.
         if i.isScanning {
             if i.linkDown { return .critical }
             if let alert = i.activeAlert {
                 return alert.severityRank >= 3 ? .critical : .warning
             }
+            if i.isArrivalCheck { return .checking }
             return worst(i.sampleHealth, i.runHealth) ?? .warning
         }
         // Switched off by the user, or held by display sleep / battery /
@@ -86,10 +95,11 @@ enum HealthResolver {
         // by a monitor that never came back still degrades to the warning.
         if i.linkDown { return .critical }
         // Supposed to be monitoring and isn't: a dead or unstartable
-        // monitor child. `.warning`, never the stale sample it left behind
-        // — that is exactly how a crashed monitor came to read as a quiet
-        // network.
-        if !i.monitorRunning { return .warning }
+        // monitor child. If actively starting or checking, report checking;
+        // if died unexpectedly, report warning.
+        if !i.monitorRunning {
+            return i.isChecking ? .checking : .warning
+        }
         // A sample too old to be a reading: the monitor process is alive but
         // not reporting. Same answer as a dead one, for the same reason —
         // what it last said is not the network now. After the no-link
@@ -98,6 +108,8 @@ enum HealthResolver {
         if let alert = i.activeAlert {
             return alert.severityRank >= 3 ? .critical : .warning
         }
+        // Connection baseline is actively being determined.
+        if i.isChecking { return .checking }
         // A live measured sample from the continuous monitor is the real-time
         // ground truth. An older one-off scan's diagnostic advisories (e.g. channel
         // contention, bufferbloat grade) must not permanently lock the menu dot to
@@ -116,6 +128,7 @@ enum HealthResolver {
         guard let b else { return a }
         if a == .critical || b == .critical { return .critical }
         if a == .warning || b == .warning { return .warning }
+        if a == .checking || b == .checking { return .checking }
         if a == .paused || b == .paused { return .paused }
         return .healthy
     }

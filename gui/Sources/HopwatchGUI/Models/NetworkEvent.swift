@@ -30,10 +30,14 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
     /// the monitor died, or the network changed. Stored events from before
     /// this existed decode as false, which is how they were always read.
     var continuesPrevious: Bool = false
+    var fromValue: String? = nil
+    var toValue: String? = nil
+    var extraDetail: String? = nil
 
     init(id: UUID = UUID(), date: Date, kind: String,
          summary: String, ruleID: String? = nil, network: String? = nil,
-         continuesPrevious: Bool = false, evidence: AppTrafficEvidence? = nil) {
+         continuesPrevious: Bool = false, evidence: AppTrafficEvidence? = nil,
+         fromValue: String? = nil, toValue: String? = nil, extraDetail: String? = nil) {
         self.id = id
         self.date = date
         self.kind = kind
@@ -42,6 +46,9 @@ struct NetworkEvent: Codable, Identifiable, Sendable, Equatable {
         self.network = network
         self.continuesPrevious = continuesPrevious
         self.evidence = evidence
+        self.fromValue = fromValue
+        self.toValue = toValue
+        self.extraDetail = extraDetail
     }
 }
 
@@ -56,6 +63,9 @@ extension NetworkEvent {
         network = c.lenient(.network)
         continuesPrevious = c.lenient(.continuesPrevious, false)
         evidence = c.lenient(.evidence)
+        fromValue = c.lenient(.fromValue)
+        toValue = c.lenient(.toValue)
+        extraDetail = c.lenient(.extraDetail)
     }
 }
 

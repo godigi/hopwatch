@@ -698,16 +698,22 @@ enum SuitabilityEngine {
             )
         }
 
-        guard inputs.mtu != nil else { return awaiting("vpn", "VPN / Remote", "shield") }
+        guard inputs.mtu != nil || inputs.measuredLoss != nil || inputs.monitorSample?.gateway.rttAvgMs != nil || inputs.monitorSample?.internet.rttAvgMs != nil else {
+            return awaiting("vpn", "VPN / Remote", "shield")
+        }
+
+        let metric = inputs.mtu.map { "\($0) bytes" } ?? "Direct route"
         return Item(
             id: "vpn",
             title: "VPN / Remote",
             icon: "shield",
             status: "Compatible",
-            metric: "Direct route",
+            metric: metric,
             tint: Theme.ColorToken.green,
             verdict: .good,
-            helpText: "Measured packet size supports common VPN tunnels"
+            helpText: inputs.mtu != nil
+                ? "Measured packet size supports common VPN tunnels"
+                : "Single NAT and direct route support VPN tunnels and remote work"
         )
     }
 

@@ -8,6 +8,26 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Added
+- Captive portal learning and 1-click sign-in button from alert banner
+- Custom DNS compatibility for captive networks (bypasses public DNS to reach router gateway)
+- Network memory indicator for networks requiring portal authentication
+- Plain English ELI5 translations for network diagnostic faults and findings
+- Global system hotkey (⌥⌘N) to summon Hopwatch from anywhere
+- Dynamic menu bar display mode (minimal dot when healthy, expands when degraded)
+- Audio chime sound cues (Basso on disconnect, Glass on restore)
+- Instant update restart with background pre-caching
+- 1-click IT & ISP support ticket dispatch formatting
+- What's New release highlights sheet
+
+### Fixed
+- Corrected Double-NAT detection to recognize local gateway and home subnets (10.0.0.x / 10.0.1.x) in 10/8 as home-side.
+- Fixed Tailscale VPN detection to require an active online exit node before treating Tailscale as default-route VPN.
+- Fixed Wi-Fi 6 GHz band detection in rule W6 to prevent false 2.4 GHz band-trapping warnings.
+- Fixed MTR per-hop fallback to preserve true traceroute hop numbers when intermediate hops time out.
+- Fixed bufferbloat probe to sustain download load across fast connections and grade saturated 100% loss as Grade F.
+- Fixed IP address target handling in DNS and connection reachability checks.
+
 ## [1.18.1] - 2026-10-15
 
 ### Changes

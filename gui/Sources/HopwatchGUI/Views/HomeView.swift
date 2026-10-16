@@ -337,8 +337,16 @@ struct HomeView: View {
         case .noLink:
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
             let rules = coordinator.monitor.latest?.status.rules ?? []
+            let isPortal = rules.contains("N1c")
+                || rules.contains("CP-1")
+                || offline?.reason == "no-route"
+                || coordinator.currentNetworkRequiresPortal
+                || coordinator.isSystemCaptiveActive()
+
             let headline: String = {
-                if rules.contains("DH-3") {
+                if isPortal {
+                    return coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network"
+                } else if rules.contains("DH-3") {
                     return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WJ-1") {
                     return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? NoLinkCopy.headline
@@ -350,6 +358,14 @@ struct HomeView: View {
             }()
 
             let subtitle: String = {
+                if isPortal {
+                    var text = coordinator.rulesCatalog.catalog?["N1c"]?.blurb
+                        ?? "This network requires you to sign in before you can access the internet."
+                    if coordinator.hasCustomDNS {
+                        text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                    }
+                    return text
+                }
                 var subtitleParts: [String] = []
                 if let line = offline?.statusLine {
                     subtitleParts.append(line)
@@ -371,22 +387,32 @@ struct HomeView: View {
             // firing rule that names, and only once the catalog has loaded.
             let reconnectRule = coordinator.reconnectRule(amongFiring: rules)
             let canReconnect = reconnectRule != nil
-            let actionTitle = canReconnect ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
-            let secTitle: String? = canReconnect ? "Open Wi-Fi Settings" : nil
+            let actionTitle: String = {
+                if isPortal {
+                    return "Open Sign-In Page"
+                } else if canReconnect {
+                    return coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi"
+                } else {
+                    return "Open Wi-Fi Settings"
+                }
+            }()
+            let secTitle: String? = (isPortal || canReconnect) ? "Open Wi-Fi Settings" : nil
 
             DashboardStatusHeroView(
-                iconName: NoLinkCopy.icon,
-                iconTint: Theme.ColorToken.red,
-                iconBackground: Theme.ColorToken.redWash,
+                iconName: isPortal ? "lock.shield" : NoLinkCopy.icon,
+                iconTint: isPortal ? Theme.ColorToken.amber : Theme.ColorToken.red,
+                iconBackground: isPortal ? Theme.ColorToken.amberWash : Theme.ColorToken.redWash,
                 headline: headline,
                 subtitle: subtitle,
-                statusPillText: "Offline",
-                statusPillTint: Theme.ColorToken.red,
-                statusPillBackground: Theme.ColorToken.redWash,
+                statusPillText: isPortal ? "Sign-in required" : "Offline",
+                statusPillTint: isPortal ? Theme.ColorToken.amber : Theme.ColorToken.red,
+                statusPillBackground: isPortal ? Theme.ColorToken.amberWash : Theme.ColorToken.redWash,
                 detectedTime: "Live",
                 actionTitle: actionTitle,
                 onAction: {
-                    if let reconnectRule {
+                    if isPortal {
+                        coordinator.openPortalPage()
+                    } else if let reconnectRule {
                         coordinator.reconnectWiFi(ruleID: reconnectRule)
                     } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
                         NSWorkspace.shared.open(url)
@@ -419,21 +445,27 @@ struct HomeView: View {
             let isCaptive = isCaptivePortalAlert(alert)
             let isRouter = isRouterAlert(alert)
 
+            let alertSubtitle: String = {
+                var text = alert.body.isEmpty ? "Network problem detected" : alert.body
+                if isCaptive && coordinator.hasCustomDNS && !text.localizedCaseInsensitiveContains("custom DNS") {
+                    text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                }
+                return text
+            }()
+
             DashboardStatusHeroView(
-                iconName: isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
-                iconTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
-                iconBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
+                iconName: isCaptive ? "lock.shield" : (isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle"),
+                iconTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber),
+                iconBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash),
                 headline: alert.title,
-                subtitle: alert.body.isEmpty ? "Network problem detected" : alert.body,
-                statusPillText: isCritical ? "Critical alert" : "Active alert",
-                statusPillTint: isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber,
-                statusPillBackground: isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash,
+                subtitle: alertSubtitle,
+                statusPillText: isCaptive ? "Sign-in required" : (isCritical ? "Critical alert" : "Active alert"),
+                statusPillTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber),
+                statusPillBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash),
                 detectedTime: "Detected \(RelativeTime.string(from: alert.raisedAt))",
-                actionTitle: isCaptive ? "Open Login Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
+                actionTitle: isCaptive ? "Open Sign-In Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
                 onAction: isCaptive ? {
-                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    coordinator.openPortalPage()
                 } : (isRouter && routerAdminURL != nil ? {
                     if let url = routerAdminURL {
                         NSWorkspace.shared.open(url)
@@ -1101,7 +1133,9 @@ struct HomeView: View {
 
     private var routerPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
-        if routerPingText == "—" { return Theme.ColorToken.muted }
+        if routerPingText == "—" || routerPingText == "no reply" || lossFiltering.filters(.gateway) {
+            return Theme.ColorToken.muted
+        }
         if routerWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -1152,7 +1186,8 @@ struct HomeView: View {
             inetPing: inetPing,
             inetJitter: inetJitter,
             hasRecentRoam: coordinator.hasRecentRoam,
-            wifiRuleTint: wifiRuleTint
+            wifiRuleTint: wifiRuleTint,
+            gatewayPingFiltered: lossFiltering.filters(.gateway)
         )
     }
 
@@ -1574,14 +1609,20 @@ struct HomeView: View {
     private var isCaptivePortal: Bool {
         coordinator.liveSample?.publicInfo.captivePortal == true
             || (coordinator.liveSample?.status.rules.contains("CP-1") ?? false)
+            || (coordinator.liveSample?.status.rules.contains("N1c") ?? false)
             || coordinator.alerts.active["captive-portal"] != nil
+            || coordinator.currentNetworkRequiresPortal
+            || coordinator.isSystemCaptiveActive()
     }
 
     private func isCaptivePortalAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
         alert.id == "captive-portal"
             || alert.rules.contains("CP-1")
+            || alert.rules.contains("N1c")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
+            || (coordinator.liveSample?.publicInfo.captivePortal == true)
+            || coordinator.currentNetworkRequiresPortal
     }
 
     private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {

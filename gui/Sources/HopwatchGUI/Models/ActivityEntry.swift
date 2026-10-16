@@ -65,6 +65,9 @@ struct ActivityEntry: Identifiable, Equatable {
     var notified: Bool = false
     var trafficEvidence: [AppTrafficEvidence] = []
     var attributionIncomplete: Bool = false
+    var fromValue: String? = nil
+    var toValue: String? = nil
+    var extraDetail: String? = nil
 }
 
 extension ActivityEntry {
@@ -251,6 +254,9 @@ extension ActivityEntry {
                 existing.durationIsLowerBound || candidate.durationIsLowerBound
             existing.trafficEvidence += candidate.trafficEvidence
             existing.attributionIncomplete = existing.attributionIncomplete || candidate.attributionIncomplete
+            if candidate.fromValue != nil { existing.fromValue = candidate.fromValue }
+            if candidate.toValue != nil { existing.toValue = candidate.toValue }
+            if candidate.extraDetail != nil { existing.extraDetail = candidate.extraDetail }
             // nil + nil stays nil, so a day of never-paired events reports
             // no duration rather than a misleading zero.
             if let extra = candidate.totalDuration {
@@ -298,7 +304,10 @@ extension ActivityEntry {
                 id: key, kind: event.kind, summary: event.summary,
                 ruleID: event.ruleID, latest: event.date, earliest: event.date,
                 occurrences: 1, totalDuration: nil, isOngoing: false,
-                durationIsLowerBound: false))
+                durationIsLowerBound: false,
+                fromValue: event.fromValue,
+                toValue: event.toValue,
+                extraDetail: event.extraDetail))
         }
 
         return absorbAlerts(entries).values.map { entry in
@@ -345,16 +354,36 @@ extension ActivityEntry {
         _ entries: [String: ActivityEntry]) -> [String: ActivityEntry] {
         var result = entries
         for (key, entry) in entries where entry.kind == "alert" {
-            guard let ruleID = entry.ruleID else { continue }
-            let day = key.split(separator: "|").last.map(String.init) ?? ""
-            let ruleKey = "rule|\(ruleID)|\(day)"
-            guard var target = result[ruleKey] else { continue }
-            target.notified = true
-            // The alert lands after the rule's dwell, so it can be the
-            // newest thing in the group; keep the row dated by it.
-            target.latest = max(target.latest, entry.latest)
-            result[ruleKey] = target
-            result.removeValue(forKey: key)
+            if let ruleID = entry.ruleID, ruleID != "public-ip-changed" {
+                let day = key.split(separator: "|").last.map(String.init) ?? ""
+                let ruleKey = "rule|\(ruleID)|\(day)"
+                if var target = result[ruleKey] {
+                    target.notified = true
+                    target.latest = max(target.latest, entry.latest)
+                    result[ruleKey] = target
+                    result.removeValue(forKey: key)
+                    continue
+                }
+            }
+            if entry.ruleID == "public-ip-changed" || entry.summary == "Your public IP address changed" {
+                let day = key.split(separator: "|").last.map(String.init) ?? ""
+                let eventKeyPrefix = "event|public-ip-changed|"
+                if let matchingKey = result.keys.first(where: { $0.hasPrefix(eventKeyPrefix) && $0.hasSuffix(day) }) {
+                    var target = result[matchingKey]!
+                    target.notified = true
+                    target.latest = max(target.latest, entry.latest)
+                    if target.fromValue == nil { target.fromValue = entry.fromValue }
+                    if target.toValue == nil { target.toValue = entry.toValue }
+                    if target.extraDetail == nil { target.extraDetail = entry.extraDetail }
+                    result[matchingKey] = target
+                    result.removeValue(forKey: key)
+                } else {
+                    var cleanEntry = entry
+                    cleanEntry.kind = "public-ip-changed"
+                    cleanEntry.notified = false
+                    result[key] = cleanEntry
+                }
+            }
         }
         return result
     }
@@ -426,6 +455,17 @@ extension ActivityEntry {
             parts.append(occurrences > 1 ? "\(formatted) total" : "lasted \(formatted)")
         }
         if ruleID == "HOG-1", attributionIncomplete { parts.append("App attribution not recorded") }
+        if kind == "public-ip-changed" || summary.contains("Public IP") {
+            if let from = fromValue, let to = toValue {
+                var ipText = "\(from) → \(to)"
+                if let isp = extraDetail, !isp.isEmpty {
+                    ipText += " · \(isp)"
+                }
+                parts.append(ipText)
+            } else if let isp = extraDetail, !isp.isEmpty {
+                parts.append("ISP: \(isp)")
+            }
+        }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

@@ -81,6 +81,9 @@ diagnosis_run() {
     _router_hint="ask the network's owner"
     [ -n "${LINK_DHCP_ROUTER:-}" ] && _router_hint="try http://${LINK_DHCP_ROUTER} in a browser"
     add_diag critical N1c "$_where and it gave your Mac an address, but no way out to the internet. Networks in hotels, airports, cafés and offices usually do this until you open a browser and pass their sign-in or terms page — so start there: $_router_hint. If there's no sign-in page, the network handed out an address without a working route, and only its owner can fix that."
+    if declare -f repair_offer >/dev/null 2>&1; then
+      repair_offer N1c open-sign-in "Open Sign-in Page"
+    fi
   elif [ -z "$GATEWAY" ] && [ "${LINK_SELF_ASSIGNED:-0}" -eq 1 ]; then
     # DH-3 — joined, but nothing answered the request for an address, so
     # macOS made one up. It sits between N1c and N1 and is a third thing
@@ -175,12 +178,17 @@ diagnosis_run() {
     local _cur_band="${WIFI_SCAN_CURRENT_BAND:-}"
     local _cur_ch_num="${_cur_ch%% *}"
     local _is_24ghz=0
-    if [ -n "$_cur_ch_num" ] && is_numeric "$_cur_ch_num" \
+    if [ -n "$_cur_band" ]; then
+      case "$_cur_band" in
+        *5*|*6*) _is_24ghz=0 ;;
+        *2*)     _is_24ghz=1 ;;
+      esac
+    elif [[ "$_cur_ch" =~ (5|6)[[:space:]]*GHz ]]; then
+      _is_24ghz=0
+    elif [ -n "$_cur_ch_num" ] && is_numeric "$_cur_ch_num" \
        && [ "$_cur_ch_num" -ge "$THRESH_WIFI_24GHZ_MIN_CHANNEL" ] \
        && [ "$_cur_ch_num" -le "$THRESH_WIFI_24GHZ_MAX_CHANNEL" ]; then
       _is_24ghz=1
-    elif [ -n "$_cur_band" ]; then
-      case "$_cur_band" in (*2*) _is_24ghz=1 ;; esac
     fi
     if [ "$_is_24ghz" -eq 1 ]; then
       local _band_delta=$(( WIFI_RSSI - WIFI_CANDIDATE_5GHZ_RSSI ))

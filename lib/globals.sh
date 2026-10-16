@@ -120,6 +120,7 @@ PUB_CC=""                # full country name from ifconfig.co ("Brazil")
 PUB_CC_ISO=""            # ISO-3166 alpha-2 ("BR") — what a flag or locale needs
 CAPTIVE_PORTAL=0
 CAPTIVE_PORTAL_CODE=""   # observed HTTP status — CP-1's evidence
+CAPTIVE_PORTAL_URL=""    # detected captive portal sign-in redirect URL
 TARGET_PING_LOSS=""
 TARGET_PING_RTT=""
 

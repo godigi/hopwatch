@@ -142,4 +142,47 @@ import Testing
         mem = NetworkHistoryStore.memory(for: net, displayName: "Net", runs: [])
         #expect(mem.reliabilityGrade == "Degraded")
     }
+
+    @Test func fallbackMediansComputedWhenStatsAreNil() {
+        // Simulates a network with <10 checks where the CLI withholds metric_stats
+        var net = makeSampleNetwork()
+        net.checkCount = 3
+        net.metricStats = nil
+        net.severityCounts = ["ok": 1, "warn": 2, "critical": 0]
+
+        var run1 = HistoryDocument.Run()
+        run1.metrics = [
+            "gateway_rtt_ms": 10.0,
+            "inet_rtt_ms": 50.0,
+            "speed_down_mbps": 360.0,
+            "speed_up_mbps": 200.0,
+        ]
+
+        var run2 = HistoryDocument.Run()
+        run2.metrics = [
+            "gateway_rtt_ms": 3.0,
+            "inet_rtt_ms": 6.0,
+            "speed_down_mbps": 390.0,
+            "speed_up_mbps": 210.0,
+        ]
+
+        var run3 = HistoryDocument.Run()
+        run3.metrics = [
+            "gateway_rtt_ms": 3.2,
+            "inet_rtt_ms": 8.0,
+        ]
+
+        let mem = NetworkHistoryStore.memory(for: net, displayName: "My WiFi", runs: [run1, run2, run3])
+
+        // Verify fallback medians are computed from runs
+        #expect(mem.typicalGatewayLatencyMs == 3.2)
+        #expect(mem.typicalInternetLatencyMs == 8.0)
+        #expect(mem.typicalDownMbps == 375.0)
+        #expect(mem.typicalUpMbps == 205.0)
+        #expect(mem.peakDownMbps == 390.0)
+        #expect(mem.speedTestCount == 2)
+        #expect(mem.isLearningBaseline == true)
+        // With <10 checks, it should NOT mark as "Degraded"
+        #expect(mem.reliabilityGrade.contains("Learning"))
+    }
 }

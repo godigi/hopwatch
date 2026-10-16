@@ -18,15 +18,17 @@ vpn_detect() {
     VPN_TYPE="managed"
     VPN_NAME="$(printf '%s' "$scutil_nc" | awk -F'"' '/\(Connected\)/{print $2; exit}')"
   fi
-  # (b) Tailscale exposes a JSON status; BackendState=="Running" means connected.
+  # (b) Tailscale exposes a JSON status; BackendState=="Running" means connected,
+  # but only an active exit node routes general internet traffic through Tailscale.
+  # Without an exit node, Tailscale is a split-tunnel mesh (handled by lib/path.sh).
   if [ "$VPN_ACTIVE" -eq 0 ] && command -v tailscale >/dev/null 2>&1 \
      && command -v jq >/dev/null 2>&1; then
     local ts_json
     ts_json="$(with_timeout 5 tailscale status --json 2>/dev/null || true)"
-    if printf '%s' "$ts_json" | jq -e '.BackendState=="Running"' >/dev/null 2>&1; then
+    if printf '%s' "$ts_json" | jq -e '.BackendState=="Running" and (.ExitNodeStatus != null and .ExitNodeStatus.Online == true)' >/dev/null 2>&1; then
       VPN_ACTIVE=1
-      VPN_TYPE="tailscale"
-      VPN_NAME="tailscale ($(printf '%s' "$ts_json" | jq -r .Self.HostName 2>/dev/null))"
+      VPN_TYPE="tailscale-exit-node"
+      VPN_NAME="tailscale exit node ($(printf '%s' "$ts_json" | jq -r '(.ExitNodeStatus.TailscaleIPs[0] // .Self.HostName)' 2>/dev/null))"
     fi
   fi
   # (c) Default route via utun* / wg* — most reliable WireGuard-style signal.

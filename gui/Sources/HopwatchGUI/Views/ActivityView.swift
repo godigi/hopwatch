@@ -37,6 +37,7 @@ struct ActivityView: View {
     /// monitor recorded a transition. Recomputing once per render keeps the
     /// observation-driven refresh exactly as it was.
     @State private var issuesOnly = false
+    @State private var expandedEntryIDs: Set<String> = []
 
     var body: some View {
         let allEntries = ActivityEntry.fold(coordinator.eventLog.events)
@@ -53,7 +54,21 @@ struct ActivityView: View {
                 } else {
                     ForEach(days) { day in
                         Section(day.label) {
-                            ForEach(day.entries) { ActivityRow(entry: $0) }
+                            ForEach(day.entries) { entry in
+                                ActivityRowContainer(
+                                    entry: entry,
+                                    isExpanded: expandedEntryIDs.contains(entry.id),
+                                    onToggleExpand: {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            if expandedEntryIDs.contains(entry.id) {
+                                                expandedEntryIDs.remove(entry.id)
+                                            } else {
+                                                expandedEntryIDs.insert(entry.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -90,6 +105,7 @@ struct ActivityView: View {
                     Text("Issues Only (\(issuesCount))").tag(true)
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(maxWidth: 240)
             }
         }
@@ -129,11 +145,19 @@ struct ActivityView: View {
         if !active.isEmpty {
             Section("Active now") {
                 ForEach(active) { alert in
-                    AlertStageCard(alert: .init(
-                        title: alert.title, body: alert.body,
-                        raisedAt: alert.raisedAt, rules: alert.rules,
-                        severityRank: alert.rules
-                            .map(coordinator.severityRank(forRuleID:)).max() ?? 0))
+                    AlertStageCard(
+                        alert: .init(
+                            title: alert.title, body: alert.body,
+                            raisedAt: alert.raisedAt, rules: alert.rules,
+                            severityRank: alert.rules
+                                .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
+                            id: alert.id),
+                        onAction: {
+                            if alert.id == "captive-portal" || alert.rules.contains("CP-1") || alert.rules.contains("N1c") {
+                                coordinator.openPortalPage()
+                            }
+                        }
+                    )
                     .listRowSeparator(.hidden)
                 }
             }
@@ -196,3 +220,47 @@ struct ActivityView: View {
         Self.relativeDayFormatter.string(from: day)
     }
 }
+
+// MARK: - Expandable Activity Row Container
+
+struct ActivityRowContainer: View {
+    let entry: ActivityEntry
+    let isExpanded: Bool
+    let onToggleExpand: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 10) {
+                ActivityRow(entry: entry)
+
+                Button(action: onToggleExpand) {
+                    Image(systemName: isExpanded ? "chevron.up.circle.fill" : "info.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isExpanded ? .blue : (isHovered ? .primary : .secondary.opacity(0.8)))
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse details" : "Explain this activity & show more details")
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isExpanded ? Color.blue.opacity(0.06) : (isHovered ? Color.secondary.opacity(0.08) : Color.clear))
+            )
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+            .onTapGesture { onToggleExpand() }
+
+            if isExpanded {
+                ActivityDetailCard(entry: entry)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.leading, 34)
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+}
+

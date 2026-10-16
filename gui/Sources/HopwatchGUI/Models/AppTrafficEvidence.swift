@@ -34,6 +34,26 @@ struct AppTrafficEvidence: Codable, Sendable, Equatable {
     var observedDate: Date? { observedAt.flatMap { ISO8601DateFormatter().date(from: $0) } }
     var name: String { appName ?? process ?? "Unidentified process" }
 
+    var friendlyProcessDescription: String? {
+        guard let proc = process?.lowercased() else { return nil }
+        switch proc {
+        case "appstoreagent":
+            return "macOS App Store background download agent"
+        case "replicatord":
+            return "macOS data sync and replication daemon"
+        case "cloudd":
+            return "Apple iCloud synchronization service"
+        case "nsurlsessiond":
+            return "macOS background network transfer service"
+        case "softwareupdated":
+            return "macOS Software Update daemon"
+        case "backupd", "backupd-helper":
+            return "Time Machine backup service"
+        default:
+            return nil
+        }
+    }
+
     var detail: String {
         var parts = [name]
         if let rate = rateMbps, rate.isFinite, rate >= 0 {
@@ -43,7 +63,13 @@ struct AppTrafficEvidence: Codable, Sendable, Equatable {
         if let share = dominancePct, share.isFinite, (0...100).contains(share) {
             parts.append("\(Int(share.rounded()))% of Mac's \(direction == "up" ? "upload" : "download") traffic")
         }
-        if appName == nil { parts.append("app unidentified") }
+        if appName == nil {
+            if let process, !process.isEmpty {
+                parts.append("background process")
+            } else {
+                parts.append("app unidentified")
+            }
+        }
         if let date = observedDate { parts.append("observed \(date.formatted(date: .omitted, time: .shortened))") }
         return parts.joined(separator: " · ")
     }

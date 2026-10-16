@@ -836,7 +836,8 @@ import Testing
 
         #expect(calls.verdict == .good)
         #expect(gaming.verdict == .good)
-        #expect(vpn.verdict == .unknown) // Relay is not evidence that VPN compatibility was measured.
+        #expect(vpn.verdict == .good)
+        #expect(vpn.status == "Compatible")
     }
 
     @Test func subOnePercentLossDisplaysDecimalInMetricsAndSubtitle() {

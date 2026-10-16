@@ -231,6 +231,7 @@ MON_PUB_CC_ISO=""
 MON_PUB_CITY=""
 MON_PUBLIC_OK=""
 MON_CAPTIVE=""
+MON_CAPTIVE_URL=""
 MON_RULES=""
 MON_CLEARABLE_RULES=""
 MON_BROWSER_CHECKED=0
@@ -875,7 +876,7 @@ _mon_probe_browser() {
 # ── Slow tier ────────────────────────────────────────────────────────────
 
 _mon_probe_public() {
-  MON_PUBLIC_OK=""; MON_CAPTIVE=""
+  MON_PUBLIC_OK=""; MON_CAPTIVE=""; MON_CAPTIVE_URL=""
   # Cleared before the fetch, not only when it returns a body: a lookup that
   # fails (captive portal, certificate error, timeout) must not leave the
   # previous network's IP, ISP and country in the sample as if current.
@@ -898,16 +899,79 @@ _mon_probe_public() {
   fi
   # Body captured for the same reason lib/public.sh captures it: a portal
   # that answers 200 with its login page is invisible in the status alone.
-  local captive_raw captive_code captive_body
-  captive_raw="$(curl -s -m 3 -w '\n%{http_code}' \
+  local captive_raw captive_code captive_body captive_url=""
+  captive_raw="$(curl -s -m 3 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' \
     "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
-  captive_code="${captive_raw##*$'\n'}"
-  captive_body="${captive_raw%$'\n'*}"
+  captive_body="${captive_raw%%$'\n'__METADATA__*}"
+  local captive_meta="${captive_raw##*$'\n'__METADATA__$'\n'}"
+  { read -r captive_code || true; read -r captive_url || true; } <<< "$captive_meta"
   # Same classifier lib/public.sh uses — see lib/common.sh.
   case "$(captive_portal_classify "$captive_code" "$captive_body")" in
-    ok)     MON_CAPTIVE=0 ;;
-    portal) MON_CAPTIVE=1 ;;
-    *)      MON_CAPTIVE="" ;;
+    ok)
+      MON_CAPTIVE=0
+      MON_CAPTIVE_URL=""
+      ;;
+    portal)
+      MON_CAPTIVE=1
+      MON_CAPTIVE_URL="${captive_url:-}"
+      ;;
+    *)
+      # Primary canary probe failed (unknown) — often due to custom DNS blocking resolution.
+      # Fallback 1: Query DHCP-provided DNS server or gateway directly for captive.apple.com
+      local dhcp_dns=""
+      if [ -n "$MON_INTERFACE" ]; then
+        dhcp_dns="$(ipconfig getoption "$MON_INTERFACE" domain_name_server 2>/dev/null | awk '{print $1; exit}' || true)"
+      fi
+      [ -n "$dhcp_dns" ] || dhcp_dns="$MON_GATEWAY"
+      local resolved_ip=""
+      if [ -n "$dhcp_dns" ] && type dig >/dev/null 2>&1; then
+        resolved_ip="$(dig @"$dhcp_dns" +short +time=1 captive.apple.com 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+      fi
+      if [ -n "$resolved_ip" ]; then
+        local fb_raw fb_body fb_meta fb_code fb_url
+        fb_raw="$(curl -s -m 3 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' \
+          --resolve "captive.apple.com:80:$resolved_ip" "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
+        fb_body="${fb_raw%%$'\n'__METADATA__*}"
+        fb_meta="${fb_raw##*$'\n'__METADATA__$'\n'}"
+        { read -r fb_code || true; read -r fb_url || true; } <<< "$fb_meta"
+        case "$(captive_portal_classify "$fb_code" "$fb_body")" in
+          ok)
+            MON_CAPTIVE=0
+            MON_CAPTIVE_URL=""
+            ;;
+          portal)
+            MON_CAPTIVE=1
+            MON_CAPTIVE_URL="${fb_url:-}"
+            ;;
+        esac
+      fi
+
+      # Fallback 2: Check macOS DynamicStore CaptiveNetwork state
+      if [ -z "$MON_CAPTIVE" ] && [ -n "$MON_INTERFACE" ]; then
+        local sc_out
+        sc_out="$(echo "get State:/Network/Interface/$MON_INTERFACE/CaptiveNetwork"$'\n'"d.show" | scutil 2>/dev/null || true)"
+        if [[ "$sc_out" =~ Stage[[:space:]]*:[[:space:]]*(Captive|Redirect|Probe) ]] || [[ "$sc_out" =~ WaitingOnUI[[:space:]]*:[[:space:]]*(TRUE|1) ]]; then
+          MON_CAPTIVE=1
+          [ -z "$MON_CAPTIVE_URL" ] && [ -n "$MON_GATEWAY" ] && MON_CAPTIVE_URL="http://${MON_GATEWAY}"
+        fi
+      fi
+
+      # Fallback 3: Probe gateway on port 80 directly (no DNS needed)
+      if [ -z "$MON_CAPTIVE" ] && [ -n "$MON_GATEWAY" ]; then
+        local gw_raw gw_code gw_url gw_body
+        gw_raw="$(curl -s -m 2 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' "http://${MON_GATEWAY}/" 2>/dev/null || true)"
+        gw_body="${gw_raw%%$'\n'__METADATA__*}"
+        local gw_meta="${gw_raw##*$'\n'__METADATA__$'\n'}"
+        { read -r gw_code || true; read -r gw_url || true; } <<< "$gw_meta"
+        if [ "$gw_code" = "302" ] || [ "$gw_code" = "307" ] || [ "$gw_code" = "511" ]; then
+          MON_CAPTIVE=1
+          MON_CAPTIVE_URL="${gw_url:-http://${MON_GATEWAY}}"
+        elif [ "$gw_code" = "200" ] && printf '%s' "$gw_body" | grep -qiE '(captive|portal|guest|login|sign[ -]?in|password)'; then
+          MON_CAPTIVE=1
+          MON_CAPTIVE_URL="${gw_url:-http://${MON_GATEWAY}}"
+        fi
+      fi
+      ;;
   esac
 }
 
@@ -969,7 +1033,7 @@ _mon_clear_measurements() {
   MON_DNS_UDP_HOLDERS=""; MON_DNS_UDP_TOP_SHARE_PCT=""; MON_DNS_TCP_DNS_OK=""
   MON_TCP_OK=""; MON_TCP_LINES=""
   MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""
-  MON_PUBLIC_OK=""; MON_CAPTIVE=""
+  MON_PUBLIC_OK=""; MON_CAPTIVE=""; MON_CAPTIVE_URL=""
   MON_PUB_IP=""; MON_PUB_ISP=""; MON_PUB_ASN=""
   MON_PUB_CITY=""; MON_PUB_CC=""; MON_PUB_CC_ISO=""
 }
@@ -1090,13 +1154,17 @@ _mon_rules() {
   MON_RULES=""
   # A rule can clear only when this cycle measured the inputs that decide it.
   # Link and VPN state are observed every cycle, even when traffic is not.
-  MON_CLEARABLE_RULES="N1 VPN-1 WF-1 WJ-1 DH-3 "
+  MON_CLEARABLE_RULES="N1 N1c VPN-1 WF-1 WJ-1 DH-3 "
   MON_SEVERITY="ok"
   MON_ICMP_FILTERED=0
   MON_MEASUREMENT_STATE="unknown"
 
   if [ "$MON_LINK_UP" -eq 0 ]; then
-    _mon_add_rule critical N1
+    if [ "$MON_OFFLINE_REASON" = "no-route" ] && { [ -n "$MON_LOCAL_IP" ] || [ -n "$MON_SSID" ]; }; then
+      _mon_add_rule critical N1c
+    else
+      _mon_add_rule critical N1
+    fi
     local down_duration=0
     [ "$MON_DOWN_SINCE_EPOCH" -gt 0 ] && down_duration=$(( EPOCHSECONDS - MON_DOWN_SINCE_EPOCH ))
     if [ "$MON_OFFLINE_REASON" = "wifi-off" ]; then
@@ -1816,6 +1884,7 @@ _mon_emit() {
   NETDIAG_MON_PUB_CC="$MON_PUB_CC" \
   NETDIAG_MON_PUB_CC_ISO="$MON_PUB_CC_ISO" \
   NETDIAG_MON_CAPTIVE="$MON_CAPTIVE" \
+  NETDIAG_MON_CAPTIVE_URL="$MON_CAPTIVE_URL" \
   NETDIAG_MON_RULES="$MON_RULES" \
   NETDIAG_MON_HOG_REFRESHED="$MON_HOG_REFRESHED" \
   NETDIAG_MON_HOG_OBSERVED_AT="$MON_HOG_OBSERVED_AT" \

@@ -663,6 +663,7 @@ def main() -> None:
             "country": _env("PUB_CC"),
             "country_iso": _env("PUB_CC_ISO"),
             "captive_portal": _tri("CAPTIVE"),
+            "captive_portal_url": _env("CAPTIVE_URL"),
         },
         "status": {
             "severity": _env("SEVERITY") or "ok",

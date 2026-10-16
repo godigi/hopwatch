@@ -286,3 +286,42 @@ spin() {
   diagnosis_run >/dev/null
   [[ " ${DIAG_RULE[*]:-} " == *" V6-2 "* ]] || return 1
 }
+
+@test "_run_per_hop_fallback preserves traceroute hop numbers when intermediate hops time out" {
+  . "$REPO/lib/mtr.sh"
+  ping_parse_summary() { printf '0|10.5|0.5'; }
+  ping() { :; }
+  with_timeout() { shift; "$@"; }
+  TRACE_LINES=$'1|192.168.1.1|1.2\n2||\n3|100.64.0.1|8.5\n'
+  HOPS=("192.168.1.1" "100.64.0.1")
+  _run_per_hop_fallback >/dev/null
+  [ "${HOP_NUMS[0]}" -eq 1 ]
+  [ "${HOP_NUMS[1]}" -eq 3 ]
+  [ "${HOP_IPS[0]}" = "192.168.1.1" ]
+  [ "${HOP_IPS[1]}" = "100.64.0.1" ]
+}
+
+@test "Tailscale without exit node does not set VPN_ACTIVE=1" {
+  . "$REPO/lib/vpn.sh"
+  scutil() { printf ''; }
+  tailscale() {
+    printf '{"BackendState":"Running","Self":{"HostName":"my-mac"},"ExitNodeStatus":null}'
+  }
+  INTERFACE="en0"
+  vpn_detect
+  [ "$VPN_ACTIVE" -eq 0 ]
+  [ -z "$VPN_TYPE" ]
+}
+
+@test "Tailscale with active exit node sets VPN_ACTIVE=1" {
+  . "$REPO/lib/vpn.sh"
+  scutil() { printf ''; }
+  tailscale() {
+    printf '{"BackendState":"Running","Self":{"HostName":"my-mac"},"ExitNodeStatus":{"Online":true,"TailscaleIPs":["100.64.1.2"]}}'
+  }
+  INTERFACE="en0"
+  vpn_detect
+  [ "$VPN_ACTIVE" -eq 1 ]
+  [ "$VPN_TYPE" = "tailscale-exit-node" ]
+  [[ "$VPN_NAME" == *"100.64.1.2"* ]]
+}

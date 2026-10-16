@@ -44,14 +44,18 @@ struct NetworkDetailCard: View {
 
     private var cardTitleRow: some View {
         HStack(spacing: 8) {
-            Image(systemName: "chart.xyaxis.line")
+            Image(systemName: memory.isLearningBaseline ? "gauge.with.dots.needle.bottom.50percent" : "chart.xyaxis.line")
                 .foregroundStyle(.blue)
                 .font(.system(size: 13, weight: .semibold))
-            Text("Typical Performance Baseline")
+            Text(memory.isLearningBaseline ? "Performance Profile" : "Typical Performance Baseline")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            if let last = memory.lastSeenDate {
+            if memory.isLearningBaseline && memory.checkCount > 0 {
+                Text("Building baseline (\(memory.checkCount) of 10 checks)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if let last = memory.lastSeenDate {
                 Text("Last seen \(RelativeTime.string(from: last))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -76,8 +80,23 @@ struct NetworkDetailCard: View {
                 }
             }
 
-            Text(memory.displayName)
-                .font(.title3.weight(.bold))
+            HStack(alignment: .center, spacing: 6) {
+                Text(memory.displayName)
+                    .font(.title3.weight(.bold))
+                if memory.requiresPortal {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.shield")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Sign-in portal")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+                }
+            }
 
             if !memory.gateways.isEmpty || !memory.isps.isEmpty {
                 Text([memory.gateways.joined(separator: ", "),
@@ -115,7 +134,7 @@ struct NetworkDetailCard: View {
                 iconColor: reliabilityTint,
                 label: "Reliability",
                 primary: reliabilityDisplay,
-                secondary: "\(memory.checkCount) checks"
+                secondary: reliabilitySubcaption
             )
         }
     }
@@ -292,6 +311,9 @@ struct NetworkDetailCard: View {
         if let peak = memory.peakDownMbps, let typical = memory.typicalDownMbps, peak > typical {
             return String(format: "Peak: %.0f Mbps", peak)
         }
+        if memory.speedTestCount > 0 {
+            return memory.speedTestCount == 1 ? "1 test recorded" : "\(memory.speedTestCount) tests recorded"
+        }
         return nil
     }
 
@@ -313,13 +335,32 @@ struct NetworkDetailCard: View {
     }
 
     private var reliabilityDisplay: String {
+        if memory.checkCount < 5 {
+            if memory.checkCount == 0 { return "—" }
+            if memory.incidentCount == 0 { return "All Clean" }
+            return "\(memory.checkCount - memory.incidentCount)/\(memory.checkCount) Clean"
+        }
         if let rel = memory.reliabilityPercent {
             return String(format: "%.0f%%", rel)
         }
         return "—"
     }
 
+    private var reliabilitySubcaption: String {
+        if memory.checkCount < 5 && memory.checkCount > 0 {
+            if memory.incidentCount == 0 {
+                return "\(memory.checkCount) check\(memory.checkCount == 1 ? "" : "s") passed"
+            }
+            return "\(memory.incidentCount) issue\(memory.incidentCount == 1 ? "" : "s") in \(memory.checkCount) check\(memory.checkCount == 1 ? "" : "s")"
+        }
+        return "\(memory.checkCount) checks"
+    }
+
     private var reliabilityTint: Color {
+        if memory.checkCount < 5 {
+            if memory.incidentCount == 0 { return .green }
+            return .orange
+        }
         switch memory.reliabilityGrade {
         case "Excellent", "Good": return .green
         case "Fair":              return .orange

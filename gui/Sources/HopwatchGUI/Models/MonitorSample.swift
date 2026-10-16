@@ -315,11 +315,13 @@ struct MonitorSample: Decodable, Sendable {
         var country: String?
         var countryISO: String?
         var captivePortal: Bool?
+        var captivePortalURL: String?
 
         enum CodingKeys: String, CodingKey {
             case ok, ip, isp, asn, city, country
             case countryISO = "country_iso"
             case captivePortal = "captive_portal"
+            case captivePortalURL = "captive_portal_url"
         }
     }
 
@@ -394,17 +396,26 @@ struct MonitorSample: Decodable, Sendable {
         // No rule firing is not the same as a successful check. Keep the
         // menu-bar indicator out of the green state until a router, internet,
         // or HTTPS reachability probe has actually produced evidence.
-        guard status.measurement == "measured" else { return .warning }
+        guard status.measurement == "measured" else { return .checking }
         switch status.severity {
         case "critical": return .critical
         case "warn":     return .warning
         default:
             if status.degraded { return .warning }
+            let filtering = EffectiveLoss.filtering(sample: self)
             let inetLoss = internet.lossPct ?? 0
             let gwLoss = gateway.lossPct ?? 0
             // Downstream validation: if internet is healthy (<= 1.0%), isolated router loss
-            // (< 20%) is control-plane rate limiting and does not degrade user traffic.
-            let loss = (inetLoss <= 1.0 && gwLoss < 20.0) ? inetLoss : max(inetLoss, gwLoss)
+            // (< 20%) or complete gateway ICMP filtering (TCP-1 / icmp_filtered) is control-plane
+            // rate limiting or filtering by policy and does not degrade user traffic.
+            let loss: Double
+            if filtering.gatewayLeg && inetLoss <= 1.0 {
+                loss = inetLoss
+            } else if inetLoss <= 1.0 && gwLoss < 20.0 {
+                loss = inetLoss
+            } else {
+                loss = max(inetLoss, gwLoss)
+            }
             if loss > 2.0 { return .warning }
             return .healthy
         }
@@ -606,6 +617,10 @@ enum Health: Sendable {
     /// so without this case `currentHealth` fell through to it and left a
     /// green dot in the menu bar over a "Monitoring paused" card.
     case paused
+    /// The network connection is actively being determined (e.g. initial connection,
+    /// arriving on a new network, or baseline probing). Distinct from warning so
+    /// transient determination never creates false panic.
+    case checking
 
     var symbol: String {
         switch self {
@@ -613,6 +628,7 @@ enum Health: Sendable {
         case .warning:  return "exclamationmark.circle.fill"
         case .critical: return "xmark.circle.fill"
         case .paused:   return "pause.circle.fill"
+        case .checking: return "circle.dashed"
         }
     }
 
@@ -624,6 +640,7 @@ enum Health: Sendable {
         case .warning:  return "Network warning"
         case .critical: return "Network problem"
         case .paused:   return "Monitoring paused"
+        case .checking: return "Checking network connection"
         }
     }
 }

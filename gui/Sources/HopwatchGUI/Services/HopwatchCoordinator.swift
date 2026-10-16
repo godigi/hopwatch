@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreWLAN
+import SystemConfiguration
 import os
 
 /// The one object that owns the others and decides when they act.
@@ -251,6 +252,7 @@ final class HopwatchCoordinator {
         alerts.inNetworkGracePeriod = { [weak events] in
             events?.withinGracePeriod() ?? false
         }
+        alerts.hasCustomDNS = { [weak self] in self?.hasCustomDNS ?? false }
         alerts.onAlertFired = { [weak self] def, firingRules in
             self?.handleAlertFired(def, firingRules: firingRules) ?? false
         }
@@ -702,6 +704,12 @@ final class HopwatchCoordinator {
         if let ssid = Self.readableSSID(sample.link.ssid) ?? liveSSID {
             lastAssociatedSSID = ssid
         }
+        if sample.publicInfo.captivePortal == true ||
+           sample.status.rules.contains("CP-1") ||
+           sample.status.rules.contains("N1c") ||
+           isSystemCaptiveActive() {
+            learnCurrentNetworkRequiresPortal()
+        }
         alerts.evaluate(sample: sample)
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
@@ -709,6 +717,9 @@ final class HopwatchCoordinator {
                 latencyMs: sample.gateway.rttAvgMs ?? sample.internet.rttAvgMs,
                 activeIDs: Set(alerts.active.keys)
             )
+            if appSettings.audioChimesEnabled {
+                NSSound(named: "Glass")?.play()
+            }
         }
         evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
@@ -736,6 +747,16 @@ final class HopwatchCoordinator {
         }
 
         for change in sample.changes {
+            var extra: String? = nil
+            if change.kind == "public-ip-changed" {
+                if let isp = sample.publicInfo.isp, !isp.isEmpty {
+                    extra = isp
+                }
+            } else if change.kind == "isp-changed" {
+                if let ip = sample.publicInfo.ip, !ip.isEmpty {
+                    extra = "IP: \(ip)"
+                }
+            }
             eventLog.record(
                 kind: change.kind,
                 summary: change.summary,
@@ -743,7 +764,11 @@ final class HopwatchCoordinator {
                     ? (change.to ?? change.from) : nil,
                 network: sample.network.id,
                 date: sample.timestamp,
-                evidence: change.evidence)
+                continuesPrevious: false,
+                evidence: change.evidence,
+                fromValue: change.from,
+                toValue: change.to,
+                extraDetail: extra)
         }
 
         if let gwIP = sample.link.gateway, gwIP != lastProbedRouterIP {
@@ -1613,6 +1638,112 @@ final class HopwatchCoordinator {
         }
     }
 
+    // MARK: - Captive Portal & Custom DNS Support
+
+    /// Current reason why link is offline (e.g. "no-route", "no-interface", etc.)
+    var offlineReason: String? {
+        liveSample?.link.offline?.reason ?? monitor.latest?.link.offline?.reason
+    }
+
+    /// Servers configured manually by the user on the primary network service,
+    /// bypassing DHCP DNS. When present, captive portals that intercept DNS or
+    /// block external port 53 will cause standard URL probes to time out.
+    var customDNSServers: [String] {
+        guard let store = SCDynamicStoreCreate(nil, "Hopwatch" as CFString, nil, nil) else { return [] }
+        guard let primaryIface = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+              let serviceID = primaryIface["PrimaryService"] as? String else { return [] }
+        if let customDNS = SCDynamicStoreCopyValue(store, "Setup:/Network/Service/\(serviceID)/DNS" as CFString) as? [String: Any],
+           let servers = customDNS["ServerAddresses"] as? [String], !servers.isEmpty {
+            return servers
+        }
+        return []
+    }
+
+    /// Whether the Mac is configured with custom DNS on its primary connection.
+    var hasCustomDNS: Bool {
+        !customDNSServers.isEmpty
+    }
+
+    /// True when macOS itself reports the interface is awaiting captive portal interaction.
+    func isSystemCaptiveActive() -> Bool {
+        guard let store = SCDynamicStoreCreate(nil, "Hopwatch" as CFString, nil, nil) else { return false }
+        let iface = monitor.latest?.link.interface ?? "en0"
+        if let dict = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(iface)/CaptiveNetwork" as CFString) as? [String: Any] {
+            if let waiting = dict["WaitingOnUI"] as? Bool, waiting { return true }
+            if let waitingNum = dict["WaitingOnUI"] as? Int, waitingNum != 0 { return true }
+            if let stage = dict["Stage"] as? String, stage != "Online" && stage != "Offline" { return true }
+        }
+        return false
+    }
+
+    /// Whether the current network has been identified or learned as requiring a portal sign-in.
+    var currentNetworkRequiresPortal: Bool {
+        if let id = monitor.latest?.network.historyJoinID, Defaults.portalNetworks.contains(id) {
+            return true
+        }
+        if let key = monitor.latest?.network.id, Defaults.portalNetworks.contains(key) {
+            return true
+        }
+        if let ssid = wifiDisplayName, Defaults.portalNetworks.contains("ssid:\(ssid)") {
+            return true
+        }
+        if let lastSSID = lastAssociatedSSID, Defaults.portalNetworks.contains("ssid:\(lastSSID)") {
+            return true
+        }
+        return false
+    }
+
+    /// Records the current network's identity into persistent memory so future connections
+    /// know immediately that it requires a captive portal sign-in.
+    func learnCurrentNetworkRequiresPortal() {
+        if let id = monitor.latest?.network.historyJoinID, !id.isEmpty {
+            Defaults.recordPortalNetwork(id)
+        }
+        if let key = monitor.latest?.network.id, !key.isEmpty {
+            Defaults.recordPortalNetwork(key)
+        }
+        if let ssid = wifiDisplayName, !ssid.isEmpty {
+            Defaults.recordPortalNetwork("ssid:\(ssid)")
+        }
+        if let lastSSID = lastAssociatedSSID, !lastSSID.isEmpty {
+            Defaults.recordPortalNetwork("ssid:\(lastSSID)")
+        }
+    }
+
+    /// Directs the user to the captive portal sign-in page across all compatible methods:
+    /// native Captive Network Assistant, detected portal redirect URL, canary detect URL,
+    /// and raw router gateway HTTP (for custom DNS compatibility).
+    func openPortalPage() {
+        learnCurrentNetworkRequiresPortal()
+
+        // 1. If liveSample has a detected captive portal URL, open that in default browser
+        if let urlStr = liveSample?.publicInfo.captivePortalURL,
+           let url = URL(string: urlStr) {
+            NSWorkspace.shared.open(url)
+        }
+
+        // 2. Launch macOS native Captive Network Assistant.app if present
+        let cnaPath = "/System/Library/CoreServices/Captive Network Assistant.app"
+        if FileManager.default.fileExists(atPath: cnaPath) {
+            let cnaURL = URL(fileURLWithPath: cnaPath)
+            NSWorkspace.shared.openApplication(at: cnaURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        }
+
+        // 3. Open Apple's hotspot detect URL in default browser
+        if let detectURL = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+            NSWorkspace.shared.open(detectURL)
+        }
+
+        // 4. If custom DNS is active and router IP is known, also open http://<gateway> which bypasses DNS
+        if hasCustomDNS, let gw = liveSample?.link.gateway ?? monitor.latest?.link.gateway, !gw.isEmpty,
+           let gwURL = URL(string: "http://\(gw)") {
+            NSWorkspace.shared.open(gwURL)
+        }
+
+        eventLog.record(kind: "repair", summary: "Opened captive portal sign-in page", ruleID: "CP-1",
+                         network: monitor.latest?.network.id)
+    }
+
     /// Run a repair the user has just confirmed, then find out whether it
     /// worked. Only ever called from a button the user pressed — never from
     /// a timer, an arrival or an alert (CLAUDE.md, Read-only).
@@ -1711,9 +1842,20 @@ final class HopwatchCoordinator {
         // reads an arbitrary element of an unordered Set of everything the
         // alert *listens* for, which is why one L2 condition was logged as
         // "rule=L1" and the next identical one as "rule=L2".
+        var alertExtra: String? = nil
+        var alertTo: String? = nil
+        if def.id == "public-ip-changed" {
+            alertExtra = monitor.latest?.publicInfo.isp
+            alertTo = monitor.latest?.publicInfo.ip
+        }
         eventLog.record(kind: "alert", summary: def.title,
-                        ruleID: firingRules.min(),
-                        network: monitor.latest?.network.id)
+                        ruleID: firingRules.min() ?? (def.isEvent ? def.id : nil),
+                        network: monitor.latest?.network.id,
+                        toValue: alertTo,
+                        extraDetail: alertExtra)
+        if appSettings.audioChimesEnabled {
+            NSSound(named: "Basso")?.play()
+        }
         guard Defaults.scanOnAlert else { return false }
         // Loop guard, two clauses. A scan started by an alert never starts
         // another, and no scan starts while one is running. Between them
@@ -2206,8 +2348,15 @@ final class HopwatchCoordinator {
         let currentRunHealth = monitor.latest == nil
             ? currentNetworkRun?.snapshot.worstSeverity : nil
 
+        let isDetermining = isSettling
+            || monitor.isAwaitingFirstSample
+            || (isScanning && isArrivalCheck)
+            || (liveSample != nil && liveSample?.status.measurement != "measured")
+            || (liveSample == nil && freshNetworkRunSnapshot == nil)
+
         return HealthResolver.resolve(.init(
             isScanning: isScanning,
+            isArrivalCheck: isArrivalCheck,
             monitoringEnabled: Defaults.monitoringEnabled,
             isPausedForAnyReason: monitor.isPausedForAnyReason,
             monitorRunning: monitor.isRunning,
@@ -2215,7 +2364,8 @@ final class HopwatchCoordinator {
             sampleHealth: liveSample?.health,
             runHealth: currentRunHealth,
             linkDown: linkIsDown,
-            sampleStale: latestSampleIsStale))
+            sampleStale: latestSampleIsStale,
+            isChecking: isDetermining))
     }
 
     /// The CLI's severity for one rule ID, ranked so the worst of a set can

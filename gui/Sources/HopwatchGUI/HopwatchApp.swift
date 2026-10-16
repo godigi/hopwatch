@@ -66,6 +66,16 @@ struct HopwatchApp: App {
         }
         .defaultSize(width: 560, height: 580)
         .windowResizability(.contentSize)
+
+        Window("What’s New in Hopwatch", id: WindowID.whatsNew) {
+            WhatsNewView(onDismiss: {
+                NSApp.windows.first(where: { $0.identifier?.rawValue.contains(WindowID.whatsNew) == true })?.close()
+            })
+            .environment(coordinator)
+            .environment(coordinator.appSettings)
+        }
+        .defaultSize(width: 480, height: 520)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -83,6 +93,11 @@ extension HopwatchApp {
         }
         coordinator.notifications.onNotificationResponse = {
             delegate.openDashboard()
+        }
+        coordinator.notifications.onNotificationAction = { [weak coordinator] id, _ in
+            if id == "netdiag.captive-portal" {
+                coordinator?.openPortalPage()
+            }
         }
 
         // `--verify` runs the harness and exits from
@@ -122,7 +137,21 @@ extension HopwatchApp {
             }
         }
 
+        GlobalHotkeyManager.shared.onHotkeyPressed = {
+            delegate.openDashboard()
+        }
+
         if Defaults.hasOnboarded {
+            let currentVersion = Defaults.appVersion
+            if let lastSeen = Defaults.lastSeenAppVersion, lastSeen != currentVersion {
+                Defaults.lastSeenAppVersion = currentVersion
+                openWindow(id: WindowID.whatsNew)
+                NSApp.activate(ignoringOtherApps: true)
+                didOpenWindow = true
+            } else if Defaults.lastSeenAppVersion == nil {
+                Defaults.lastSeenAppVersion = currentVersion
+            }
+
             // Grants can be revoked in System Settings between launches, so
             // the stored answer is a fact about last time, not about now.
             await coordinator.alerts.refreshAuthorization()
@@ -267,6 +296,7 @@ enum WindowID {
     static let dashboard = "dashboard"
     static let settings = "settings"
     static let onboarding = "onboarding"
+    static let whatsNew = "whatsNew"
 }
 
 /// Layer one of four: the menu-bar item itself.
@@ -281,7 +311,11 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(nsImage: Self.dot(for: coordinator.currentHealth))
+            if coordinator.currentHealth == .checking {
+                MenuBarCheckingIcon()
+            } else {
+                Image(nsImage: Self.dot(for: coordinator.currentHealth))
+            }
             switch appSettings.menuBarStyle {
             case .dotOnly:
                 EmptyView()
@@ -300,6 +334,12 @@ struct MenuBarLabel: View {
                 if let ping = pingString {
                     Text(ping).font(Theme.Font.compactMonospace)
                 }
+            case .dynamic:
+                if coordinator.currentHealth != .healthy && coordinator.currentHealth != .checking {
+                    if let ping = pingString {
+                        Text(ping).font(Theme.Font.compactMonospace)
+                    }
+                }
             }
         }
     }
@@ -315,11 +355,11 @@ struct MenuBarLabel: View {
     /// template, so the symbol is rasterised here with an explicit palette
     /// colour and `isTemplate = false`.
     ///
-    /// Colour is never the only signal — the three symbols differ in shape
+    /// Colour is never the only signal — the symbols differ in shape
     /// as well, which is what makes the state readable to someone who can't
     /// distinguish red from green.
     @MainActor
-    private static func dot(for health: Health) -> NSImage {
+    static func dot(for health: Health) -> NSImage {
         if let cached = dotCache[health.symbol] { return cached }
         let colour = health.nsColor
         let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
@@ -372,4 +412,42 @@ struct MenuBarLabel: View {
             filtering: EffectiveLoss.filtering(sample: coordinator.monitor.latest)
         )
     }
+}
+
+/// An animated menu-bar icon showing that the connection is actively being determined.
+///
+/// Uses an array of pre-rasterised, rotated NSImage frames driven by a periodic
+/// TimelineView. Like `MenuBarLabel.dot(for:)`, the frames are created with
+/// `isTemplate = false` and an explicit systemBlue palette so the icon renders
+/// in vibrant colour rather than greyed-out template monochrome.
+struct MenuBarCheckingIcon: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.125)) { timeline in
+            let count = max(Self.frames.count, 1)
+            let step = abs(Int(timeline.date.timeIntervalSinceReferenceDate / 0.125)) % count
+            Image(nsImage: Self.frames[step])
+        }
+        .accessibilityLabel("Determining network connection")
+    }
+
+    @MainActor
+    private static let frames: [NSImage] = {
+        let base = MenuBarLabel.dot(for: .checking)
+        let size = base.size
+        guard size.width > 0, size.height > 0 else { return [base] }
+        return (0..<8).map { i in
+            let angle = -Double(i) * 45.0
+            let img = NSImage(size: size)
+            img.lockFocus()
+            let xform = NSAffineTransform()
+            xform.translateX(by: size.width / 2.0, yBy: size.height / 2.0)
+            xform.rotate(byDegrees: angle)
+            xform.translateX(by: -size.width / 2.0, yBy: -size.height / 2.0)
+            xform.concat()
+            base.draw(in: NSRect(origin: .zero, size: size))
+            img.unlockFocus()
+            img.isTemplate = false
+            return img
+        }
+    }()
 }

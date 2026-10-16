@@ -45,18 +45,21 @@ enum RouteWarningResolver {
         inetPing: Double,
         inetJitter: Double,
         hasRecentRoam: Bool,
-        wifiRuleTint: Color? = nil
+        wifiRuleTint: Color? = nil,
+        gatewayPingFiltered: Bool = false
     ) -> Result {
         // Downstream validation: Packets to the internet must traverse the local gateway.
         // If internet through-traffic is clean (loss <= 1.0%), isolated router ping loss (< 20%)
-        // is harmless ICMP control-plane rate limiting by the router's CPU, NOT physical data loss.
+        // or complete gateway ICMP ping filtering (e.g. TCP-1 / icmp_filtered where the router
+        // drops ping but forwards real traffic) is harmless ICMP control-plane behavior, NOT physical data loss.
         let isIsolatedGWLoss = (inetLoss <= 1.0 && gwLoss < 20.0)
-        let realGWLoss = !isIsolatedGWLoss && gwLoss >= 5.0
+            || (gatewayPingFiltered && inetLoss <= 1.0)
+        let realGWLoss = !isIsolatedGWLoss && gwLoss >= 5.0 && !gatewayPingFiltered
 
         // If the full round-trip to the internet has lower latency or jitter than the router,
         // any delay/jitter to the router IP itself is router CPU reply delay, not local Wi-Fi latency.
-        let realGWPing = gwPing >= 35.0 && (inetPing >= 35.0 || inetPing == 0)
-        let realGWJitter = gwJitter >= 25.0 && (inetJitter >= 20.0 || inetJitter == 0)
+        let realGWPing = gwPing >= 35.0 && (inetPing >= 35.0 || inetPing == 0) && !gatewayPingFiltered
+        let realGWJitter = gwJitter >= 25.0 && (inetJitter >= 20.0 || inetJitter == 0) && !gatewayPingFiltered
 
         // 1. Wi-Fi Laggy evaluation
         // Wi-Fi is laggy when wireless latency/jitter is elevated or Wi-Fi rules indicate degradation.
@@ -75,10 +78,12 @@ enum RouteWarningResolver {
         let routerWarn: Bool
         if hasRecentRoam && gwLoss < 10.0 {
             routerWarn = false
+        } else if gatewayPingFiltered && inetLoss <= 1.0 && !firedCategories.contains("router") {
+            routerWarn = false
         } else {
             routerWarn = firedCategories.contains("router")
                 || realGWLoss
-                || (gwPing > 30.0 && (inetPing >= 30.0 || inetPing == 0))
+                || (!gatewayPingFiltered && gwPing > 30.0 && (inetPing >= 30.0 || inetPing == 0))
         }
 
         // 4. Internet / Broadband status
@@ -89,7 +94,7 @@ enum RouteWarningResolver {
             internetWarn = true
         } else if inetJitter >= 30.0 && gwJitter < 20.0 {
             internetWarn = true
-        } else if inetPing >= 120.0 && gwPing < 30.0 {
+        } else if inetPing >= 120.0 && gwPing < 30.0 && !gatewayPingFiltered {
             internetWarn = true
         } else if case .degraded = stage, !routerWarn, !isWifiLaggy {
             // When user experiences degradation for calls/gaming/streaming/browsing

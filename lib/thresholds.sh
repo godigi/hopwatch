@@ -569,6 +569,16 @@ THRESH_BUFFERBLOAT_D_MS=200
 THRESH_BUFFERBLOAT_FAST_MBPS=150
 THRESH_BUFFERBLOAT_CONSTRAINED_MBPS=30
 
+# Saturated bufferbloat fallback: when loaded pings suffer total loss while
+# idle was healthy, the link queue is completely saturated/exhausted.
+# Assigned delta of 2000 ms ensures Grade F (>= THRESH_BUFFERBLOAT_D_MS).
+THRESH_BUFFERBLOAT_SATURATED_DELTA_MS=2000.0
+
+# 1 GB download target capped at 11 s bounds the bufferbloat load generation
+# so multi-hundred-megabit links stay loaded through the entire 9 s ping probe.
+THRESH_BUFFERBLOAT_DL_BYTES=1073741824
+THRESH_BUFFERBLOAT_DL_MAX_TIME_SEC=11
+
 # MTR — per-hop loss above this is interesting enough to display as loss.
 # A middle hop above this with a clean destination is classified as ICMP
 # rate limiting; the same boundary must be used by both branches.

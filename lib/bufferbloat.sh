@@ -41,14 +41,15 @@ bufferbloat_run() {
   fi
 
   info "Idle:  gateway ${BUFFERBLOAT_IDLE_GW_RTT} ms · internet ${BUFFERBLOAT_IDLE_INET_RTT} ms"
-  info "Loading link with 100 MB download for 10 s..."
+  info "Loading link with sustained download for 10 s..."
 
   local bb_tmp bb_dl_pid bb_pg_pid bb_pi_pid
   netdiag_mktemp_dir netdiag-bb || { warn "Bufferbloat scratch directory unavailable — skipping."; return 0; }
   bb_tmp="$NETDIAG_TMP_DIR"
-  # Background: 100 MB download capped at 10 s wall-clock.
-  curl -s -o /dev/null --max-time 10 \
-    'https://speed.cloudflare.com/__down?bytes=104857600' \
+  # Background: download sized to sustain saturation across multi-hundred-megabit links,
+  # capped at THRESH_BUFFERBLOAT_DL_MAX_TIME_SEC and killed as soon as pings complete.
+  curl -s -o /dev/null --max-time "$THRESH_BUFFERBLOAT_DL_MAX_TIME_SEC" \
+    "https://speed.cloudflare.com/__down?bytes=${THRESH_BUFFERBLOAT_DL_BYTES}" \
     >/dev/null 2>&1 &
   bb_dl_pid=$!
 
@@ -66,25 +67,42 @@ bufferbloat_run() {
     > "$bb_tmp/inet.ping" 2>/dev/null &
   bb_pi_pid=$!
   wait "$bb_pg_pid" "$bb_pi_pid"
-  # Reap the download (--max-time should have already ended it).
+  # Reap the download immediately after pings finish so it does not linger.
+  kill "$bb_dl_pid" 2>/dev/null || true
   wait "$bb_dl_pid" 2>/dev/null || true
 
-  BUFFERBLOAT_LOADED_GW_RTT="$(ping_parse_summary "$(cat "$bb_tmp/gw.ping" 2>/dev/null)" | cut -d'|' -f2)"
-  BUFFERBLOAT_LOADED_INET_RTT="$(ping_parse_summary "$(cat "$bb_tmp/inet.ping" 2>/dev/null)" | cut -d'|' -f2)"
+  local gw_summary inet_summary gw_loss inet_loss
+  gw_summary="$(ping_parse_summary "$(cat "$bb_tmp/gw.ping" 2>/dev/null)")"
+  inet_summary="$(ping_parse_summary "$(cat "$bb_tmp/inet.ping" 2>/dev/null)")"
+  IFS='|' read -r gw_loss BUFFERBLOAT_LOADED_GW_RTT _ <<<"$gw_summary"
+  IFS='|' read -r inet_loss BUFFERBLOAT_LOADED_INET_RTT _ <<<"$inet_summary"
   rm -rf "$bb_tmp"
   netdiag_tmp_forget "$bb_tmp"
+
+  # If loaded ping suffered 100% loss (no RTT summary), but idle baseline was clean,
+  # the link was saturated to total drop: that is Grade F bufferbloat.
+  if [ -z "$BUFFERBLOAT_LOADED_GW_RTT" ] && [ -n "$gw_loss" ] && loss_at_least "$gw_loss" 100; then
+    BUFFERBLOAT_LOADED_GW_RTT=">2000"
+    BUFFERBLOAT_GW_DELTA="$THRESH_BUFFERBLOAT_SATURATED_DELTA_MS"
+    BUFFERBLOAT_GW_GRADE="F"
+  fi
+  if [ -z "$BUFFERBLOAT_LOADED_INET_RTT" ] && [ -n "$inet_loss" ] && loss_at_least "$inet_loss" 100; then
+    BUFFERBLOAT_LOADED_INET_RTT=">2000"
+    BUFFERBLOAT_INET_DELTA="$THRESH_BUFFERBLOAT_SATURATED_DELTA_MS"
+    BUFFERBLOAT_INET_GRADE="F"
+  fi
 
   if [ -z "$BUFFERBLOAT_LOADED_GW_RTT" ] || [ -z "$BUFFERBLOAT_LOADED_INET_RTT" ]; then
     warn "Loaded ping returned no rtt summary — link likely saturated to the point of total loss."
     return 0
   fi
 
-  BUFFERBLOAT_GW_DELTA="$(awk -v a="$BUFFERBLOAT_IDLE_GW_RTT" -v b="$BUFFERBLOAT_LOADED_GW_RTT" \
+  [ -z "$BUFFERBLOAT_GW_DELTA" ] && BUFFERBLOAT_GW_DELTA="$(awk -v a="$BUFFERBLOAT_IDLE_GW_RTT" -v b="$BUFFERBLOAT_LOADED_GW_RTT" \
     'BEGIN{printf "%.1f", b-a}')"
-  BUFFERBLOAT_INET_DELTA="$(awk -v a="$BUFFERBLOAT_IDLE_INET_RTT" -v b="$BUFFERBLOAT_LOADED_INET_RTT" \
+  [ -z "$BUFFERBLOAT_INET_DELTA" ] && BUFFERBLOAT_INET_DELTA="$(awk -v a="$BUFFERBLOAT_IDLE_INET_RTT" -v b="$BUFFERBLOAT_LOADED_INET_RTT" \
     'BEGIN{printf "%.1f", b-a}')"
-  BUFFERBLOAT_GW_GRADE="$(grade_bufferbloat "$BUFFERBLOAT_GW_DELTA")"
-  BUFFERBLOAT_INET_GRADE="$(grade_bufferbloat "$BUFFERBLOAT_INET_DELTA")"
+  [ -z "$BUFFERBLOAT_GW_GRADE" ] && BUFFERBLOAT_GW_GRADE="$(grade_bufferbloat "$BUFFERBLOAT_GW_DELTA")"
+  [ -z "$BUFFERBLOAT_INET_GRADE" ] && BUFFERBLOAT_INET_GRADE="$(grade_bufferbloat "$BUFFERBLOAT_INET_DELTA")"
 
   # A well-behaved link can report a slightly negative delta (loaded median
   # happened to be lower than the 8-sample idle median). Clamp to 0 for the

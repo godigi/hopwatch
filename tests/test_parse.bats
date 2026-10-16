@@ -520,6 +520,23 @@ TSV
   [ -z "$WAN_NAT_ISP_CHAIN" ]
 }
 
+@test "_wan_split_nat_chain: mesh router + 10.0.0.1 gateway counts as 2 home routers (double-NAT)" {
+  _wan_split_nat_chain "192.168.1.1 10.0.0.1"
+  [ "$WAN_NAT_HOME_COUNT" -eq 2 ]
+  [ "$WAN_NAT_HOME_CHAIN" = "192.168.1.1 → 10.0.0.1" ]
+  [ "$WAN_NAT_ISP_COUNT" -eq 0 ]
+}
+
+@test "_wan_split_nat_chain: gateway IP in 10/8 is counted as home-side" {
+  GATEWAY="10.50.1.1"
+  _wan_split_nat_chain "10.50.1.1 10.166.41.210"
+  [ "$WAN_NAT_HOME_COUNT" -eq 1 ]
+  [ "$WAN_NAT_HOME_CHAIN" = "10.50.1.1" ]
+  [ "$WAN_NAT_ISP_COUNT" -eq 1 ]
+  [ "$WAN_NAT_ISP_CHAIN" = "10.166.41.210" ]
+  unset GATEWAY
+}
+
 # ── --redact: mask identifying values on stdout ──────────────────────────
 # The local log keeps full detail; only what gets shared is masked.
 

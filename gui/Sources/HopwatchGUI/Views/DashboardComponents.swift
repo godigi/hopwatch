@@ -378,7 +378,7 @@ struct DashboardRouteView: View {
 
                         hopNode(icon: "network", isWarning: routerWarn && !linkDown, flag: nil,
                                 isCulprit: culpritHop == "router" && !linkDown, isCritical: isCritical,
-                                state: linkDown || (routerPingText == "—" && !routerWarn) ? .unknown : .normal)
+                                state: linkDown || ((routerPingText == "—" || routerPingText == "no reply") && !routerWarn) ? .unknown : .normal)
 
                         Text("Router")
                             .font(.system(size: 12, weight: .semibold))
@@ -526,7 +526,7 @@ struct DashboardRouteView: View {
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(routerLossText)
                         .fontWeight(.semibold)
-                        .foregroundStyle(routerLossText == "0%" ? Theme.ColorToken.ink : Theme.ColorToken.amber)
+                        .foregroundStyle((routerLossText == "0%" || routerLossText == "Not measured") ? Theme.ColorToken.ink : Theme.ColorToken.amber)
                     Text("· Jitter")
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(routerJitterText)
@@ -1000,6 +1000,7 @@ struct DashboardFindingsPanel: View {
     var onDismissOutcome: () -> Void
     /// "ruleID|repairID" of the repair whose confirmation is open.
     @State private var confirming: String?
+    @State private var plainEnglishExpanded: Set<String> = []
 
     init(checkTime: String?,
          findings: [FindingItem],
@@ -1083,15 +1084,72 @@ struct DashboardFindingsPanel: View {
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(Theme.ColorToken.ink)
                                     .fixedSize(horizontal: false, vertical: true)
+
+                                Spacer()
+
+                                Button {
+                                    withAnimation(.snappy(duration: 0.18)) {
+                                        if plainEnglishExpanded.contains(item.id) {
+                                            plainEnglishExpanded.remove(item.id)
+                                        } else {
+                                            plainEnglishExpanded.insert(item.id)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "sparkles")
+                                            .font(.system(size: 9))
+                                        Text(plainEnglishExpanded.contains(item.id) ? "Technical" : "Plain English")
+                                            .font(.system(size: 10, weight: .medium))
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Theme.ColorToken.blueWash)
+                                    .foregroundStyle(Theme.ColorToken.blue)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
 
-                            if !item.explanation.isEmpty {
-                                Text(item.explanation)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.ColorToken.muted)
-                                    .lineSpacing(2)
-                                    .padding(.leading, 20)
-                                    .fixedSize(horizontal: false, vertical: true)
+                            if plainEnglishExpanded.contains(item.id) {
+                                let eli5 = PlainEnglishTranslator.translate(ruleId: item.ruleID, summary: item.title + " " + item.explanation)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "person.wave.2.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Theme.ColorToken.blue)
+                                        Text(eli5.title)
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundStyle(Theme.ColorToken.ink)
+                                    }
+                                    Text(eli5.explanation)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    HStack(alignment: .top, spacing: 4) {
+                                        Text("What you can do:")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(Theme.ColorToken.ink)
+                                        Text(eli5.action)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Theme.ColorToken.ink)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .padding(.top, 1)
+                                }
+                                .padding(8)
+                                .background(Theme.ColorToken.blueWash.opacity(0.45))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .padding(.leading, 20)
+                            } else {
+                                if !item.explanation.isEmpty {
+                                    Text(item.explanation)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+                                        .lineSpacing(2)
+                                        .padding(.leading, 20)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
 
                             if let nextStep = item.nextStep, !nextStep.isEmpty {

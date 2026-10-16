@@ -377,6 +377,14 @@ struct SettingsView: View {
                         description: "Starts monitoring in the background whenever you log in to your Mac.",
                         isOn: $appSettings.launchAtLogin
                     )
+
+                    Divider()
+
+                    SettingsToggleRow(
+                        title: "Global keyboard shortcut (⌥⌘N)",
+                        description: "Quickly toggle and open Hopwatch from anywhere using Option-Command-N.",
+                        isOn: $appSettings.globalHotkeyEnabled
+                    )
                 }
             }
 
@@ -432,6 +440,10 @@ struct SettingsView: View {
                     Text("12ms")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.ColorToken.ink)
+                case .dynamic:
+                    Text("(minimal · reveals on lag)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.ColorToken.muted)
                 }
             }
             .padding(.horizontal, 10)
@@ -636,6 +648,34 @@ struct SettingsView: View {
                         description: "Runs one full benchmark check including a speed test when you connect to an unfamiliar network. Runs once per network, ever.",
                         isOn: $appSettings.scanOnNewNetwork
                     )
+                }
+            }
+
+            // Audio Chimes Card
+            SettingsCard(title: "Audio Chimes & Cues", icon: "speaker.wave.2", subtitle: "Audible cues when your connection drops or recovers.") {
+                VStack(spacing: 12) {
+                    SettingsToggleRow(
+                        title: "Play sound on connection drop and recovery",
+                        description: "Plays a low chime when your internet drops, and a crisp recovery chime when it comes back online.",
+                        isOn: $appSettings.audioChimesEnabled
+                    )
+
+                    if appSettings.audioChimesEnabled {
+                        HStack(spacing: 12) {
+                            Button("Test Drop Sound") {
+                                NSSound(named: "Basso")?.play()
+                            }
+                            .controlSize(.small)
+
+                            Button("Test Recovery Sound") {
+                                NSSound(named: "Glass")?.play()
+                            }
+                            .controlSize(.small)
+
+                            Spacer()
+                        }
+                        .padding(.top, 2)
+                    }
                 }
             }
 
@@ -1073,23 +1113,31 @@ struct SettingsView: View {
 
                         Spacer()
 
-                        if coordinator.updateChecker.isChecking {
-                            ProgressView().controlSize(.small)
-                        } else if coordinator.updateChecker.isDownloading {
-                            ProgressView(value: coordinator.updateChecker.downloadProgress)
-                                .progressViewStyle(.linear)
-                                .frame(width: 90)
-                        } else if coordinator.updateChecker.hasUpdate {
-                            Button("Install Update") {
-                                coordinator.updateChecker.downloadAndInstallUpdate()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        } else {
-                            Button("Check Now") {
-                                coordinator.updateChecker.checkForUpdates(manual: true)
+                        HStack(spacing: 8) {
+                            Button("What’s New…") {
+                                openWindow(id: WindowID.whatsNew)
+                                NSApp.activate(ignoringOtherApps: true)
                             }
                             .controlSize(.small)
+
+                            if coordinator.updateChecker.isChecking {
+                                ProgressView().controlSize(.small)
+                            } else if coordinator.updateChecker.isDownloading {
+                                ProgressView(value: coordinator.updateChecker.downloadProgress)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 90)
+                            } else if coordinator.updateChecker.hasUpdate {
+                                Button("Install Update") {
+                                    coordinator.updateChecker.downloadAndInstallUpdate()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            } else {
+                                Button("Check Now") {
+                                    coordinator.updateChecker.checkForUpdates(manual: true)
+                                }
+                                .controlSize(.small)
+                            }
                         }
                     }
 

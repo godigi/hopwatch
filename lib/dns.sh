@@ -48,7 +48,14 @@ dns_run() {
     warn "DHCP handed out '$DHCP_DNS_SERVERS' but the system is using $(dns_routable_resolvers "$SYS_RES_ALL") — manual DNS override?"
   fi
   dns_names=( apple.com cloudflare.com )
-  [ -n "$TARGET" ] && dns_names+=( "$TARGET" )
+  if [ -n "$TARGET" ]; then
+    # Skip querying TARGET as a forward DNS name if it is an IP literal.
+    # An IP address cannot resolve as an A record; querying it causes false
+    # DNS lookup failures, lowers DNS_OK, and trips CONN-1.
+    if [[ ! "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$TARGET" != *":"* ]]; then
+      dns_names+=( "$TARGET" )
+    fi
+  fi
   for name in "${dns_names[@]}"; do
     if [ -n "$SYS_RES" ]; then
       _primary_total_count=$((_primary_total_count+1))

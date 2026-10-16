@@ -15,20 +15,27 @@ enum CrashReporter {
         }
 
         SentrySDK.start { options in
-            options.dsn = dsn
-            options.enableCrashHandler = true
-            options.enableAppHangTracking = false
-            options.enableNetworkTracking = false
-            options.enableFileIOTracing = false
+            configure(options: options)
+        }
+    }
 
-            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-                options.releaseName = "hopwatch@\(version)"
-            }
+    /// Configures Sentry options with privacy safeguards and disables non-crash tracing.
+    static func configure(options: Options) {
+        options.dsn = dsn
+        options.enableCrashHandler = true
+        options.enableAppHangTracking = false
+        options.enableNetworkTracking = false
+        options.enableCaptureFailedRequests = false
+        options.enableNetworkBreadcrumbs = false
+        options.enableFileIOTracing = false
 
-            options.beforeSend = { event in
-                guard Defaults.crashReportingEnabled else { return nil }
-                return sanitize(event: event)
-            }
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            options.releaseName = "hopwatch@\(version)"
+        }
+
+        options.beforeSend = { event in
+            guard Defaults.crashReportingEnabled else { return nil }
+            return sanitize(event: event)
         }
     }
 
@@ -42,7 +49,7 @@ enum CrashReporter {
     }
 
     /// Strips local usernames and user home directory paths from crash payloads.
-    private static func sanitize(event: Event) -> Event {
+    static func sanitize(event: Event) -> Event {
         let username = NSUserName()
         let homeDir = NSHomeDirectory()
 

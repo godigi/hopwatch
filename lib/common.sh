@@ -624,7 +624,7 @@ conn_dns_lines_facts() {
 # would be counted as a refused connection and both legs would be one fault.
 conn_tcp_reach_facts() {
   printf '%s\n' "${1:-}" | awk -F'|' '
-    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:443$/ { total++; if ($2 == "FAIL") fail++ }
+    ($1 == "1.1.1.1:443" || $1 == "8.8.8.8:443") { total++; if ($2 == "FAIL") fail++ }
     END { printf "%d %d\n", fail + 0, total + 0 }'
 }
 

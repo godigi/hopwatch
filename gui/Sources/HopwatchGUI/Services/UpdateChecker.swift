@@ -16,6 +16,9 @@ final class UpdateChecker {
 
     var isChecking = false
     var isDownloading = false
+    var isPreloaded = false
+    private var preloadedAppPath: String?
+    private var preloadTask: Task<Void, Never>?
     var downloadProgress: Double = 0.0
     var hasUpdate = false
     var availableRelease: GitHubRelease?
@@ -83,6 +86,9 @@ final class UpdateChecker {
                             Defaults.lastNotifiedUpdateVersion = release.cleanVersion
                             self.onUpdateFound?(release)
                         }
+                        if !self.isDownloading && !self.isPreloaded {
+                            self.startBackgroundPreload(for: release)
+                        }
                     } else {
                         // Release tag exists but packaging is still in progress in CI
                         self.availableRelease = nil
@@ -129,10 +135,75 @@ final class UpdateChecker {
         installUpdate()
     }
 
+    /// Preloads update in background quietly so subsequent install is instantaneous.
+    func startBackgroundPreload(for release: GitHubRelease) {
+        guard !isDownloading, !isPreloaded, preloadTask == nil else { return }
+        let asset = release.assets.first(where: { $0.name.lowercased().hasSuffix(".zip") })
+            ?? release.assets.first(where: { $0.isInstallableArchive })
+        guard let downloadURL = asset?.browserDownloadUrl else { return }
+
+        preloadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchPreload-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                let downloader = FileDownloader()
+                let downloadedURL = try await downloader.download(from: downloadURL) { _ in }
+                guard let ext = Self.archiveExtension(forAssetNamed: asset?.name) else { return }
+                let archivePath = tempDir.appendingPathComponent("update.\(ext)")
+                try FileManager.default.moveItem(at: downloadedURL, to: archivePath)
+
+                let extractDir = tempDir.appendingPathComponent("Extracted")
+                try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+                var appPath: String?
+                if ext == "zip" {
+                    try await Self.runTool("/usr/bin/ditto", ["-xk", archivePath.path, extractDir.path])
+                    appPath = self.findApp(in: extractDir)
+                } else if ext == "dmg" {
+                    let mountPoint = tempDir.appendingPathComponent("Volume")
+                    try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+                    try await Self.runTool("/usr/bin/hdiutil", [
+                        "attach", archivePath.path, "-mountpoint", mountPoint.path,
+                        "-nobrowse", "-quiet", "-noautoopen"])
+                    do {
+                        if let sourceApp = self.findApp(in: mountPoint) {
+                            let copiedApp = extractDir.appendingPathComponent(
+                                URL(fileURLWithPath: sourceApp).lastPathComponent)
+                            try await Self.runTool("/usr/bin/ditto", [sourceApp, copiedApp.path])
+                            appPath = copiedApp.path
+                        }
+                    } catch {
+                        try? await Self.runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force", "-quiet"])
+                        throw error
+                    }
+                    try? await Self.runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force", "-quiet"])
+                }
+
+                if let appPath {
+                    self.preloadedAppPath = appPath
+                    self.isPreloaded = true
+                    self.statusMessage = "v\(release.cleanVersion) ready to install"
+                    self.log.notice("Update v\(release.cleanVersion) preloaded and ready to install.")
+                }
+            } catch {
+                self.log.debug("Background preload failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Downloads the latest release asset and initiates automatic in-place upgrade.
     func installUpdate() {
         guard let release = availableRelease else {
             openReleasePage()
+            return
+        }
+
+        // Fast path: use already preloaded app bundle
+        if isPreloaded, let preloadedAppPath, FileManager.default.fileExists(atPath: preloadedAppPath) {
+            self.downloadProgress = 1.0
+            self.statusMessage = "Relaunching…"
+            self.replaceAndRelaunch(withAppAt: preloadedAppPath)
             return
         }
 

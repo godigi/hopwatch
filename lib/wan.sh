@@ -99,6 +99,10 @@ wan_double_nat_run() {
     info "Home chain: $WAN_NAT_HOME_CHAIN"
     [ -n "$WAN_NAT_ISP_CHAIN" ] && info "ISP transit: $WAN_NAT_ISP_CHAIN"
     info "UPnP / port-forwarding from apps usually fails through double-NAT."
+  elif [ "$WAN_NAT_HOME_COUNT" -eq 1 ] && [ "$WAN_NAT_ISP_COUNT" -ge 1 ]; then
+    local _s="hops"
+    [ "$WAN_NAT_ISP_COUNT" -eq 1 ] && _s="hop"
+    ok "No double-NAT — 1 home router ($WAN_NAT_HOME_CHAIN), remaining private $_s ($WAN_NAT_ISP_CHAIN) is ISP transit."
   elif [ "$WAN_NAT_ISP_COUNT" -gt 1 ]; then
     ok "No double-NAT — the $WAN_NAT_ISP_COUNT private hops ($WAN_NAT_ISP_CHAIN) are ISP transit."
   elif [ "${n:-0}" -ge 1 ]; then
@@ -108,11 +112,10 @@ wan_double_nat_run() {
   fi
 }
 
-# Split an RFC1918 chain into the part the user controls (192.168/16 and
-# 172.16/12 — home routers) and ISP-side transit (10/8). The input is
-# guaranteed to be all-RFC1918 by _wan_count_rfc1918_chain, so anything
-# that isn't 10/8 is home-side by elimination — no hop can fall through
-# both arms and vanish from the counts.
+# Split an RFC1918 chain into the part the user controls (192.168/16,
+# 172.16/12, and home-gateway subnets in 10/8 like 10.0.0.x / 10.0.1.x)
+# and ISP-side transit (10/8). Local GATEWAY is always home-side.
+# The input is guaranteed to be all-RFC1918 by _wan_count_rfc1918_chain.
 #
 # Writes: WAN_NAT_HOME_CHAIN, WAN_NAT_HOME_COUNT,
 #         WAN_NAT_ISP_CHAIN,  WAN_NAT_ISP_COUNT
@@ -121,7 +124,16 @@ _wan_split_nat_chain() {
   WAN_NAT_HOME_CHAIN=""; WAN_NAT_HOME_COUNT=0
   WAN_NAT_ISP_CHAIN="";  WAN_NAT_ISP_COUNT=0
   for h in $1; do
+    if [ -n "${GATEWAY:-}" ] && [ "$h" = "$GATEWAY" ]; then
+      WAN_NAT_HOME_CHAIN="${WAN_NAT_HOME_CHAIN:+$WAN_NAT_HOME_CHAIN → }$h"
+      WAN_NAT_HOME_COUNT=$((WAN_NAT_HOME_COUNT + 1))
+      continue
+    fi
     case "$h" in
+      192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|10.0.0.*|10.0.1.*|10.1.1.*|10.10.10.*)
+        WAN_NAT_HOME_CHAIN="${WAN_NAT_HOME_CHAIN:+$WAN_NAT_HOME_CHAIN → }$h"
+        WAN_NAT_HOME_COUNT=$((WAN_NAT_HOME_COUNT + 1))
+        ;;
       10.*)
         WAN_NAT_ISP_CHAIN="${WAN_NAT_ISP_CHAIN:+$WAN_NAT_ISP_CHAIN → }$h"
         WAN_NAT_ISP_COUNT=$((WAN_NAT_ISP_COUNT + 1))

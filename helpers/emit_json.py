@@ -690,6 +690,7 @@ def main() -> None:
             # table in every consumer.
             "country_iso": _env("PUB_CC_ISO"),
             "captive_portal": _bool("CAPTIVE_PORTAL"),
+            "captive_portal_url": _env("CAPTIVE_PORTAL_URL"),
         },
         "dns": build_dns(),
         # Whether this Mac could open a UDP socket to ask those questions

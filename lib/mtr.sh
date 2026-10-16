@@ -93,10 +93,27 @@ _run_per_hop_fallback() {
     info "No hops to test (traceroute returned no IPs)."
     return
   fi
+  # Collect true hop numbers matching HOPS from TRACE_LINES when available,
+  # so non-responding hops (* * *) don't cause downstream hops to be falsely renumbered.
+  local -a hop_nums_src=()
+  local -a hop_ips_src=()
+  if [ -n "${TRACE_LINES:-}" ]; then
+    local tl_line tl_num tl_ip
+    while IFS= read -r tl_line; do
+      [ -z "$tl_line" ] && continue
+      tl_num="${tl_line%%|*}"
+      tl_ip="${tl_line#*|}"; tl_ip="${tl_ip%%|*}"
+      if [ -n "$tl_ip" ]; then
+        hop_nums_src+=("$tl_num")
+        hop_ips_src+=("$tl_ip")
+      fi
+    done <<<"$TRACE_LINES"
+  fi
+
   # Fire all hop pings concurrently to one temp file per hop, then collect in
   # original hop order. Bounded by the slowest hop (~1-2 s) rather than the
   # sum (~12 s for 8 hops).
-  local hop_tmp i h out parsed loss lat
+  local hop_tmp i h out parsed loss lat true_num
   netdiag_mktemp_dir netdiag-hops || { warn "MTR scratch directory unavailable — skipping hop loss."; return 0; }
   hop_tmp="$NETDIAG_TMP_DIR"
   i=0
@@ -121,11 +138,16 @@ _run_per_hop_fallback() {
   HOP_NUMS=(); HOP_IPS=(); HOP_LOSSES=(); HOP_AVGS=()
   i=0
   for h in "${HOPS[@]}"; do
+    true_num=""
+    if [ "${#hop_ips_src[@]}" -gt "$i" ] && [ "${hop_ips_src[$i]}" = "$h" ]; then
+      true_num="${hop_nums_src[$i]}"
+    fi
     i=$((i+1))
+    [ -z "$true_num" ] && true_num="$i"
     out="$(cat "$hop_tmp/hop-$i" 2>/dev/null)"
     parsed="$(ping_parse_summary "$out")"
     IFS='|' read -r loss lat _ <<<"$parsed"
-    HOP_NUMS+=("$i")
+    HOP_NUMS+=("$true_num")
     HOP_IPS+=("$h")
     # No summary means the probe did not produce a measurement. Keep it
     # unknown instead of turning a command failure into 100% loss.

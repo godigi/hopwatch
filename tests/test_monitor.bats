@@ -290,6 +290,7 @@ scanner_rules() {
 @test "parity: gateway loss with one internet target lossy and one clean is still TCP-1 on both" {
   reset_state
   MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=60 MON_INET_LOSS_ALT=0 INET_LOSS=60 INET_LOSS_ALT=0
+  _mon_rules
   monitor_rules_here; local m="$MON_RULES_SORTED"
   reset_state
   MON_GW_LOSS=58 GW_LOSS=58 MON_INET_LOSS=60 MON_INET_LOSS_ALT=0 INET_LOSS=60 INET_LOSS_ALT=0
@@ -954,7 +955,7 @@ assert down["wifi"] == {"rssi": None, "noise": None, "snr": None, "channel": Non
 # The old network's public identity is not this (absent) network's.
 assert down["public"] == {"ok": None, "ip": None, "isp": None, "asn": None,
                           "city": None, "country": None, "country_iso": None,
-                          "captive_portal": None}, down["public"]
+                          "captive_portal": None, "captive_portal_url": None}, down["public"]
 PY
 }
 

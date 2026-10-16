@@ -148,4 +148,30 @@ import Testing
 
         #expect(!result.isWifiLaggy)
     }
+
+    @Test func gatewayPingFilteredWithCleanInternetDoesNotWarnRouter() {
+        // Router blocks/filters ICMP ping (100% gateway loss), but downstream
+        // internet is clean and healthy (0% loss, 54ms latency).
+        // Router must NOT be marked with a warning, and Wi-Fi must remain good.
+        let result = RouteWarningResolver.resolve(
+            linkUp: true,
+            isWiFi: true,
+            stage: .healthy,
+            firedCategories: [],
+            gwLoss: 100.0,
+            gwPing: 0.0,
+            gwJitter: 0.0,
+            inetLoss: 0.0,
+            inetPing: 54.0,
+            inetJitter: 7.0,
+            hasRecentRoam: false,
+            gatewayPingFiltered: true
+        )
+
+        #expect(!result.routerWarn)
+        #expect(!result.isWifiLaggy)
+        #expect(result.macStatusGood)
+        #expect(!result.internetWarn)
+        #expect(result.culpritHop == nil)
+    }
 }

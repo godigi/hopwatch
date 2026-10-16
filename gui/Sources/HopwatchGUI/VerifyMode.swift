@@ -152,9 +152,21 @@ private enum VerifyHarness {
         equal(at(inputs(sampleHealth: nil, runHealth: .warning)), .warning,
               "no sample yet → the newest run's severity")
         equal(at(inputs(sampleHealth: nil, runHealth: nil)), .warning,
-              "nothing measured at all → warning, never green")
+              "nothing measured at all without checking flag → warning, never green")
+        equal(at(inputs(sampleHealth: .checking)), .checking,
+              "sample in checking measurement state → checking")
+        equal(at(.init(isScanning: true, isArrivalCheck: true, monitoringEnabled: true,
+                       isPausedForAnyReason: false, monitorRunning: true,
+                       sampleHealth: nil, runHealth: nil, isChecking: true)), .checking,
+              "arrival check on new network → checking, not warning")
+        equal(at(.init(isScanning: false, monitoringEnabled: true,
+                       isPausedForAnyReason: false, monitorRunning: true,
+                       sampleHealth: nil, runHealth: nil, isChecking: true)), .checking,
+              "determining baseline connection → checking, not warning")
         check(Health.paused.symbol != Health.healthy.symbol,
               "paused is distinguishable from healthy without colour")
+        check(Health.checking.symbol != Health.warning.symbol,
+              "checking is distinguishable from warning without colour")
         print("")
     }
 

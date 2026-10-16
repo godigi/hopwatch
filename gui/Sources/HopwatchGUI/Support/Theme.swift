@@ -225,6 +225,7 @@ extension Health {
         case .warning:  return .yellow
         case .critical: return .red
         case .paused:   return .secondary
+        case .checking: return .blue
         }
     }
 
@@ -241,6 +242,7 @@ extension Health {
         // mean something. `secondaryLabelColor` reads as "off" in both
         // light and dark menu bars.
         case .paused:   return .secondaryLabelColor
+        case .checking: return .systemBlue
         }
     }
 }

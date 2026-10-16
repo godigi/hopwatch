@@ -25,6 +25,9 @@ struct NetworkMemory: Identifiable, Sendable, Equatable {
     // Reliability
     let reliabilityPercent: Double?
     let reliabilityGrade: String
+    let isLearningBaseline: Bool
+    let speedTestCount: Int
+    let requiresPortal: Bool
 
     init(
         id: String,
@@ -44,7 +47,10 @@ struct NetworkMemory: Identifiable, Sendable, Equatable {
         typicalUpMbps: Double? = nil,
         peakUpMbps: Double? = nil,
         reliabilityPercent: Double? = nil,
-        reliabilityGrade: String = "Good"
+        reliabilityGrade: String = "Good",
+        isLearningBaseline: Bool = false,
+        speedTestCount: Int = 0,
+        requiresPortal: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
@@ -64,6 +70,9 @@ struct NetworkMemory: Identifiable, Sendable, Equatable {
         self.peakUpMbps = peakUpMbps
         self.reliabilityPercent = reliabilityPercent
         self.reliabilityGrade = reliabilityGrade
+        self.isLearningBaseline = isLearningBaseline
+        self.speedTestCount = speedTestCount
+        self.requiresPortal = requiresPortal
     }
 
     /// Quick summary rating string for list rows (e.g. "450 Mbps · 12 ms · 99% reliable").
@@ -76,11 +85,17 @@ struct NetworkMemory: Identifiable, Sendable, Equatable {
             parts.append(String(format: "%.0f ms", lat))
         }
         if let rel = reliabilityPercent {
-            parts.append(String(format: "%.0f%% reliable", rel))
+            if checkCount >= 5 {
+                parts.append(String(format: "%.0f%% reliable", rel))
+            } else if incidentCount == 0 {
+                parts.append("Clean link")
+            } else {
+                parts.append("\(checkCount) check\(checkCount == 1 ? "" : "s")")
+            }
         }
         if parts.isEmpty {
             if checkCount > 0 {
-                return "\(checkCount) checks"
+                return "\(checkCount) check\(checkCount == 1 ? "" : "s")"
             }
             return "No checks"
         }
@@ -163,46 +178,105 @@ enum NetworkHistoryStore {
     static func memory(
         for network: HistoryDocument.Network,
         displayName: String,
-        runs: [HistoryDocument.Run] = []
+        runs: [HistoryDocument.Run] = [],
+        activeSpeedTest: (down: Double, up: Double)? = nil,
+        activeLiveMetrics: (gatewayLatency: Double?, internetLatency: Double?, jitter: Double?)? = nil
     ) -> NetworkMemory {
         let checks = network.checkCount ?? network.runCount
         let incidents = network.incidentCount
 
-        let typicalGWLatency = network.stat(for: "gateway_rtt_ms")?.median
-        let typicalInetLatency = network.stat(for: "inet_rtt_ms")?.median
-        let typicalGWJitter = network.stat(for: "gateway_jitter_ms")?.median
-        let typicalDown = network.stat(for: "speed_down_mbps")?.median
-        let typicalUp = network.stat(for: "speed_up_mbps")?.median
+        var typicalGWLatency = network.stat(for: "gateway_rtt_ms")?.median
+        var typicalInetLatency = network.stat(for: "inet_rtt_ms")?.median
+        var typicalGWJitter = network.stat(for: "gateway_jitter_ms")?.median
+        var typicalDown = network.stat(for: "speed_down_mbps")?.median
+        var typicalUp = network.stat(for: "speed_up_mbps")?.median
 
-        // Calculate peak throughput across available runs
+        // Fall back to local calculation from runs when the CLI withholds stats (e.g. <10 checks or custom merge)
+        if typicalGWLatency == nil {
+            typicalGWLatency = localMedian(from: runs, key: "gateway_rtt_ms")
+        }
+        if typicalInetLatency == nil {
+            typicalInetLatency = localMedian(from: runs, key: "inet_rtt_ms")
+        }
+        if typicalGWJitter == nil {
+            typicalGWJitter = localMedian(from: runs, key: "gateway_jitter_ms")
+        }
+        if typicalDown == nil {
+            typicalDown = localMedian(from: runs, keys: ["speed_down_mbps", "speedtest.down_mbps"])
+        }
+        if typicalUp == nil {
+            typicalUp = localMedian(from: runs, keys: ["speed_up_mbps", "speedtest.up_mbps"])
+        }
+
+        // Active live/coordinator fallbacks for current network
+        if typicalDown == nil, let act = activeSpeedTest {
+            typicalDown = act.down
+        }
+        if typicalUp == nil, let act = activeSpeedTest {
+            typicalUp = act.up
+        }
+        if typicalGWLatency == nil, let gw = activeLiveMetrics?.gatewayLatency {
+            typicalGWLatency = gw
+        }
+        if typicalInetLatency == nil, let inet = activeLiveMetrics?.internetLatency {
+            typicalInetLatency = inet
+        }
+        if typicalGWJitter == nil, let jit = activeLiveMetrics?.jitter {
+            typicalGWJitter = jit
+        }
+
+        // Count speed tests and peak throughput across available runs + active test
         var peakDown: Double? = typicalDown
         var peakUp: Double? = typicalUp
+        var speedTestCount = 0
         for run in runs {
-            if let d = run.metrics["speedtest.down_mbps"] ?? run.metrics["speed_down_mbps"] {
-                peakDown = max(peakDown ?? 0, d)
+            let d = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"]
+            let u = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
+            if d != nil || u != nil {
+                speedTestCount += 1
             }
-            if let u = run.metrics["speedtest.up_mbps"] ?? run.metrics["speed_up_mbps"] {
-                peakUp = max(peakUp ?? 0, u)
+            if let d { peakDown = max(peakDown ?? 0, d) }
+            if let u { peakUp = max(peakUp ?? 0, u) }
+        }
+        if let act = activeSpeedTest {
+            peakDown = max(peakDown ?? 0, act.down)
+            peakUp = max(peakUp ?? 0, act.up)
+            if speedTestCount == 0 {
+                speedTestCount = 1
             }
         }
 
         // Reliability percentage: fraction of clean checks without critical or warning diagnoses
+        let isLearning = checks < 10
         var reliabilityPercent: Double? = nil
-        var reliabilityGrade = "Good"
+        var reliabilityGrade = isLearning ? "Learning" : "Good"
         if checks > 0 {
             let clean = max(0, checks - incidents)
             let pct = (Double(clean) / Double(checks)) * 100.0
             reliabilityPercent = pct
-            if pct >= 95.0 {
-                reliabilityGrade = "Excellent"
-            } else if pct >= 85.0 {
-                reliabilityGrade = "Good"
-            } else if pct >= 70.0 {
-                reliabilityGrade = "Fair"
+            if isLearning {
+                if incidents == 0 {
+                    reliabilityGrade = "Learning (Stable)"
+                } else if pct >= 70.0 {
+                    reliabilityGrade = "Learning (Good)"
+                } else {
+                    reliabilityGrade = "Learning (Building)"
+                }
             } else {
-                reliabilityGrade = "Degraded"
+                if pct >= 95.0 {
+                    reliabilityGrade = "Excellent"
+                } else if pct >= 85.0 {
+                    reliabilityGrade = "Good"
+                } else if pct >= 70.0 {
+                    reliabilityGrade = "Fair"
+                } else {
+                    reliabilityGrade = "Degraded"
+                }
             }
         }
+
+        let requiresPortal = Defaults.portalNetworks.contains(network.id)
+            || network.ssids.contains { Defaults.portalNetworks.contains("ssid:\($0)") }
 
         return NetworkMemory(
             id: network.id,
@@ -222,8 +296,29 @@ enum NetworkHistoryStore {
             typicalUpMbps: typicalUp,
             peakUpMbps: peakUp,
             reliabilityPercent: reliabilityPercent,
-            reliabilityGrade: reliabilityGrade
+            reliabilityGrade: reliabilityGrade,
+            isLearningBaseline: isLearning,
+            speedTestCount: speedTestCount,
+            requiresPortal: requiresPortal
         )
+    }
+
+    private static func localMedian(from runs: [HistoryDocument.Run], keys: [String]) -> Double? {
+        let values = runs.compactMap { run -> Double? in
+            for key in keys {
+                if let val = run.metrics[key], val.isFinite { return val }
+            }
+            return nil
+        }.sorted()
+        guard !values.isEmpty else { return nil }
+        let mid = values.count / 2
+        return values.count.isMultiple(of: 2)
+            ? (values[mid - 1] + values[mid]) / 2.0
+            : values[mid]
+    }
+
+    private static func localMedian(from runs: [HistoryDocument.Run], key: String) -> Double? {
+        localMedian(from: runs, keys: [key])
     }
 
     /// Compares a snapshot against a network memory baseline.

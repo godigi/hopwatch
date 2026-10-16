@@ -51,8 +51,10 @@ struct AlertStageCard: View {
                     .controlSize(.small)
                     .padding(.vertical, 2)
             } else if isCaptivePortal {
-                Button("Open Login Page") {
-                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
+                Button("Open Sign-In Page") {
+                    if let onAction {
+                        onAction()
+                    } else if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
                         NSWorkspace.shared.open(url)
                     }
                 }
@@ -117,6 +119,7 @@ struct AlertStageCard: View {
     private var isCaptivePortal: Bool {
         alert.id == "captive-portal"
             || alert.rules.contains("CP-1")
+            || alert.rules.contains("N1c")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
     }

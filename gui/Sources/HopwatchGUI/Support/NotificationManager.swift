@@ -70,6 +70,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// link claims a reconnect that never happened.
     private(set) var announcedOutages: Set<String> = []
 
+    static let captivePortalCategoryID = "CAPTIVE_PORTAL"
+    static let openPortalActionID = "OPEN_PORTAL_ACTION"
+
     /// Notification posting handler, overridable for testing
     var onPostNotification: ((_ id: String, _ title: String, _ body: String, _ isSilent: Bool) -> Void)?
     var onRemoveNotification: ((_ id: String) -> Void)?
@@ -77,6 +80,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     var onFetchSettings: (() async -> UNAuthorizationStatus)?
     var onRequestAuthorization: ((UNAuthorizationOptions) async throws -> Bool)?
     var onNotificationResponse: (() -> Void)?
+    var onNotificationAction: ((_ id: String, _ actionIdentifier: String) -> Void)?
 
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "notifications")
 
@@ -85,7 +89,20 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         self.scope = scope
         super.init()
         if Bundle.main.bundleIdentifier != nil {
-            UNUserNotificationCenter.current().delegate = self
+            let center = UNUserNotificationCenter.current()
+            center.delegate = self
+            let openAction = UNNotificationAction(
+                identifier: Self.openPortalActionID,
+                title: "Open Sign-In Page",
+                options: [.foreground]
+            )
+            let category = UNNotificationCategory(
+                identifier: Self.captivePortalCategoryID,
+                actions: [openAction],
+                intentIdentifiers: [],
+                options: []
+            )
+            center.setNotificationCategories([category])
         }
     }
 
@@ -96,7 +113,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        let identifier = response.notification.request.identifier
+        let actionIdentifier = response.actionIdentifier
         Task { @MainActor in
+            self.onNotificationAction?(identifier, actionIdentifier)
             self.onNotificationResponse?()
             completionHandler()
         }
@@ -299,6 +319,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             content.title = title
             if !body.isEmpty { content.body = body }
             content.sound = replacing ? nil : .default
+            if id == "captive-portal" {
+                content.categoryIdentifier = Self.captivePortalCategoryID
+            }
 
             let request = UNNotificationRequest(identifier: "netdiag.\(id)", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)

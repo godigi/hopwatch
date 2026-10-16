@@ -37,6 +37,7 @@ struct TrendsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     metricChart
+                    speedBenchmarkSection
                     incidentChart
                     coverageNote
                 }
@@ -60,7 +61,7 @@ struct TrendsView: View {
     /// Wayfinding copy about this screen itself — permanent, not tied to
     /// any state, per the redesign's split.
     private var purposeSubtitle: some View {
-        Text("What this network is usually like — one point per saved check, over weeks. Live samples are not stored here.")
+        Text("Historical stability, throughput benchmarks, and baseline performance for this network.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .proseWidth()
@@ -96,11 +97,19 @@ struct TrendsView: View {
                 )
 
                 digestTile(
-                    icon: "shield.checkerboard",
+                    icon: mem.isLearningBaseline ? "shield.lefthalf.filled" : "shield.checkerboard",
                     iconColor: reliabilityColor(mem),
                     title: "Reliability",
                     value: reliabilityText(mem),
                     subcaption: "\(mem.checkCount) checks · \(mem.incidentCount) issues"
+                )
+
+                digestTile(
+                    icon: "network",
+                    iconColor: .teal,
+                    title: "Network Profile",
+                    value: profileText(mem),
+                    subcaption: profileSubcaption(mem)
                 )
             }
             .padding(.horizontal, 12)
@@ -131,7 +140,7 @@ struct TrendsView: View {
                     .foregroundStyle(.secondary)
             }
             Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(.system(size: 14, weight: .bold, design: .rounded))
                 .lineLimit(1)
             Text(subcaption)
                 .font(.system(size: 9))
@@ -158,7 +167,10 @@ struct TrendsView: View {
 
     private func speedSubcaption(_ mem: NetworkMemory) -> String {
         if let peak = mem.peakDownMbps, let typ = mem.typicalDownMbps, peak > typ {
-            return String(format: "Peak: %.0f Mbps", peak)
+            return String(format: "Peak: %.0f Mbps · %d tests", peak, mem.speedTestCount)
+        }
+        if mem.speedTestCount > 0 {
+            return "\(mem.speedTestCount) test\(mem.speedTestCount == 1 ? "" : "s") recorded"
         }
         return "Download / Upload"
     }
@@ -168,12 +180,18 @@ struct TrendsView: View {
             return String(format: "%.1f ms", lat)
         }
         if let lat = mem.typicalInternetLatencyMs {
-            return String(format: "%.1f ms", lat)
+            return String(format: "%.1f ms (Internet)", lat)
         }
         return "—"
     }
 
     private func jitterText(_ mem: NetworkMemory) -> String {
+        if let inet = mem.typicalInternetLatencyMs, mem.typicalGatewayLatencyMs != nil {
+            if let j = mem.typicalGatewayJitterMs {
+                return String(format: "Inet: %.1f ms · ±%.1f ms", inet, j)
+            }
+            return String(format: "Internet: %.1f ms", inet)
+        }
         if let j = mem.typicalGatewayJitterMs {
             return String(format: "±%.1f ms jitter", j)
         }
@@ -181,6 +199,12 @@ struct TrendsView: View {
     }
 
     private func reliabilityText(_ mem: NetworkMemory) -> String {
+        if mem.isLearningBaseline {
+            if let pct = mem.reliabilityPercent {
+                return String(format: "%.0f%% (%@)", pct, mem.reliabilityGrade)
+            }
+            return "Learning"
+        }
         if let pct = mem.reliabilityPercent {
             return String(format: "%.0f%% (%@)", pct, mem.reliabilityGrade)
         }
@@ -188,6 +212,9 @@ struct TrendsView: View {
     }
 
     private func reliabilityColor(_ mem: NetworkMemory) -> Color {
+        if mem.isLearningBaseline {
+            return mem.incidentCount == 0 ? .green : .blue
+        }
         switch mem.reliabilityGrade {
         case "Excellent", "Good": return .green
         case "Fair": return .orange
@@ -195,12 +222,69 @@ struct TrendsView: View {
         }
     }
 
+    private func profileText(_ mem: NetworkMemory) -> String {
+        if let ssid = mem.ssids.first, !ssid.isEmpty {
+            return ssid
+        }
+        if let isp = mem.isps.first, !isp.isEmpty {
+            return isp
+        }
+        return mem.displayName
+    }
+
+    private func profileSubcaption(_ mem: NetworkMemory) -> String {
+        var parts: [String] = []
+        if let gw = mem.gateways.first {
+            parts.append(gw)
+        }
+        if let isp = mem.isps.first, !mem.ssids.isEmpty {
+            parts.append(isp)
+        }
+        return parts.isEmpty ? "Local connection" : parts.joined(separator: " · ")
+    }
+
     // MARK: - Verdict
 
     @ViewBuilder
     private var verdictCard: some View {
         if let networkID {
-            if let judged = store.judged(networkID: networkID),
+            if let mem = selectedNetworkMemory, mem.isLearningBaseline {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.blue)
+                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Establishing Network Baseline (Learning Mode)")
+                                .font(.callout.weight(.medium))
+                            Text("\(mem.checkCount) of 10 checks")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Color.blue.opacity(0.12), in: Capsule())
+                        }
+                        Text("Provisional medians are computed from your recorded checks. Statistical confidence bands unlock after 10 checks.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if coordinator.isScanning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button {
+                            coordinator.runFullCheck()
+                        } label: {
+                            Label("Run Check", systemImage: "arrow.clockwise")
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .padding(12)
+                .cardStyle()
+                .padding(.horizontal, 12)
+            } else if let judged = store.judged(networkID: networkID),
                let summary = judged.summary, !summary.isEmpty {
                 let health = verdictHealth(judged.overall)
                 HStack(alignment: .top, spacing: 10) {
@@ -262,24 +346,37 @@ struct TrendsView: View {
         switch m.key {
         case "gateway_rtt_ms":
             name = "Router Ping"
-        case "internet_rtt_ms":
+        case "inet_rtt_ms", "internet_rtt_ms":
             name = "Internet Ping"
-        case "bufferbloat_gw_delta_ms":
+        case "gateway_jitter_ms":
+            name = "Router Jitter"
+        case "gateway_loss_pct":
+            name = "Router Loss"
+        case "inet_loss_pct":
+            name = "Internet Loss"
+        case "bufferbloat_gw_ms", "bufferbloat_gw_delta_ms":
             name = "Bufferbloat (Router)"
-        case "bufferbloat_inet_delta_ms":
+        case "bufferbloat_inet_ms", "bufferbloat_inet_delta_ms":
             name = "Bufferbloat (Internet)"
-        case "speedtest_down_mbps":
+        case "speed_down_mbps", "speedtest_down_mbps":
             name = "Download Speed"
-        case "speedtest_up_mbps":
+        case "speed_up_mbps", "speedtest_up_mbps":
             name = "Upload Speed"
-        case "wifi_rssi":
-            name = "Wi-Fi Signal Strength"
+        case "wifi_rssi_dbm", "wifi_rssi":
+            name = "Wi-Fi Signal"
+        case "wifi_snr_db":
+            name = "Wi-Fi SNR"
         default:
             name = m.label
         }
         let samples: Int
         if let networkID, let net = store.mergedNetworks.first(where: { $0.id == networkID }) {
-            samples = net.metricSamples[m.key] ?? 0
+            samples = net.metricSamples[m.key]
+                ?? (m.key == "speed_down_mbps" ? net.metricSamples["speedtest_down_mbps"] : nil)
+                ?? (m.key == "speed_up_mbps" ? net.metricSamples["speedtest_up_mbps"] : nil)
+                ?? (m.key == "bufferbloat_gw_ms" ? net.metricSamples["bufferbloat_gw_delta_ms"] : nil)
+                ?? (m.key == "bufferbloat_inet_ms" ? net.metricSamples["bufferbloat_inet_delta_ms"] : nil)
+                ?? 0
         } else {
             samples = m.samples
         }
@@ -311,6 +408,21 @@ struct TrendsView: View {
 
             Spacer()
 
+            if coordinator.isSpeedTestOnly {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.small)
+                    Text("Testing speed…").font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Button {
+                    coordinator.runSpeedTest(reason: "trends manual test")
+                } label: {
+                    Label("Test Speed", systemImage: "gauge.with.needle")
+                }
+                .controlSize(.small)
+                .help("Run a focused speed test to record a fresh benchmark")
+            }
+
             if store.isLoading {
                 ProgressView().controlSize(.small)
             } else {
@@ -333,6 +445,9 @@ struct TrendsView: View {
         let descriptor = store.metric(metricKey)
         let points = store.series(metric: metricKey, networkID: networkID, window: window)
         let count = points.count
+        let inetPoints = metricKey == "gateway_rtt_ms"
+            ? store.series(metric: "inet_rtt_ms", networkID: networkID, window: window)
+            : []
         // Only for a single selected network — the same gate as
         // `verdictCard` — and only when the CLI actually had enough
         // samples to compute one (`stat` is `nil` below the sample floor,
@@ -342,16 +457,24 @@ struct TrendsView: View {
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                // The unit belongs on the metric's name — "Gateway RTT
-                // (ms) · 2027 samples" — not on the sample count, where
-                // "(ms)" reads as the unit of "samples".
                 Text(chartTitle).font(.headline)
                 HelpHint(key: metricKey)
                 Text(sampleLabel(count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if let descriptor, count > 0 {
+                if metricKey == "gateway_rtt_ms" && !inetPoints.isEmpty {
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.blue).frame(width: 7, height: 7)
+                            Text("Router Ping").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.purple).frame(width: 7, height: 7)
+                            Text("Internet Ping").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                } else if let descriptor, count > 0 {
                     Text(descriptor.higherIsBetter ? "higher is better" : "lower is better")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -361,13 +484,8 @@ struct TrendsView: View {
             if count == 0 {
                 noData(descriptor)
             } else {
-                // A single outlier was setting the whole scale: 2371 gateway
-                // RTT samples that live between 2 and 8 ms were being drawn
-                // against a 0–3000 ms axis because one reading hit 2.8 s,
-                // flattening every real variation into a line on the floor.
-                // See `Clamp` for what is done about it and why nothing is
-                // hidden by it.
-                let clamp = Clamp.forValues(points.map(\.1), p90: stat?.p90)
+                let allValues = points.map(\.1) + inetPoints.map(\.1)
+                let clamp = Clamp.forValues(allValues, p90: stat?.p90)
                 Chart {
                     // Drawn first, so the line and points sit on top of it.
                     if hasBand, let p10 = stat?.p10, let p90 = stat?.p90,
@@ -382,20 +500,34 @@ struct TrendsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    // Internet ping companion line when showing router ping
+                    if metricKey == "gateway_rtt_ms" {
+                        ForEach(inetPoints, id: \.0) { pt in
+                            let value = clamp?.apply(pt.1) ?? pt.1
+                            LineMark(x: .value("When", pt.0),
+                                     y: .value("Internet Ping", value),
+                                     series: .value("Target", "Internet Ping"))
+                                .foregroundStyle(Color.purple)
+                                .interpolationMethod(.monotone)
+                            PointMark(x: .value("When", pt.0),
+                                      y: .value("Internet Ping", value))
+                                .foregroundStyle(Color.purple)
+                                .symbolSize(inetPoints.count > 200 ? 4 : 16)
+                        }
+                    }
+
                     ForEach(points, id: \.0) { point in
                         let value = clamp?.apply(point.1) ?? point.1
                         LineMark(x: .value("When", point.0),
-                                 y: .value(descriptor?.label ?? "", value))
+                                 y: .value(descriptor?.label ?? "", value),
+                                 series: .value("Target", metricKey == "gateway_rtt_ms" ? "Router Ping" : (descriptor?.label ?? "")))
+                            .foregroundStyle(metricKey == "gateway_rtt_ms" ? Color.blue : Color.accentColor)
                             .interpolationMethod(.monotone)
-                        // Points as well as a line: with 38 samples spread
-                        // over two months, a line alone implies a
-                        // continuous measurement that was never taken.
                         PointMark(x: .value("When", point.0),
                                   y: .value(descriptor?.label ?? "", value))
+                            .foregroundStyle(metricKey == "gateway_rtt_ms" ? Color.blue : Color.accentColor)
                             .symbolSize(count > 200 ? 4 : 18)
-                        // A reading drawn at the ceiling rather than at its
-                        // real height gets its own mark, so "pegged" can
-                        // never be mistaken for "measured this value".
                         if let clamp, clamp.exceeds(point.1) {
                             PointMark(x: .value("When", point.0),
                                       y: .value(descriptor?.label ?? "", clamp.upper))
@@ -414,17 +546,114 @@ struct TrendsView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                // Required, not decorative: the axis stops below the real
-                // maximum, and a chart that quietly rescales past its own
-                // outliers tells the same comfortable lie as a smooth line
-                // through an outage — the thing `MonitorSeries` refuses to
-                // draw. If the top of the range is not the top of the data,
-                // the chart has to say so.
                 if let clamp {
                     Text(verbatim: clamp.note(unit: descriptor?.unit))
                         .font(.caption2)
                         .foregroundStyle(.orange)
                         .proseWidth()
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Speed Benchmark Section
+
+    @ViewBuilder
+    private var speedBenchmarkSection: some View {
+        let runs = store.runs(networkID: networkID, window: window)
+        let speedRuns = runs.filter {
+            $0.metrics["speed_down_mbps"] != nil || $0.metrics["speedtest.down_mbps"] != nil
+        }.sorted { $0.date > $1.date }
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Speed Test Benchmarks").font(.headline)
+                Text(sampleLabel(speedRuns.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if coordinator.isSpeedTestOnly {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.small)
+                        Text("Testing throughput…").font(.caption2).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button("Run Speed Test") {
+                        coordinator.runSpeedTest(reason: "trends speed test")
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            if speedRuns.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("No speed tests recorded in this window", systemImage: "gauge.with.needle")
+                        .font(.callout)
+                    Text("Benchmarking your download and upload speeds records persistent data points in your trends history.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Run Speed Test") {
+                        coordinator.runSpeedTest(reason: "trends speed test")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .cardStyle()
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(speedRuns.prefix(5)) { run in
+                        let down = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"] ?? 0
+                        let up = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
+                        let peak = selectedNetworkMemory?.peakDownMbps ?? 0
+                        let isPeak = peak > 0 && down >= peak - 0.5
+
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: "arrow.up.arrow.down.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(isPeak ? .blue : .secondary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(up != nil ? String(format: "%.1f Down / %.1f Up Mbps", down, up!) : String(format: "%.1f Mbps Down", down))
+                                        .font(.subheadline.weight(.semibold))
+                                    if isPeak {
+                                        Text("Peak")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(Color.blue.opacity(0.12), in: Capsule())
+                                    }
+                                }
+                                Text(run.date.formatted(date: .abbreviated, time: .shortened) + (run.runMode.flatMap { " · \($0)" } ?? ""))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if let rtt = run.metrics["gateway_rtt_ms"] {
+                                Text(String(format: "%.1f ms ping", rtt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.secondary.opacity(0.04))
+                        )
+                    }
                 }
             }
         }
@@ -613,6 +842,8 @@ struct TrendsView: View {
     private var incidentChart: some View {
         let runs = store.runs(networkID: networkID, window: window)
         let buckets = bucketByDay(runs)
+        let problemRuns = runs.filter { $0.severity == "warn" || $0.severity == "critical" }
+            .sorted { $0.date > $1.date }
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -642,6 +873,42 @@ struct TrendsView: View {
                 // as two different apps stacked.
                 .chartYAxis { AxisMarks(position: .leading) { plainCountLabel($0) } }
                 .frame(height: 160)
+
+                if !problemRuns.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    Text("Issues flagged in this window:")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(problemRuns.prefix(4)) { run in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: run.severity == "critical" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(run.severity == "critical" ? Color.red : Color.orange)
+                                    .padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                            .font(.caption2.weight(.medium))
+                                        if !run.rules.isEmpty {
+                                            Text(run.rules.joined(separator: ", "))
+                                                .font(.system(.caption2, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    if let cause = run.rootCause, !cause.isEmpty {
+                                        Text(cause)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                            .padding(6)
+                            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                }
             }
         }
         .padding(14)

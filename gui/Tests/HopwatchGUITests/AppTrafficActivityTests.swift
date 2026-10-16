@@ -48,7 +48,7 @@ import Testing
     @Test func unattributedProcessIsShownWithoutInventingAnApp() throws {
         let entry = ActivityEntry.fold([try event(1000, app: nil)])[0]
         #expect(entry.displaySummary.contains("backup"))
-        #expect(entry.trafficEvidence[0].detail.contains("app unidentified"))
+        #expect(entry.trafficEvidence[0].detail.contains("background process"))
         #expect(entry.trafficEvidence[0].detail.contains("40 Mbps"))
     }
 

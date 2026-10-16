@@ -94,6 +94,18 @@ final class AppSettings {
     var autoReconnectWiFi: Bool {
         didSet { Defaults.autoReconnectWiFi = autoReconnectWiFi }
     }
+    var audioChimesEnabled: Bool {
+        didSet { Defaults.audioChimesEnabled = audioChimesEnabled }
+    }
+    var globalHotkeyEnabled: Bool {
+        didSet {
+            Defaults.globalHotkeyEnabled = globalHotkeyEnabled
+            GlobalHotkeyManager.shared.isEnabled = globalHotkeyEnabled
+        }
+    }
+    var plainEnglishEnabled: Bool {
+        didSet { Defaults.plainEnglishEnabled = plainEnglishEnabled }
+    }
     var launchAtLogin: Bool {
         didSet {
             guard launchAtLogin != oldValue else { return }
@@ -149,9 +161,15 @@ final class AppSettings {
         showInDock = Defaults.showInDock
         crashReportingEnabled = Defaults.crashReportingEnabled
         autoReconnectWiFi = Defaults.autoReconnectWiFi
+        audioChimesEnabled = Defaults.audioChimesEnabled
+        globalHotkeyEnabled = Defaults.globalHotkeyEnabled
+        plainEnglishEnabled = Defaults.plainEnglishEnabled
         launchAtLogin = SMAppService.mainApp.status == .enabled
         if showInDock {
             NSApp?.setActivationPolicy(.regular)
+        }
+        if globalHotkeyEnabled {
+            _ = GlobalHotkeyManager.shared.register()
         }
     }
 }

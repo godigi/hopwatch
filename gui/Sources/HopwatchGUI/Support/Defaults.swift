@@ -96,6 +96,7 @@ enum Defaults {
         static let networkNames       = "networkNames"
         static let networkMerges      = "networkMerges"
         static let networkOwned       = "networkOwned"
+        static let portalNetworks     = "portalNetworks"
         static let seenNetworks       = "seenNetworks"
         static let arrivalStates      = "arrivalStates"
         static let hasOnboarded       = "hasOnboarded"
@@ -114,6 +115,10 @@ enum Defaults {
         static let phaseDurationSamples = "phaseDurationSamples"
         static let crashReportingEnabled = "crashReportingEnabled"
         static let autoReconnectWiFi  = "autoReconnectWiFi"
+        static let lastSeenAppVersion = "lastSeenAppVersion"
+        static let audioChimesEnabled = "audioChimesEnabled"
+        static let globalHotkeyEnabled = "globalHotkeyEnabled"
+        static let plainEnglishEnabled = "plainEnglishEnabled"
     }
 
     // MARK: - Recovery
@@ -145,6 +150,28 @@ enum Defaults {
     static var lastNotifiedUpdateVersion: String? {
         get { d.string(forKey: Key.lastNotifiedUpdateVersion) }
         set { d.set(newValue, forKey: Key.lastNotifiedUpdateVersion) }
+    }
+
+    static var lastSeenAppVersion: String? {
+        get { d.string(forKey: Key.lastSeenAppVersion) }
+        set { d.set(newValue, forKey: Key.lastSeenAppVersion) }
+    }
+
+    // MARK: - Audio & Shortcuts
+
+    static var audioChimesEnabled: Bool {
+        get { d.object(forKey: Key.audioChimesEnabled) as? Bool ?? false }
+        set { d.set(newValue, forKey: Key.audioChimesEnabled) }
+    }
+
+    static var globalHotkeyEnabled: Bool {
+        get { d.object(forKey: Key.globalHotkeyEnabled) as? Bool ?? false }
+        set { d.set(newValue, forKey: Key.globalHotkeyEnabled) }
+    }
+
+    static var plainEnglishEnabled: Bool {
+        get { d.object(forKey: Key.plainEnglishEnabled) as? Bool ?? true }
+        set { d.set(newValue, forKey: Key.plainEnglishEnabled) }
     }
 
     // MARK: - Monitoring
@@ -291,6 +318,18 @@ enum Defaults {
         set { d.set(Array(newValue).sorted(), forKey: Key.networkOwned) }
     }
 
+    static var portalNetworks: Set<String> {
+        get { Set(d.stringArray(forKey: Key.portalNetworks) ?? []) }
+        set { d.set(Array(newValue).sorted(), forKey: Key.portalNetworks) }
+    }
+
+    static func recordPortalNetwork(_ key: String) {
+        guard !key.isEmpty else { return }
+        var current = portalNetworks
+        current.insert(key)
+        portalNetworks = current
+    }
+
     // MARK: - Scan progress weighting
 
     /// `PhaseWeights`' raw material: mode -> phase name -> recent measured
@@ -400,6 +439,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
     case dotAndFlag = "dot+flag"
     case dotFlagAndIP = "dot+flag+ip"
     case dotAndPing = "dot+ping"
+    case dynamic = "dynamic"
 
     var id: String { rawValue }
 
@@ -409,6 +449,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
         case .dotAndFlag:   return "Status dot and country flag"
         case .dotFlagAndIP: return "Status dot, flag, and IP address"
         case .dotAndPing:   return "Dot and ping time"
+        case .dynamic:      return "Smart / Dynamic (Minimal, shows ping when degraded)"
         }
     }
 }

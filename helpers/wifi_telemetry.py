@@ -76,11 +76,15 @@ def get_wifi_telemetry() -> dict[str, str | int] | None:
     tx = int(round(tx_raw)) if tx_raw > 0 else ""
 
     chan_obj = objc.objc_msgSend(iface, objc.sel_registerName(b"wlanChannel"))
-    chan = (
-        msg_long(chan_obj, objc.sel_registerName(b"channelNumber"))
-        if chan_obj
-        else ""
-    )
+    chan = ""
+    if chan_obj:
+        num = msg_long(chan_obj, objc.sel_registerName(b"channelNumber"))
+        band = msg_long(chan_obj, objc.sel_registerName(b"channelBand"))
+        band_str = {1: "2.4GHz", 2: "5GHz", 3: "6GHz"}.get(band, "")
+        if band_str:
+            chan = f"{num} ({band_str})"
+        else:
+            chan = str(num)
 
     phy_mode = msg_long(iface, objc.sel_registerName(b"activePHYMode"))
     phy_map = {

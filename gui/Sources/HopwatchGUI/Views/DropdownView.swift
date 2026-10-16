@@ -30,6 +30,24 @@ struct DropdownView: View {
 
             updateBanner
 
+            if let feedback = shareFeedback {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.ColorToken.green)
+                        .font(.system(size: 11))
+                    Text(feedback)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Theme.ColorToken.nodeBackground)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(Theme.ColorToken.line, lineWidth: 1))
+                .shadow(color: Color.black.opacity(0.08), radius: 3, y: 1)
+                .padding(.vertical, 4)
+            }
+
             VStack(spacing: 12) {
                 statusHeroSection
 
@@ -112,20 +130,20 @@ struct DropdownView: View {
         if checker.hasUpdate || checker.isDownloading {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .foregroundStyle(.orange)
+                    Image(systemName: checker.isPreloaded ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                        .foregroundStyle(checker.isPreloaded ? .green : .orange)
                         .font(.system(size: 13))
-                    Text(checker.isDownloading ? checker.statusMessage : "Update available: v\(checker.availableRelease?.cleanVersion ?? "")")
+                    Text(checker.isDownloading ? checker.statusMessage : (checker.isPreloaded ? "Update ready: v\(checker.availableRelease?.cleanVersion ?? "")" : "Update available: v\(checker.availableRelease?.cleanVersion ?? "")"))
                         .font(.system(size: 11, weight: .semibold))
                     Spacer()
                     if !checker.isDownloading {
                         Button {
                             checker.downloadAndInstallUpdate()
                         } label: {
-                            Text("Update & Relaunch")
+                            Text(checker.isPreloaded ? "Restart to Update" : "Update & Relaunch")
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.orange)
+                        .tint(checker.isPreloaded ? .green : .orange)
                         .controlSize(.small)
                     }
                 }
@@ -251,8 +269,16 @@ struct DropdownView: View {
         case .noLink:
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
             let rules = coordinator.monitor.latest?.status.rules ?? []
+            let isPortal = rules.contains("N1c")
+                || rules.contains("CP-1")
+                || offline?.reason == "no-route"
+                || coordinator.currentNetworkRequiresPortal
+                || coordinator.isSystemCaptiveActive()
+
             let headline: String = {
-                if rules.contains("DH-3") {
+                if isPortal {
+                    return coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network"
+                } else if rules.contains("DH-3") {
                     return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WJ-1") {
                     return coordinator.rulesCatalog.catalog?["WJ-1"]?.title ?? NoLinkCopy.headline
@@ -264,6 +290,14 @@ struct DropdownView: View {
             }()
 
             let subtitle: String = {
+                if isPortal {
+                    var text = coordinator.rulesCatalog.catalog?["N1c"]?.blurb
+                        ?? "This network requires you to sign in before you can access the internet."
+                    if coordinator.hasCustomDNS {
+                        text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                    }
+                    return text
+                }
                 var subtitleParts: [String] = []
                 if let line = offline?.statusLine {
                     subtitleParts.append(line)
@@ -285,18 +319,28 @@ struct DropdownView: View {
             // firing rule that names, and only once the catalog has loaded.
             let reconnectRule = coordinator.reconnectRule(amongFiring: rules)
             let canReconnect = reconnectRule != nil
-            let actionTitle = canReconnect ? (coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi") : "Open Wi-Fi Settings"
-            let secTitle: String? = canReconnect ? "Open Wi-Fi Settings" : nil
+            let actionTitle: String = {
+                if isPortal {
+                    return "Open Sign-In Page"
+                } else if canReconnect {
+                    return coordinator.isRepairing ? "Reconnecting…" : "Reconnect Wi-Fi"
+                } else {
+                    return "Open Wi-Fi Settings"
+                }
+            }()
+            let secTitle: String? = (isPortal || canReconnect) ? "Open Wi-Fi Settings" : nil
 
             MenuStatusHeroView(
-                iconName: NoLinkCopy.icon,
-                iconTint: .red,
-                iconBackground: Color.red.opacity(0.12),
+                iconName: isPortal ? "lock.shield" : NoLinkCopy.icon,
+                iconTint: isPortal ? Theme.ColorToken.amber : .red,
+                iconBackground: isPortal ? Theme.ColorToken.amberWash : Color.red.opacity(0.12),
                 headline: headline,
                 subtitle: subtitle,
                 actionTitle: actionTitle,
                 onAction: {
-                    if let reconnectRule {
+                    if isPortal {
+                        coordinator.openPortalPage()
+                    } else if let reconnectRule {
                         coordinator.reconnectWiFi(ruleID: reconnectRule)
                     } else if let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") ?? URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension") {
                         NSWorkspace.shared.open(url)
@@ -325,17 +369,23 @@ struct DropdownView: View {
             let isCaptive = isCaptivePortalAlert(alert)
             let isRouter = isRouterAlert(alert)
 
+            let alertSubtitle: String = {
+                var text = alert.body.isEmpty ? "Network problem detected" : alert.body
+                if isCaptive && coordinator.hasCustomDNS && !text.localizedCaseInsensitiveContains("custom DNS") {
+                    text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                }
+                return text
+            }()
+
             MenuStatusHeroView(
-                iconName: isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle",
-                iconTint: isCritical ? .red : Theme.ColorToken.amber,
-                iconBackground: isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash,
+                iconName: isCaptive ? "lock.shield" : (isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle"),
+                iconTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? .red : Theme.ColorToken.amber),
+                iconBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash),
                 headline: alert.title,
-                subtitle: alert.body.isEmpty ? "Network problem detected" : alert.body,
-                actionTitle: isCaptive ? "Open Login Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
+                subtitle: alertSubtitle,
+                actionTitle: isCaptive ? "Open Sign-In Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
                 onAction: isCaptive ? {
-                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    coordinator.openPortalPage()
                 } : (isRouter && routerAdminURL != nil ? {
                     if let url = routerAdminURL {
                         NSWorkspace.shared.open(url)
@@ -399,9 +449,11 @@ struct DropdownView: View {
     private func isCaptivePortalAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
         alert.id == "captive-portal"
             || alert.rules.contains("CP-1")
+            || alert.rules.contains("N1c")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
             || (coordinator.liveSample?.publicInfo.captivePortal == true)
+            || coordinator.currentNetworkRequiresPortal
     }
 
     private var quietLine: String {
@@ -463,7 +515,8 @@ struct DropdownView: View {
             inetPing: inetPing,
             inetJitter: inetJitter,
             hasRecentRoam: coordinator.hasRecentRoam,
-            wifiRuleTint: wifiRuleTint
+            wifiRuleTint: wifiRuleTint,
+            gatewayPingFiltered: lossFiltering.filters(.gateway)
         )
     }
 
@@ -583,6 +636,9 @@ struct DropdownView: View {
 
     private var routerPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
+        if lossFiltering.filters(.gateway) || coordinator.liveSample?.gateway.rttAvgMs == nil {
+            return Theme.ColorToken.muted
+        }
         let rtt = coordinator.liveSample?.gateway.rttAvgMs ?? 0
         if routerWarn || rtt >= 25.0 {
             return Theme.ColorToken.amber
@@ -801,12 +857,35 @@ struct DropdownView: View {
     // MARK: - 8. Actions Section
 
     private var actionsSection: some View {
-        MenuActionsView(
-            isScanning: coordinator.isScanning,
-            onOpenDashboard: { openDashboard() },
-            onRunFullCheck: { coordinator.runFullCheck() },
-            onCancelScan: { coordinator.cancelScan() }
-        )
+        VStack(spacing: 8) {
+            if coordinator.currentHealth != .healthy && coordinator.currentHealth != .checking {
+                Button(action: { copySupportSummary() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Copy 1-Click IT / Support Ticket")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(Theme.ColorToken.amberWash)
+                    .foregroundStyle(Theme.ColorToken.amber)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Theme.ColorToken.amber.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            MenuActionsView(
+                isScanning: coordinator.isScanning,
+                onOpenDashboard: { openDashboard() },
+                onRunFullCheck: { coordinator.runFullCheck() },
+                onCancelScan: { coordinator.cancelScan() }
+            )
+        }
     }
 
     // MARK: - 9. Footer Section

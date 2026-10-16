@@ -349,7 +349,15 @@ final class HistoryStore {
     /// two months of a dead connection.
     func series(metric: String, networkID: String?, window: HistoryWindow) -> [(Date, Double)] {
         runs(networkID: networkID, window: window)
-            .compactMap { run in run.metrics[metric].map { (run.date, $0) } }
+            .compactMap { run in
+                let val = run.metrics[metric]
+                    ?? (metric == "speed_down_mbps" ? run.metrics["speedtest.down_mbps"] : nil)
+                    ?? (metric == "speed_up_mbps" ? run.metrics["speedtest.up_mbps"] : nil)
+                    ?? (metric == "bufferbloat_gw_ms" ? run.metrics["bufferbloat.gw_delta_ms"] : nil)
+                    ?? (metric == "bufferbloat_inet_ms" ? run.metrics["bufferbloat.inet_delta_ms"] : nil)
+                    ?? (metric == "wifi_rssi_dbm" ? run.metrics["wifi_rssi"] : nil)
+                return val.map { (run.date, $0) }
+            }
             .sorted { $0.0 < $1.0 }
     }
 

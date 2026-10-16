@@ -247,7 +247,7 @@ RULES: list[dict[str, object]] = [
         "title": "Joined to a network with no route out",
         "category": "router",
         "severity": "critical",
-        "scope": "scan",
+        "scope": "both",
         "blurb": (
             "Your Mac is associated and holds an address from this "
             "network, but the network has given it no route to the "
@@ -267,6 +267,7 @@ RULES: list[dict[str, object]] = [
             "it can fix that."
         ),
         "fix_target": "you",
+        "repairs": ["open-sign-in"],
     },
     {
         "id": "W1",

@@ -209,7 +209,28 @@ struct NetworksView: View {
     }
 
     private func networkListRow(_ net: HistoryDocument.Network, isActive: Bool) -> some View {
-        let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id))
+        let runs = allNetworkRuns(net)
+        let activeSpeed: (down: Double, up: Double)? = {
+            if isActive, let current = coordinator.currentSpeedTest, let down = current.speed.downMbps {
+                return (down: down, up: current.speed.upMbps ?? 0)
+            }
+            return nil
+        }()
+        let activeLive: (gatewayLatency: Double?, internetLatency: Double?, jitter: Double?)? = {
+            if isActive, let sample = coordinator.liveSample {
+                return (gatewayLatency: sample.gateway.rttAvgMs,
+                        internetLatency: sample.internet.rttAvgMs,
+                        jitter: coordinator.currentJitter ?? sample.gateway.rttJitterMs)
+            }
+            return nil
+        }()
+        let mem = NetworkHistoryStore.memory(
+            for: net,
+            displayName: store.displayName(for: net.id),
+            runs: runs,
+            activeSpeedTest: activeSpeed,
+            activeLiveMetrics: activeLive
+        )
         return HStack(alignment: .center, spacing: 8) {
             Image(systemName: networkTypeIcon(net))
                 .font(.system(size: 13, weight: .medium))
@@ -288,11 +309,36 @@ struct NetworksView: View {
     // MARK: - Network overview (header + stats + controls + checks)
 
     private func networkOverview(_ net: HistoryDocument.Network) -> some View {
-        let runs = networkRuns(net)
-        let mem = NetworkHistoryStore.memory(for: net, displayName: store.displayName(for: net.id), runs: runs)
+        let runs = allNetworkRuns(net)
+        let isActive = isCurrent(net)
+        let activeSpeed: (down: Double, up: Double)? = {
+            if isActive, let current = coordinator.currentSpeedTest, let down = current.speed.downMbps {
+                return (down: down, up: current.speed.upMbps ?? 0)
+            }
+            return nil
+        }()
+        let activeLive: (gatewayLatency: Double?, internetLatency: Double?, jitter: Double?)? = {
+            if isActive, let sample = coordinator.liveSample {
+                return (gatewayLatency: sample.gateway.rttAvgMs,
+                        internetLatency: sample.internet.rttAvgMs,
+                        jitter: coordinator.currentJitter ?? sample.gateway.rttJitterMs)
+            }
+            return nil
+        }()
+        let mem = NetworkHistoryStore.memory(
+            for: net,
+            displayName: store.displayName(for: net.id),
+            runs: runs,
+            activeSpeedTest: activeSpeed,
+            activeLiveMetrics: activeLive
+        )
         let comp: NetworkComparison? = {
-            if isCurrent(net), let latest = coordinator.liveSample {
-                return NetworkHistoryStore.compare(sample: latest, baseline: mem)
+            if isActive, let latest = coordinator.liveSample {
+                return NetworkHistoryStore.compare(
+                    sample: latest,
+                    baseline: mem,
+                    fallbackDownMbps: coordinator.currentSpeedTest?.speed.downMbps
+                )
             }
             return nil
         }()
@@ -429,6 +475,22 @@ struct NetworksView: View {
                         .fixedSize()
                 }
 
+                let isPortal = Defaults.portalNetworks.contains(net.id) || net.ssids.contains { Defaults.portalNetworks.contains("ssid:\($0)") }
+                if isPortal {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.shield")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Portal")
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.12), in: Capsule())
+                    .help("This network requires a captive portal sign-in.")
+                    .fixedSize()
+                }
+
                 let subtitle = networkDetailSubtitle(net)
                 if !subtitle.isEmpty {
                     Text(subtitle)
@@ -465,7 +527,7 @@ struct NetworksView: View {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("CHECK HISTORY")
+                    Text("SAVED DIAGNOSTIC CHECKS")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -797,6 +859,10 @@ struct NetworksView: View {
             runs = runs.filter(isProblem)
         }
         return runs
+    }
+
+    private func allNetworkRuns(_ net: HistoryDocument.Network) -> [HistoryDocument.Run] {
+        store.runs(networkID: net.id, window: .all)
     }
 
     private func networkRuns(_ net: HistoryDocument.Network) -> [HistoryDocument.Run] {

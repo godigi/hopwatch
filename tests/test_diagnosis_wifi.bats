@@ -377,3 +377,15 @@ assert_contains() {
   ! diag_has W6 || { echo "W6 fired for current BSSID"; return 1; }
 }
 
+@test "diagnosis: W6 stays silent when connected to 6 GHz band (channels 1-14)" {
+  wifi_baseline
+  WIFI_RSSI=-55
+  WIFI_CHAN="5 (6GHz)"
+  WIFI_SCAN_CURRENT_CHANNEL="5"
+  WIFI_SCAN_CURRENT_BAND="6GHz"
+  WIFI_CANDIDATE_5GHZ_BSSID="aa:bb:cc:dd:ee:02"
+  WIFI_CANDIDATE_5GHZ_RSSI=-58
+  diagnosis_run >/dev/null
+  ! diag_has W6 || { echo "W6 fired on 6 GHz channel 5"; return 1; }
+}
+

@@ -56,7 +56,10 @@ final class EventStore {
                 network: String? = nil,
                 date: Date = .now,
                 continuesPrevious: Bool = false,
-                evidence: AppTrafficEvidence? = nil) {
+                evidence: AppTrafficEvidence? = nil,
+                fromValue: String? = nil,
+                toValue: String? = nil,
+                extraDetail: String? = nil) {
         guard !summary.isEmpty else { return }
         if kind == "rule-updated", let evidence {
             // Keep the opening and each distinct app, but replace repeated
@@ -87,7 +90,10 @@ final class EventStore {
                                    summary: summary, ruleID: ruleID,
                                    network: network,
                                    continuesPrevious: continuesPrevious,
-                                   evidence: evidence)],
+                                   evidence: evidence,
+                                   fromValue: fromValue,
+                                   toValue: toValue,
+                                   extraDetail: extraDetail)],
             cap: Self.cap)
         save()
     }

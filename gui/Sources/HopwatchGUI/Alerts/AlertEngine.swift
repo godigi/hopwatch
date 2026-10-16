@@ -125,6 +125,9 @@ final class AlertEngine {
     /// dwell and cooldown without waiting minutes for them.
     @ObservationIgnored var now: () -> Date = { Date() }
 
+    /// Injected by coordinator: whether custom DNS is configured on the primary network service.
+    @ObservationIgnored var hasCustomDNS: () -> Bool = { false }
+
     private var conditionSince: [String: Date] = [:]
     private var lastNotifiedAt: [String: Date] = [:]
     private var firedForNetwork: [String: Set<String>] = [:]
@@ -167,8 +170,38 @@ final class AlertEngine {
     // chosen because the alternative is an alert that is *always* wrong
     // rather than occasionally wrong.
 
+    private func isLearnedPortal(_ sample: MonitorSample) -> Bool {
+        if let id = sample.network.historyJoinID, !id.isEmpty, Defaults.portalNetworks.contains(id) {
+            return true
+        }
+        if let key = sample.network.id, !key.isEmpty, Defaults.portalNetworks.contains(key) {
+            return true
+        }
+        if let ssid = sample.link.ssid, !ssid.isEmpty, Defaults.portalNetworks.contains("ssid:\(ssid)") {
+            return true
+        }
+        return false
+    }
+
+    private func isLearnedPortalAwaitingSignIn(_ sample: MonitorSample) -> Bool {
+        guard isLearnedPortal(sample) else { return false }
+        if sample.publicInfo.ok == true && (sample.internet.lossPct ?? 0) < 50 {
+            return false
+        }
+        return true
+    }
+
     private func suppressed(_ def: AlertDefinition, sample: MonitorSample?) -> String? {
         if !Defaults.isAlertEnabled(def.id) { return "disabled by user" }
+        // When a network requires portal sign-in, pings to the internet fail.
+        // Suppress generic connection-lost so the user gets the actionable captive-portal alert.
+        if def.id == "connection-lost", let sample,
+           sample.publicInfo.captivePortal == true
+            || sample.status.rules.contains("CP-1")
+            || sample.status.rules.contains("N1c")
+            || isLearnedPortalAwaitingSignIn(sample) {
+            return "captive portal sign-in required"
+        }
         // A scan saturates the link on purpose (speed test, bufferbloat).
         // Alerting on latency the app itself caused is the worst possible
         // false positive: it is self-inflicted and perfectly reproducible.
@@ -210,8 +243,11 @@ final class AlertEngine {
         let firing = Set(sample.status.rules)
         for def in AlertDefinition.liveAlerts {
             let holds = conditionHolds(def, sample: sample, previous: previousSample)
+            let firingRules = def.id == "captive-portal"
+                ? Set(["CP-1", "N1c"]).intersection(firing)
+                : def.rules.intersection(firing)
             step(def, holds: holds, now: now, networkKey: networkKey, sample: sample,
-                 firingRules: def.rules.intersection(firing))
+                 firingRules: firingRules)
         }
     }
 
@@ -242,6 +278,9 @@ final class AlertEngine {
 
         case "captive-portal":
             return sample.publicInfo.captivePortal == true
+                || sample.status.rules.contains("CP-1")
+                || sample.status.rules.contains("N1c")
+                || isLearnedPortalAwaitingSignIn(sample)
 
         case "vpn-dropped":
             // Back up: the drop is over, whether or not it was announced.
@@ -519,7 +558,10 @@ final class AlertEngine {
             return
         }
 
-        let body = bodyOverride ?? def.interimBody
+        var body = bodyOverride ?? def.interimBody
+        if def.id == "captive-portal" && hasCustomDNS() {
+            body = "Sign in to access the internet. Custom DNS is configured and may prevent the sign-in page from opening automatically."
+        }
         active[def.id] = ActiveAlert(id: def.id, title: def.title, body: body,
                                      raisedAt: now,
                                      bodyState: initialBodyState(def, bodyOverride: bodyOverride),

@@ -138,4 +138,51 @@ struct NetworkEventTests {
         let nullGap = try JSONDecoder().decode(MonitorSample.self, from: nullGapJSON)
         #expect(nullGap.gapS == nil)
     }
+
+    @Test func publicIPChangeWithFromToAndISP() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let event = NetworkEvent(
+            date: now,
+            kind: "public-ip-changed",
+            summary: "Public IP changed",
+            fromValue: "198.51.100.7",
+            toValue: "203.0.113.42",
+            extraDetail: "Starlink"
+        )
+
+        let entries = ActivityEntry.fold([event])
+        #expect(entries.count == 1)
+        #expect(entries[0].kind == "public-ip-changed")
+        #expect(entries[0].fromValue == "198.51.100.7")
+        #expect(entries[0].toValue == "203.0.113.42")
+        #expect(entries[0].extraDetail == "Starlink")
+        #expect(entries[0].detail?.contains("198.51.100.7 → 203.0.113.42 · Starlink") == true)
+    }
+
+    @Test func publicIPAlertAbsorbedIntoEvent() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let changeEvent = NetworkEvent(
+            date: now.addingTimeInterval(-5),
+            kind: "public-ip-changed",
+            summary: "Public IP changed",
+            fromValue: "198.51.100.7",
+            toValue: "203.0.113.42",
+            extraDetail: "Comcast Cable"
+        )
+        let alertEvent = NetworkEvent(
+            date: now,
+            kind: "alert",
+            summary: "Your public IP address changed",
+            ruleID: "public-ip-changed"
+        )
+
+        let folded = ActivityEntry.fold([changeEvent, alertEvent])
+        #expect(folded.count == 1, "Alert must be absorbed into event to prevent duplicate rows")
+        #expect(folded[0].notified == true)
+        #expect(folded[0].fromValue == "198.51.100.7")
+        #expect(folded[0].toValue == "203.0.113.42")
+        #expect(folded[0].extraDetail == "Comcast Cable")
+        #expect(folded[0].detail?.contains("198.51.100.7 → 203.0.113.42 · Comcast Cable") == true)
+    }
 }
+
