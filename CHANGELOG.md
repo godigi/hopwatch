@@ -8,6 +8,12 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.19.1] - 2026-10-16
+
+### Changes
+
+- fix(gui): resolve arrival scan loop on weak network IDs and menu bar memory leak
+
 ## [1.19.0] - 2026-10-16
 
 ### Added
@@ -127,8 +133,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.19.0...HEAD
-[1.19.0]: https://github.com/godigi/hopwatch/releases/tag/v1.19.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.19.1...HEAD
+[1.19.1]: https://github.com/godigi/hopwatch/releases/tag/v1.19.1
+[1.19.0]: https://github.com/godigi/hopwatch/commit/0d87c149a5434e1b16733fb4e16ce2f1f4fcfb7b
 [1.18.1]: https://github.com/godigi/hopwatch/commit/69148336c6c93b2418b34bdce9b1b9aaf099f148
 [1.18.0]: https://github.com/godigi/hopwatch/commit/7b9d11733bda2a37fed505b27c7e81178b50fe61
 [1.17.2]: https://github.com/godigi/hopwatch/commit/34aeb710049da8eb73bcf66e116bf3ad05e4695f
