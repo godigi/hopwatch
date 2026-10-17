@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-16
+
 ### Added
 - Captive portal learning and 1-click sign-in button from alert banner
 - Custom DNS compatibility for captive networks (bypasses public DNS to reach router gateway)
@@ -125,8 +127,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.18.1...HEAD
-[1.18.1]: https://github.com/godigi/hopwatch/releases/tag/v1.18.1
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/godigi/hopwatch/releases/tag/v1.19.0
+[1.18.1]: https://github.com/godigi/hopwatch/commit/69148336c6c93b2418b34bdce9b1b9aaf099f148
 [1.18.0]: https://github.com/godigi/hopwatch/commit/7b9d11733bda2a37fed505b27c7e81178b50fe61
 [1.17.2]: https://github.com/godigi/hopwatch/commit/34aeb710049da8eb73bcf66e116bf3ad05e4695f
 [1.17.1]: https://github.com/godigi/hopwatch/commit/d4be4f91116203ba65f20e05eaed87f59c8a6517
