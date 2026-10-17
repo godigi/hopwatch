@@ -1178,35 +1178,119 @@ final class HopwatchCoordinator {
     /// under A, or — on an early switch — mark A checked having never
     /// measured it, silently spending its one automatic baseline. Both
     /// networks are left `.unchecked` instead, and both retry.
+    /// Determines whether two network identifiers refer to the same physical network,
+    /// accounting for history merges, weak-key folding (gw: vs ssid: vs mac:),
+    /// matching gateway IPs, and known Wi-Fi SSIDs.
+    func networkMatches(scanNetwork: String?, measured: String?, snapshot: RunSnapshot? = nil) -> Bool {
+        guard let scanNetwork, let measured else { return true }
+        if history.canonicalID(measured) == history.canonicalID(scanNetwork) {
+            return true
+        }
+        // Fallback: check if one is a weak gateway key and the snapshot or other key agrees on gateway IP
+        if scanNetwork.starts(with: "gw:") {
+            let gw = String(scanNetwork.dropFirst(3))
+            if let snapGw = snapshot?.gateway.ip, snapGw == gw {
+                return true
+            }
+            if measured.starts(with: "gw:") && String(measured.dropFirst(3)) == gw {
+                return true
+            }
+        }
+        if measured.starts(with: "gw:") {
+            let gw = String(measured.dropFirst(3))
+            if let snapGw = snapshot?.gateway.ip, snapGw == gw {
+                return true
+            }
+        }
+        // Fallback: check if one is an ssid key and the SSID matches liveSSID or snapshot SSID
+        if scanNetwork.starts(with: "ssid:") {
+            let ssid = String(scanNetwork.dropFirst(5))
+            if let snapSsid = snapshot?.wifi?.ssid, snapSsid == ssid {
+                return true
+            }
+            if let live = liveSSID, live == ssid {
+                return true
+            }
+        }
+        if measured.starts(with: "ssid:") {
+            let ssid = String(measured.dropFirst(5))
+            if let snapSsid = snapshot?.wifi?.ssid, snapSsid == ssid {
+                return true
+            }
+            if let live = liveSSID, live == ssid {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Write the terminal arrival state for a scan that has just landed.
+    ///
+    /// `.declined` when the policy chose the quick check for a reason the
+    /// user can override, `.checked` otherwise. Both are terminal: neither
+    /// retries. A check that failed or was cancelled never reaches here and
+    /// stays `.unchecked` with exponential backoff so the next sample tries again safely.
     private func finishArrivalIfPending(runID: String?, measured: String?) {
         guard let id = pendingArrivalNetworkID, let depth = pendingArrivalDepth else { return }
         let decline = pendingArrivalDecline
-        clearPendingArrival()
 
         // `measured == nil` is "the run could not name its network", not
         // "a different network" — treat it as agreeing, since the check
         // did run and refusing it would retry forever.
-        guard let measured,
-              history.canonicalID(measured) == history.canonicalID(id) else {
+        let isMatching: Bool
+        if let measured {
+            isMatching = networkMatches(scanNetwork: id, measured: measured, snapshot: latestRun?.snapshot)
+        } else {
+            isMatching = true
+        }
+
+        guard isMatching else {
+            clearPendingArrival(failed: true)
             log.info("arrival check for \(id, privacy: .public) landed after a network change — left unchecked so it retries")
             return
         }
 
+        clearPendingArrival(failed: false)
+
+        let targetState: ArrivalState
         if let decline {
-            setArrivalState(.declined(depth: depth, reason: decline, at: Date()), for: id)
+            targetState = .declined(depth: depth, reason: decline, at: Date())
         } else {
-            setArrivalState(.checked(depth: depth, at: Date(), runID: runID), for: id)
+            targetState = .checked(depth: depth, at: Date(), runID: runID)
+        }
+
+        // Record the terminal state under both the requested id, the measured
+        // identity, and its canonical history id, so monitor samples reporting
+        // either alias (e.g. gw: vs ssid: vs mac:) won't re-trigger arrival.
+        setArrivalState(targetState, for: id)
+        if let measured, measured != id {
+            setArrivalState(targetState, for: measured)
+        }
+        let canonical = history.canonicalID(id)
+        if canonical != id {
+            setArrivalState(targetState, for: canonical)
+        }
+        if let measured {
+            let canMeasured = history.canonicalID(measured)
+            if canMeasured != measured && canMeasured != canonical {
+                setArrivalState(targetState, for: canMeasured)
+            }
         }
         log.info("arrival check for \(id, privacy: .public) finished at \(depth.rawValue, privacy: .public)")
     }
 
     /// Forget the in-flight arrival check without writing a terminal
     /// state. Used when a scan fails or is cancelled: the network stays
-    /// `.unchecked`, so the next sample retries. That retry is the entire
-    /// point of this change.
-    private func clearPendingArrival() {
+    /// `.unchecked`, so the next sample retries with backoff.
+    private func clearPendingArrival(failed: Bool = false) {
         if let id = pendingArrivalNetworkID {
             setArrivalState(.unchecked, for: id)
+            if failed {
+                arrivalAttempts += 1
+                let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
+                nextArrivalAttemptAt = Date().addingTimeInterval(delay)
+                log.info("arrival check for \(id, privacy: .public) cleared after failure/cancel (attempt \(self.arrivalAttempts)) — retrying in \(delay, format: .fixed(precision: 0))s")
+            }
         }
         pendingArrivalNetworkID = nil
         pendingArrivalDepth = nil
@@ -1526,14 +1610,14 @@ final class HopwatchCoordinator {
                     // The run may well have completed, but nothing here
                     // adopted it, so claiming the network was checked
                     // would record a baseline the user cannot open.
-                    self.clearPendingArrival()
+                    self.clearPendingArrival(failed: true)
                     return
                 }
                 guard generation == self.connectionGeneration,
                       let measured = result.snapshot.network.historyJoinID,
-                      scanNetwork == nil || self.history.canonicalID(measured) == scanNetwork.map(self.history.canonicalID)
+                      scanNetwork == nil || self.networkMatches(scanNetwork: scanNetwork, measured: measured, snapshot: result.snapshot)
                 else {
-                    self.clearPendingArrival()
+                    self.clearPendingArrival(failed: true)
                     await self.history.load()
                     return
                 }
@@ -1552,10 +1636,10 @@ final class HopwatchCoordinator {
                                             measured: result.snapshot.network.historyJoinID)
                 self.log.info("\(reason, privacy: .public) finished in \(result.duration, format: .fixed(precision: 1))s, exit \(result.exitCode)")
             } catch is CancellationError {
-                self.clearPendingArrival()
+                self.clearPendingArrival(failed: true)
                 self.log.debug("scan cancelled")
             } catch {
-                self.clearPendingArrival()
+                self.clearPendingArrival(failed: true)
                 self.lastRunError = error.localizedDescription
                 self.log.error("scan failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -2049,7 +2133,10 @@ final class HopwatchCoordinator {
 
     private func runIsForNetwork(_ runNetwork: String?, live: String?) -> Bool {
         guard let runNetwork, let live else { return false }
-        return RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID)
+        if RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID) {
+            return true
+        }
+        return networkMatches(scanNetwork: live, measured: runNetwork)
     }
 
     /// The one place a stored or session run becomes "the report for the

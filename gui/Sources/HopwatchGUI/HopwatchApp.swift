@@ -87,9 +87,12 @@ extension HopwatchApp {
         delegate.didBootstrap = true
 
         delegate.openDashboardHandler = {
+            NSApp.setActivationPolicy(.regular)
             openWindow(id: WindowID.dashboard)
+            for window in NSApp.windows where window.canBecomeMain && !(window.className.contains("NSStatusBarWindow")) {
+                window.makeKeyAndOrderFront(nil)
+            }
             NSApp.activate(ignoringOtherApps: true)
-            delegate.updateActivationPolicy()
         }
         coordinator.notifications.onNotificationResponse = {
             delegate.openDashboard()
@@ -145,6 +148,7 @@ extension HopwatchApp {
             let currentVersion = Defaults.appVersion
             if let lastSeen = Defaults.lastSeenAppVersion, lastSeen != currentVersion {
                 Defaults.lastSeenAppVersion = currentVersion
+                NSApp.setActivationPolicy(.regular)
                 openWindow(id: WindowID.whatsNew)
                 NSApp.activate(ignoringOtherApps: true)
                 didOpenWindow = true
@@ -161,13 +165,18 @@ extension HopwatchApp {
             // open and focus the dashboard window.
             if !didOpenWindow && (delegate.pendingOpenDashboard || !CommandLine.arguments.contains("--background")) {
                 delegate.pendingOpenDashboard = false
+                NSApp.setActivationPolicy(.regular)
                 openWindow(id: WindowID.dashboard)
+                for window in NSApp.windows where window.canBecomeMain && !(window.className.contains("NSStatusBarWindow")) {
+                    window.makeKeyAndOrderFront(nil)
+                }
                 NSApp.activate(ignoringOtherApps: true)
                 didOpenWindow = true
             }
         } else {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.setActivationPolicy(.regular)
             openWindow(id: WindowID.onboarding)
+            NSApp.activate(ignoringOtherApps: true)
             didOpenWindow = true
         }
 
@@ -189,10 +198,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     @MainActor
     func openDashboard() {
+        NSApp.setActivationPolicy(.regular)
         if let openDashboardHandler {
             openDashboardHandler()
         } else {
             pendingOpenDashboard = true
+        }
+        for window in NSApp.windows where window.canBecomeMain && !(window.className.contains("NSStatusBarWindow")) {
+            window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -311,11 +324,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            if coordinator.currentHealth == .checking {
-                MenuBarCheckingIcon()
-            } else {
-                Image(nsImage: Self.dot(for: coordinator.currentHealth))
-            }
+            Image(nsImage: Self.dot(for: coordinator.currentHealth))
             switch appSettings.menuBarStyle {
             case .dotOnly:
                 EmptyView()
@@ -414,40 +423,4 @@ struct MenuBarLabel: View {
     }
 }
 
-/// An animated menu-bar icon showing that the connection is actively being determined.
-///
-/// Uses an array of pre-rasterised, rotated NSImage frames driven by a periodic
-/// TimelineView. Like `MenuBarLabel.dot(for:)`, the frames are created with
-/// `isTemplate = false` and an explicit systemBlue palette so the icon renders
-/// in vibrant colour rather than greyed-out template monochrome.
-struct MenuBarCheckingIcon: View {
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.125)) { timeline in
-            let count = max(Self.frames.count, 1)
-            let step = abs(Int(timeline.date.timeIntervalSinceReferenceDate / 0.125)) % count
-            Image(nsImage: Self.frames[step])
-        }
-        .accessibilityLabel("Determining network connection")
-    }
 
-    @MainActor
-    private static let frames: [NSImage] = {
-        let base = MenuBarLabel.dot(for: .checking)
-        let size = base.size
-        guard size.width > 0, size.height > 0 else { return [base] }
-        return (0..<8).map { i in
-            let angle = -Double(i) * 45.0
-            let img = NSImage(size: size)
-            img.lockFocus()
-            let xform = NSAffineTransform()
-            xform.translateX(by: size.width / 2.0, yBy: size.height / 2.0)
-            xform.rotate(byDegrees: angle)
-            xform.translateX(by: -size.width / 2.0, yBy: -size.height / 2.0)
-            xform.concat()
-            base.draw(in: NSRect(origin: .zero, size: size))
-            img.unlockFocus()
-            img.isTemplate = false
-            return img
-        }
-    }()
-}

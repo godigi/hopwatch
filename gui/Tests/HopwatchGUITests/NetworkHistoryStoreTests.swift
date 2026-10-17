@@ -185,4 +185,27 @@ import Testing
         // With <10 checks, it should NOT mark as "Degraded"
         #expect(mem.reliabilityGrade.contains("Learning"))
     }
+
+    @Test @MainActor func canonicalIDFoldsWeakKeysOntoNetworkGroup() {
+        let store = HistoryStore()
+        var net = makeSampleNetwork()
+        net.id = "mac:64:d1:54:4a:93:7f"
+        net.gateways = ["10.125.128.1"]
+        net.ssids = ["Mercure"]
+        net.bridgedFrom = ["ssid:Mercure"]
+
+        var doc = HistoryDocument.empty
+        doc.networks = [net]
+        store.adoptDocumentForTesting(doc)
+
+        // The weak gateway and ssid keys must fold onto the MAC group
+        #expect(store.canonicalID("gw:10.125.128.1") == "mac:64:d1:54:4a:93:7f")
+        #expect(store.canonicalID("ssid:Mercure") == "mac:64:d1:54:4a:93:7f")
+        #expect(store.canonicalID("wifi:gw=10.125.128.1") == "mac:64:d1:54:4a:93:7f")
+        #expect(store.canonicalID("wifi:ssid=Mercure") == "mac:64:d1:54:4a:93:7f")
+        #expect(store.canonicalID("mac:64:d1:54:4a:93:7f") == "mac:64:d1:54:4a:93:7f")
+
+        // An unrelated network must not fold
+        #expect(store.canonicalID("gw:192.168.1.1") == "gw:192.168.1.1")
+    }
 }

@@ -72,6 +72,13 @@ final class HistoryStore {
         var d = HistoryDocument.empty
         d.runs = runs
         document = d
+        rebuildFoldedKeys()
+    }
+
+    func adoptDocumentForTesting(_ doc: HistoryDocument) {
+        document = doc
+        rebuildFoldedKeys()
+        canonicalIDCache.removeAll()
     }
 
     /// Bumped by every `load()`. Loads overlap (a network event, a wake and
@@ -103,6 +110,7 @@ final class HistoryStore {
             document = loaded
             lastError = nil
             lastLoadedAt = Date()
+            rebuildFoldedKeys()
             // A fresh document invalidates every memoized median: the
             // store may have grown new runs, and stale numbers under a
             // "computed once" cache are worse than the repeated scan it
@@ -178,23 +186,53 @@ final class HistoryStore {
         Defaults.networkOwned = set
     }
 
-    // MARK: - Manual merge
+    // MARK: - Weak-key folding & Manual merge
+
+    @ObservationIgnored
+    private var foldedKeys: [String: String] = [:]
+
+    private func rebuildFoldedKeys() {
+        var strong: [String: [String]] = [:]
+        var weak: Set<String> = []
+        for net in document.networks {
+            var used: [String] = []
+            for gw in net.gateways {
+                let key = "gw:\(gw)"
+                used.append(key)
+                weak.insert(key)
+            }
+            for ssid in net.ssids {
+                let key = "ssid:\(ssid)"
+                used.append(key)
+                weak.insert(key)
+            }
+            for b in net.bridgedFrom {
+                if let can = NetworkIdentity.canonical(b) {
+                    used.append(can)
+                    weak.insert(can)
+                }
+            }
+            strong[net.id] = used
+        }
+        foldedKeys = NetworkIdentity.fold(strong, weak: weak)
+    }
 
     @ObservationIgnored
     private var canonicalIDCache: [String: String] = [:]
 
-    /// Follows the merge chain to the group a key ultimately belongs to.
+    /// Follows weak-key folding and the merge chain to the group a key ultimately belongs to.
     /// Bounded rather than recursive: a user who merges A→B and later B→A
     /// would otherwise hang the app on the next render.
     func canonicalID(_ networkID: String) -> String {
-        if let cached = canonicalIDCache[networkID] { return cached }
-        var current = networkID
+        let canonicalInput = NetworkIdentity.canonical(networkID) ?? networkID
+        if let cached = canonicalIDCache[canonicalInput] { return cached }
+        var current = foldedKeys[canonicalInput] ?? canonicalInput
         var hops = 0
         while let parent = manualMerges[current], parent != current, hops < 16 {
             current = parent
             hops += 1
         }
-        canonicalIDCache[networkID] = current
+        canonicalIDCache[canonicalInput] = current
         return current
     }
 
