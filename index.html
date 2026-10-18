@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hopwatch by Godigi — macOS Network Diagnostics &amp; Menu Bar Monitor (CLI + App)</title>
+  <meta name="description" content="Hopwatch (github.com/godigi/hopwatch) is an open-source macOS network monitor and diagnostic companion (CLI &amp; SwiftUI menu bar app) by Godigi. Pinpoint Wi-Fi, router, bufferbloat, DNS, or ISP issues in one run." />
+  <meta name="keywords" content="Hopwatch, Godigi Hopwatch, godigi/hopwatch, macOS network monitor, macOS network diagnostics, bufferbloat test macOS, menu bar network monitor, ping monitor macOS, packet loss, Wi-Fi diagnostics" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://godigi.github.io/hopwatch/" />
+
+  <!-- OpenGraph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Hopwatch by Godigi" />
+  <meta property="og:title" content="Hopwatch — Zero-Jargon Network Monitor &amp; Diagnostics for macOS" />
+  <meta property="og:description" content="Know instantly whether an internet issue is your Wi-Fi, your router, or your ISP. Open-source macOS SwiftUI menu bar app and CLI by Godigi." />
+  <meta property="og:url" content="https://godigi.github.io/hopwatch/" />
+  <meta property="og:image" content="https://raw.githubusercontent.com/godigi/hopwatch/main/docs/assets/home-dark.png" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Hopwatch by Godigi — macOS Network Monitor &amp; Diagnostics" />
+  <meta name="twitter:description" content="Open-source macOS menu bar app and CLI that pinpoints Wi-Fi, router, bufferbloat, and ISP problems." />
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/godigi/hopwatch/main/docs/assets/home-dark.png" />
+
+  <!-- JSON-LD Structured Data for Google & AI Search -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Hopwatch",
+    "alternateName": ["Godigi Hopwatch", "godigi/hopwatch"],
+    "operatingSystem": "macOS 14+",
+    "applicationCategory": "DeveloperApplication, UtilitiesApplication",
+    "description": "Hopwatch is an open-source macOS network monitor and diagnostic tool (SwiftUI menu bar app and Bash CLI) created by Godigi that identifies whether internet issues are caused by local apps, Wi-Fi, router, DNS, bufferbloat, or the ISP.",
+    "url": "https://godigi.github.io/hopwatch/",
+    "codeRepository": "https://github.com/godigi/hopwatch",
+    "downloadUrl": "https://github.com/godigi/hopwatch/releases/latest",
+    "softwareVersion": "1.19.1",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": {
+      "@type": "Organization",
+      "name": "Godigi",
+      "url": "https://github.com/godigi"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card: #151c28;
+      --border: #263147;
+      --text: #f0f4f8;
+      --muted: #9fb0c7;
+      --accent: #0a84ff;
+      --green: #30d158;
+      --code-bg: #080b11;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    header img.icon {
+      width: 112px;
+      height: 112px;
+      border-radius: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    }
+    h1 {
+      font-size: 2.75rem;
+      margin: 16px 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      font-size: 1.25rem;
+      color: var(--muted);
+      max-width: 680px;
+      margin: 0 auto 24px;
+    }
+    .cta-row {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 24px 0 36px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .btn:hover { transform: translateY(-1px); opacity: 0.94; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    .gallery {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr;
+      gap: 18px;
+      align-items: center;
+      margin: 32px 0;
+    }
+    .gallery img {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 12px 36px rgba(0,0,0,0.4);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.92rem;
+      color: #7ee787;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+    }
+    h2 { margin-top: 0; font-size: 1.5rem; }
+    h3 { margin: 0 0 8px; font-size: 1.1rem; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    a { color: var(--accent); }
+    footer {
+      text-align: center;
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    @media (max-width: 700px) {
+      .gallery { grid-template-columns: 1fr; }
+      h1 { font-size: 2.1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img class="icon" src="https://raw.githubusercontent.com/godigi/hopwatch/main/assets/hopwatch-icon.png" alt="Hopwatch macOS App Icon" />
+      <h1>Hopwatch</h1>
+      <p class="subtitle">
+        The zero-jargon network monitor and diagnostic companion for macOS by <a href="https://github.com/godigi">Godigi</a>.<br/>
+        Know instantly whether an issue is your Mac, your Wi-Fi, your router, or your internet provider.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/godigi/hopwatch">View on GitHub (godigi/hopwatch)</a>
+        <a class="btn btn-secondary" href="https://github.com/godigi/hopwatch/releases/latest">Download Hopwatch.dmg for macOS</a>
+      </div>
+      <div class="gallery">
+        <img src="https://raw.githubusercontent.com/godigi/hopwatch/main/docs/assets/dropdown-dark.png" alt="Hopwatch macOS Menu Bar Dropdown" />
+        <img src="https://raw.githubusercontent.com/godigi/hopwatch/main/docs/assets/home-dark.png" alt="Hopwatch macOS Dashboard Overview" />
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Quick Install on macOS (Sonoma 14+ / Sequoia 15+)</h2>
+      <p><strong>Option 1: Instant 1-Line Installer (Menu Bar App + CLI)</strong></p>
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh | bash</code></pre>
+      <p><strong>Option 2: Homebrew Cask</strong></p>
+      <pre><code>brew tap godigi/hopwatch https://github.com/godigi/hopwatch.git
+brew install --cask hopwatch</code></pre>
+      <p><strong>Option 3: Direct DMG Download</strong> — Grab the latest signed release from <a href="https://github.com/godigi/hopwatch/releases/latest">GitHub Releases</a>.</p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h3>🎯 Hop Attribution Chain</h3>
+        <p>Pinpoints the exact root cause across <code>[Mac] ──► [Wi-Fi / Router] ──► [ISP / Internet]</code> so you never guess where lag or packet loss starts.</p>
+      </div>
+      <div class="card">
+        <h3>⚡ Live Menu Bar Telemetry</h3>
+        <p>Real-time gateway and internet RTT, packet loss detection, outage journaling, and automatic arrival checks when joining new networks.</p>
+      </div>
+      <div class="card">
+        <h3>🚦 Local App Bandwidth Attribution</h3>
+        <p>Identifies local macOS processes saturating your upload/download link, exhausting sockets, or flooding router NAT tables.</p>
+      </div>
+      <div class="card">
+        <h3>🔍 40+ Automated Network Probes</h3>
+        <p>Checks bufferbloat (idle vs loaded latency), Path MTU black holes, captive portals, sticky Wi-Fi APs, DNS hijacking, double-NAT, and DHCP expiry.</p>
+      </div>
+      <div class="card">
+        <h3>🛠️ 1-Click Guided Repairs</h3>
+        <p>Actionable fixes right from the app or CLI (<code>hopwatch --repair</code>) to quit bandwidth hogs, open captive portal login, or recover broken links.</p>
+      </div>
+      <div class="card">
+        <h3>🛡️ Zero Jargon &amp; Redacted Reports</h3>
+        <p>Plain-English diagnoses with 1-click sanitized support summaries (SSIDs, MACs, and IPs redacted) ready to share with your ISP or IT team.</p>
+      </div>
+    </section>
+
+    <footer>
+      <p>
+        Open-source under the MIT License • Created by <a href="https://github.com/godigi">Godigi</a> •
+        Repository: <a href="https://github.com/godigi/hopwatch">https://github.com/godigi/hopwatch</a> •
+        <a href="https://github.com/godigi/hopwatch/blob/main/docs/SCREENSHOTS.md">UI Screenshot Gallery</a>
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

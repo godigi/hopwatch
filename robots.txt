@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://godigi.github.io/hopwatch/sitemap.xml
