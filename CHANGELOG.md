@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-19
+
 ### Fixed
 - Eliminated dropdown flip-flopping between "Monitor is not reporting" and active network states during degraded or timing-out probe cycles by stopping unnecessary monitor process restarts on severity transitions, aligning the coordinator watchdog window with probe timeout durations, and ignoring redundant SSID notifications.
 - Updated `G2` (router packet loss with strong Wi-Fi signal) diagnosis and away-network guidance to rule out wireless distance and accurately attribute the issue to overloaded/rebooting router or access-point hardware or upstream ISP failures.
@@ -142,8 +144,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.19.1...HEAD
-[1.19.1]: https://github.com/godigi/hopwatch/releases/tag/v1.19.1
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/godigi/hopwatch/releases/tag/v1.20.0
+[1.19.1]: https://github.com/godigi/hopwatch/commit/03beb7f6daddef01d2fb94e104363eae01374572
 [1.19.0]: https://github.com/godigi/hopwatch/commit/0d87c149a5434e1b16733fb4e16ce2f1f4fcfb7b
 [1.18.1]: https://github.com/godigi/hopwatch/commit/69148336c6c93b2418b34bdce9b1b9aaf099f148
 [1.18.0]: https://github.com/godigi/hopwatch/commit/7b9d11733bda2a37fed505b27c7e81178b50fe61
