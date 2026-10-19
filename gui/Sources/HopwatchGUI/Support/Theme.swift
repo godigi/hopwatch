@@ -77,6 +77,15 @@ enum Theme {
                 : NSColor(red: 0xe3/255.0, green: 0xe8/255.0, blue: 0xef/255.0, alpha: 1.0)
         }))
 
+        /// The backdrop for the dropdown menu bar panel.
+        /// Matches `--bg: #f6f8fb` from docs/design/hopwatch-menu.mockup.html in light
+        /// mode, and `windowBackgroundColor` in dark mode.
+        static let dropdownBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.windowBackgroundColor
+                : NSColor(red: 0xf6/255.0, green: 0xf8/255.0, blue: 0xfb/255.0, alpha: 1.0)
+        }))
+
         static let cardBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor.quaternarySystemFill

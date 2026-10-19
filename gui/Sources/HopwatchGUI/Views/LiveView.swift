@@ -33,36 +33,74 @@ struct LiveView: View {
                 stateBanner
                 currentValues
                 let samples = samples
+                chart(title: "Internet round-trip",
+                      titleHelpKey: "internet",
+                      subtitle: "Fast-tier ping to core internet targets (1.1.1.1, 8.8.8.8) every cycle.",
+                      caption: internetHostsCaption,
+                      series: MonitorSeries.build(
+                          samples,
+                          tier: "fast",
+                          isDrop: { sample in
+                              !EffectiveLoss.filtering(sample: sample).internetLeg
+                                  && ((sample.internet.lossPct ?? 0) >= 100 || sample.internet.rttAvgMs == nil)
+                          },
+                          value: { sample in
+                              PingReadout.internetSeriesValue(for: sample)
+                                  ?? (EffectiveLoss.filtering(sample: sample).internetLeg ? Self.internetMs(sample) : nil)
+                          }
+                      ),
+                      emptyTitle: samples.isEmpty ? "Measuring internet round-trip…" : "All internet ping probes failed or timed out",
+                      emptySubtitle: samples.isEmpty
+                          ? "Samples appear here as the monitor takes them — the first one lands within seconds."
+                          : "No response from core internet targets in the last hour. Check your router, modem, or ISP uplink.",
+                      emptyIcon: samples.isEmpty ? "waveform.path.ecg" : "exclamationmark.triangle.fill",
+                      unit: "ms",
+                      advice: "Measures core internet targets. Spikes or dropped pings with a flat router line point to ISP congestion.")
+
                 chart(title: "Router round-trip",
                       titleHelpKey: "router",
                       subtitle: subtitle(catalogKey: "monitor_gateway_rtt",
                                         fallback: Self.routerSubtitleFallback),
-                      series: MonitorSeries.build(samples, tier: "fast") {
-                          $0.gateway.rttAvgMs
-                      },
-                      absent: "No router round-trip has been measured in the last hour.",
+                      series: MonitorSeries.build(
+                          samples,
+                          tier: "fast",
+                          isDrop: { sample in
+                              !EffectiveLoss.filtering(sample: sample).gatewayLeg
+                                  && ((sample.gateway.lossPct ?? 0) >= 100 || sample.gateway.rttAvgMs == nil)
+                          },
+                          value: { sample in
+                              EffectiveLoss.filtering(sample: sample).gatewayLeg ? nil : sample.gateway.rttAvgMs
+                          }
+                      ),
+                      emptyTitle: routerIsFiltered
+                          ? "Router declines ICMP ping requests"
+                          : (samples.isEmpty ? "Measuring router round-trip…" : "Router is unresponsive to ping"),
+                      emptySubtitle: routerIsFiltered
+                          ? "Your router (\(routerGatewayIP)) drops ping packets by security policy. This is common on hotel, public, and secure networks. Internet traffic still flows through it."
+                          : (samples.isEmpty
+                             ? "Samples appear here as the monitor takes them — the first one lands within a cycle."
+                             : "All gateway ping probes timed out in the last hour. Verify your connection to the local router."),
+                      emptyIcon: routerIsFiltered ? "shield.slash.fill" : (samples.isEmpty ? "waveform.path.ecg" : "exclamationmark.triangle.fill"),
                       unit: "ms",
                       advice: "Flat lines near the bottom are ideal. Spikes indicate Wi-Fi noise or router load.")
-                chart(title: "Internet round-trip",
-                      titleHelpKey: "internet",
-                      subtitle: subtitle(catalogKey: "monitor_internet_tcp",
-                                        fallback: Self.internetSubtitleFallback),
-                      caption: internetHostsCaption,
-                      series: MonitorSeries.build(samples, tier: "medium",
-                                                  value: Self.internetMs),
-                      absent: "No internet round-trip has been measured in the last hour.",
-                      unit: "ms",
-                      advice: "Measures core internet targets. Spikes with a flat router line point to ISP congestion.")
-                chart(title: "Router packet loss",
+
+                chart(title: "Packet loss",
                       titleHelpKey: "packet_loss",
-                      subtitle: subtitle(catalogKey: "monitor_gateway_loss",
-                                        fallback: Self.lossSubtitleFallback),
-                      series: MonitorSeries.build(samples, tier: "fast") {
-                          $0.gateway.lossPct
+                      subtitle: "Share of ping packets that got no reply, measured across internet and router legs.",
+                      series: MonitorSeries.build(samples, tier: "fast") { sample in
+                          let filtering = EffectiveLoss.filtering(sample: sample)
+                          return EffectiveLoss.compute(
+                              internetLoss: sample.internet.lossPct,
+                              gatewayLoss: sample.gateway.lossPct,
+                              filtering: filtering,
+                              hasRecentRoam: false
+                          )
                       },
-                      absent: "No packet-loss measurement in the last hour.",
+                      emptyTitle: "No packet-loss measurement in the last hour.",
+                      emptySubtitle: "Measurements appear here as the monitor takes them.",
+                      emptyIcon: "waveform.path.ecg",
                       unit: "%",
-                      advice: "0% loss is expected. Non-zero loss causes robotic audio or dropped calls.")
+                      advice: "0% loss is expected. Non-zero loss causes robotic audio, buffering, or dropped calls.")
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,9 +265,9 @@ struct LiveView: View {
             gaugeTile(
                 icon: "globe",
                 iconColor: internetTint,
-                label: "Internet (TCP)",
+                label: "Internet Ping",
                 value: latestInternet,
-                detail: linkDown ? NoLinkCopy.nodeDetail : "Target connect time"
+                detail: internetDetail
             )
 
             gaugeTile(
@@ -288,18 +326,35 @@ struct LiveView: View {
     /// current. See `LinkState`.
     private var linkDown: Bool { coordinator.linkIsDown }
 
+    private var activeSample: MonitorSample? {
+        coordinator.liveSample ?? coordinator.monitor.latest
+    }
+
+    private var routerIsFiltered: Bool {
+        EffectiveLoss.filtering(sample: activeSample).gatewayLeg
+    }
+
+    private var routerGatewayIP: String {
+        activeSample?.link.gateway ?? "gateway"
+    }
+
     private var routerMs: Double? {
-        if linkDown { return nil }
-        return coordinator.liveSample?.gateway.rttAvgMs
+        if linkDown || routerIsFiltered { return nil }
+        return activeSample?.gateway.rttAvgMs
     }
 
     private var latestGateway: String {
+        if linkDown { return "—" }
+        if routerIsFiltered { return "Blocked" }
         guard let ms = routerMs else { return "—" }
         return String(format: "%.0f ms", ms)
     }
 
     private var routerTint: Color {
-        guard let ms = routerMs else { return .secondary }
+        if linkDown || routerIsFiltered { return .secondary }
+        guard let ms = routerMs else {
+            return samples.isEmpty ? .secondary : .red
+        }
         if ms < 5 { return .green }
         if ms < 15 { return .yellow }
         return .red
@@ -307,28 +362,68 @@ struct LiveView: View {
 
     private var routerDetail: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        guard let ms = routerMs else { return "No probe yet" }
+        if routerIsFiltered { return "ICMP blocked by router" }
+        guard let ms = routerMs else {
+            if samples.isEmpty { return "Measuring…" }
+            return "Unresponsive to ping"
+        }
         if ms < 4 { return "Normal local link" }
         if ms < 15 { return "Moderate latency" }
         return "High router ping"
     }
 
+    private var internetIsFiltered: Bool {
+        EffectiveLoss.filtering(sample: activeSample).internetLeg
+    }
+
     private var internetMsValue: Double? {
         if linkDown { return nil }
-        guard let sample = coordinator.liveSample else { return nil }
+        guard let sample = activeSample else { return nil }
+        if !internetIsFiltered, let rtt = sample.internet.rttAvgMs {
+            return rtt
+        }
         return Self.internetMs(sample)
     }
 
+    private var isUsingTCPFallback: Bool {
+        guard let sample = activeSample else { return false }
+        return (internetIsFiltered || sample.internet.rttAvgMs == nil) && Self.internetMs(sample) != nil
+    }
+
     private var latestInternet: String {
-        guard let ms = internetMsValue else { return "—" }
+        if linkDown { return "—" }
+        guard let ms = internetMsValue else {
+            if samples.isEmpty { return "—" }
+            if (activeSample?.internet.lossPct ?? 0) >= 100 {
+                return "Failed"
+            }
+            return "—"
+        }
         return String(format: "%.0f ms", ms)
     }
 
     private var internetTint: Color {
-        guard let ms = internetMsValue else { return .secondary }
+        if linkDown { return .secondary }
+        guard let ms = internetMsValue else {
+            return samples.isEmpty ? .secondary : .red
+        }
         if ms < 40 { return .green }
         if ms < 100 { return .yellow }
         return .red
+    }
+
+    private var internetDetail: String {
+        if linkDown { return NoLinkCopy.nodeDetail }
+        guard let ms = internetMsValue else {
+            if samples.isEmpty { return "Measuring…" }
+            return "No ping response"
+        }
+        if isUsingTCPFallback {
+            return "TCP connect time (ICMP blocked)"
+        }
+        if ms < 40 { return "Fast connection" }
+        if ms < 100 { return "Acceptable latency" }
+        return "Elevated ping"
     }
 
     private var currentJitter: Double? {
@@ -382,25 +477,18 @@ struct LiveView: View {
         return status.degraded ? "every \(cadence)s · degraded" : "every \(cadence)s"
     }
 
-    /// The monitor has no ICMP probe past the gateway; its reading on the
-    /// internet is how long a TCP connection to a well-known host takes to
-    /// open. The fastest of the targets, because a single slow *host* is a
-    /// fact about that host, not about the link.
+    /// Fallback TCP connection time to a well-known host when ICMP is blocked.
     private static func internetMs(_ sample: MonitorSample) -> Double? {
         sample.tcp.targets.filter(\.ok).compactMap(\.elapsedMs).min()
     }
 
-    /// "Currently: host1, host2" — which hosts the medium tier is actually
-    /// probing right now, separated out from the subtitle so the subtitle
-    /// itself can be catalog prose (a fixed sentence about the
-    /// *measurement*) rather than a sentence that has to be rebuilt around
-    /// live data. Same host-naming logic the old inline subtitle used:
-    /// named hosts when the latest sample has them, else the generic
-    /// "well-known hosts".
     private var internetHostsCaption: String {
-        let hosts = coordinator.liveSample?.tcp.targets.compactMap(\.host) ?? []
-        let named = hosts.isEmpty ? "well-known hosts" : hosts.joined(separator: ", ")
-        return "Currently: \(named)"
+        if internetIsFiltered {
+            let hosts = activeSample?.tcp.targets.compactMap(\.host) ?? []
+            let named = hosts.isEmpty ? "1.1.1.1, 8.8.8.8" : hosts.joined(separator: ", ")
+            return "Currently (TCP): \(named)"
+        }
+        return "Targets: 1.1.1.1, 8.8.8.8"
     }
 
     private static let routerSubtitleFallback = "Gateway ping, every cycle of the fast tier."
@@ -422,19 +510,17 @@ struct LiveView: View {
     @ViewBuilder
     private func chart(title: String, titleHelpKey: String, subtitle: String,
                        caption: String? = nil,
-                       series: MonitorSeries.Result, absent: String,
+                       series: MonitorSeries.Result,
+                       emptyTitle: String,
+                       emptySubtitle: String,
+                       emptyIcon: String = "waveform.path.ecg",
                        unit: String,
                        advice: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center) {
                 Text(title).font(.headline)
                 HelpHint(key: titleHelpKey)
-                Text(sampleLabel(series.points.count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                sampleLabel(points: series.points.count, drops: series.drops.count)
                 Spacer()
                 Text("Last 60m")
                     .font(.caption2)
@@ -449,7 +535,7 @@ struct LiveView: View {
             }
 
             if series.isEmpty {
-                empty(absent)
+                empty(title: emptyTitle, subtitle: emptySubtitle, systemImage: emptyIcon)
             } else {
                 LiveChart(series: series, unit: unit)
 
@@ -478,13 +564,11 @@ struct LiveView: View {
         )
     }
 
-    private func empty(_ text: String) -> some View {
+    private func empty(title: String, subtitle: String, systemImage: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(text, systemImage: "waveform.path.ecg")
+            Label(title, systemImage: systemImage)
                 .font(.callout)
-            Text(appSettings.monitoringEnabled
-                 ? "Samples appear here as the monitor takes them — the first one lands within a cycle."
-                 : "Monitoring is off, so nothing is being sampled.")
+            Text(appSettings.monitoringEnabled ? subtitle : "Monitoring is off, so nothing is being sampled.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -498,12 +582,28 @@ struct LiveView: View {
         return "\(plural) — the monitor stops sampling while a check runs and while your Mac or display sleeps. Nothing was measured in the shaded stretches."
     }
 
-    private func sampleLabel(_ count: Int) -> String {
-        switch count {
-        case 0:  return "no samples"
-        case 1:  return "1 sample"
-        default: return "\(count) samples"
+    private func sampleLabel(points: Int, drops: Int) -> some View {
+        let countText: String
+        switch points {
+        case 0:  countText = "no samples"
+        case 1:  countText = "1 sample"
+        default: countText = "\(points) samples"
         }
+
+        return HStack(spacing: 4) {
+            Text(countText)
+            if drops > 0 {
+                Text("·")
+                Text("\(drops) \(drops == 1 ? "drop" : "drops")")
+                    .foregroundStyle(.red)
+                    .fontWeight(.medium)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .background(Color.secondary.opacity(0.12), in: Capsule())
     }
 }
 
@@ -532,6 +632,24 @@ struct LiveChart: View {
         })
     }
 
+    private var hoveredDrop: MonitorSeries.Drop? {
+        guard let selectedDate else { return nil }
+        guard let nearest = series.drops.min(by: {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }) else { return nil }
+        let dropDistance = abs(nearest.date.timeIntervalSince(selectedDate))
+        if dropDistance <= 20 {
+            if let h = hovered {
+                if dropDistance < abs(h.date.timeIntervalSince(selectedDate)) {
+                    return nearest
+                }
+                return nil
+            }
+            return nearest
+        }
+        return nil
+    }
+
     var body: some View {
         Chart {
             // Shaded rather than merely blank, because "the line stops
@@ -555,7 +673,27 @@ struct LiveChart: View {
                         .symbolSize(segment.points.count > 120 ? 4 : 14)
                 }
             }
-            if let hovered {
+            // Dropped / timed-out pings drawn with red markers
+            ForEach(series.drops) { drop in
+                RuleMark(x: .value("Time", drop.date))
+                    .foregroundStyle(Color.red.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                PointMark(x: .value("Time", drop.date),
+                          y: .value("Value", 0))
+                    .foregroundStyle(Color.red)
+                    .symbol(.cross)
+                    .symbolSize(36)
+            }
+            if let hoveredDrop {
+                PointMark(x: .value("Time", hoveredDrop.date),
+                          y: .value("Value", 0))
+                    .foregroundStyle(.red)
+                    .symbol(.cross)
+                    .symbolSize(60)
+                    .annotation(position: .top, spacing: 4) {
+                        HoverLabel(value: nil, unit: unit, text: "Packet dropped / timeout", date: hoveredDrop.date)
+                    }
+            } else if let hovered {
                 PointMark(x: .value("Time", hovered.date),
                           y: .value("Value", hovered.value))
                     .foregroundStyle(.white)
@@ -575,15 +713,22 @@ struct LiveChart: View {
 /// wall-clock time it was measured. Kept compact so it does not overrun the
 /// chart's top margin on the narrow panels.
 struct HoverLabel: View {
-    let value: Double
+    let value: Double?
     let unit: String
+    var text: String? = nil
     let date: Date
 
     var body: some View {
         VStack(spacing: 1) {
-            Text(String(format: "%.0f %@", value, unit))
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
+            if let text {
+                Text(text)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+            } else if let value {
+                Text(String(format: "%.0f %@", value, unit))
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+            }
             Text(date.formatted(date: .omitted, time: .standard))
                 .font(.caption2)
                 .foregroundStyle(.secondary)

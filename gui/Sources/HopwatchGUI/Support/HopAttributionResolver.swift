@@ -108,17 +108,17 @@ public enum HopAttributionResolver {
 
     // SOCK-1: this Mac cannot open a UDP socket. The fault is on the Mac, so
     // it must not fall through to blaming the router or the ISP.
-    private static let macCriticalRules: Set<String> = ["SOCK-1"]
-    private static let macWarningRules: Set<String> = ["BR-1", "CK-1", "EDNS-1"]
+    private static let macCriticalRules: Set<String> = ["SOCK-1", "NT-1"]
+    private static let macWarningRules: Set<String> = ["BR-1", "NT-1", "EDNS-1", "HOG-1", "CONN-1"]
 
-    private static let wifiCriticalRules: Set<String> = ["G1", "WD-1"]
+    private static let wifiCriticalRules: Set<String> = ["G1", "WD-1", "WF-1", "WJ-1"]
     private static let wifiWarningRules: Set<String> = ["W1", "W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
 
-    private static let routerCriticalRules: Set<String> = ["G2", "DI-1"]
-    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3"]
+    private static let routerCriticalRules: Set<String> = ["G2", "DI-1", "N1c"]
+    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3", "ETH-1", "ETH-2"]
 
     private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1", "N1b", "L1", "CP-1", "D1"]
-    private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "D5", "M1", "SP-1", "BL-1"]
+    private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "D5", "DI-2", "M1", "SP-1", "BL-1", "V6-1", "V6-2"]
 
     // MARK: - Resolution
 
@@ -220,11 +220,11 @@ public enum HopAttributionResolver {
                 let hasDrops = gatewayLoss != nil && gatewayLoss! > 0
                 badgeTitle = hasDrops ? "Culprit: Crowded Channel" : "Advisory: Crowded Channel"
                 reassurance = "Your Wi-Fi channel is crowded by neighboring networks. If performance is inconsistent, changing your router to a less congested channel will improve stability."
-            } else if let rssi = wifiRSSI {
+            } else if let rssi = wifiRSSI, (rssi <= -70 || ruleSet.contains("W1")) {
                 reassurance = "Your Wi-Fi signal is weak (\(rssi) dBm) based on your Mac's physical position. Moving closer to the access point or switching to 5GHz will resolve the packet loss."
             } else {
-                if let loss = gatewayLoss, loss > 0 {
-                    reassurance = "The wireless link between your Mac and the router is dropping packets. Moving closer to the router or toggling Wi-Fi usually fixes this."
+                if let loss = effectiveGatewayLoss, loss > 0 {
+                    reassurance = "The wireless link between your Mac and the router is dropping packets (\(LossFormatter.formatPct(loss))). Moving closer to the router or toggling Wi-Fi usually fixes this."
                 } else {
                     reassurance = "The wireless link between your Mac and the router is experiencing instability. Moving closer to the router or switching Wi-Fi bands usually helps."
                 }
@@ -279,7 +279,7 @@ public enum HopAttributionResolver {
             culprit = .mac
             headline = "Mac System / Application Issue"
             badgeTitle = culprit.badgeTitle
-            if ruleSet.contains("CK-1") {
+            if ruleSet.contains("NT-1") {
                 reassurance = "Your Mac's system clock has drifted significantly from network time, which can disrupt TLS handshakes and secure connections."
             } else if ruleSet.contains("EDNS-1") {
                 reassurance = "An encrypted DNS profile is active on your Mac. If lookups fail, check your installed profile in System Settings."

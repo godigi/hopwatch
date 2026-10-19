@@ -57,6 +57,29 @@ iface_run() {
   fi
   [ -z "$LOCAL_IP" ] && LOCAL_IP="$LINK_IP"
 
+  if [ -z "$GATEWAY" ]; then
+    local _wifi_dev=""
+    if type wifi_primary_device >/dev/null 2>&1; then
+      _wifi_dev="$(wifi_primary_device "${HW_PORTS:-}")"
+    fi
+    [ -n "$_wifi_dev" ] || _wifi_dev="en0"
+    local _pwr
+    _pwr="$(networksetup -getairportpower "$_wifi_dev" 2>/dev/null || true)"
+    if [[ "$_pwr" =~ :[[:space:]]*Off ]]; then
+      OFFLINE_REASON="wifi-off"
+    elif [ "${LINK_UP:-0}" -eq 0 ]; then
+      if [ -z "$LINK_DEVICE" ] || [ "${LINK_STATUS:-}" = "inactive" ]; then
+        OFFLINE_REASON="wifi-not-joined"
+      elif [ "${LINK_SELF_ASSIGNED:-0}" -eq 1 ]; then
+        OFFLINE_REASON="self-assigned"
+      else
+        OFFLINE_REASON="wifi-no-address"
+      fi
+    else
+      OFFLINE_REASON="no-route"
+    fi
+  fi
+
   if [ -n "$INTERFACE" ] && [ -n "$GATEWAY" ]; then
     ok "Interface: $INTERFACE   IP: ${LOCAL_IP:-?}   Gateway: $GATEWAY"
   elif [ "${LINK_UP:-0}" -eq 1 ]; then

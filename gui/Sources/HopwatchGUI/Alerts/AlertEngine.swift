@@ -193,9 +193,10 @@ final class AlertEngine {
 
     private func suppressed(_ def: AlertDefinition, sample: MonitorSample?) -> String? {
         if !Defaults.isAlertEnabled(def.id) { return "disabled by user" }
-        // When a network requires portal sign-in, pings to the internet fail.
-        // Suppress generic connection-lost so the user gets the actionable captive-portal alert.
-        if def.id == "connection-lost", let sample,
+        // When a network requires portal sign-in, pings and internet connections fail or are intercepted.
+        // Suppress generic connection-lost / unstable / degraded / dns alerts so the user gets the actionable captive-portal alert.
+        if (def.id == "connection-lost" || def.id == "wifi-unstable" || def.id == "internet-degraded" || def.id == "dns-failing"),
+           let sample,
            sample.publicInfo.captivePortal == true
             || sample.status.rules.contains("CP-1")
             || sample.status.rules.contains("N1c")
@@ -646,7 +647,9 @@ final class AlertEngine {
         guard !active.isEmpty else { return [] }
         if active.count == 1 { return Array(active.values) }
         let ranked = active.values.map { alert in
-            (alert: alert, rank: alert.rules.compactMap(severityRank).max() ?? 0)
+            let baseRank = alert.id == "captive-portal" ? 3 : 0
+            let ruleRank = alert.rules.compactMap(severityRank).max() ?? 0
+            return (alert: alert, rank: max(baseRank, ruleRank))
         }
         return ranked.sorted { a, b in
             if a.rank != b.rank { return a.rank > b.rank }

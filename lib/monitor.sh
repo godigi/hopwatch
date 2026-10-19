@@ -887,13 +887,17 @@ _mon_probe_public() {
   local out
   out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null || true)"
   if [ -n "$out" ]; then
-    MON_PUBLIC_OK=1
     [[ "$out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_IP="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ISP="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"asn\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_ASN="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"city\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CITY="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"country\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CC="${BASH_REMATCH[1]}"
     [[ "$out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && MON_PUB_CC_ISO="${BASH_REMATCH[1]}"
+    if [ -n "$MON_PUB_IP" ]; then
+      MON_PUBLIC_OK=1
+    else
+      MON_PUBLIC_OK=0
+    fi
   else
     MON_PUBLIC_OK=0
   fi
@@ -917,7 +921,7 @@ _mon_probe_public() {
       ;;
     *)
       # Primary canary probe failed (unknown) — often due to custom DNS blocking resolution.
-      # Fallback 1: Query DHCP-provided DNS server or gateway directly for captive.apple.com
+      # Fallback 1: Query DHCP-provided DNS server or gateway directly for canary host
       local dhcp_dns=""
       if [ -n "$MON_INTERFACE" ]; then
         dhcp_dns="$(ipconfig getoption "$MON_INTERFACE" domain_name_server 2>/dev/null | awk '{print $1; exit}' || true)"
@@ -925,12 +929,12 @@ _mon_probe_public() {
       [ -n "$dhcp_dns" ] || dhcp_dns="$MON_GATEWAY"
       local resolved_ip=""
       if [ -n "$dhcp_dns" ] && type dig >/dev/null 2>&1; then
-        resolved_ip="$(dig @"$dhcp_dns" +short +time=1 captive.apple.com 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+        resolved_ip="$(dig @"$dhcp_dns" +short +time=1 "$CAPTIVE_CANARY_HOST" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
       fi
       if [ -n "$resolved_ip" ]; then
         local fb_raw fb_body fb_meta fb_code fb_url
         fb_raw="$(curl -s -m 3 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' \
-          --resolve "captive.apple.com:80:$resolved_ip" "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
+          --resolve "$CAPTIVE_CANARY_HOST:80:$resolved_ip" "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
         fb_body="${fb_raw%%$'\n'__METADATA__*}"
         fb_meta="${fb_raw##*$'\n'__METADATA__$'\n'}"
         { read -r fb_code || true; read -r fb_url || true; } <<< "$fb_meta"
@@ -973,6 +977,9 @@ _mon_probe_public() {
       fi
       ;;
   esac
+  if [ "${MON_CAPTIVE:-0}" -eq 1 ]; then
+    MON_PUBLIC_OK=0
+  fi
 }
 
 # ── Rule evaluation ──────────────────────────────────────────────────────
@@ -1263,6 +1270,11 @@ _mon_rules() {
     # TCP-1 already described this link. Reset both streaks: filtered cycles
     # are not evidence toward a confirmed G3.
     MON_GW_LOSS_STREAK=0
+  elif [ "${MON_CAPTIVE:-}" = "1" ]; then
+    # CP-1 owns the portal case. Router loss on an unauthenticated captive
+    # network is an artifact of the portal firewalling/dropping packets or
+    # dropping ICMP to the gateway, not a failing home router.
+    MON_GW_LOSS_STREAK=0
   elif loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
     MON_GW_LOSS_STREAK=0
     if [ -n "$MON_WIFI_RSSI" ] && is_numeric "$MON_WIFI_RSSI" && [ "$MON_WIFI_RSSI" -le "$THRESH_WIFI_RSSI_G1_DBM" ]; then
@@ -1340,7 +1352,11 @@ _mon_rules() {
   fi
 
   if [ "${MON_CAPTIVE:-}" = "1" ]; then
-    _mon_add_rule warn CP-1
+    if [ "$_mon_public_ok" = "0" ]; then
+      _mon_add_rule critical CP-1
+    else
+      _mon_add_rule warn CP-1
+    fi
   fi
 
   if [ "$MON_VPN_ACTIVE" -eq 1 ]; then
@@ -1464,7 +1480,13 @@ _mon_rules() {
     case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
     case "$prior" in
       N1|G1|G2|P1|P2|L1|SOCK-1) _mon_add_rule critical "$prior" ;;
-      G3|D1|CP-1|L2|BR-1|CONN-1|HOG-1) _mon_add_rule warn "$prior" ;;
+      G3|D1|CP-1|L2|BR-1|CONN-1|HOG-1)
+        if [ "$prior" = "CP-1" ] && [ "$_mon_public_ok" = "0" ]; then
+          _mon_add_rule critical "$prior"
+        else
+          _mon_add_rule warn "$prior"
+        fi
+        ;;
       *) _mon_add_rule info "$prior" ;;
     esac
     unresolved=1
@@ -1916,7 +1938,7 @@ _mon_emit() {
   NETDIAG_MON_PREV_RULES="$MON_PREV_RULES" \
   NETDIAG_MON_OFFLINE_REASON="$MON_OFFLINE_REASON" \
   NETDIAG_MON_OFFLINE_DOWN_SINCE="$MON_DOWN_SINCE" \
-  NETDIAG_MON_OFFLINE_DOWN_DURATION_S="$(( MON_DOWN_SINCE_EPOCH > 0 ? now - MON_DOWN_SINCE_EPOCH : 0 ))" \
+  NETDIAG_MON_OFFLINE_DOWN_DURATION_S="$(( MON_DOWN_SINCE_EPOCH > 0 ? EPOCHSECONDS - MON_DOWN_SINCE_EPOCH : 0 ))" \
   NETDIAG_MON_OFFLINE_PRECURSOR="$MON_OFFLINE_PRECURSOR" \
   NETDIAG_MON_OFFLINE_LAST_NETWORK="$MON_LAST_NETWORK" \
   NETDIAG_MON_AUTO_RECONNECT_REASON="$MON_AR_REASON" \
@@ -2029,6 +2051,7 @@ monitor_run() {
   # runs every tier anyway) never counts as a change.
   local seen_vpn_active="" seen_vpn_name="" seen_bssid="" vpn_changed roamed
   local dns_recheck_pending=0
+  local inet_crit_forced=0
   MON_EMIT_FAILED=0
   MON_BROWSER_DESYNC_COUNT=0
   _mon_carry_stage "${HOPWATCH_MONITOR_CARRY:-}" "$EPOCHSECONDS" "${HOPWATCH_MONITOR_LAST_NETWORK:-}"
@@ -2233,7 +2256,13 @@ monitor_run() {
          || [ "$link_restored" -eq 1 ] || [ "$vpn_changed" -eq 1 ]; then
         MON_REFRESHED+="slow "
         _mon_probe_public
-        next_slow=$((now + MONITOR_SLOW_INTERVAL))
+        if [ "${MON_PUBLIC_OK:-0}" -eq 1 ]; then
+          next_slow=$((now + MONITOR_SLOW_INTERVAL))
+        else
+          local retry_slow=30
+          [ "$MONITOR_SLOW_INTERVAL" -lt "$retry_slow" ] && retry_slow="$MONITOR_SLOW_INTERVAL"
+          next_slow=$((now + retry_slow))
+        fi
       fi
     fi
 
@@ -2261,16 +2290,26 @@ monitor_run() {
     if [ "$MON_LINK_UP" -eq 1 ] \
        && loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT" \
        && loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT"; then
-      if ! printf '%s' "$MON_REFRESHED" | grep -qw medium; then
-        MON_REFRESHED+="medium "
-        _mon_probe_tcp
-        next_medium=$((now + MONITOR_MEDIUM_INTERVAL))
+      if [ "$inet_crit_forced" -eq 0 ]; then
+        inet_crit_forced=1
+        if ! printf '%s' "$MON_REFRESHED" | grep -qw medium; then
+          MON_REFRESHED+="medium "
+          _mon_probe_tcp
+        fi
+        if ! printf '%s' "$MON_REFRESHED" | grep -qw slow; then
+          MON_REFRESHED+="slow "
+          _mon_probe_public
+          if [ "${MON_PUBLIC_OK:-0}" -eq 1 ]; then
+            next_slow=$((now + MONITOR_SLOW_INTERVAL))
+          else
+            local retry_slow=30
+            [ "$MONITOR_SLOW_INTERVAL" -lt "$retry_slow" ] && retry_slow="$MONITOR_SLOW_INTERVAL"
+            next_slow=$((now + retry_slow))
+          fi
+        fi
       fi
-      if ! printf '%s' "$MON_REFRESHED" | grep -qw slow; then
-        MON_REFRESHED+="slow "
-        _mon_probe_public
-        next_slow=$((now + MONITOR_SLOW_INTERVAL))
-      fi
+    else
+      inet_crit_forced=0
     fi
 
     _mon_probe_hog

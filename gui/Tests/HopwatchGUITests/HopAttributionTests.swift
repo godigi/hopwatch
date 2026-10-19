@@ -307,4 +307,30 @@ import Testing
         #expect(result.badgeTitle == "Culprit: Weak Wi-Fi")
         #expect(result.reassurance.contains("physical position"))
     }
+
+    @Test func nt1ClockDriftAttributesToMacCulprit() {
+        let result = HopAttributionResolver.resolve(
+            rules: ["NT-1"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: 2.0,
+            gatewayLoss: 0.0
+        )
+        #expect(result.culprit == .mac)
+        #expect(result.macHealth == .critical)
+        #expect(result.reassurance.contains("system clock has drifted significantly"))
+    }
+
+    @Test func strongWifiSignalDoesNotClaimWeakSignalOnInstability() {
+        let result = HopAttributionResolver.resolve(
+            rules: ["G1"],
+            isWifi: true,
+            wifiRSSI: -45,
+            gatewayRTT: 20.0,
+            gatewayLoss: 25.0
+        )
+        #expect(result.culprit == .wifi)
+        #expect(!result.reassurance.contains("signal is weak (-45 dBm)"))
+        #expect(result.reassurance.contains("dropping packets"))
+    }
 }

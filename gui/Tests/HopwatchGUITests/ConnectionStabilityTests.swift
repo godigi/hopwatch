@@ -110,4 +110,38 @@ import Testing
         let emptyJitter = MonitorSeries.movingJitter(samples: [])
         #expect(emptyJitter == nil)
     }
+
+    @Test func dropTrackingInMonitorSeries() {
+        let t0 = Date()
+        let t1 = t0.addingTimeInterval(10)
+        let t2 = t0.addingTimeInterval(20)
+
+        var s1 = MonitorSample()
+        s1.ts = HistoryDocument.iso.string(from: t0)
+        s1.refreshed = ["fast"]
+        s1.internet.rttAvgMs = 24.0
+
+        var s2 = MonitorSample()
+        s2.ts = HistoryDocument.iso.string(from: t1)
+        s2.refreshed = ["fast"]
+        s2.internet.lossPct = 100.0
+        s2.internet.rttAvgMs = nil
+
+        var s3 = MonitorSample()
+        s3.ts = HistoryDocument.iso.string(from: t2)
+        s3.refreshed = ["fast"]
+        s3.internet.rttAvgMs = 26.0
+
+        let result = MonitorSeries.build(
+            [s1, s2, s3],
+            tier: "fast",
+            isDrop: { ($0.internet.lossPct ?? 0) >= 100 || $0.internet.rttAvgMs == nil },
+            value: { $0.internet.rttAvgMs }
+        )
+
+        #expect(result.points.count == 2)
+        #expect(result.drops.count == 1)
+        #expect(result.drops.first?.date == s2.timestamp)
+        #expect(result.segments.count == 2)
+    }
 }

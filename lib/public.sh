@@ -17,7 +17,6 @@ public_run() {
   local pub_out
   pub_out="$(curl -4 -s -m 4 https://ifconfig.co/json 2>/dev/null || curl -s -m 4 https://ifconfig.co/json 2>/dev/null)"
   if [ -n "$pub_out" ]; then
-    PUBLIC_OK=1
     PUB_IP="" PUB_ISP="" PUB_ASN="" PUB_CITY="" PUB_CC="" PUB_CC_ISO=""
     [[ "$pub_out" =~ \"ip\":[[:space:]]*\"([^\"]*)\" ]] && PUB_IP="${BASH_REMATCH[1]}"
     [[ "$pub_out" =~ \"asn_org\":[[:space:]]*\"([^\"]*)\" ]] && PUB_ISP="${BASH_REMATCH[1]}"
@@ -30,8 +29,15 @@ public_run() {
     # is what a consumer maps to a flag or a locale. Deriving one from the
     # other would mean shipping a country table in every consumer.
     [[ "$pub_out" =~ \"country_iso\":[[:space:]]*\"([^\"]*)\" ]] && PUB_CC_ISO="${BASH_REMATCH[1]}"
-    ok "Public IP: $PUB_IP  ($PUB_ISP, $PUB_CITY ${PUB_CC_ISO:-$PUB_CC})"
+    if [ -n "$PUB_IP" ]; then
+      PUBLIC_OK=1
+      ok "Public IP: $PUB_IP  ($PUB_ISP, $PUB_CITY ${PUB_CC_ISO:-$PUB_CC})"
+    else
+      PUBLIC_OK=0
+      warn "Could not parse public IP from response."
+    fi
   else
+    PUBLIC_OK=0
     warn "Could not reach ifconfig.co — public IP and ISP metadata are unavailable."
   fi
 
@@ -65,7 +71,7 @@ public_run() {
       ;;
     *)
       # Primary canary probe failed (unknown) — often due to custom DNS blocking resolution.
-      # Fallback 1: Resolve captive.apple.com via DHCP-provided DNS server or gateway
+      # Fallback 1: Resolve canary host via DHCP-provided DNS server or gateway
       local dhcp_dns=""
       if [ -n "${INTERFACE:-}" ]; then
         dhcp_dns="$(ipconfig getoption "$INTERFACE" domain_name_server 2>/dev/null | awk '{print $1; exit}' || true)"
@@ -73,12 +79,12 @@ public_run() {
       [ -n "$dhcp_dns" ] || dhcp_dns="${GATEWAY:-}"
       local resolved_ip=""
       if [ -n "$dhcp_dns" ] && type dig >/dev/null 2>&1; then
-        resolved_ip="$(dig @"$dhcp_dns" +short +time=1 captive.apple.com 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+        resolved_ip="$(dig @"$dhcp_dns" +short +time=1 "$CAPTIVE_CANARY_HOST" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
       fi
       if [ -n "$resolved_ip" ]; then
         local fb_raw fb_body fb_meta fb_code fb_url
         fb_raw="$(curl -s -m 3 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' \
-          --resolve "captive.apple.com:80:$resolved_ip" "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
+          --resolve "$CAPTIVE_CANARY_HOST:80:$resolved_ip" "$CAPTIVE_CANARY_URL" 2>/dev/null || true)"
         fb_body="${fb_raw%%$'\n'__METADATA__*}"
         fb_meta="${fb_raw##*$'\n'__METADATA__$'\n'}"
         { read -r fb_code || true; read -r fb_url || true; } <<< "$fb_meta"
@@ -131,6 +137,10 @@ public_run() {
       fi
       ;;
   esac
+
+  if [ "${CAPTIVE_PORTAL:-0}" -eq 1 ]; then
+    PUBLIC_OK=0
+  fi
 
   # TARGET-specific ping for "this site is slow" investigations.
   if [ -n "$TARGET" ]; then

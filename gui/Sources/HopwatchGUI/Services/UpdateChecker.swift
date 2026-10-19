@@ -144,6 +144,7 @@ final class UpdateChecker {
 
         preloadTask = Task { [weak self] in
             guard let self else { return }
+            defer { self.preloadTask = nil }
             do {
                 let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchPreload-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -500,12 +501,15 @@ private final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unche
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        session.finishTasksAndInvalidate()
         let tempTarget = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let cont = continuation
+        continuation = nil
         do {
             try FileManager.default.moveItem(at: location, to: tempTarget)
-            continuation?.resume(returning: tempTarget)
+            cont?.resume(returning: tempTarget)
         } catch {
-            continuation?.resume(throwing: error)
+            cont?.resume(throwing: error)
         }
     }
 
@@ -516,8 +520,10 @@ private final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unche
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error {
-            continuation?.resume(throwing: error)
+        session.finishTasksAndInvalidate()
+        if let error, let cont = continuation {
+            continuation = nil
+            cont.resume(throwing: error)
         }
     }
 }

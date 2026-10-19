@@ -615,7 +615,7 @@ assert all('repairs' not in x for x in d), d
 
 # ── The catalogue agrees with itself ─────────────────────────────────────
 
-@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1, CP-1, WF-1, WJ-1, DH-3 can offer, and only known ones" {
+@test "--rules-catalog names the repairs SOCK-1, CONN-1, HOG-1, CP-1, WF-1, WJ-1, DH-3, N1c can offer, and only known ones" {
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]
   local known
@@ -634,7 +634,8 @@ assert d['HOG-1']['repairs'] == ['quit-app'], d['HOG-1']
 assert d['WF-1']['repairs'] == ['reconnect-wifi'], d['WF-1']
 assert d['WJ-1']['repairs'] == ['reconnect-wifi'], d['WJ-1']
 assert d['DH-3']['repairs'] == ['reconnect-wifi'], d['DH-3']
-assert sum(1 for r in d.values() if 'repairs' in r) == 7
+assert d['N1c']['repairs'] == ['open-sign-in'], d['N1c']
+assert sum(1 for r in d.values() if 'repairs' in r) == 8
 " "$known"
 }
 
@@ -644,7 +645,7 @@ assert sum(1 for r in d.values() if 'repairs' in r) == 7
 # catalogue, and every catalogue entry is offered somewhere.
 @test "the catalogue's per-rule repairs are exactly the repair_offer calls in lib/" {
   local offers
-  offers="$(grep -hoE '^[[:space:]]*repair_offer [A-Z0-9-]+ [a-z-]+' "$REPO"/lib/*.sh | awk '{print $2" "$3}' | sort -u)"
+  offers="$(grep -hoE '^[[:space:]]*repair_offer [A-Za-z0-9-]+ [a-z-]+' "$REPO"/lib/*.sh | awk '{print $2" "$3}' | sort -u)"
   [ -n "$offers" ]
   run "$NETDIAG" --rules-catalog
   [ "$status" -eq 0 ]

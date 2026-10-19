@@ -50,6 +50,18 @@ import Testing
         #expect(result.action == "Move closer to your router, switch to 5 GHz or 6 GHz Wi-Fi, or connect with an Ethernet cable.")
     }
 
+    @Test func dnsRuleTranslations() {
+        let d1 = PlainEnglishTranslator.translate(ruleId: "D1")
+        #expect(d1.title == "Flaky Website Lookup (DNS)")
+        #expect(d1.explanation.contains("intermittently"))
+
+        let d2 = PlainEnglishTranslator.translate(ruleId: "D2")
+        #expect(d2.title == "Website Lookup Failure (DNS Down)")
+
+        let d3 = PlainEnglishTranslator.translate(ruleId: "D3")
+        #expect(d3.title == "Sluggish Website Lookup (DNS)")
+    }
+
     // MARK: - Normalization and Case-Insensitivity
 
     @Test func ruleIdNormalizationHandlesVariations() {

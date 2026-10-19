@@ -81,6 +81,10 @@ final class HopwatchCoordinator {
     /// a network whose name macOS hides is never answered with the previous
     /// network's name.
     private(set) var lastAssociatedSSID: String?
+    /// The last known public info (IP, ISP, country flag) seen on the current network.
+    /// Retained across transient monitor sample probe failures on the same connection so
+    /// flags and IP displays do not flicker during packet loss or curl timeouts.
+    private(set) var lastKnownPublicInfo: MonitorSample.PublicInfo?
     private(set) var latestRun: RunResult?
     /// Home's fallback for a session that has not run a scan yet.
     /// See `reportSource` for why this is a separate property rather than
@@ -698,7 +702,15 @@ final class HopwatchCoordinator {
         // last one. Cleared before anything below can re-set it, so a
         // network whose name macOS hides ends up with no name rather than
         // the previous network's.
-        if identityChanged { lastAssociatedSSID = nil }
+        if identityChanged {
+            lastAssociatedSSID = nil
+            lastKnownPublicInfo = nil
+        }
+        if sample.publicInfo.captivePortal == true {
+            lastKnownPublicInfo = nil
+        } else if sample.publicInfo.ok == true && !(sample.publicInfo.countryISO ?? "").isEmpty {
+            lastKnownPublicInfo = sample.publicInfo
+        }
         refreshLiveWiFi()
         adoptLiveSSIDAsNameIfNeeded()
         if let ssid = Self.readableSSID(sample.link.ssid) ?? liveSSID {
@@ -832,7 +844,8 @@ final class HopwatchCoordinator {
     /// having. Monitoring covers the continuous question; this covers the
     /// one-off one. See CLAUDE.md's three-depth table.
     private func considerArrival(for id: String, sample: MonitorSample) {
-        let state = Defaults.arrivalStates[id] ?? .unchecked
+        let canonical = history.canonicalID(id)
+        let state = Defaults.arrivalStates[id] ?? Defaults.arrivalStates[canonical] ?? .unchecked
         // Assigned only on a real change. Under `@Observable` a write
         // invalidates every observer whether or not the value differs, and
         // this runs once per monitor sample — every 5 s on the fast tier.
@@ -1352,8 +1365,8 @@ final class HopwatchCoordinator {
                 )
             }
             // Case 2: Wi-Fi Band Switch (2.4 GHz to 5 GHz / 6 GHz)
-            else if let prevCh = prev.wifi?.channel, let prevChNum = Int(prevCh), prevChNum <= 14,
-                    let currCh = sample.wifi?.channel, let currChNum = Int(currCh), currChNum >= 32 {
+            else if let prevCh = prev.wifi?.channel, let prevChNum = Int(prevCh.prefix(while: { $0.isNumber })), prevChNum <= 14,
+                    let currCh = sample.wifi?.channel, let currChNum = Int(currCh.prefix(while: { $0.isNumber })), currChNum >= 32 {
                 recordResolution(
                     title: "Wi-Fi Improved",
                     message: "Moved from 2.4 GHz to 5 GHz (Ch \(currCh)). Negotiated higher throughput.",
@@ -1403,13 +1416,12 @@ final class HopwatchCoordinator {
         lastSample = sample
     }
 
-    /// `_mon_rules`. Fires only on the genuine ok/info → warn/critical
-    /// edge, not on every warn/critical sample, so a sustained outage
-    /// gets one surge at onset and a steady 3 s after, not a restart
-    /// every minute. A burst already running is not re-triggered; a scan
-    /// in progress blocks it (a scan pauses the monitor and saturates the
-    /// link, and a burst's 2 s samples would be measuring the scan's own
-    /// traffic); a paused or stopped monitor has nothing to burst.
+    /// `_mon_rules` in `lib/monitor.sh` automatically switches the running
+    /// monitor from the fast cadence (5 s) to the degraded cadence (3 s) the
+    /// instant severity becomes `warn` or `critical`. Avoid calling
+    /// `monitor.beginBurst` here because `beginBurst` kills and restarts the
+    /// bash process, wiping rolling packet-loss windows and forcing a slow
+    /// full three-tier startup cycle right in the middle of an outage.
     private func considerInvestigationBurst(_ sample: MonitorSample) {
         let sev = sample.status.severity
         defer { lastSeverity = sev }
@@ -1421,9 +1433,7 @@ final class HopwatchCoordinator {
               !isScanning,
               !monitor.isBursting,
               Defaults.monitoringEnabled else { return }
-        monitor.beginBurst(interval: Defaults.latencyTestInterval,
-                           duration: Defaults.latencyTestDuration)
-        log.info("severity turned \(sev, privacy: .public) — started 2s investigation burst")
+        log.info("severity turned \(sev, privacy: .public) — monitor entering degraded cadence")
     }
 
     private func handleNetworkEvent(_ event: NetworkEventWatcher.Event) {
@@ -1435,35 +1445,37 @@ final class HopwatchCoordinator {
         // wanted; if the network really did change, the monitor's next
         // sample carries a different identity and `reconcileNetworkIdentity`
         // invalidates then, on evidence rather than on a CoreWLAN callback.
-        // (An SSID change and a path change still invalidate below.)
         switch event {
         case .bssidChanged, .linkChanged:
             log.debug("same-network roam or link change — forcing monitor refresh only")
             monitor.forceRefresh()
             return
-        case .ssidChanged, .pathChanged:
-            break
-        }
-        invalidateCurrentConnection()
-        if Defaults.monitoringEnabled { monitor.restart() }
-        // CoreWLAN and NWPathMonitor are near-instant where the monitor
-        // loop is up to a cadence behind. The monitor is the fallback, not
-        // the primary detector — so nudge it to resample now rather than
-        // letting the flag and public IP sit stale for ten seconds.
-        //
-        // A path going unsatisfied is the loudest of these and used to be
-        // the one that returned early, so a disconnect waited for the next
-        // monitor tick (5 s degraded, 10 s otherwise) before the dot and
-        // the card changed. The resample is local and cheap, so it happens
-        // for every event. What stays skipped when the path is gone is the
-        // part that needs a network: the history reload and the update
-        // check. The alert engine's grace window is not touched here — it
-        // is opened by `NetworkEventWatcher.emit` before this handler runs —
-        // so the resample cannot make a disconnect alert fire early.
-        if case .pathChanged(let satisfied, _) = event, !satisfied {
-            log.debug("network path lost — forcing monitor refresh")
+        case .pathChanged(let satisfied, _):
+            log.debug("network path changed (satisfied=\(satisfied)) — forcing monitor refresh")
             monitor.forceRefresh()
             return
+        case .ssidChanged(let newSSID):
+            let readable = Self.readableSSID(newSSID)
+            let knownSSID = self.liveSSID ?? self.lastAssociatedSSID
+            // Only invalidate on positive evidence that the user associated to a
+            // different named Wi-Fi network. On flaky or multi-AP networks (hotels),
+            // CoreWLAN fires ssidDidChange with nil or the same SSID during a brief
+            // re-association; invalidating and restarting the monitor there blanks
+            // the UI and resets rolling loss history while on the same network.
+            guard let readable, let knownSSID, readable != knownSSID else {
+                log.debug("ssidDidChange without a new SSID — refreshing Wi-Fi and forcing monitor refresh only")
+                refreshLiveWiFi()
+                monitor.forceRefresh()
+                return
+            }
+        }
+        invalidateCurrentConnection()
+        if Defaults.monitoringEnabled {
+            if monitor.isRunning {
+                monitor.forceRefresh()
+            } else {
+                monitor.start()
+            }
         }
         log.debug("network event — refreshing history and forcing monitor refresh")
         monitor.forceRefresh()
@@ -1485,6 +1497,7 @@ final class HopwatchCoordinator {
         latestSpeedTest = nil
         latestSpeedTestAt = nil
         latestSpeedTestNetwork = nil
+        lastKnownPublicInfo = nil
         didHydrateForNetwork = false
         routerAdminAvailable = false
         lastProbedRouterIP = nil
@@ -1613,10 +1626,9 @@ final class HopwatchCoordinator {
                     self.clearPendingArrival(failed: true)
                     return
                 }
-                guard generation == self.connectionGeneration,
-                      let measured = result.snapshot.network.historyJoinID,
-                      scanNetwork == nil || self.networkMatches(scanNetwork: scanNetwork, measured: measured, snapshot: result.snapshot)
-                else {
+                let measured = result.snapshot.network.historyJoinID
+                let matches = scanNetwork == nil || measured == nil || self.networkMatches(scanNetwork: scanNetwork, measured: measured!, snapshot: result.snapshot)
+                guard generation == self.connectionGeneration, matches else {
                     self.clearPendingArrival(failed: true)
                     await self.history.load()
                     return
@@ -2189,7 +2201,7 @@ final class HopwatchCoordinator {
     /// drawn before the first sample of the new network cannot beat it.
     var currentSpeedTest: (speed: RunSnapshot.Speedtest, at: Date?)? {
         guard let speed = latestSpeedTest else { return nil }
-        guard let live = confirmedNetworkID else { return nil }
+        guard let live = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return nil }
         guard runIsForNetwork(latestSpeedTestNetwork, live: live) else { return nil }
         return (speed, latestSpeedTestAt)
     }
@@ -2204,8 +2216,17 @@ final class HopwatchCoordinator {
 
     var currentPublicInfo: MonitorSample.PublicInfo? {
         guard !linkIsDown else { return nil }
-        if let sample = liveSample, sample.publicInfo.ok != nil {
-            return sample.publicInfo.ok == true ? sample.publicInfo : nil
+        if let sample = liveSample, sample.publicInfo.captivePortal == true {
+            return nil
+        }
+        if let sample = liveSample, sample.publicInfo.ok == true, !(sample.publicInfo.countryISO ?? "").isEmpty {
+            return sample.publicInfo
+        }
+        if let last = lastKnownPublicInfo {
+            return last
+        }
+        if let sample = liveSample, sample.publicInfo.ok == false {
+            return nil
         }
         let info = freshNetworkRunSnapshot?.publicInfo
         return info?.ok == false ? nil : info
@@ -2234,8 +2255,12 @@ final class HopwatchCoordinator {
 
     func computeSampleIsStale(now: Date) -> Bool {
         guard !stalenessSuspended, let sample = monitor.latest else { return false }
-        let reference = max(sample.timestamp, monitor.awaitingSince ?? .distantPast)
-        return SampleFreshness.isStale(
+        let reference = max(
+            sample.timestamp,
+            monitor.awaitingSince ?? .distantPast,
+            monitor.lastSpawnedAt ?? .distantPast
+        )
+        return SampleFreshness.isWatchdogStale(
             sampleAge: now.timeIntervalSince(reference),
             cadenceS: sample.status.cadenceS,
             observing: Defaults.monitoringEnabled && !monitor.isPausedForAnyReason,
@@ -2259,9 +2284,12 @@ final class HopwatchCoordinator {
         _ = staleEpoch
         guard let sample = monitor.latest,
               !monitor.isAwaitingFirstSample,
-              !sample.status.paused,
-              stalenessSuspended || Date().timeIntervalSince(sample.timestamp)
-                <= SampleFreshness.window(cadenceS: sample.status.cadenceS) else { return nil }
+              !sample.status.paused else { return nil }
+        let reference = max(sample.timestamp, monitor.lastSpawnedAt ?? .distantPast)
+        guard stalenessSuspended
+              || Date().timeIntervalSince(reference)
+                 <= SampleFreshness.watchdogWindow(cadenceS: sample.status.cadenceS)
+        else { return nil }
         return sample
     }
 
@@ -2277,7 +2305,7 @@ final class HopwatchCoordinator {
     }
 
     var currentSamples: [MonitorSample] {
-        guard liveSample != nil, let id = confirmedNetworkID else { return [] }
+        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return [] }
         let canonical = history.canonicalID(id)
         return monitor.recent.filter {
             !$0.status.paused && $0.network.historyJoinID.map(history.canonicalID) == canonical
@@ -2290,7 +2318,7 @@ final class HopwatchCoordinator {
     /// when `nil`. Never another network's: a surface that must not cap at
     /// 24 h (the "nothing has changed in…" line) still scopes by identity.
     func currentNetworkEvents(withinHours hours: Double?) -> [NetworkEvent] {
-        guard let id = confirmedNetworkID else { return [] }
+        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return [] }
         let canonical = history.canonicalID(id)
         let pool = hours.map { eventLog.within(hours: $0) } ?? eventLog.events
         return pool.filter {

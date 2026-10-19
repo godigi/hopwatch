@@ -8,6 +8,15 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Fixed
+- Eliminated dropdown flip-flopping between "Monitor is not reporting" and active network states during degraded or timing-out probe cycles by stopping unnecessary monitor process restarts on severity transitions, aligning the coordinator watchdog window with probe timeout durations, and ignoring redundant SSID notifications.
+- Updated `G2` (router packet loss with strong Wi-Fi signal) diagnosis and away-network guidance to rule out wireless distance and accurately attribute the issue to overloaded/rebooting router or access-point hardware or upstream ISP failures.
+- Enriched "Copy 1-Click IT / Support Ticket" so it always includes the latest telemetry (gateway IP, signal quality, packet loss, active alert/rule findings) even if triggered between live sample windows.
+- Fixed captive portal diagnosis to prioritize sign-in instructions and suppress router-reboot blaming (G1/G2/G3) on hotel and guest networks.
+- Fixed Support Summary report generation to accurately describe captive portal authentication and avoid misleading front-desk reboot requests.
+- Fixed Internet hop node rendering to prevent displaying a green checkmark when internet ping has 100% packet loss / "no reply".
+- Suppressed generic connection-unstable and connection-lost alerts while awaiting captive portal authentication.
+
 ## [1.19.1] - 2026-10-16
 
 ### Changes

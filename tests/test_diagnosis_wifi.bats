@@ -147,9 +147,9 @@ assert_contains() {
   assert_contains "$text" "losing 25% of the packets it sends to your router"
   assert_contains "$text" "not out on the wider internet or with your provider"
   assert_contains "$text" "signal your Mac hears from the router is strong (-50 dBm)"
-  assert_contains "$text" "struggling to hear your Mac"
-  assert_contains "$text" "moving closer"
-  assert_contains "$text" "reboot the router"
+  assert_contains "$text" "wireless distance is ruled out"
+  assert_contains "$text" "router or access point hardware itself is overloaded"
+  assert_contains "$text" "rebooting the router"
   [ "$MAX_SEVERITY" -ge 2 ]
 }
 

@@ -293,6 +293,10 @@ diagnosis_run() {
   # W5 is retired and no longer fires (docs/DIAGNOSIS-RULES.md#w5).
   if [ "$_gw_icmp_filtered" -eq 1 ]; then
     : # TCP-1 has already described this link.
+  elif [ "${CAPTIVE_PORTAL:-0}" -eq 1 ]; then
+    : # CP-1 owns the portal case. Router loss on an unauthenticated captive
+      # network is an artifact of the portal firewalling/dropping packets or
+      # dropping ICMP to the gateway, not a failing home router.
   elif loss_at_least "$GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
     if [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" && [ "$WIFI_RSSI" -le "$THRESH_WIFI_RSSI_G1_DBM" ]; then
       add_diag critical G1 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet. Your Wi-Fi signal here is weak (${WIFI_RSSI} dBm), which is almost certainly the cause. Try moving closer to the router, or switching to a closer access point if you have one."
@@ -304,7 +308,7 @@ diagnosis_run() {
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. That is what the half-duplex ethernet link above causes, so fix the negotiation first rather than the router; collisions on a half-duplex link produce exactly this."
     elif [ "$IS_WIFI" -eq 1 ] && [ -n "$WIFI_RSSI" ] && is_numeric "$WIFI_RSSI" \
          && [ "$WIFI_RSSI" -ge "$THRESH_WIFI_ASYMMETRIC_MIN_RSSI" ]; then
-      add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. The Wi-Fi signal your Mac hears from the router is strong (${WIFI_RSSI} dBm), so the likely cause is the router struggling to hear your Mac back — through walls or interference, since a router transmits far louder than a laptop can. Try moving closer to the router, and if it keeps happening, reboot the router (unplug it for 30 seconds, then plug it back in)."
+      add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. Because the Wi-Fi signal your Mac hears from the router is strong (${WIFI_RSSI} dBm), wireless distance is ruled out: the router or access point hardware itself is overloaded, stalling, or rebooting (or, on hotel and guest networks that block router pings, the upstream provider connection is failing). Try rebooting the router (unplug it for 30 seconds, then plug it back in)."
     else
       add_diag critical G2 "Your Mac is losing ${GW_LOSS}% of the packets it sends to your router — the box that gives you internet in your home — not out on the wider internet or with your provider. Try rebooting the router (unplug it for 30 seconds, then plug it back in) or moving closer to it; on ethernet, check the cable."
     fi
@@ -350,7 +354,7 @@ diagnosis_run() {
     # The one fix for a portal is to complete its page. Guarded because the
     # bats suite sources this file without lib/repairs.sh.
     if declare -f repair_offer >/dev/null 2>&1; then
-      repair_offer CP-1 open-sign-in ""
+      repair_offer CP-1 open-sign-in "" ${CAPTIVE_PORTAL_URL:+"url=$CAPTIVE_PORTAL_URL"}
     fi
   fi
 

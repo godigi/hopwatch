@@ -17,6 +17,7 @@ INTERFACE=""
 LOCAL_IP=""
 GATEWAY=""
 GW_COUNT=0
+OFFLINE_REASON=""
 
 # Link state (lib/linkstate.sh, consumed by lib/iface.sh) — deliberately
 # separate from GATEWAY above, which means one specific thing: "the

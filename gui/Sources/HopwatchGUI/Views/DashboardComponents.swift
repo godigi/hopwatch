@@ -450,7 +450,7 @@ struct DashboardRouteView: View {
 
                         hopNode(icon: "globe", isWarning: internetWarn && !linkDown, flag: linkDown ? nil : countryFlag,
                                 isCulprit: culpritHop == "internet" && !linkDown, isCritical: isCritical,
-                                state: linkDown || (internetPingText == "—" && !internetWarn) ? .unknown : .normal)
+                                state: linkDown || ((internetPingText == "—" || internetPingText == "no reply") && !internetWarn) ? .unknown : .normal)
 
                         Text("Internet")
                             .font(.system(size: 12, weight: .semibold))

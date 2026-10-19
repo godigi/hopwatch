@@ -60,11 +60,25 @@ enum LinkState {
 /// network, so it is named in `Defaults` rather than in `lib/thresholds.sh`.
 enum SampleFreshness {
 
-    /// How old the newest sample may be before it stops counting as live.
+    /// How old the newest sample may be before it stops counting as live
+    /// for short-window series averaging (`MonitorSeries`).
     static func window(cadenceS: Int?) -> TimeInterval {
         Double(cadenceS ?? Defaults.assumedMonitorCadenceS)
             * Double(Defaults.staleSampleMissedCadences)
             + Defaults.staleSampleMargin
+    }
+
+    /// How long the coordinator waits before declaring the monitor process
+    /// stale ("Monitor is not reporting"). A single cycle on a degraded or
+    /// blackholed link that runs fast + medium + slow tiers and hits every
+    /// probe timeout takes ~47–60 s (`THRESH_MON_GAP_MIN_S = 60` in
+    /// `lib/thresholds.sh`), so the watchdog floor must outlast a full
+    /// timeout cycle plus the next fast cycle while still catching a
+    /// genuinely hung monitor within 90 s (< 2 minutes).
+    static let minimumWatchdogWindow: TimeInterval = 90
+
+    static func watchdogWindow(cadenceS: Int?) -> TimeInterval {
+        max(minimumWatchdogWindow, window(cadenceS: cadenceS))
     }
 
     /// - Parameters:
@@ -81,6 +95,12 @@ enum SampleFreshness {
                         observing: Bool, samplePaused: Bool = false) -> Bool {
         guard observing, !samplePaused, let sampleAge else { return false }
         return sampleAge > window(cadenceS: cadenceS)
+    }
+
+    static func isWatchdogStale(sampleAge: TimeInterval?, cadenceS: Int?,
+                                observing: Bool, samplePaused: Bool = false) -> Bool {
+        guard observing, !samplePaused, let sampleAge else { return false }
+        return sampleAge > watchdogWindow(cadenceS: cadenceS)
     }
 }
 

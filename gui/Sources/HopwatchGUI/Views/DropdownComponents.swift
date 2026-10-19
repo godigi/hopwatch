@@ -651,7 +651,149 @@ struct ConnectionRouteView: View {
             .padding(.bottom, 6)
 
             // 3-Hop Route
-            ZStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 0) {
+                // Hop 1: This Mac
+                VStack(spacing: 4) {
+                    VStack(spacing: 2) {
+                        Text(wifiReadingLabel)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        HStack(spacing: 4) {
+                            if wifiWarning {
+                                Image(systemName: "wifi.exclamationmark")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Theme.ColorToken.amber)
+                            }
+                            Text(wifiReadingValue)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(wifiReadingTint)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                    }
+                    .frame(height: 52)
+
+                    hopNode(
+                        icon: macIcon,
+                        isWarning: !macStatusGood,
+                        statusGood: macStatusGood,
+                        flag: nil,
+                        state: linkDown ? .down : (!macStatusGood && !wifiWarning ? .unknown : .normal)
+                    )
+
+                    Text("This Mac")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                        .padding(.top, 6)
+
+                    Text(macDetail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+
+                // Hop 2: Router
+                VStack(spacing: 4) {
+                    VStack(spacing: 2) {
+                        Text("Router ping")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        pingReadingText(routerPingValue, tint: routerPingTint)
+                    }
+                    .frame(height: 52)
+
+                    hopNode(
+                        icon: "network",
+                        isWarning: routerWarn,
+                        statusGood: routerStatusGood,
+                        flag: nil,
+                        state: linkDown || (!routerStatusGood && !routerWarn) ? .unknown : .normal
+                    )
+
+                    Text("Router")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                        .padding(.top, 6)
+
+                    if routerAdminAvailable, let routerAdminURL {
+                        Button {
+                            NSWorkspace.shared.open(routerAdminURL)
+                        } label: {
+                            HStack(spacing: 2) {
+                                Text(routerDetail)
+                                    .underline()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 8))
+                            }
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open router admin page (\(routerAdminURL.absoluteString))")
+                    } else {
+                        Text(routerDetail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                // Hop 3: Internet
+                VStack(spacing: 4) {
+                    VStack(spacing: 2) {
+                        Text("Internet ping")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        pingReadingText(internetPingValue, tint: internetPingTint)
+                    }
+                    .frame(height: 52)
+
+                    hopNode(
+                        icon: "globe",
+                        isWarning: internetWarn,
+                        statusGood: internetStatusGood,
+                        flag: linkDown ? nil : countryFlag,
+                        state: linkDown || (!internetStatusGood && !internetWarn) ? .unknown : .normal
+                    )
+
+                    Text("Internet")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                        .padding(.top, 6)
+
+                    if internetWarn {
+                        Text(internetDetail)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.amber)
+                            .lineLimit(1)
+                        if let countryName, !countryName.isEmpty {
+                            Text(countryName)
+                                .font(.system(size: 8))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        if let countryName, !countryName.isEmpty {
+                            Text(countryName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.ink)
+                                .lineLimit(1)
+                            Text("Public IP country")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                        } else {
+                            Text(internetDetail)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .background(alignment: .top) {
                 // Connecting dashed lines and labels
                 GeometryReader { geo in
                     let w = geo.size.width
@@ -691,149 +833,6 @@ struct ConnectionRouteView: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(Theme.ColorToken.muted)
                         .position(x: (x2 + x3) / 2.0, y: lineY + 12)
-                }
-
-                HStack(alignment: .top, spacing: 0) {
-                    // Hop 1: This Mac
-                    VStack(spacing: 4) {
-                        VStack(spacing: 2) {
-                            Text(wifiReadingLabel)
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                            HStack(spacing: 4) {
-                                if wifiWarning {
-                                    Image(systemName: "wifi.exclamationmark")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundStyle(Theme.ColorToken.amber)
-                                }
-                                Text(wifiReadingValue)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(wifiReadingTint)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.75)
-                            }
-                        }
-                        .frame(height: 52)
-
-                        hopNode(
-                            icon: macIcon,
-                            isWarning: !macStatusGood,
-                            statusGood: macStatusGood,
-                            flag: nil,
-                            state: linkDown ? .down : (!macStatusGood && !wifiWarning ? .unknown : .normal)
-                        )
-
-                        Text("This Mac")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                            .padding(.top, 6)
-
-                        Text(macDetail)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.ColorToken.muted)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    // Hop 2: Router
-                    VStack(spacing: 4) {
-                        VStack(spacing: 2) {
-                            Text("Router ping")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                            pingReadingText(routerPingValue, tint: routerPingTint)
-                        }
-                        .frame(height: 52)
-
-                        hopNode(
-                            icon: "network",
-                            isWarning: routerWarn,
-                            statusGood: routerStatusGood,
-                            flag: nil,
-                            state: linkDown || (!routerStatusGood && !routerWarn) ? .unknown : .normal
-                        )
-
-                        Text("Router")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                            .padding(.top, 6)
-
-                        if routerAdminAvailable, let routerAdminURL {
-                            Button {
-                                NSWorkspace.shared.open(routerAdminURL)
-                            } label: {
-                                HStack(spacing: 2) {
-                                    Text(routerDetail)
-                                        .underline()
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 8))
-                                }
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.accentColor)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open router admin page (\(routerAdminURL.absoluteString))")
-                        } else {
-                            Text(routerDetail)
-                                .font(.system(size: 10))
-                                .foregroundStyle(routerWarn ? Theme.ColorToken.amber : Theme.ColorToken.muted)
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    // Hop 3: Internet
-                    VStack(spacing: 4) {
-                        VStack(spacing: 2) {
-                            Text("Internet ping")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.ColorToken.muted)
-                            pingReadingText(internetPingValue, tint: internetPingTint)
-                        }
-                        .frame(height: 52)
-
-                        hopNode(
-                            icon: "globe",
-                            isWarning: internetWarn,
-                            statusGood: internetStatusGood,
-                            flag: linkDown ? nil : countryFlag,
-                            state: linkDown || (!internetStatusGood && !internetWarn) ? .unknown : .normal
-                        )
-
-                        Text("Internet")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.ink)
-                            .padding(.top, 6)
-
-                        if internetWarn {
-                            Text(internetDetail)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.ColorToken.amber)
-                                .lineLimit(1)
-                            if let countryName, !countryName.isEmpty {
-                                Text(countryName)
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(Theme.ColorToken.muted)
-                                    .lineLimit(1)
-                            }
-                        } else {
-                            if let countryName, !countryName.isEmpty {
-                                Text(countryName)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Theme.ColorToken.ink)
-                                    .lineLimit(1)
-                                Text("Public IP country")
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(Theme.ColorToken.muted)
-                            } else {
-                                Text(internetDetail)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Theme.ColorToken.muted)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
                 }
             }
 

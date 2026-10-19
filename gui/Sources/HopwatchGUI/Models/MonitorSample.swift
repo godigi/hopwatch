@@ -583,6 +583,7 @@ extension MonitorSample.PublicInfo {
         country = c.lenient(.country)
         countryISO = c.lenient(.countryISO)
         captivePortal = c.lenient(.captivePortal)
+        captivePortalURL = c.lenient(.captivePortalURL)
     }
 }
 

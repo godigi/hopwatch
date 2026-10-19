@@ -107,6 +107,7 @@ private enum VerifyHarness {
         runSnapshots()
         renderArrivalCards()
         renderRepairPanels()
+        renderDropdownSnapshots()
         print("")
         if failures.isEmpty {
             print("All checks passed.")
@@ -3837,8 +3838,11 @@ private enum VerifyHarness {
     /// Render a SwiftUI view to an NSImage offscreen via NSHostingView +
     /// `cacheDisplay`. Captures the layer without a window for static
     /// content; called after launch so NSApplication is already up.
-    private static func renderImage(_ view: some View, size: NSSize) -> NSImage? {
+    private static func renderImage(_ view: some View, size: NSSize, appearance: NSAppearance? = nil) -> NSImage? {
         let hosting = NSHostingView(rootView: view)
+        if let appearance {
+            hosting.appearance = appearance
+        }
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.layoutSubtreeIfNeeded()
         guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
@@ -4042,6 +4046,61 @@ private enum VerifyHarness {
                 continue
             }
             writePNG(image, to: "\(dir)/repair-\(name).png", name: "repair-\(name)")
+        }
+    }
+
+    private static func renderDropdownSnapshots() {
+        print("Render dropdown snapshots:")
+        let dir = "/tmp/opencode/verify"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let coordinator = HopwatchCoordinator()
+
+        var sample = MonitorSample()
+        sample.network.label = "Home Wi-Fi"
+        sample.link.up = true
+        sample.link.type = "wifi"
+        sample.link.ssid = "Home Wi-Fi"
+        sample.link.interface = "en0"
+        sample.gateway.rttAvgMs = 4.2
+        sample.gateway.lossPct = 0
+        sample.internet.rttAvgMs = 18.5
+        sample.internet.lossPct = 0
+        sample.dns.ok = true
+        sample.tcp.anyOk = true
+        sample.publicInfo.ok = true
+        sample.publicInfo.country = "Brazil"
+        sample.publicInfo.countryISO = "BR"
+        sample.publicInfo.ip = "177.136.244.18"
+        sample.status.severity = "ok"
+        sample.status.measurement = "ok"
+        coordinator.handleSampleForTesting(sample)
+
+        let lightView = DropdownView()
+            .environment(coordinator)
+            .environment(coordinator.appSettings)
+            .environment(\.colorScheme, .light)
+        let hostingLight = NSHostingView(rootView: lightView)
+        hostingLight.layoutSubtreeIfNeeded()
+        let fittingHeight = hostingLight.fittingSize.height
+        let controller = NSHostingController(rootView: lightView)
+        let proposed = controller.sizeThatFits(in: NSSize(width: 420, height: 880))
+        check(
+            fittingHeight > 500 && fittingHeight < 800 && abs(proposed.height - fittingHeight) < 1.0,
+            "dropdown: MenuBarExtra hosting controller reports exact fitting height (\(Int(proposed.height))pt) without expanding to 880pt"
+        )
+        let height = max(fittingHeight, 600)
+        let size = NSSize(width: 420, height: height)
+
+        if let image = renderImage(lightView, size: size, appearance: NSAppearance(named: .aqua)) {
+            writePNG(image, to: "\(dir)/dropdown-light.png", name: "dropdown-light")
+        }
+
+        let darkView = DropdownView()
+            .environment(coordinator)
+            .environment(coordinator.appSettings)
+            .environment(\.colorScheme, .dark)
+        if let image = renderImage(darkView, size: size, appearance: NSAppearance(named: .darkAqua)) {
+            writePNG(image, to: "\(dir)/dropdown-dark.png", name: "dropdown-dark")
         }
     }
 

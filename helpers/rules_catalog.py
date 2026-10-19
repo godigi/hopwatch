@@ -563,12 +563,13 @@ RULES: list[dict[str, object]] = [
         "scope": "both",
         "blurb": (
             "Your Mac is losing packets between your Mac and your router "
-            "— the connection between your Mac and your router is "
-            "severely degraded. With a strong Wi-Fi signal the likely "
-            "cause is the router struggling to hear your Mac back, so "
-            "moving closer helps; either way, a reboot of the router "
-            "(power off, wait, then power back on) clears this in most "
-            "cases. On ethernet, check the cable."
+            "— the connection at the local router is severely degraded. "
+            "When your Wi-Fi signal is strong, wireless distance is ruled "
+            "out: the router or access point hardware itself is overloaded, "
+            "stalling, or rebooting (or, on hotel and guest networks that "
+            "block router pings, the upstream internet provider connection "
+            "is failing). A reboot of the router clears a wedged box in "
+            "most cases; on ethernet, check the cable."
         ),
         "doc": "DIAGNOSIS-RULES.md#g2--gateway-loss-with-healthy-wifi",
         "impacts": {"calls": "broken", "streaming": "degraded", "gaming": "broken",
@@ -579,10 +580,11 @@ RULES: list[dict[str, object]] = [
             "day, the router is failing and wants replacing."
         ),
         "fix_away": (
-            "Ask whoever runs this network to restart the router — tell "
-            "them your Mac is losing packets to it while the Wi-Fi signal "
-            "is strong, which is the detail that distinguishes a bad router "
-            "from a bad radio."
+            "Ask whoever runs this network to restart the router or check "
+            "their internet provider connection — tell them your Mac is "
+            "losing packets while the Wi-Fi signal is strong, which points "
+            "to overloaded router hardware or an upstream provider outage "
+            "rather than wireless range."
         ),
         "fix_target": "your_router",
     },

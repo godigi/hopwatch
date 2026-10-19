@@ -446,10 +446,14 @@ struct HomeView: View {
             let isRouter = isRouterAlert(alert)
 
             let alertSubtitle: String = {
-                var text = alert.body.isEmpty ? "Network problem detected" : alert.body
-                if isCaptive && coordinator.hasCustomDNS && !text.localizedCaseInsensitiveContains("custom DNS") {
-                    text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                if isCaptive {
+                    var text = "This network requires you to sign in before you can access the internet."
+                    if coordinator.hasCustomDNS {
+                        text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                    }
+                    return text
                 }
+                let text = alert.body.isEmpty ? "Network problem detected" : alert.body
                 return text
             }()
 
@@ -457,7 +461,7 @@ struct HomeView: View {
                 iconName: isCaptive ? "lock.shield" : (isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle"),
                 iconTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber),
                 iconBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Theme.ColorToken.redWash : Theme.ColorToken.amberWash),
-                headline: alert.title,
+                headline: isCaptive ? (coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network") : alert.title,
                 subtitle: alertSubtitle,
                 statusPillText: isCaptive ? "Sign-in required" : (isCritical ? "Critical alert" : "Active alert"),
                 statusPillTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? Theme.ColorToken.red : Theme.ColorToken.amber),
@@ -642,9 +646,11 @@ struct HomeView: View {
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
         let snap = currentRunResult?.snapshot
-        let fired = coordinator.liveSample?.status.rules
-            ?? snap?.diagnosis.compactMap(\.rule)
-            ?? []
+        var firedSet = Set(coordinator.liveSample?.status.rules ?? [])
+        if let snapRules = snap?.diagnosis.compactMap(\.rule) {
+            firedSet.formUnion(snapRules)
+        }
+        let fired = Array(firedSet)
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: coordinator.liveSample,
             speedTest: coordinator.currentSuitabilitySpeed,
@@ -1252,6 +1258,9 @@ struct HomeView: View {
     private var internetPingTint: Color {
         if linkDown { return Theme.ColorToken.muted }
         if internetPingText == "—" { return Theme.ColorToken.muted }
+        if internetPingText == "no reply" {
+            return internetWarn ? (isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber) : Theme.ColorToken.muted
+        }
         if internetWarn {
             return isStageCritical ? Theme.ColorToken.red : Theme.ColorToken.amber
         }
@@ -1672,6 +1681,10 @@ struct HomeView: View {
 
     private func copySupportSummary() {
         let text: String
+        let snapshotCandidate = coordinator.currentNetworkRun?.snapshot
+            ?? coordinator.latestRun?.snapshot
+            ?? coordinator.hydratedReport?.run
+        let sampleCandidate = coordinator.liveSample ?? coordinator.monitor.latest
         if let run = coordinator.currentNetworkRun {
             let owned = coordinator.history.isOwned(networkID: run.snapshot.network.id)
                 || run.snapshot.network.isMine
@@ -1680,13 +1693,40 @@ struct HomeView: View {
                 catalog: coordinator.rulesCatalog.catalog,
                 networkIsOwned: owned
             )
+        } else if let sample = sampleCandidate {
+            let owned = coordinator.history.isOwned(networkID: sample.network.id)
+            text = SupportSummaryFormatter.format(
+                sample: sample,
+                alert: coordinator.alerts.activeSorted.first.map {
+                    StageResolver.AlertSnapshot(
+                        title: $0.title, body: $0.body,
+                        raisedAt: $0.raisedAt, rules: $0.rules,
+                        severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0,
+                        id: $0.id
+                    )
+                },
+                catalog: coordinator.rulesCatalog.catalog,
+                networkIsOwned: owned,
+                fallbackNetworkName: coordinator.wifiDisplayName,
+                fallbackRSSI: sample.wifi?.rssi,
+                fallbackChannel: sample.wifi?.channel,
+                fallbackSnapshot: snapshotCandidate
+            )
+        } else if let snapshot = snapshotCandidate {
+            let owned = coordinator.history.isOwned(networkID: snapshot.network.id)
+                || snapshot.network.isMine
+            text = SupportSummaryFormatter.format(
+                snapshot: snapshot,
+                catalog: coordinator.rulesCatalog.catalog,
+                networkIsOwned: owned
+            )
         } else {
             text = SupportSummaryFormatter.format(
                 SupportSummaryFormatter.Parameters(
                     networkName: coordinator.wifiDisplayName ?? "Unknown Network",
                     observedProblem: "Network issue detected",
-                    localVerification: "Laptop link is idle; issue is on the network/router side",
-                    concreteAction: "Please restart floor access point / router"
+                    localVerification: "Local link is idle and healthy; issue is upstream on network/router",
+                    concreteAction: "Please consider restarting the local Wi-Fi router / access point for this area."
                 )
             )
         }

@@ -66,6 +66,10 @@ struct DropdownView: View {
 
             footerSection
         }
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.ColorToken.dropdownBackground)
+        .background(DropdownWindowAnchor())
         .contextMenu {
             Button("Copy Redacted Report") { copyShareableReport() }.disabled(!coordinator.supportsShare)
             Button("Copy for Support") { copySupportSummary() }
@@ -370,10 +374,14 @@ struct DropdownView: View {
             let isRouter = isRouterAlert(alert)
 
             let alertSubtitle: String = {
-                var text = alert.body.isEmpty ? "Network problem detected" : alert.body
-                if isCaptive && coordinator.hasCustomDNS && !text.localizedCaseInsensitiveContains("custom DNS") {
-                    text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                if isCaptive {
+                    var text = "This network requires you to sign in before you can access the internet."
+                    if coordinator.hasCustomDNS {
+                        text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                    }
+                    return text
                 }
+                let text = alert.body.isEmpty ? "Network problem detected" : alert.body
                 return text
             }()
 
@@ -381,7 +389,7 @@ struct DropdownView: View {
                 iconName: isCaptive ? "lock.shield" : (isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle"),
                 iconTint: isCaptive ? Theme.ColorToken.amber : (isCritical ? .red : Theme.ColorToken.amber),
                 iconBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash),
-                headline: alert.title,
+                headline: isCaptive ? (coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network") : alert.title,
                 subtitle: alertSubtitle,
                 actionTitle: isCaptive ? "Open Sign-In Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
                 onAction: isCaptive ? {
@@ -858,7 +866,7 @@ struct DropdownView: View {
 
     private var actionsSection: some View {
         VStack(spacing: 8) {
-            if coordinator.currentHealth != .healthy && coordinator.currentHealth != .checking {
+            if coordinator.currentHealth == .warning || coordinator.currentHealth == .critical {
                 Button(action: { copySupportSummary() }) {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.on.clipboard")
@@ -949,7 +957,11 @@ struct DropdownView: View {
     }
 
     private var firedRules: Set<String> {
-        Set(coordinator.liveSample?.status.rules ?? [])
+        var rules = Set(coordinator.liveSample?.status.rules ?? [])
+        if let snapRules = coordinator.freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) {
+            rules.formUnion(snapRules)
+        }
+        return rules
     }
 
     private var currentJitter: Double? {
@@ -1038,17 +1050,40 @@ struct DropdownView: View {
 
     private func copySupportSummary() {
         let text: String
-        let owned = coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
-        if let latestSample = coordinator.liveSample {
+        let sampleCandidate = coordinator.liveSample ?? coordinator.monitor.latest
+        let snapshotCandidate = coordinator.currentRunResult?.snapshot
+            ?? coordinator.latestRun?.snapshot
+            ?? coordinator.hydratedReport?.run
+        let owned = coordinator.history.isOwned(
+            networkID: sampleCandidate?.network.id ?? snapshotCandidate?.network.id
+        )
+        let activeAlert: StageResolver.AlertSnapshot? = {
+            if case .alerted(let stageAlert) = stage {
+                return stageAlert
+            }
+            return coordinator.alerts.activeSorted.first.map {
+                StageResolver.AlertSnapshot(
+                    title: $0.title, body: $0.body,
+                    raisedAt: $0.raisedAt, rules: $0.rules,
+                    severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0,
+                    id: $0.id
+                )
+            }
+        }()
+        if let latestSample = sampleCandidate {
             text = SupportSummaryFormatter.format(
                 sample: latestSample,
-                alert: coordinator.alerts.activeSorted.first.map {
-                    StageResolver.AlertSnapshot(
-                        title: $0.title, body: $0.body,
-                        raisedAt: $0.raisedAt, rules: $0.rules,
-                        severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0
-                    )
-                },
+                alert: activeAlert,
+                catalog: coordinator.rulesCatalog.catalog,
+                networkIsOwned: owned,
+                fallbackNetworkName: coordinator.wifiDisplayName,
+                fallbackRSSI: resolvedRSSI,
+                fallbackChannel: resolvedBand,
+                fallbackSnapshot: snapshotCandidate
+            )
+        } else if let snapshot = snapshotCandidate {
+            text = SupportSummaryFormatter.format(
+                snapshot: snapshot,
                 catalog: coordinator.rulesCatalog.catalog,
                 networkIsOwned: owned
             )
@@ -1056,9 +1091,14 @@ struct DropdownView: View {
             text = SupportSummaryFormatter.format(
                 SupportSummaryFormatter.Parameters(
                     networkName: coordinator.wifiDisplayName ?? "Unknown Network",
-                    observedProblem: "Network issue detected",
-                    localVerification: "Laptop link is idle; issue is on the network/router side",
-                    concreteAction: "Please restart floor access point / router"
+                    signalQuality: resolvedRSSI.flatMap {
+                        SupportSummaryFormatter.describeSignal(rssi: $0, channel: resolvedBand)
+                    },
+                    observedProblem: activeAlert.map { "\($0.title): \($0.body)" } ?? "Network issue detected",
+                    localVerification: "Local link is idle and healthy; issue is upstream on network/router",
+                    concreteAction: owned
+                        ? "Restart the router (unplug for 15 seconds, then plug back in)."
+                        : "Please consider restarting the local Wi-Fi router / access point for this area."
                 )
             )
         }
@@ -1177,3 +1217,93 @@ struct HighlightingButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
+
+/// Anchors the borderless `MenuBarExtra(.window)` panel to its exact SwiftUI fitting height
+/// and keeps its top edge (`maxY`) pinned directly beneath the macOS menu bar when content height changes.
+private struct DropdownWindowAnchor: NSViewRepresentable {
+    func makeNSView(context: Context) -> DropdownWindowAnchorView {
+        DropdownWindowAnchorView()
+    }
+
+    func updateNSView(_ nsView: DropdownWindowAnchorView, context: Context) {
+        nsView.scheduleSync()
+    }
+}
+
+final class DropdownWindowAnchorView: NSView {
+    private var pinnedMaxY: CGFloat?
+    private var isAdjusting = false
+    private var syncScheduled = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        guard let window, !window.styleMask.contains(.titled) else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChange(_:)),
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChange(_:)),
+            name: NSWindow.didMoveNotification,
+            object: window
+        )
+        scheduleSync()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scheduleSync()
+    }
+
+    func scheduleSync() {
+        guard window != nil, !syncScheduled else { return }
+        syncScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.syncScheduled = false
+            self.syncWindowFrame()
+        }
+    }
+
+    @objc private func windowDidChange(_ notification: Notification) {
+        syncWindowFrame()
+    }
+
+    func syncWindowFrame() {
+        guard let window, !window.styleMask.contains(.titled), !isAdjusting else { return }
+        let fitting = window.contentView?.fittingSize ?? .zero
+        let targetHeight = fitting.height > 100 ? fitting.height : bounds.height
+        let targetWidth = fitting.width > 100 ? fitting.width : bounds.width
+        guard targetHeight > 100, targetWidth > 100 else { return }
+
+        if let screenMaxY = (window.screen ?? NSScreen.main)?.visibleFrame.maxY {
+            pinnedMaxY = screenMaxY - 2
+        } else if pinnedMaxY == nil {
+            pinnedMaxY = window.frame.maxY
+        }
+
+        guard let topY = pinnedMaxY else { return }
+        var frame = window.frame
+        let heightChanged = abs(frame.size.height - targetHeight) > 0.5
+        let widthChanged = abs(frame.size.width - targetWidth) > 0.5
+        let topDrifted = abs(frame.maxY - topY) > 0.5
+        guard heightChanged || widthChanged || topDrifted else { return }
+
+        isAdjusting = true
+        defer { isAdjusting = false }
+
+        frame.size.width = targetWidth
+        frame.size.height = targetHeight
+        frame.origin.y = topY - targetHeight
+        window.setFrame(frame, display: true)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+

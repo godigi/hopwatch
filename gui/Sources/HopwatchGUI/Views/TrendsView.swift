@@ -26,23 +26,19 @@ struct TrendsView: View {
     private var store: HistoryStore { coordinator.history }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 controls
                 purposeSubtitle
                 verdictCard
                 baselineDigest
+                Divider()
+                metricChart
+                speedBenchmarkSection
+                incidentChart
+                coverageNote
             }
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    metricChart
-                    speedBenchmarkSection
-                    incidentChart
-                    coverageNote
-                }
-                .padding(16)
-            }
+            .padding(16)
         }
         .task {
             if store.document.runs.isEmpty { await store.load() }
@@ -65,7 +61,6 @@ struct TrendsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .proseWidth()
-            .padding(.horizontal, 12)
     }
 
     private var defaultNetworkID: String? {
@@ -112,7 +107,6 @@ struct TrendsView: View {
                     subcaption: profileSubcaption(mem)
                 )
             }
-            .padding(.horizontal, 12)
         }
     }
 
@@ -283,7 +277,6 @@ struct TrendsView: View {
                 }
                 .padding(12)
                 .cardStyle()
-                .padding(.horizontal, 12)
             } else if let judged = store.judged(networkID: networkID),
                let summary = judged.summary, !summary.isEmpty {
                 let health = verdictHealth(judged.overall)
@@ -303,13 +296,11 @@ struct TrendsView: View {
                 }
                 .padding(12)
                 .cardStyle()
-                .padding(.horizontal, 12)
             }
         } else {
             Text("Pick a network to see what it's usually like.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
         }
     }
 
@@ -435,7 +426,6 @@ struct TrendsView: View {
                 .help("Reload history")
             }
         }
-        .padding(12)
     }
 
     // MARK: - Metric chart

@@ -72,6 +72,10 @@ final class MonitorStream {
     /// is stop-then-start. Readers that draw measurements read
     /// `HopwatchCoordinator.liveSample`, which honours this flag.
     private(set) var awaitingSince: Date?
+    /// When the current monitor child process was spawned or restarted, so
+    /// the staleness watchdog gives a newly restarted child a full window to
+    /// finish its initial three-tier probe cycle before aging out `latest`.
+    private(set) var lastSpawnedAt: Date?
     var isAwaitingFirstSample: Bool { awaitingSince != nil }
 
     /// A connection boundary invalidates both readings and identity. Retained
@@ -322,6 +326,7 @@ final class MonitorStream {
 
         process = proc
         isRunning = true
+        lastSpawnedAt = Date()
         lastError = nil
         // No signal may reach this child until it proves its USR1/USR2
         // traps are installed. lib/monitor.sh installs them inside
@@ -379,6 +384,7 @@ final class MonitorStream {
         process = nil
         isRunning = false
         isPaused = false
+        lastSpawnedAt = nil
         awaitingSince = Date()
         restartPending = false
         pauseHolders.removeAll()
@@ -412,10 +418,19 @@ final class MonitorStream {
         let lastNetwork = monitorLastNetwork
         stop()
         awaitingSince = wasAwaiting
+        lastSpawnedAt = Date()
         monitorCarry = carry
         monitorLastNetwork = lastNetwork
         burstInterval = interval
         burstUntil = until
+        if let until, until > Date() {
+            let remaining = until.timeIntervalSinceNow
+            burstTimer = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(remaining))
+                guard !Task.isCancelled else { return }
+                self?.endBurst()
+            }
+        }
         restartAttempts = 0
         // After `stop()`, which clears it. Only a monitor that was actually
         // running is being replaced; restarting one that was not is a start.
@@ -661,6 +676,7 @@ final class MonitorStream {
     func adoptGallerySample(_ sample: MonitorSample, historical: [MonitorSample] = []) {
         self.latest = sample
         self.awaitingSince = nil
+        self.lastSpawnedAt = nil
         self.isRunning = true
         self.isPaused = false
         self.pauseReason = nil

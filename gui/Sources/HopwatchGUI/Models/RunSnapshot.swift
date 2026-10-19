@@ -287,6 +287,7 @@ struct RunSnapshot: Decodable, Sendable {
         struct UPnP: Decodable, Sendable {
             /// "enabled" | "disabled" | "unknown".
             var state: String = "unknown"
+            enum CodingKeys: String, CodingKey { case state }
         }
     }
 
@@ -588,6 +589,8 @@ struct RunSnapshot: Decodable, Sendable {
             var label: String
             var hint: String?
             var url: String?
+
+            enum CodingKeys: String, CodingKey { case id, label, hint, url }
         }
 
         var health: Health {
@@ -717,10 +720,55 @@ extension RunSnapshot.IPv6 {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         available = c.lenient(.available, false)
+        only = c.lenient(.only, false)
+        clat = c.lenient(.clat, false)
         globalAddr = c.lenient(.globalAddr)
         pingLossPct = c.lenient(.pingLossPct)
         aaaaOk = c.lenient(.aaaaOk, false)
         tcpV6Ok = c.lenient(.tcpV6Ok, false)
+    }
+}
+
+extension RunSnapshot.WAN {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        doubleNat = c.lenient(.doubleNat, .init())
+        upnp = c.lenient(.upnp, .init())
+    }
+}
+
+extension RunSnapshot.WAN.DoubleNAT {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        detected = c.lenient(.detected, false)
+        homeCount = c.lenient(.homeCount, 0)
+        ispTransitCount = c.lenient(.ispTransitCount, 0)
+    }
+}
+
+extension RunSnapshot.WAN.UPnP {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = c.lenient(.state, "unknown")
+    }
+}
+
+extension RunSnapshot.Traffic {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sampledS = c.lenient(.sampledS)
+        downMbps = c.lenient(.downMbps)
+        upMbps = c.lenient(.upMbps)
+        topProcesses = c.lenient(.topProcesses, [])
+    }
+}
+
+extension RunSnapshot.Traffic.Process {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = c.lenient(.name, "")
+        downMbps = c.lenient(.downMbps)
+        upMbps = c.lenient(.upMbps)
     }
 }
 
@@ -766,12 +814,23 @@ extension RunSnapshot.SuitabilityRow {
     }
 }
 
+extension RunSnapshot.Diagnosis.Action {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.lenient(.id, "")
+        label = c.lenient(.label, "")
+        hint = c.lenient(.hint)
+        url = c.lenient(.url)
+    }
+}
+
 extension RunSnapshot.Diagnosis {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         severity = c.lenient(.severity, "info")
         rule = c.lenient(.rule)
         summary = c.lenient(.summary, "")
+        action = c.lenient(.action)
         // Declared, in CodingKeys, and unassigned here on first writing —
         // the same silent default `wan` and `suitability` once held. Every
         // finding decoded with no repairs, so no button could ever appear.

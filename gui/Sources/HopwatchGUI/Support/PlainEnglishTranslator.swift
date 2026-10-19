@@ -171,8 +171,8 @@ public enum PlainEnglishTranslator {
         "W2": "WIFI-2",
         "B1": "BLOAT-1",
         "B2": "BLOAT-2",
-        "D1": "DNS-1",
         "D2": "DNS-2",
+        "D3": "DNS-1",
         "M1": "MTU-1",
         "NT-1": "DESYNC-1",
     ]
@@ -303,6 +303,11 @@ public enum PlainEnglishTranslator {
             title: "Sluggish Website Lookup (DNS)",
             explanation: "Your Mac takes an unusually long time to look up server addresses, making websites pause before they start loading.",
             action: "Change your DNS servers in System Settings or router settings to faster alternatives like Cloudflare (1.1.1.1) or Google (8.8.8.8)."
+        ),
+        "D1": PlainExplanation(
+            title: "Flaky Website Lookup (DNS)",
+            explanation: "Some website name lookups are failing intermittently, even though your general internet connection is working.",
+            action: "Change your DNS servers in System Settings or router settings to reliable alternatives like Cloudflare (1.1.1.1) or Google (8.8.8.8)."
         ),
         "DNS-2": PlainExplanation(
             title: "Website Lookup Failure (DNS Down)",

@@ -45,6 +45,7 @@ final class NetworkEventWatcher: NSObject {
     private(set) var pathIsExpensive = false
     /// `NWPath.isConstrained` — Low Data Mode.
     private(set) var pathIsConstrained = false
+    private(set) var lastSSID: String?
 
     var onEvent: ((Event) -> Void)?
 
@@ -53,6 +54,7 @@ final class NetworkEventWatcher: NSObject {
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "netwatch")
 
     func start() {
+        lastSSID = wifiClient.interface()?.ssid()
         wifiClient.delegate = self
         // Each of these is a separate registration; CoreWLAN does not
         // deliver one without asking for it.
@@ -130,7 +132,10 @@ final class NetworkEventWatcher: NSObject {
 extension NetworkEventWatcher: CWEventDelegate {
     nonisolated func ssidDidChangeForWiFiInterface(withName name: String) {
         Task { @MainActor in
-            emit(.ssidChanged(CWWiFiClient.shared().interface(withName: name)?.ssid()))
+            let currentSSID = CWWiFiClient.shared().interface(withName: name)?.ssid()
+            guard currentSSID != self.lastSSID else { return }
+            self.lastSSID = currentSSID
+            self.emit(.ssidChanged(currentSSID))
         }
     }
 

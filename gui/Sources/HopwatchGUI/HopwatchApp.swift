@@ -23,7 +23,6 @@ struct HopwatchApp: App {
             DropdownView()
                 .environment(coordinator)
                 .environment(coordinator.appSettings)
-                .frame(width: 420)
         } label: {
             MenuBarLabel(coordinator: coordinator, appSettings: coordinator.appSettings)
                 // The only view guaranteed to exist at launch. An
@@ -391,14 +390,14 @@ struct MenuBarLabel: View {
     // ping beside a red dot.
     private var countryISO: String? {
         if coordinator.linkIsDown { return nil }
-        return coordinator.liveSample?.publicInfo.countryISO
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.countryISO
+        let iso = coordinator.currentPublicInfo?.countryISO
+        guard let iso, !iso.isEmpty else { return nil }
+        return iso
     }
 
     private var publicIP: String? {
         if coordinator.linkIsDown { return nil }
-        let ip = coordinator.liveSample?.publicInfo.ip
-            ?? coordinator.currentNetworkRun?.snapshot.publicInfo.ip
+        let ip = coordinator.currentPublicInfo?.ip
         guard let ip, !ip.isEmpty else { return nil }
         // IPv6 addresses are far too long for a menu bar. Show the last
         // group, which is the part that actually changes.

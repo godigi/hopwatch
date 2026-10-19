@@ -940,6 +940,7 @@ CAPTIVE_CANARY_MARKER='<TITLE>Success</TITLE>'
 # the sign-in page (lib/repairs.sh) must open the very page detection used.
 # shellcheck disable=SC2034 # read by lib/public.sh, lib/monitor.sh and lib/repairs.sh
 CAPTIVE_CANARY_URL='http://captive.apple.com/hotspot-detect.html'
+CAPTIVE_CANARY_HOST='captive.apple.com'
 captive_portal_classify() {
   local http_status="${1:-}" body="${2:-}"
   case "$http_status" in

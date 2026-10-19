@@ -40,11 +40,18 @@ enum MonitorSeries {
         }
     }
 
+    /// A probe that was executed on this tier but resulted in a timeout / dropped ping.
+    struct Drop: Identifiable, Equatable {
+        let date: Date
+        var id: Date { date }
+    }
+
     struct Result {
         /// One entry per unbroken stretch. Charts draw each as its own
         /// series so no line spans two of them.
         var segments: [[Point]] = []
         var gaps: [Gap] = []
+        var drops: [Drop] = []
 
         var identifiedSegments: [Segment] {
             segments.compactMap { pts in
@@ -64,8 +71,11 @@ enum MonitorSeries {
     ///     `"medium"` or `"slow"`. Samples where that tier was not due carry
     ///     the previous cycle's number verbatim, and plotting them would
     ///     turn one measurement into six.
+    ///   - isDrop: optional predicate deciding if an unmeasured sample on this
+    ///     tier represents a dropped probe.
     ///   - value: `nil` means not measured, never zero.
     static func build(_ samples: [MonitorSample], tier: String,
+                      isDrop: ((MonitorSample) -> Bool)? = nil,
                       value: (MonitorSample) -> Double?) -> Result {
         var result = Result()
         var current: [Point] = []
@@ -123,6 +133,9 @@ enum MonitorSeries {
                 // ping that got no reply. Joining across it would draw a
                 // round-trip time through an outage.
                 closeSegment()
+                if let isDrop, isDrop(sample) {
+                    result.drops.append(Drop(date: now))
+                }
                 continue
             }
 

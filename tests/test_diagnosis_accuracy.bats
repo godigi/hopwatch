@@ -111,7 +111,7 @@ diag_text_for() {
   curl() {
     case "$*" in
       *ifconfig.co*) return 7 ;;
-      *captive.apple.com*) cat "$REPO/tests/fixtures/captive_apple_success.txt"; printf '\n200' ;;
+      *captive.apple.com*) cat "$REPO/tests/fixtures/captive_apple_success.txt"; printf '\n__METADATA__\n200\n\n' ;;
     esac
   }
   public_run >/dev/null || true
