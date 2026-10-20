@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-10-20
+
 ### Fixed
 - Fixed false captive portal banner and alert hijacking:
   - Eliminated automatic captive portal network learning from rule `N1c` ("joined with no route out") or momentary `no-route` states so home and office networks are never falsely branded as captive portals.
@@ -154,8 +156,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.20.0...HEAD
-[1.20.0]: https://github.com/godigi/hopwatch/releases/tag/v1.20.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.20.1...HEAD
+[1.20.1]: https://github.com/godigi/hopwatch/releases/tag/v1.20.1
+[1.20.0]: https://github.com/godigi/hopwatch/commit/0202371d64474cfd06d9c5b1c5299b8c81ea29a9
 [1.19.1]: https://github.com/godigi/hopwatch/commit/03beb7f6daddef01d2fb94e104363eae01374572
 [1.19.0]: https://github.com/godigi/hopwatch/commit/0d87c149a5434e1b16733fb4e16ce2f1f4fcfb7b
 [1.18.1]: https://github.com/godigi/hopwatch/commit/69148336c6c93b2418b34bdce9b1b9aaf099f148
