@@ -119,7 +119,6 @@ struct AlertStageCard: View {
     private var isCaptivePortal: Bool {
         alert.id == "captive-portal"
             || alert.rules.contains("CP-1")
-            || alert.rules.contains("N1c")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
     }

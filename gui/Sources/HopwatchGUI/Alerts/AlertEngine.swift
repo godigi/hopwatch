@@ -185,7 +185,13 @@ final class AlertEngine {
 
     private func isLearnedPortalAwaitingSignIn(_ sample: MonitorSample) -> Bool {
         guard isLearnedPortal(sample) else { return false }
-        if sample.publicInfo.ok == true && (sample.internet.lossPct ?? 0) < 50 {
+        if sample.publicInfo.captivePortal == false {
+            return false
+        }
+        let internetHealthy = (sample.internet.lossPct ?? 100) < 50
+            || sample.publicInfo.ip != nil
+            || sample.tcp.anyOk == true
+        if internetHealthy && (sample.internet.rttAvgMs != nil || sample.tcp.anyOk == true) {
             return false
         }
         return true
@@ -199,7 +205,6 @@ final class AlertEngine {
            let sample,
            sample.publicInfo.captivePortal == true
             || sample.status.rules.contains("CP-1")
-            || sample.status.rules.contains("N1c")
             || isLearnedPortalAwaitingSignIn(sample) {
             return "captive portal sign-in required"
         }
@@ -245,7 +250,7 @@ final class AlertEngine {
         for def in AlertDefinition.liveAlerts {
             let holds = conditionHolds(def, sample: sample, previous: previousSample)
             let firingRules = def.id == "captive-portal"
-                ? Set(["CP-1", "N1c"]).intersection(firing)
+                ? Set(["CP-1"]).intersection(firing)
                 : def.rules.intersection(firing)
             step(def, holds: holds, now: now, networkKey: networkKey, sample: sample,
                  firingRules: firingRules)
@@ -280,7 +285,6 @@ final class AlertEngine {
         case "captive-portal":
             return sample.publicInfo.captivePortal == true
                 || sample.status.rules.contains("CP-1")
-                || sample.status.rules.contains("N1c")
                 || isLearnedPortalAwaitingSignIn(sample)
 
         case "vpn-dropped":

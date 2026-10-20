@@ -2446,7 +2446,7 @@ private enum VerifyHarness {
         let inetFiltered = EffectiveLoss.Filtering(gatewayLeg: false, internetLeg: true)
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4, filtering: inetFiltered) == "5ms", "formatPing: internet filtered falls back to the gateway RTT")
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, filtering: inetFiltered) == "TCP ok", "formatPing: internet filtered with no gateway RTT reads TCP ok")
-        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, filtering: gwFiltered) == "TCP ok", "formatPing: gateway filtered with nothing measured reads TCP ok")
+        check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil, filtering: gwFiltered) == nil, "formatPing: gateway filtered with nothing measured reads nil")
     }
 
     // MARK: - Diagnostic Share
@@ -3348,9 +3348,9 @@ private enum VerifyHarness {
         check(fBoth.filters(.gateway) && fBoth.filters(.internet), "both rules: both hops marked blocked")
         check(!fNone.any, "neither: no hop marked blocked")
 
-        // Internet ping cell: RTT unless the internet leg is filtered or nothing came back under TCP-1.
+        // Internet ping cell: RTT unless the internet leg is filtered.
         check(!PingReadout.internetShowsTCPOk(rtt: 25, filtering: fTcp1), "TCP-1 only with a measured internet RTT: the cell shows the RTT, not TCP ok")
-        check(PingReadout.internetShowsTCPOk(rtt: nil, filtering: fTcp1), "TCP-1 only with no internet RTT: TCP ok")
+        check(!PingReadout.internetShowsTCPOk(rtt: nil, filtering: fTcp1), "TCP-1 only with no internet RTT: not TCP ok (the cell shows no reply / dash)")
         check(PingReadout.internetShowsTCPOk(rtt: 25, filtering: fIcmp1), "ICMP-1: TCP ok even if an RTT is present")
         check(PingReadout.internetShowsTCPOk(rtt: nil, filtering: fIcmp1), "ICMP-1 with no RTT: TCP ok")
         check(PingReadout.internetShowsTCPOk(rtt: 25, filtering: fBoth), "both: TCP ok")

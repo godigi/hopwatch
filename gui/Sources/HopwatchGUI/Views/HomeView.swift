@@ -337,15 +337,15 @@ struct HomeView: View {
         case .noLink:
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
             let rules = coordinator.monitor.latest?.status.rules ?? []
-            let isPortal = rules.contains("N1c")
-                || rules.contains("CP-1")
-                || offline?.reason == "no-route"
-                || coordinator.currentNetworkRequiresPortal
+            let isPortal = rules.contains("CP-1")
+                || (coordinator.currentNetworkRequiresPortal && (offline?.reason == "no-route" || rules.contains("N1c")))
                 || coordinator.isSystemCaptiveActive()
 
             let headline: String = {
                 if isPortal {
                     return coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network"
+                } else if rules.contains("N1c") {
+                    return coordinator.rulesCatalog.catalog?["N1c"]?.title ?? "No route to internet"
                 } else if rules.contains("DH-3") {
                     return coordinator.rulesCatalog.catalog?["DH-3"]?.title ?? NoLinkCopy.headline
                 } else if rules.contains("WJ-1") {
@@ -359,10 +359,17 @@ struct HomeView: View {
 
             let subtitle: String = {
                 if isPortal {
-                    var text = coordinator.rulesCatalog.catalog?["N1c"]?.blurb
-                        ?? "This network requires you to sign in before you can access the internet."
+                    var text = "This network requires you to sign in before you can access the internet."
                     if coordinator.hasCustomDNS {
                         text += "\nCustom DNS is configured; if the portal doesn't open, your custom DNS may be blocking it."
+                    }
+                    return text
+                }
+                if rules.contains("N1c") {
+                    var text = coordinator.rulesCatalog.catalog?["N1c"]?.blurb
+                        ?? "Your Mac is associated with this network, but has no route to the internet."
+                    if coordinator.hasCustomDNS {
+                        text += "\nCustom DNS is configured; if this network has a captive portal, custom DNS may prevent the sign-in page from opening."
                     }
                     return text
                 }
@@ -1154,7 +1161,10 @@ struct HomeView: View {
 
     private var firedCategories: Set<String> {
         guard let catalog = coordinator.rulesCatalog.catalog else { return [] }
-        return Set(firedRules.compactMap { catalog[$0]?.category })
+        return Set(firedRules.compactMap { ruleID in
+            guard let entry = catalog[ruleID], entry.severity != "info" else { return nil }
+            return entry.category
+        })
     }
 
     private var routeWarningResult: RouteWarningResolver.Result {
@@ -1618,20 +1628,17 @@ struct HomeView: View {
     private var isCaptivePortal: Bool {
         coordinator.liveSample?.publicInfo.captivePortal == true
             || (coordinator.liveSample?.status.rules.contains("CP-1") ?? false)
-            || (coordinator.liveSample?.status.rules.contains("N1c") ?? false)
             || coordinator.alerts.active["captive-portal"] != nil
-            || coordinator.currentNetworkRequiresPortal
+            || (coordinator.currentNetworkRequiresPortal && (coordinator.liveSample?.link.up == false || coordinator.monitor.latest?.link.up == false))
             || coordinator.isSystemCaptiveActive()
     }
 
     private func isCaptivePortalAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
         alert.id == "captive-portal"
             || alert.rules.contains("CP-1")
-            || alert.rules.contains("N1c")
             || alert.title.localizedCaseInsensitiveContains("sign in")
             || alert.title.localizedCaseInsensitiveContains("captive")
             || (coordinator.liveSample?.publicInfo.captivePortal == true)
-            || coordinator.currentNetworkRequiresPortal
     }
 
     private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {

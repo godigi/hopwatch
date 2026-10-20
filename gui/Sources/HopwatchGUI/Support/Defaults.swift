@@ -330,6 +330,13 @@ enum Defaults {
         portalNetworks = current
     }
 
+    static func removePortalNetwork(_ key: String) {
+        guard !key.isEmpty else { return }
+        var current = portalNetworks
+        current.remove(key)
+        portalNetworks = current
+    }
+
     // MARK: - Scan progress weighting
 
     /// `PhaseWeights`' raw material: mode -> phase name -> recent measured

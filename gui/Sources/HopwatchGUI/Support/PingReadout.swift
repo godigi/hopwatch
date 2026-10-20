@@ -9,11 +9,11 @@ import Foundation
 enum PingReadout {
 
     /// True when the internet ping cell should read "TCP ok" instead of an
-    /// RTT: the internet leg is filtered (ICMP-1), or the gateway is filtered
-    /// (TCP-1) and no internet RTT came back to show. Under TCP-1 alone a
-    /// measured internet RTT is real and is shown.
+    /// RTT: the internet leg is filtered (ICMP-1). Under TCP-1 alone, only
+    /// the gateway is filtered; an internet RTT is real if measured, or "no reply"
+    /// / unmeasured if missing.
     static func internetShowsTCPOk(rtt: Double?, filtering: EffectiveLoss.Filtering) -> Bool {
-        filtering.internetLeg || (filtering.gatewayLeg && rtt == nil)
+        filtering.internetLeg
     }
 
     /// The internet RTT a chart series plots for one sample, or `nil` (a gap)
@@ -24,12 +24,13 @@ enum PingReadout {
 
     /// The menu-bar latency string. Prefers the internet RTT, falls back to
     /// the gateway RTT, and never trusts a figure from a filtered leg.
-    /// "TCP ok" when a filter left nothing measurable to show.
+    /// "TCP ok" when a filter left nothing measurable to show, provided the
+    /// internet leg was actually filtered or both legs are filtered.
     static func menuBarPing(internetRtt: Double?, gatewayRtt: Double?,
                             filtering: EffectiveLoss.Filtering) -> String? {
         let inet = filtering.internetLeg ? nil : internetRtt
         let gw = filtering.gatewayLeg ? nil : gatewayRtt
         if let rtt = inet ?? gw, rtt >= 0 { return "\(Int(round(rtt)))ms" }
-        return filtering.any ? "TCP ok" : nil
+        return (filtering.internetLeg || filtering.both) ? "TCP ok" : nil
     }
 }

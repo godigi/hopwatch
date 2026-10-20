@@ -532,7 +532,7 @@ enum SupportSummaryFormatter {
         var impact: String?
 
         let isCaptive = snapshot.publicInfo.captivePortal == true
-            || snapshot.diagnosis.contains(where: { $0.rule == "CP-1" || $0.rule == "N1c" })
+            || snapshot.diagnosis.contains(where: { $0.rule == "CP-1" })
 
         if isCaptive {
             problem = "Wi-Fi sign-in / captive portal authentication required to access the internet"
@@ -791,10 +791,8 @@ enum SupportSummaryFormatter {
 
         let isCaptive = sample.publicInfo.captivePortal == true
             || (alert?.rules.contains("CP-1") == true)
-            || (alert?.rules.contains("N1c") == true)
             || (alert?.id == "captive-portal")
             || sample.status.rules.contains("CP-1")
-            || sample.status.rules.contains("N1c")
 
         if isCaptive {
             problem = "Wi-Fi sign-in / captive portal authentication required to access the internet"

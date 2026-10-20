@@ -716,11 +716,16 @@ final class HopwatchCoordinator {
         if let ssid = Self.readableSSID(sample.link.ssid) ?? liveSSID {
             lastAssociatedSSID = ssid
         }
-        if sample.publicInfo.captivePortal == true ||
-           sample.status.rules.contains("CP-1") ||
-           sample.status.rules.contains("N1c") ||
-           isSystemCaptiveActive() {
+        let isPortalConfirmed = sample.publicInfo.captivePortal == true ||
+            sample.status.rules.contains("CP-1") ||
+            isSystemCaptiveActive()
+        let internetHealthy = (sample.internet.lossPct ?? 100) < 50
+            || sample.publicInfo.ip != nil
+            || sample.tcp.anyOk == true
+        if isPortalConfirmed {
             learnCurrentNetworkRequiresPortal()
+        } else if sample.publicInfo.captivePortal == false && internetHealthy {
+            unlearnCurrentNetworkPortal()
         }
         alerts.evaluate(sample: sample)
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
@@ -1762,18 +1767,34 @@ final class HopwatchCoordinator {
 
     /// True when macOS itself reports the interface is awaiting captive portal interaction.
     func isSystemCaptiveActive() -> Bool {
+        // If internet has already been verified as accessible and clean, no captive portal is active.
+        if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
+            return false
+        }
         guard let store = SCDynamicStoreCreate(nil, "Hopwatch" as CFString, nil, nil) else { return false }
         let iface = monitor.latest?.link.interface ?? "en0"
         if let dict = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(iface)/CaptiveNetwork" as CFString) as? [String: Any] {
             if let waiting = dict["WaitingOnUI"] as? Bool, waiting { return true }
             if let waitingNum = dict["WaitingOnUI"] as? Int, waitingNum != 0 { return true }
-            if let stage = dict["Stage"] as? String, stage != "Online" && stage != "Offline" { return true }
+            if let stage = dict["Stage"] as? String {
+                let s = stage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if s == "captive" || s == "redirect" { return true }
+            }
         }
         return false
     }
 
     /// Whether the current network has been identified or learned as requiring a portal sign-in.
     var currentNetworkRequiresPortal: Bool {
+        if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
+            return false
+        }
+        let internetHealthy = (liveSample?.internet.lossPct ?? monitor.latest?.internet.lossPct ?? 100) < 50
+            || liveSample?.publicInfo.ip != nil || monitor.latest?.publicInfo.ip != nil
+            || liveSample?.tcp.anyOk == true || monitor.latest?.tcp.anyOk == true
+        if internetHealthy && (liveSample?.internet.rttAvgMs != nil || monitor.latest?.internet.rttAvgMs != nil || liveSample?.tcp.anyOk == true) {
+            return false
+        }
         if let id = monitor.latest?.network.historyJoinID, Defaults.portalNetworks.contains(id) {
             return true
         }
@@ -1806,11 +1827,31 @@ final class HopwatchCoordinator {
         }
     }
 
+    /// Removes the current network from persistent portal memory when internet access is confirmed.
+    func unlearnCurrentNetworkPortal() {
+        if let id = monitor.latest?.network.historyJoinID, !id.isEmpty {
+            Defaults.removePortalNetwork(id)
+        }
+        if let key = monitor.latest?.network.id, !key.isEmpty {
+            Defaults.removePortalNetwork(key)
+        }
+        if let ssid = wifiDisplayName, !ssid.isEmpty {
+            Defaults.removePortalNetwork("ssid:\(ssid)")
+        }
+        if let lastSSID = lastAssociatedSSID, !lastSSID.isEmpty {
+            Defaults.removePortalNetwork("ssid:\(lastSSID)")
+        }
+    }
+
     /// Directs the user to the captive portal sign-in page across all compatible methods:
     /// native Captive Network Assistant, detected portal redirect URL, canary detect URL,
     /// and raw router gateway HTTP (for custom DNS compatibility).
     func openPortalPage() {
-        learnCurrentNetworkRequiresPortal()
+        if liveSample?.publicInfo.captivePortal == true ||
+           monitor.latest?.status.rules.contains("CP-1") == true ||
+           isSystemCaptiveActive() {
+            learnCurrentNetworkRequiresPortal()
+        }
 
         // 1. If liveSample has a detected captive portal URL, open that in default browser
         if let urlStr = liveSample?.publicInfo.captivePortalURL,

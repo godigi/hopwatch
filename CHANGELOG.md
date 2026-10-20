@@ -8,6 +8,16 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Fixed
+- Fixed false captive portal banner and alert hijacking:
+  - Eliminated automatic captive portal network learning from rule `N1c` ("joined with no route out") or momentary `no-route` states so home and office networks are never falsely branded as captive portals.
+  - Fixed `isLearnedPortalAwaitingSignIn` in `AlertEngine`: networks where internet access is confirmed (`captive_portal == false` and healthy latency/traffic) immediately clear and never raise false sign-in alerts.
+  - Fixed `isCaptivePortalAlert` in dropdown and dashboard views so unrelated network findings (e.g. IPv6, double NAT, jitter) are never hijacked and replaced with captive portal sign-in banners.
+  - Added automatic unlearning of portal flags when live probes confirm direct internet access without interception.
+- Fixed false captive portal detection and persistent network poisoning: macOS `CaptiveNetwork` state reporting `Stage : Unknown` is no longer mistaken for an active captive portal, and probing the default gateway router on port 80 directly is eliminated so that local router admin login pages are never classified as captive portals.
+- Fixed misleading "Internet ping: TCP ok" readout when internet pings fail or time out: under gateway ping filtering (`TCP-1`), missing or failing internet pings now accurately display "no reply" or packet loss instead of falsely displaying "TCP ok" in green.
+- Fixed 3-hop topology attribution during upstream internet outages: when the gateway router filters ICMP ping, high internet packet loss now properly warns on the Internet hop (red/amber globe) and attributes the culprit to the ISP/Internet rather than blaming the local router.
+
 ## [1.20.0] - 2026-10-19
 
 ### Fixed

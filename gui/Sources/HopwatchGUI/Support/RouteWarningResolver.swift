@@ -78,8 +78,12 @@ enum RouteWarningResolver {
         let routerWarn: Bool
         if hasRecentRoam && gwLoss < 10.0 {
             routerWarn = false
-        } else if gatewayPingFiltered && inetLoss <= 1.0 && !firedCategories.contains("router") {
+        } else if gatewayPingFiltered && !firedCategories.contains("router") {
             routerWarn = false
+        } else if gatewayPingFiltered && !realGWLoss {
+            // Under gateway ICMP filtering (TCP-1), the gateway's ping silence is not a fault.
+            // Only real router fault rules (severity warn/crit) or real gateway loss should warn.
+            routerWarn = firedCategories.contains("router")
         } else {
             routerWarn = firedCategories.contains("router")
                 || realGWLoss
@@ -90,7 +94,9 @@ enum RouteWarningResolver {
         var internetWarn = false
         if firedCategories.contains("internet") {
             internetWarn = true
-        } else if inetLoss >= 3.0 && inetLoss > gwLoss {
+        } else if inetLoss >= 3.0 && (gatewayPingFiltered || inetLoss > gwLoss) {
+            internetWarn = true
+        } else if inetLoss >= 10.0 {
             internetWarn = true
         } else if inetJitter >= 30.0 && gwJitter < 20.0 {
             internetWarn = true
@@ -99,6 +105,10 @@ enum RouteWarningResolver {
         } else if case .degraded = stage, !routerWarn, !isWifiLaggy {
             // When user experiences degradation for calls/gaming/streaming/browsing
             // and local hops (Wi-Fi and Router) are verified clean, the culprit is the Internet/ISP.
+            internetWarn = true
+        } else if case .degraded = stage, gatewayPingFiltered, !isWifiLaggy {
+            // When degraded and gateway ping is filtered while Wi-Fi is clean,
+            // the degradation is upstream (Internet/ISP).
             internetWarn = true
         }
 

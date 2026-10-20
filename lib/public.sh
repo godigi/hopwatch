@@ -108,31 +108,11 @@ public_run() {
       if [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] && [ -n "${INTERFACE:-}" ]; then
         local sc_out
         sc_out="$(echo "get State:/Network/Interface/$INTERFACE/CaptiveNetwork"$'\n'"d.show" | scutil 2>/dev/null || true)"
-        if [[ "$sc_out" =~ Stage[[:space:]]*:[[:space:]]*(Captive|Redirect|Probe) ]] || [[ "$sc_out" =~ WaitingOnUI[[:space:]]*:[[:space:]]*(TRUE|1) ]]; then
+        if [[ "$sc_out" =~ Stage[[:space:]]*:[[:space:]]*(Captive|Redirect) ]] || [[ "$sc_out" =~ WaitingOnUI[[:space:]]*:[[:space:]]*(TRUE|1) ]]; then
           CAPTIVE_PORTAL=1
           CAPTIVE_PORTAL_CODE="CNA"
           [ -z "$CAPTIVE_PORTAL_URL" ] && [ -n "${GATEWAY:-}" ] && CAPTIVE_PORTAL_URL="http://${GATEWAY}"
           warn "Captive portal detected (macOS Captive Network Assistant) — log in via browser."
-        fi
-      fi
-
-      # Fallback 3: Probe gateway on port 80 directly (no DNS needed)
-      if [ "${CAPTIVE_PORTAL:-0}" -eq 0 ] && [ -n "${GATEWAY:-}" ]; then
-        local gw_raw gw_code gw_url gw_body
-        gw_raw="$(curl -s -m 2 -w $'\n__METADATA__\n%{http_code}\n%{redirect_url}\n' "http://${GATEWAY}/" 2>/dev/null || true)"
-        gw_body="${gw_raw%%$'\n'__METADATA__*}"
-        local gw_meta="${gw_raw##*$'\n'__METADATA__$'\n'}"
-        { read -r gw_code || true; read -r gw_url || true; } <<< "$gw_meta"
-        if [ "$gw_code" = "302" ] || [ "$gw_code" = "307" ] || [ "$gw_code" = "511" ]; then
-          CAPTIVE_PORTAL=1
-          CAPTIVE_PORTAL_CODE="$gw_code"
-          CAPTIVE_PORTAL_URL="${gw_url:-http://${GATEWAY}}"
-          warn "Captive portal detected (HTTP $gw_code) — log in via browser."
-        elif [ "$gw_code" = "200" ] && printf '%s' "$gw_body" | grep -qiE '(captive|portal|guest|login|sign[ -]?in|password)'; then
-          CAPTIVE_PORTAL=1
-          CAPTIVE_PORTAL_CODE="200"
-          CAPTIVE_PORTAL_URL="${gw_url:-http://${GATEWAY}}"
-          warn "Captive portal detected (HTTP 200) — log in via browser."
         fi
       fi
       ;;

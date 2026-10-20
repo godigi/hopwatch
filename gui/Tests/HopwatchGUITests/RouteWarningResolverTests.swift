@@ -174,4 +174,36 @@ import Testing
         #expect(!result.internetWarn)
         #expect(result.culpritHop == nil)
     }
+
+    @Test func gatewayPingFilteredWithInternetLossWarnsInternetNotRouter() {
+        // Router blocks/filters ICMP ping (100% gateway loss, gatewayPingFiltered: true),
+        // but the internet connection is degraded/down (100% internet loss).
+        // The router must NOT be blamed; the Internet hop must be warned and named culprit.
+        let degraded = StageResolver.DegradedSnapshot(
+            headline: "Connection is unstable",
+            subtitle: "100% packet loss",
+            isCritical: true,
+            affectedActivities: ["Calls", "Gaming", "Streaming", "Browsing"]
+        )
+        let result = RouteWarningResolver.resolve(
+            linkUp: true,
+            isWiFi: true,
+            stage: .degraded(degraded),
+            firedCategories: [],
+            gwLoss: 100.0,
+            gwPing: 0.0,
+            gwJitter: 0.0,
+            inetLoss: 100.0,
+            inetPing: 0.0,
+            inetJitter: 0.0,
+            hasRecentRoam: false,
+            gatewayPingFiltered: true
+        )
+
+        #expect(!result.routerWarn)
+        #expect(!result.isWifiLaggy)
+        #expect(result.macStatusGood)
+        #expect(result.internetWarn)
+        #expect(result.culpritHop == "internet")
+    }
 }

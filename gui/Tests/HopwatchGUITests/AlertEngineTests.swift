@@ -59,4 +59,68 @@ import Testing
         #expect(engine.active["browser-desync"] == nil)
         #expect(delivered.contains { $0.id.contains("browser-desync") && $0.title.contains("resolved") })
     }
+
+    @Test @MainActor func captivePortalAlertDoesNotFireOnHealthyLearnedPortal() {
+        let notifMgr = NotificationManager()
+        let engine = AlertEngine(notificationManager: notifMgr)
+
+        let testSSID = "TestCafe"
+        Defaults.recordPortalNetwork("ssid:\(testSSID)")
+        defer { Defaults.removePortalNetwork("ssid:\(testSSID)") }
+
+        var sample = MonitorSample()
+        sample.link.ssid = testSSID
+        sample.publicInfo.captivePortal = false
+        sample.publicInfo.ip = "203.0.113.1"
+        sample.internet.lossPct = 0
+        sample.internet.rttAvgMs = 20.0
+        sample.status.severity = "ok"
+
+        var currentTime = Date()
+        engine.now = { currentTime }
+
+        engine.evaluate(sample: sample)
+        currentTime = currentTime.addingTimeInterval(30)
+        engine.evaluate(sample: sample)
+
+        #expect(engine.active["captive-portal"] == nil)
+    }
+
+    @Test @MainActor func n1cDoesNotFireCaptivePortalAlert() {
+        let notifMgr = NotificationManager()
+        let engine = AlertEngine(notificationManager: notifMgr)
+
+        var sample = MonitorSample()
+        sample.status.rules = ["N1c"]
+        sample.status.severity = "critical"
+
+        var currentTime = Date()
+        engine.now = { currentTime }
+
+        engine.evaluate(sample: sample)
+        currentTime = currentTime.addingTimeInterval(30)
+        engine.evaluate(sample: sample)
+
+        #expect(engine.active["captive-portal"] == nil)
+    }
+
+    @Test @MainActor func cp1FiresCaptivePortalAlert() {
+        let notifMgr = NotificationManager()
+        let engine = AlertEngine(notificationManager: notifMgr)
+
+        var sample = MonitorSample()
+        sample.status.rules = ["CP-1"]
+        sample.publicInfo.captivePortal = true
+        sample.status.severity = "critical"
+
+        var currentTime = Date()
+        engine.now = { currentTime }
+
+        engine.evaluate(sample: sample)
+        // Def dwell is 15s
+        currentTime = currentTime.addingTimeInterval(20)
+        engine.evaluate(sample: sample)
+
+        #expect(engine.active["captive-portal"] != nil)
+    }
 }
