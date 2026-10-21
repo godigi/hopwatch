@@ -44,6 +44,10 @@ final class HopwatchCoordinator {
     let appSettings = AppSettings()
     /// Automated update checker against GitHub releases.
     let updateChecker = UpdateChecker()
+    /// Live 1-second ping heartbeat monitor and cardiogram stream.
+    let heartbeat = PingHeartbeat()
+    /// Callback to open the native software update modal.
+    var onOpenSoftwareUpdate: (() -> Void)?
     /// macOS Location Services permission manager.
     let locationPermissions = LocationPermissionStore()
     /// The run in flight, phase by phase. Reset at the start of every run
@@ -336,7 +340,10 @@ final class HopwatchCoordinator {
             guard let blurb = self?.rulesCatalog.catalog?[ruleID]?.blurb, !blurb.isEmpty else { return nil }
             return blurb
         }
-        if Defaults.monitoringEnabled { monitor.start() }
+        if Defaults.monitoringEnabled {
+            monitor.start()
+            heartbeat.start()
+        }
         syncAlertPauseState()
         startStaleWatch()
 
@@ -359,6 +366,7 @@ final class HopwatchCoordinator {
         scanTask?.cancel()
         monitor.stop()
         events.stop()
+        heartbeat.stop()
     }
 
     private func startPeriodicUpdateChecks() {
@@ -571,7 +579,13 @@ final class HopwatchCoordinator {
 
     func setMonitoring(enabled: Bool) {
         Defaults.monitoringEnabled = enabled
-        if enabled { monitor.start() } else { monitor.stop() }
+        if enabled {
+            monitor.start()
+            heartbeat.start()
+        } else {
+            monitor.stop()
+            heartbeat.stop()
+        }
         syncAlertPauseState()
     }
 
@@ -742,6 +756,10 @@ final class HopwatchCoordinator {
         considerInvestigationBurst(sample)
 
         considerAutoReconnect(sample)
+
+        if heartbeat.beats.isEmpty {
+            heartbeat.seedFromSamples(currentSamples)
+        }
 
         // The first cycle of a monitor process records monitor-started, matching
         // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
@@ -1066,6 +1084,14 @@ final class HopwatchCoordinator {
 
     func handleSampleForTesting(_ sample: MonitorSample) {
         handleSample(sample)
+        if heartbeat.beats.isEmpty {
+            heartbeat.adoptTestBeat(latencyMs: 18.5, isMiss: false, seq: 1)
+            heartbeat.adoptTestBeat(latencyMs: 22.1, isMiss: false, seq: 2)
+            heartbeat.adoptTestBeat(latencyMs: 19.0, isMiss: false, seq: 3)
+            heartbeat.adoptTestBeat(latencyMs: nil, isMiss: true, seq: 4)
+            heartbeat.adoptTestBeat(latencyMs: 45.2, isMiss: false, seq: 5)
+            heartbeat.adoptTestBeat(latencyMs: 18.5, isMiss: false, seq: 6)
+        }
     }
 
     /// Gallery fixture for the moved-network state (`--gallery-moved`): the
@@ -1511,6 +1537,7 @@ final class HopwatchCoordinator {
         lastSeverity = "ok"
         previousActiveAlerts = [:]
         alerts.invalidateConnection()
+        heartbeat.reset()
         notifications.clearAnnouncedFaults()
         dismissActiveResolution()
         events.markSettling()
@@ -1598,6 +1625,7 @@ final class HopwatchCoordinator {
         // The pause is SIGUSR1, not SIGSTOP. See MonitorStream for why the
         // obvious mechanism kills the process 2 s in.
         monitor.pause(reason: Self.scanPauseReason)
+        heartbeat.pause()
         alerts.scanInProgress = true
 
         scanTask = Task { [weak self] in
@@ -1614,6 +1642,7 @@ final class HopwatchCoordinator {
                 // must not go on saying it is checking once the child is gone.
                 self.alerts.scanEnded()
                 self.monitor.resume(reason: Self.scanPauseReason)
+                self.heartbeat.resume()
                 self.syncAlertPauseState()
                 // Whatever happened — a clean exit, a crash, Cancel — the
                 // child is gone, so no phase can report again. Without this
@@ -1843,6 +1872,12 @@ final class HopwatchCoordinator {
         }
     }
 
+    /// Presents the native macOS Software Update modal showing version differences,
+    /// formatted release notes, and install options.
+    func showSoftwareUpdate() {
+        onOpenSoftwareUpdate?()
+    }
+
     /// Directs the user to the captive portal sign-in page across all compatible methods:
     /// native Captive Network Assistant, detected portal redirect URL, canary detect URL,
     /// and raw router gateway HTTP (for custom DNS compatibility).
@@ -1857,6 +1892,9 @@ final class HopwatchCoordinator {
         if let urlStr = liveSample?.publicInfo.captivePortalURL,
            let url = URL(string: urlStr) {
             NSWorkspace.shared.open(url)
+            eventLog.record(kind: "repair", summary: "Opened captive portal sign-in page", ruleID: "CP-1",
+                            network: monitor.latest?.network.id)
+            return
         }
 
         // 2. Launch macOS native Captive Network Assistant.app if present
@@ -1864,21 +1902,27 @@ final class HopwatchCoordinator {
         if FileManager.default.fileExists(atPath: cnaPath) {
             let cnaURL = URL(fileURLWithPath: cnaPath)
             NSWorkspace.shared.openApplication(at: cnaURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+            eventLog.record(kind: "repair", summary: "Launched Captive Network Assistant", ruleID: "CP-1",
+                            network: monitor.latest?.network.id)
+            return
         }
 
-        // 3. Open Apple's hotspot detect URL in default browser
+        // 3. If custom DNS is active and router IP is known, open http://<gateway> which bypasses DNS
+        if hasCustomDNS, let gw = liveSample?.link.gateway ?? monitor.latest?.link.gateway, !gw.isEmpty,
+           let gwURL = URL(string: "http://\(gw)") {
+            NSWorkspace.shared.open(gwURL)
+            eventLog.record(kind: "repair", summary: "Opened gateway HTTP sign-in page", ruleID: "CP-1",
+                            network: monitor.latest?.network.id)
+            return
+        }
+
+        // 4. Fall back to Apple's hotspot detect URL in default browser
         if let detectURL = URL(string: "http://captive.apple.com/hotspot-detect.html") {
             NSWorkspace.shared.open(detectURL)
         }
 
-        // 4. If custom DNS is active and router IP is known, also open http://<gateway> which bypasses DNS
-        if hasCustomDNS, let gw = liveSample?.link.gateway ?? monitor.latest?.link.gateway, !gw.isEmpty,
-           let gwURL = URL(string: "http://\(gw)") {
-            NSWorkspace.shared.open(gwURL)
-        }
-
         eventLog.record(kind: "repair", summary: "Opened captive portal sign-in page", ruleID: "CP-1",
-                         network: monitor.latest?.network.id)
+                        network: monitor.latest?.network.id)
     }
 
     /// Run a repair the user has just confirmed, then find out whether it
@@ -2022,6 +2066,7 @@ final class HopwatchCoordinator {
             Task { @MainActor in
                 guard Defaults.pauseOnDisplaySleep else { return }
                 self?.monitor.pause(reason: "the display is asleep")
+                self?.heartbeat.pause()
                 self?.syncAlertPauseState()
             }
         }
@@ -2030,6 +2075,7 @@ final class HopwatchCoordinator {
             Task { @MainActor in
                 self?.events.markSettling()
                 self?.monitor.resume(reason: "the display is asleep")
+                self?.heartbeat.resume()
                 self?.syncAlertPauseState()
             }
         }
@@ -2040,6 +2086,7 @@ final class HopwatchCoordinator {
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 self?.monitor.pause(reason: "your Mac is asleep")
+                self?.heartbeat.pause()
                 self?.syncAlertPauseState()
             }
         }
@@ -2049,6 +2096,7 @@ final class HopwatchCoordinator {
                 self?.events.markSettling()
                 self?.invalidateCurrentConnection()
                 self?.monitor.resume(reason: "your Mac is asleep")
+                self?.heartbeat.resume()
                 if Defaults.monitoringEnabled { self?.monitor.restart() }
                 self?.syncAlertPauseState()
                 // The world may be entirely different after a wake, and
@@ -2490,12 +2538,13 @@ final class HopwatchCoordinator {
     /// that file for the precedence and for why a paused app no longer
     /// reports the last reading from before it stopped looking.
     var currentHealth: Health {
-        let activeSnapshot = alerts.activeSorted.first.map {
+        let activeSnapshot = alerts.urgentActiveSorted.first.map {
             StageResolver.AlertSnapshot(
                 title: $0.title, body: $0.body,
                 raisedAt: $0.raisedAt, rules: $0.rules,
                 severityRank: $0.rules.compactMap(severityRank(forRuleID:)).max() ?? 0,
-                id: $0.id)
+                id: $0.id,
+                isUrgent: $0.isUrgent)
         }
         // A run is the dot's answer only when there is no sample at all
         // (a cold launch before the first one). Once the monitor has spoken
@@ -2647,7 +2696,7 @@ final class HopwatchCoordinator {
                                      catalog: rulesCatalog.catalog)
                 ?? NoLinkCopy.fallbackSubtitle
         }
-        if let alert = alerts.activeSorted.first {
+        if let alert = alerts.urgentActiveSorted.first {
             return alert.body.isEmpty ? alert.title : alert.body
         }
         if !monitor.isRunning {

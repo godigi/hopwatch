@@ -127,4 +127,49 @@ struct UpdateCheckerTests {
         #expect(deliveredBody?.contains("1.2.1") == true)
         #expect(deliveredBody?.contains("Fix latency jitter") == true)
     }
+
+    @Test("release bullet points cleans markdown and conventional commit prefixes")
+    func releaseBulletPointsParsing() {
+        let release = GitHubRelease(
+            tagName: "v0.18.3",
+            name: "Hopwatch 0.18.3",
+            body: """
+            ## What's Changed
+            - fix(gui): taskbar icons not updating after an app's icon is changed
+            * feat: global shortcut ⌥⌘N to summon menu bar
+            • Fixed pinned folder icons flickering while being reordered by @contributor in https://github.com/godigi/hopwatch/pull/99
+            - chore(release): bump version to 0.18.3 (#100)
+            """,
+            htmlUrl: nil,
+            publishedAt: nil,
+            assets: []
+        )
+
+        let bullets = release.releaseBulletPoints
+        #expect(bullets.count == 4)
+        #expect(bullets[0] == "Taskbar icons not updating after an app's icon is changed")
+        #expect(bullets[1] == "Global shortcut ⌥⌘N to summon menu bar")
+        #expect(bullets[2] == "Fixed pinned folder icons flickering while being reordered")
+        #expect(bullets[3] == "Bump version to 0.18.3")
+    }
+
+    @Test("skipping an update version stores preference and resets active update")
+    @MainActor
+    func skipUpdateVersionBehavior() {
+        let checker = UpdateChecker()
+        checker.hasUpdate = true
+        checker.availableRelease = GitHubRelease(
+            tagName: "v1.99.0",
+            name: "Hopwatch 1.99.0",
+            body: "- Future release",
+            htmlUrl: nil,
+            publishedAt: nil,
+            assets: []
+        )
+
+        checker.skipVersion("1.99.0")
+        #expect(Defaults.skippedUpdateVersion == "1.99.0")
+        #expect(checker.hasUpdate == false)
+        #expect(checker.availableRelease == nil)
+    }
 }

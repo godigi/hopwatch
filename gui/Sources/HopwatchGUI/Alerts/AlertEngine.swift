@@ -75,6 +75,11 @@ final class AlertEngine {
         /// asks "how bad is this?" reads these IDs, so they have to be the
         /// ones the CLI actually reported.
         var rules: Set<String> = []
+
+        var isUrgent: Bool {
+            AlertDefinition.byID(id)?.isUrgent ?? true
+        }
+        var reachesMiniMenu: Bool { isUrgent }
     }
 
     private(set) var active: [String: ActiveAlert] = [:]
@@ -659,5 +664,11 @@ final class AlertEngine {
             if a.rank != b.rank { return a.rank > b.rank }
             return a.alert.raisedAt > b.alert.raisedAt
         }.map(\.alert)
+    }
+
+    /// Active alerts that represent urgent connection issues suitable for the
+    /// taskbar dropdown (mini menu), menu-bar health dot, and status headline.
+    var urgentActiveSorted: [ActiveAlert] {
+        activeSorted.filter(\.isUrgent)
     }
 }

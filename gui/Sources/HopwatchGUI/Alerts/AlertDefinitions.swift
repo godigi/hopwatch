@@ -107,6 +107,19 @@ struct AlertDefinition: Identifiable, Sendable {
     /// and no rules; `--verify` checks it.
     var isEvent: Bool = false
 
+    /// Whether this alert represents an urgent real-time connection issue
+    /// that reaches the taskbar dropdown (mini menu), drives the menu-bar
+    /// health status dot, and updates the status headline.
+    ///
+    /// Non-urgent advisories (such as Double NAT, DHCP lease countdown,
+    /// clock drift, and baseline speed regressions) are reported in the
+    /// Dashboard findings, check tables, and diagnostic run reports, but
+    /// do not hijack the taskbar dropdown's hero status card.
+    var isUrgent: Bool = true
+
+    /// Alias for clarity at call sites deciding whether an alert reaches the mini menu.
+    var reachesMiniMenu: Bool { isUrgent }
+
     static let all: [AlertDefinition] = [
         AlertDefinition(
             id: "connection-lost", title: "No internet connection",
@@ -146,7 +159,7 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 60, resolves: false, scanOnly: false,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Fires as soon as it's seen; won't repeat within 1 minute.",
-            interimBody: "", isEvent: true),
+            interimBody: "", isEvent: true, isUrgent: false),
 
         AlertDefinition(
             id: "captive-portal", title: "This network needs you to sign in",
@@ -174,7 +187,7 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 43_200, resolves: true, scanOnly: true,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 12 hours.",
-            interimBody: ""),
+            interimBody: "", isUrgent: false),
 
         AlertDefinition(
             id: "ip-conflict", title: "IP address conflict",
@@ -199,7 +212,7 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 21_600, resolves: false, scanOnly: true,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 6 hours.",
-            interimBody: ""),
+            interimBody: "", isUrgent: false),
 
         AlertDefinition(
             id: "slower-than-usual", title: "Slower than usual",
@@ -207,7 +220,7 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 43_200, resolves: false, scanOnly: true,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Checked only during a full check; won't repeat for 12 hours.",
-            interimBody: ""),
+            interimBody: "", isUrgent: false),
 
         AlertDefinition(
             id: "double-nat", title: "Two routers connected (Double NAT)",
@@ -215,7 +228,8 @@ struct AlertDefinition: Identifiable, Sendable {
             dwell: 0, cooldown: 86_400, resolves: true, scanOnly: true,
             lossLeg: nil, oncePerNetwork: true,
             caption: "Checked only during a full check; fires once per network, then won't repeat for 24 hours.",
-            interimBody: "Two routers are chained together in your home, which can cause gaming and VPN issues."),
+            interimBody: "Two routers are chained together in your home, which can cause gaming and VPN issues.",
+            isUrgent: false),
 
         AlertDefinition(
             id: "browser-desync", title: "Browser needs relaunch",

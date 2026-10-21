@@ -74,7 +74,7 @@ enum HealthResolver {
         // Exception: an arrival check on a new network is determining the connection.
         if i.isScanning {
             if i.linkDown { return .critical }
-            if let alert = i.activeAlert {
+            if let alert = i.activeAlert, alert.isUrgent {
                 return alert.severityRank >= 3 ? .critical : .warning
             }
             if i.isArrivalCheck { return .checking }
@@ -105,7 +105,7 @@ enum HealthResolver {
         // what it last said is not the network now. After the no-link
         // branch above, which has its own (longer) window.
         if i.sampleStale { return .warning }
-        if let alert = i.activeAlert {
+        if let alert = i.activeAlert, alert.isUrgent {
             return alert.severityRank >= 3 ? .critical : .warning
         }
         // Connection baseline is actively being determined.

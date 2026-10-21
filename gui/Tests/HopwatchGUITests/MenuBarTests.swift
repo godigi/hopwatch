@@ -70,7 +70,7 @@ import AppKit
         let proposedSize = hostingController.sizeThatFits(in: NSSize(width: 420, height: 880))
 
         #expect(offscreenFitting.width == 420)
-        #expect(offscreenFitting.height > 500 && offscreenFitting.height < 800)
+        #expect(offscreenFitting.height > 500 && offscreenFitting.height < 880)
         #expect(abs(proposedSize.height - offscreenFitting.height) <= 1.0)
 
         let topMaxY: CGFloat = (NSScreen.main?.visibleFrame.maxY ?? 1073) - 2

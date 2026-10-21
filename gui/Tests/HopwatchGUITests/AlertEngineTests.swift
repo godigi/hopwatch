@@ -123,4 +123,87 @@ import Testing
 
         #expect(engine.active["captive-portal"] != nil)
     }
+
+    @Test func nonUrgentAlertDefinitionsAreExcludedFromMiniMenu() {
+        // Non-urgent advisories that must not reach the mini menu taskbar dropdown
+        let nonUrgentIDs = ["double-nat", "lease-expiring", "clock-drift", "slower-than-usual"]
+        for id in nonUrgentIDs {
+            let def = AlertDefinition.byID(id)
+            #expect(def != nil, "AlertDefinition \(id) must exist")
+            #expect(def?.isUrgent == false, "\(id) must have isUrgent == false")
+            #expect(def?.reachesMiniMenu == false, "\(id) must have reachesMiniMenu == false")
+        }
+
+        // Urgent connection health issues that must reach the mini menu
+        let urgentIDs = ["connection-lost", "wifi-unstable", "internet-degraded", "dns-failing", "captive-portal", "vpn-dropped", "ip-conflict", "different-network", "browser-desync"]
+        for id in urgentIDs {
+            let def = AlertDefinition.byID(id)
+            #expect(def != nil, "AlertDefinition \(id) must exist")
+            #expect(def?.isUrgent == true, "\(id) must have isUrgent == true")
+            #expect(def?.reachesMiniMenu == true, "\(id) must have reachesMiniMenu == true")
+        }
+    }
+
+    @Test @MainActor func doubleNATDoesNotReachMiniMenuStageOrDotHealth() {
+        let notifMgr = NotificationManager()
+        let engine = AlertEngine(notificationManager: notifMgr)
+
+        var run = RunSnapshot()
+        run.network.id = "test-net"
+        var diag = RunSnapshot.Diagnosis()
+        diag.rule = "NAT-1"
+        diag.summary = "Two routers connected (Double NAT)"
+        diag.severity = "warn"
+        run.diagnosis = [diag]
+
+        engine.evaluate(run: run)
+
+        // 1. Double NAT is tracked in active alerts (accessible by dashboard findings and reports)
+        #expect(engine.active["double-nat"] != nil)
+
+        // 2. But excluded from urgentActiveSorted (used by the mini menu dropdown and menu bar dot)
+        #expect(!engine.urgentActiveSorted.contains { $0.id == "double-nat" })
+
+        let activeAlert = engine.active["double-nat"]!
+        #expect(activeAlert.isUrgent == false)
+        #expect(activeAlert.reachesMiniMenu == false)
+
+        let snapshot = StageResolver.AlertSnapshot(
+            title: activeAlert.title,
+            body: activeAlert.body,
+            raisedAt: activeAlert.raisedAt,
+            rules: activeAlert.rules,
+            severityRank: 2,
+            id: activeAlert.id,
+            isUrgent: activeAlert.isUrgent
+        )
+
+        // 3. StageResolver must NEVER resolve to .alerted for non-urgent alert
+        let stageInputs = StageResolver.Inputs(
+            isScanning: false,
+            monitoringEnabled: true,
+            isPausedForAnyReason: false,
+            pauseReason: nil,
+            lastError: nil,
+            monitorRunning: true,
+            activeAlert: snapshot,
+            severity: "ok",
+            linkUp: true,
+            measurementState: "measured"
+        )
+        let resolvedStage = StageResolver.resolve(stageInputs)
+        #expect(resolvedStage == .healthy, "StageResolver must not resolve to .alerted for non-urgent alert")
+
+        // 4. HealthResolver must NOT turn the menu bar dot amber when the connection is healthy
+        let healthInputs = HealthResolver.Inputs(
+            isScanning: false,
+            monitoringEnabled: true,
+            isPausedForAnyReason: false,
+            monitorRunning: true,
+            activeAlert: snapshot,
+            sampleHealth: .healthy,
+            runHealth: .warning
+        )
+        #expect(HealthResolver.resolve(healthInputs) == .healthy, "HealthResolver must remain healthy when live sample is healthy")
+    }
 }

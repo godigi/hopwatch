@@ -26,6 +26,7 @@ final class UpdateChecker {
     var lastCheckedDate: Date? { Defaults.lastUpdateCheck }
     var errorMessage: String?
     var onUpdateFound: ((GitHubRelease) -> Void)?
+    var onPresentUpdateModal: ((GitHubRelease) -> Void)?
 
     init() {
         if let last = Defaults.lastUpdateCheck {
@@ -76,6 +77,14 @@ final class UpdateChecker {
                 let localVersion = SemanticVersion(Defaults.appVersion)
 
                 if remoteVersion > localVersion {
+                    if !manual && Defaults.skippedUpdateVersion == release.cleanVersion {
+                        self.availableRelease = nil
+                        self.hasUpdate = false
+                        self.statusMessage = "Up to date (v\(Defaults.appVersion))"
+                        self.log.debug("Release v\(release.cleanVersion, privacy: .public) was previously skipped by user.")
+                        return
+                    }
+
                     let hasArchive = release.assets.contains(where: { $0.isInstallableArchive })
                     if hasArchive {
                         self.availableRelease = release
@@ -85,6 +94,9 @@ final class UpdateChecker {
                         if Defaults.lastNotifiedUpdateVersion != release.cleanVersion {
                             Defaults.lastNotifiedUpdateVersion = release.cleanVersion
                             self.onUpdateFound?(release)
+                        }
+                        if manual {
+                            self.onPresentUpdateModal?(release)
                         }
                         if !self.isDownloading && !self.isPreloaded {
                             self.startBackgroundPreload(for: release)
@@ -133,6 +145,15 @@ final class UpdateChecker {
     /// Downloads and installs the latest release update, then relaunches the app.
     func downloadAndInstallUpdate() {
         installUpdate()
+    }
+
+    /// Mark a version as skipped so automatic update notifications/dialogs won't prompt for it again.
+    func skipVersion(_ version: String) {
+        Defaults.skippedUpdateVersion = version
+        hasUpdate = false
+        availableRelease = nil
+        statusMessage = "Up to date (v\(Defaults.appVersion))"
+        log.notice("Skipped update version v\(version, privacy: .public)")
     }
 
     /// Preloads update in background quietly so subsequent install is instantaneous.

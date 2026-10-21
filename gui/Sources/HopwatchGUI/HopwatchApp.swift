@@ -75,6 +75,17 @@ struct HopwatchApp: App {
         }
         .defaultSize(width: 480, height: 520)
         .windowResizability(.contentSize)
+
+        Window("Software Update", id: WindowID.softwareUpdate) {
+            SoftwareUpdateView(onDismiss: {
+                NSApp.windows.first(where: { $0.identifier?.rawValue.contains(WindowID.softwareUpdate) == true })?.close()
+                delegate.updateActivationPolicy()
+            })
+            .environment(coordinator)
+            .environment(coordinator.appSettings)
+        }
+        .defaultSize(width: 530, height: 380)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -93,12 +104,30 @@ extension HopwatchApp {
             }
             NSApp.activate(ignoringOtherApps: true)
         }
+        delegate.openSoftwareUpdateHandler = {
+            NSApp.setActivationPolicy(.regular)
+            openWindow(id: WindowID.softwareUpdate)
+            for window in NSApp.windows where window.canBecomeMain && !(window.className.contains("NSStatusBarWindow")) {
+                if window.identifier?.rawValue.contains(WindowID.softwareUpdate) == true {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        coordinator.onOpenSoftwareUpdate = { [weak delegate] in
+            delegate?.openSoftwareUpdate()
+        }
+        coordinator.updateChecker.onPresentUpdateModal = { [weak delegate] _ in
+            delegate?.openSoftwareUpdate()
+        }
         coordinator.notifications.onNotificationResponse = {
             delegate.openDashboard()
         }
-        coordinator.notifications.onNotificationAction = { [weak coordinator] id, _ in
+        coordinator.notifications.onNotificationAction = { [weak coordinator, weak delegate] id, _ in
             if id == "netdiag.captive-portal" {
                 coordinator?.openPortalPage()
+            } else if id.hasPrefix("netdiag.update.") {
+                delegate?.openSoftwareUpdate()
             }
         }
 
@@ -193,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     /// and leave the first orphaned.
     @MainActor var didBootstrap = false
     @MainActor var openDashboardHandler: (@MainActor () -> Void)?
+    @MainActor var openSoftwareUpdateHandler: (@MainActor () -> Void)?
     @MainActor var pendingOpenDashboard = false
 
     @MainActor
@@ -207,6 +237,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
             window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
+    func openSoftwareUpdate() {
+        if let openSoftwareUpdateHandler {
+            openSoftwareUpdateHandler()
+        } else {
+            NSApp.setActivationPolicy(.regular)
+            for window in NSApp.windows where window.canBecomeMain && !(window.className.contains("NSStatusBarWindow")) {
+                if window.identifier?.rawValue.contains(WindowID.softwareUpdate) == true {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     @MainActor
@@ -309,6 +354,7 @@ enum WindowID {
     static let settings = "settings"
     static let onboarding = "onboarding"
     static let whatsNew = "whatsNew"
+    static let softwareUpdate = "softwareUpdate"
 }
 
 /// Layer one of four: the menu-bar item itself.

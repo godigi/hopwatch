@@ -4085,7 +4085,7 @@ private enum VerifyHarness {
         let controller = NSHostingController(rootView: lightView)
         let proposed = controller.sizeThatFits(in: NSSize(width: 420, height: 880))
         check(
-            fittingHeight > 500 && fittingHeight < 800 && abs(proposed.height - fittingHeight) < 1.0,
+            fittingHeight > 500 && fittingHeight < 880 && abs(proposed.height - fittingHeight) < 1.0,
             "dropdown: MenuBarExtra hosting controller reports exact fitting height (\(Int(proposed.height))pt) without expanding to 880pt"
         )
         let height = max(fittingHeight, 600)

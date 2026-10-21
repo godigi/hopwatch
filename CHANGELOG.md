@@ -8,6 +8,21 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Added
+- Live Ping Heartbeat in the Menu Bar Dropdown: A real-time telemetry card located between "Your connection" and "What this feels like", executing a 1-second continuous ICMP stream. Features a clean line graph over 3 horizontal latency zones (Green bottom for <70ms, White middle for 70–150ms, Red top for >150ms), interactive hover inspection displaying exact latency per probe, prominent red vertical drop markers and "✕" badges for packet timeouts/MISSes, and one-click target toggling between Internet (1.1.1.1) and the local Router gateway.
+- Native macOS Software Update Dialog: modeled on the clean Sparkle / Tungsten Edge update experience, featuring current vs available version comparison, an inset card displaying bulleted release notes with conventional commit prefix cleaning, background pre-caching, and one-click Skip This Version, Remind Me Later, and Install Update controls.
+
+### Changed
+- Filtered non-urgent network advisories (Double NAT, DHCP lease countdown, clock drift, and baseline speed regressions) out of the mini menu (taskbar dropdown), menu-bar health status dot, and coordinator status headlines. These conditions remain fully reported in the Dashboard findings panel, check tables, and diagnostic run reports.
+
+### Fixed
+- Fixed background process lifecycle for ping heartbeat: stopping monitoring in Settings now properly terminates the continuous ping subprocess, and re-enabling monitoring resumes it.
+- Fixed ping heartbeat target retention across network changes: roaming or switching networks now resets ping targets back to default and clears stale packets rather than continuing to ping unreachable gateway IPs from prior networks.
+- Fixed corrupt heartbeat beat creation during network outages (`link.up == false`) so drops are recorded cleanly as misses instead of producing invalid readings.
+- Fixed captive portal sign-in action spawning duplicate browser tabs by cleanly prioritizing direct gateway HTTP under custom DNS and avoiding simultaneous fallback cascades.
+- Fixed macOS Dock icon remaining stuck after dismissing the Software Update dialog by re-evaluating activation policy when the modal closes.
+- Added visible error messaging in the Software Update dialog when background downloads or extractions fail.
+
 ## [1.20.1] - 2026-10-20
 
 ### Fixed

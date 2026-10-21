@@ -80,7 +80,7 @@ struct ActivityView: View {
 
     private func summaryCard(allEntries: [ActivityEntry], daysCount: Int) -> some View {
         let issuesCount = allEntries.filter(isIssue).count
-        let activeCount = coordinator.alerts.activeSorted.count
+        let activeCount = coordinator.alerts.urgentActiveSorted.count
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
@@ -141,7 +141,7 @@ struct ActivityView: View {
 
     @ViewBuilder
     private var activeSection: some View {
-        let active = coordinator.alerts.activeSorted
+        let active = coordinator.alerts.urgentActiveSorted
         if !active.isEmpty {
             Section("Active now") {
                 ForEach(active) { alert in
@@ -151,7 +151,8 @@ struct ActivityView: View {
                             raisedAt: alert.raisedAt, rules: alert.rules,
                             severityRank: alert.rules
                                 .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                            id: alert.id),
+                            id: alert.id,
+                            isUrgent: alert.isUrgent),
                         onAction: {
                             if alert.id == "captive-portal" || alert.rules.contains("CP-1") || alert.rules.contains("N1c") {
                                 coordinator.openPortalPage()

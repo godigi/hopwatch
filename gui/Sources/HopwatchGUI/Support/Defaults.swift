@@ -109,8 +109,10 @@ enum Defaults {
         static let notificationScope  = "notificationScope"
         static let showInDock         = "showInDock"
         static let autoCheckUpdates   = "autoCheckUpdates"
+        static let autoDownloadAndInstallUpdates = "autoDownloadAndInstallUpdates"
         static let lastUpdateCheck    = "lastUpdateCheck"
         static let lastNotifiedUpdateVersion = "lastNotifiedUpdateVersion"
+        static let skippedUpdateVersion = "skippedUpdateVersion"
         static let locationBannerDismissed = "locationBannerDismissed"
         static let phaseDurationSamples = "phaseDurationSamples"
         static let crashReportingEnabled = "crashReportingEnabled"
@@ -142,6 +144,11 @@ enum Defaults {
         set { d.set(newValue, forKey: Key.autoCheckUpdates) }
     }
 
+    static var autoDownloadAndInstallUpdates: Bool {
+        get { d.object(forKey: Key.autoDownloadAndInstallUpdates) as? Bool ?? false }
+        set { d.set(newValue, forKey: Key.autoDownloadAndInstallUpdates) }
+    }
+
     static var lastUpdateCheck: Date? {
         get { d.object(forKey: Key.lastUpdateCheck) as? Date }
         set { d.set(newValue, forKey: Key.lastUpdateCheck) }
@@ -150,6 +157,11 @@ enum Defaults {
     static var lastNotifiedUpdateVersion: String? {
         get { d.string(forKey: Key.lastNotifiedUpdateVersion) }
         set { d.set(newValue, forKey: Key.lastNotifiedUpdateVersion) }
+    }
+
+    static var skippedUpdateVersion: String? {
+        get { d.string(forKey: Key.skippedUpdateVersion) }
+        set { d.set(newValue, forKey: Key.skippedUpdateVersion) }
     }
 
     static var lastSeenAppVersion: String? {

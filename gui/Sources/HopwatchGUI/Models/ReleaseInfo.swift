@@ -30,6 +30,47 @@ struct GitHubRelease: Decodable, Sendable {
             .filter { !$0.isEmpty && !$0.hasPrefix("#") }
         return lines.first
     }
+
+    /// Formatted bullet points describing what's new in this release.
+    var releaseBulletPoints: [String] {
+        guard let body = body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ["Bug fixes and stability improvements."]
+        }
+        var bullets: [String] = []
+        let lines = body.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            // Skip markdown headings
+            if trimmed.hasPrefix("#") { continue }
+            // Identify bulleted list items
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("• ") {
+                var content = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                // Strip conventional commit prefixes for cleaner user-facing release notes
+                if let colon = content.range(of: "^(fix|feat|chore|perf|refactor|docs)(\\([^\\)]+\\))?!?:\\s*", options: .regularExpression) {
+                    content.removeSubrange(colon)
+                    if let first = content.first {
+                        content = first.uppercased() + content.dropFirst()
+                    }
+                }
+                // Strip PR/commit links and metadata e.g. "by @author in https://..." or "(#123)"
+                if let prRange = content.range(of: "\\s+by\\s+@[a-zA-Z0-9_-]+.*$", options: .regularExpression) {
+                    content.removeSubrange(prRange)
+                }
+                if let prNum = content.range(of: "\\s+\\(#[0-9]+\\)$", options: .regularExpression) {
+                    content.removeSubrange(prNum)
+                }
+                if !content.isEmpty {
+                    bullets.append(content)
+                }
+            } else if !trimmed.hasPrefix("http") && !trimmed.hasPrefix("[") && !trimmed.contains("Full Changelog") {
+                if trimmed.count > 10 && trimmed.count < 300 {
+                    bullets.append(trimmed)
+                }
+            }
+        }
+        return bullets.isEmpty ? ["Bug fixes and stability improvements."] : bullets
+    }
 }
 
 /// A release asset attached to a GitHub release (e.g. `Netdiag.dmg`, `Netdiag.app.zip`).

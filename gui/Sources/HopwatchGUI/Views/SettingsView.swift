@@ -1127,11 +1127,18 @@ struct SettingsView: View {
                                     .progressViewStyle(.linear)
                                     .frame(width: 90)
                             } else if coordinator.updateChecker.hasUpdate {
-                                Button("Install Update") {
-                                    coordinator.updateChecker.downloadAndInstallUpdate()
+                                HStack(spacing: 8) {
+                                    Button("What’s New…") {
+                                        coordinator.showSoftwareUpdate()
+                                    }
+                                    .controlSize(.small)
+
+                                    Button("Install Update") {
+                                        coordinator.updateChecker.downloadAndInstallUpdate()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
                             } else {
                                 Button("Check Now") {
                                     coordinator.updateChecker.checkForUpdates(manual: true)
@@ -1153,6 +1160,15 @@ struct SettingsView: View {
                         title: "Automatically check for updates daily",
                         description: "Notifies you quietly when a new version of Hopwatch is ready to install.",
                         isOn: $appSettings.autoCheckUpdates
+                    )
+
+                    SettingsToggleRow(
+                        title: "Automatically download and install updates in background",
+                        description: "Pre-caches updates quietly so restarting Hopwatch is instantaneous.",
+                        isOn: Binding(
+                            get: { Defaults.autoDownloadAndInstallUpdates },
+                            set: { Defaults.autoDownloadAndInstallUpdates = $0 }
+                        )
                     )
                 }
             }

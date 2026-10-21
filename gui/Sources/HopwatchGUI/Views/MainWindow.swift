@@ -240,14 +240,14 @@ struct MainWindow: View {
     @ViewBuilder
     private func row(_ section: SidebarSection) -> some View {
         // Activity's badge counts alerts already active right now — the
-        // same `activeSorted` the dropdown's banner reads — never a stored
+        // same `urgentActiveSorted` the dropdown's banner reads — never a stored
         // history, which doesn't exist until T13 builds it.
-        if section == .activity, !coordinator.alerts.activeSorted.isEmpty {
+        if section == .activity, !coordinator.alerts.urgentActiveSorted.isEmpty {
             Label {
                 HStack {
                     Text(section.label)
                     Spacer()
-                    Text("\(coordinator.alerts.activeSorted.count)")
+                    Text("\(coordinator.alerts.urgentActiveSorted.count)")
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)

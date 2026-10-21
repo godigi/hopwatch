@@ -279,13 +279,14 @@ struct HomeView: View {
             pauseReason: coordinator.monitor.pauseReason,
             lastError: coordinator.monitor.lastError,
             monitorRunning: coordinator.monitor.isRunning,
-            activeAlert: coordinator.alerts.activeSorted.first.map {
+            activeAlert: coordinator.alerts.urgentActiveSorted.first.map {
                 StageResolver.AlertSnapshot(
                     title: $0.title, body: $0.body,
                     raisedAt: $0.raisedAt, rules: $0.rules,
                     severityRank: $0.rules
                         .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                    id: $0.id)
+                    id: $0.id,
+                    isUrgent: $0.isUrgent)
             },
             severity: coordinator.liveSample?.status.severity ?? "ok",
             linkUp: !linkDown,
@@ -1704,12 +1705,13 @@ struct HomeView: View {
             let owned = coordinator.history.isOwned(networkID: sample.network.id)
             text = SupportSummaryFormatter.format(
                 sample: sample,
-                alert: coordinator.alerts.activeSorted.first.map {
+                alert: coordinator.alerts.urgentActiveSorted.first.map {
                     StageResolver.AlertSnapshot(
                         title: $0.title, body: $0.body,
                         raisedAt: $0.raisedAt, rules: $0.rules,
                         severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                        id: $0.id
+                        id: $0.id,
+                        isUrgent: $0.isUrgent
                     )
                 },
                 catalog: coordinator.rulesCatalog.catalog,

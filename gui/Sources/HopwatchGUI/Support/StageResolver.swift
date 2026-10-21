@@ -100,12 +100,14 @@ enum StageResolver {
         /// the identical warn condition in amber.
         let severityRank: Int
         let id: String?
+        let isUrgent: Bool
         init(title: String, body: String, raisedAt: Date, rules: Set<String>,
-             severityRank: Int = 0, id: String? = nil) {
+             severityRank: Int = 0, id: String? = nil, isUrgent: Bool = true) {
             self.title = title; self.body = body
             self.raisedAt = raisedAt; self.rules = rules
             self.severityRank = severityRank
             self.id = id
+            self.isUrgent = isUrgent
         }
     }
 
@@ -204,7 +206,7 @@ enum StageResolver {
         // is judged on its own, longer, window) and ahead of the alert and
         // the severity: a sample that old is not evidence of anything.
         if i.sampleStale { return .notReporting }
-        if let alert = i.activeAlert { return .alerted(alert) }
+        if let alert = i.activeAlert, alert.isUrgent { return .alerted(alert) }
         if !i.monitorRunning || i.measurementState != "measured" || i.settling {
             return .checking
         }

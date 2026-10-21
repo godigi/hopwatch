@@ -53,6 +53,8 @@ struct DropdownView: View {
 
                 connectionRouteSection
 
+                heartbeatSection
+
                 experienceSection
 
                 speedSection
@@ -142,9 +144,17 @@ struct DropdownView: View {
                     Spacer()
                     if !checker.isDownloading {
                         Button {
+                            coordinator.showSoftwareUpdate()
+                        } label: {
+                            Text("Review…")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button {
                             checker.downloadAndInstallUpdate()
                         } label: {
-                            Text(checker.isPreloaded ? "Restart to Update" : "Update & Relaunch")
+                            Text(checker.isPreloaded ? "Restart" : "Update")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(checker.isPreloaded ? .green : .orange)
@@ -167,10 +177,20 @@ struct DropdownView: View {
                         }
                     }
                 } else if let notes = checker.availableRelease?.shortReleaseNotes {
-                    Text(notes)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    Button {
+                        coordinator.showSoftwareUpdate()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(notes)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text("Details ›")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.blue)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 if let err = checker.errorMessage {
@@ -224,13 +244,14 @@ struct DropdownView: View {
             pauseReason: coordinator.monitor.pauseReason,
             lastError: coordinator.monitor.lastError,
             monitorRunning: coordinator.monitor.isRunning,
-            activeAlert: coordinator.alerts.activeSorted.first.map {
+            activeAlert: coordinator.alerts.urgentActiveSorted.first.map {
                 StageResolver.AlertSnapshot(
                     title: $0.title, body: $0.body,
                     raisedAt: $0.raisedAt, rules: $0.rules,
                     severityRank: $0.rules
                         .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                    id: $0.id)
+                    id: $0.id,
+                    isUrgent: $0.isUrgent)
             },
             severity: coordinator.liveSample?.status.severity ?? "ok",
             linkUp: !linkDown,
@@ -775,6 +796,12 @@ struct DropdownView: View {
         return "Stable response times"
     }
 
+    // MARK: - 4b. Heartbeat Section
+
+    private var heartbeatSection: some View {
+        PingHeartbeatView()
+    }
+
     // MARK: - 5. Experience Grid Section
 
     private var experienceSection: some View {
@@ -1069,12 +1096,13 @@ struct DropdownView: View {
             if case .alerted(let stageAlert) = stage {
                 return stageAlert
             }
-            return coordinator.alerts.activeSorted.first.map {
+            return coordinator.alerts.urgentActiveSorted.first.map {
                 StageResolver.AlertSnapshot(
                     title: $0.title, body: $0.body,
                     raisedAt: $0.raisedAt, rules: $0.rules,
                     severityRank: $0.rules.map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                    id: $0.id
+                    id: $0.id,
+                    isUrgent: $0.isUrgent
                 )
             }
         }()
