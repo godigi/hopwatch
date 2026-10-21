@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-10-21
+
 ### Added
 - Live Ping Heartbeat in the Menu Bar Dropdown: A real-time telemetry card located between "Your connection" and "What this feels like", executing a 1-second continuous ICMP stream. Features a clean line graph over 3 horizontal latency zones (Green bottom for <70ms, White middle for 70–150ms, Red top for >150ms), interactive hover inspection displaying exact latency per probe, prominent red vertical drop markers and "✕" badges for packet timeouts/MISSes, and one-click target toggling between Internet (1.1.1.1) and the local Router gateway.
 - Native macOS Software Update Dialog: modeled on the clean Sparkle / Tungsten Edge update experience, featuring current vs available version comparison, an inset card displaying bulleted release notes with conventional commit prefix cleaning, background pre-caching, and one-click Skip This Version, Remind Me Later, and Install Update controls.
@@ -171,8 +173,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.20.1...HEAD
-[1.20.1]: https://github.com/godigi/hopwatch/releases/tag/v1.20.1
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/godigi/hopwatch/releases/tag/v1.21.0
+[1.20.1]: https://github.com/godigi/hopwatch/commit/52c71e3dc125133c3c395de6f004394762825f17
 [1.20.0]: https://github.com/godigi/hopwatch/commit/0202371d64474cfd06d9c5b1c5299b8c81ea29a9
 [1.19.1]: https://github.com/godigi/hopwatch/commit/03beb7f6daddef01d2fb94e104363eae01374572
 [1.19.0]: https://github.com/godigi/hopwatch/commit/0d87c149a5434e1b16733fb4e16ce2f1f4fcfb7b
