@@ -317,7 +317,7 @@ struct DashboardRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                             HStack(alignment: .firstTextBaseline, spacing: 3) {
                                 Text(wifiSignalText)
-                                    .font(.system(size: (wifiSignalText.contains("laggy") ? 16 : 20), weight: .semibold))
+                                    .font(.system(size: 20, weight: .semibold))
                                     .foregroundStyle(wifiSignalTint)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
@@ -328,14 +328,14 @@ struct DashboardRouteView: View {
                         }
                         .frame(height: 54)
 
-                        let isMacCulprit = culpritHop == "wifi" || culpritHop == "mac"
+                        let isMacCulprit = (culpritHop == "wifi" || culpritHop == "mac") && !macStatusGood
                         hopNode(
                             icon: (isWiFi || linkDown) ? "laptopcomputer" : "cable.connector",
-                            isWarning: !macStatusGood || isWifiLaggy,
+                            isWarning: !macStatusGood,
                             flag: nil,
                             isCulprit: isMacCulprit && !linkDown,
                             isCritical: isCritical,
-                            state: linkDown ? .down : (!macStatusGood && !isWifiLaggy && !isMacCulprit ? .unknown : .normal)
+                            state: linkDown ? .down : (!macStatusGood && !isMacCulprit ? .unknown : .normal)
                         )
 
                         Text("This Mac")

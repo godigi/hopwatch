@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import os
 
 /// Represents a single ping probe measurement in the live heartbeat stream.
@@ -49,9 +50,11 @@ final class PingHeartbeat: @unchecked Sendable {
 
     private var process: Process?
     private var stdoutPipe: Pipe?
-    private var readTask: Task<Void, Never>?
+    private var readSource: (any DispatchSourceRead)?
     private var isTestingMode: Bool = false
+    private var isExplicitlyStopped: Bool = true
     private let log = Logger(subsystem: "com.godigi.hopwatch", category: "heartbeat")
+    private let readQueue = DispatchQueue(label: "com.godigi.hopwatch.heartbeat.read", qos: .userInitiated)
 
     init(target: String = defaultTarget) {
         self.target = target
@@ -105,11 +108,13 @@ final class PingHeartbeat: @unchecked Sendable {
         if let target, !target.isEmpty {
             self.target = target
         }
+        isExplicitlyStopped = false
         guard !isRunning, !isTestingMode else { return }
         spawnPingProcess()
     }
 
     func stop() {
+        isExplicitlyStopped = true
         terminatePingProcess()
         isRunning = false
         isPaused = false
@@ -154,6 +159,7 @@ final class PingHeartbeat: @unchecked Sendable {
             beats.removeFirst(beats.count - Self.maxBeats)
         }
         beatTick &+= 1
+        log.debug("beat #\(self.beatTick): \(beat.latencyMs ?? -1, format: .fixed(precision: 1))ms miss=\(beat.isMiss)")
     }
 
     func adoptTestBeat(latencyMs: Double?, isMiss: Bool, seq: Int? = nil) {
@@ -285,7 +291,7 @@ final class PingHeartbeat: @unchecked Sendable {
         let pipe = Pipe()
         stdoutPipe = pipe
         proc.standardOutput = pipe
-        proc.standardError = pipe // Also capture errors (sendto, etc.)
+        proc.standardError = pipe
 
         do {
             try proc.run()
@@ -293,41 +299,79 @@ final class PingHeartbeat: @unchecked Sendable {
             isRunning = true
             log.info("ping heartbeat started for target \(self.target, privacy: .public)")
 
-            readTask = Task { [weak self] in
-                await self?.consumePingStream(pipe: pipe, proc: proc)
-            }
-        } catch {
-            log.error("failed to spawn ping heartbeat: \(error.localizedDescription, privacy: .public)")
-            isRunning = false
-        }
-    }
+            let fd = pipe.fileHandleForReading.fileDescriptor
+            _ = fcntl(fd, F_SETFL, O_NONBLOCK)
 
-    private func consumePingStream(pipe: Pipe, proc: Process) async {
-        let handle = pipe.fileHandleForReading
-        do {
-            for try await line in handle.bytes.lines {
-                if Task.isCancelled || process !== proc { break }
-                if let beat = Self.parsePingLine(line, target: target) {
-                    await MainActor.run {
-                        self.ingestBeat(beat)
+            let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: readQueue)
+            var lineBuffer = Data()
+
+            source.setEventHandler { [weak self] in
+                var chunk = [UInt8](repeating: 0, count: 1024)
+                while true {
+                    let bytesRead = read(fd, &chunk, chunk.count)
+                    if bytesRead > 0 {
+                        lineBuffer.append(chunk, count: bytesRead)
+                    } else if bytesRead == 0 {
+                        source.cancel()
+                        break
+                    } else {
+                        break
+                    }
+                }
+
+                while let nlIndex = lineBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                    let lineData = lineBuffer.subdata(in: 0..<nlIndex)
+                    lineBuffer.removeSubrange(0...nlIndex)
+                    if let line = String(data: lineData, encoding: .utf8) {
+                        let cleanLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !cleanLine.isEmpty {
+                            Task { @MainActor [weak self] in
+                                guard let self else { return }
+                                if let beat = Self.parsePingLine(cleanLine, target: self.target) {
+                                    self.ingestBeat(beat)
+                                }
+                            }
+                        }
                     }
                 }
             }
-        } catch {
-            // EOF or pipe closed
-        }
 
-        await MainActor.run {
-            if self.process === proc {
-                self.isRunning = false
+            source.setCancelHandler { [weak self, weak proc, pipe] in
+                _ = pipe // Retain pipe until dispatch source registration teardown completes
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if self.process === proc {
+                        self.isRunning = false
+                        self.scheduleAutoRecoveryIfNeeded()
+                    }
+                }
             }
+
+            readSource = source
+            source.resume()
+        } catch {
+            log.error("failed to spawn ping heartbeat: \(error.localizedDescription, privacy: .public)")
+            isRunning = false
+            scheduleAutoRecoveryIfNeeded()
+        }
+    }
+
+    private func scheduleAutoRecoveryIfNeeded() {
+        guard !isExplicitlyStopped, !isPaused, !isTestingMode else { return }
+        log.info("ping heartbeat stream ended; scheduling auto-recovery in 1s")
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !self.isRunning, !self.isExplicitlyStopped, !self.isPaused, !self.isTestingMode else { return }
+            self.spawnPingProcess()
         }
     }
 
     private func terminatePingProcess() {
-        readTask?.cancel()
-        readTask = nil
-        try? stdoutPipe?.fileHandleForReading.close()
+        if let source = readSource {
+            readSource = nil
+            source.cancel()
+        }
+
         stdoutPipe = nil
 
         if let proc = process, proc.isRunning {

@@ -662,6 +662,10 @@ struct ConnectionRouteView: View {
                                 Image(systemName: "wifi.exclamationmark")
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundStyle(Theme.ColorToken.amber)
+                            } else if wifiReadingLabel.contains("Wi-Fi") && wifiReadingValue != "—" {
+                                Image(systemName: "wifi")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(wifiReadingTint)
                             }
                             Text(wifiReadingValue)
                                 .font(.system(size: 16, weight: .bold))

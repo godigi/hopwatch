@@ -72,8 +72,8 @@ bundle: build
 	@if [ -z "$(VERSION)" ]; then \
 	  echo "error: could not read HOPWATCH_VERSION from ../bin/hopwatch" >&2; exit 1; \
 	fi
-	@pkill -x HopwatchGUI 2>/dev/null || true
-	@pkill -x NetdiagGUI 2>/dev/null || true
+	@killall HopwatchGUI 2>/dev/null || pkill -f HopwatchGUI 2>/dev/null || true
+	@killall NetdiagGUI 2>/dev/null || pkill -f NetdiagGUI 2>/dev/null || true
 	@rm -rf "$(APP_DIR)"
 	@mkdir -p "$(APP_DIR)/Contents/MacOS" "$(APP_DIR)/Contents/Resources"
 	@cp "$(BIN)" "$(APP_DIR)/Contents/MacOS/HopwatchGUI"
@@ -109,14 +109,14 @@ endif
 	@codesign --verify --verbose=1 "$(APP_DIR)" 2>&1 | sed 's/^/  /'
 
 run: sign
-	@pkill -x HopwatchGUI 2>/dev/null || true
-	@pkill -x NetdiagGUI 2>/dev/null || true
+	@killall HopwatchGUI 2>/dev/null || pkill -f HopwatchGUI 2>/dev/null || true
+	@killall NetdiagGUI 2>/dev/null || pkill -f NetdiagGUI 2>/dev/null || true
 	open "$(APP_DIR)"
 	@echo "launched. logs: log stream --predicate 'subsystem == \"$(BUNDLE_ID)\"'"
 
 install: sign
-	@pkill -x HopwatchGUI 2>/dev/null || true
-	@pkill -x NetdiagGUI 2>/dev/null || true
+	@killall HopwatchGUI 2>/dev/null || pkill -f HopwatchGUI 2>/dev/null || true
+	@killall NetdiagGUI 2>/dev/null || pkill -f NetdiagGUI 2>/dev/null || true
 	@rm -rf "/Applications/$(APP).app"
 	@rm -rf "/Applications/Netdiag.app"
 	@cp -R "$(APP_DIR)" /Applications/

@@ -90,6 +90,9 @@ struct DropdownView: View {
         }
         .onAppear {
             coordinator.refreshLocationState()
+            if appSettings.monitoringEnabled && !coordinator.heartbeat.isRunning && !coordinator.heartbeat.isPaused {
+                coordinator.heartbeat.start()
+            }
         }
     }
 
@@ -591,12 +594,24 @@ struct DropdownView: View {
             return coordinator.liveSample?.link.ip ?? "Ethernet"
         }
         if let rssi = resolvedRSSI {
+            let guidance = SignalScale.distanceGuidance(forRSSI: rssi)
+            if let guidance {
+                if let band = resolvedBand {
+                    return "\(guidance) · \(band)"
+                }
+                return "\(guidance) · \(rssi) dBm"
+            }
             if let band = resolvedBand {
                 return "\(rssi) dBm · \(band)"
             }
             return "\(rssi) dBm"
         }
         return coordinator.liveSample?.link.ip ?? "Wi-Fi link"
+    }
+
+    private var isWifiSignalWeak: Bool {
+        guard let rssi = resolvedRSSI else { return false }
+        return rssi < -75 || (wifiRuleTint != nil && wifiRuleTint != .green)
     }
 
     private var isGatewayJitterDominant: Bool {
@@ -634,9 +649,9 @@ struct DropdownView: View {
             publicIP: linkDown ? nil : publicIP,
             internetDetail: internetDetailText,
             internetWarn: !linkDown && internetWarn,
-            firstLinkLabel: !linkUp ? NoLinkCopy.nodeDetail : (isWiFi ? "Wi-Fi" : "Wired"),
+            firstLinkLabel: !linkUp ? NoLinkCopy.nodeDetail : (isWiFi ? (isWifiLaggy ? "Wi-Fi (Laggy)" : "Wi-Fi") : "Wired"),
             secondLinkLabel: !linkUp ? "" : "Broadband",
-            wifiWarning: !linkDown && isWiFi && isWifiLaggy,
+            wifiWarning: !linkDown && isWiFi && isWifiSignalWeak,
             isWifiLaggy: !linkDown && isWiFi && isWifiLaggy,
             routerAdminURL: linkDown ? nil : routerAdminURL,
             routerAdminAvailable: !linkDown && coordinator.routerAdminAvailable,
@@ -799,7 +814,7 @@ struct DropdownView: View {
     // MARK: - 4b. Heartbeat Section
 
     private var heartbeatSection: some View {
-        PingHeartbeatView()
+        PingHeartbeatView(heartbeat: coordinator.heartbeat)
     }
 
     // MARK: - 5. Experience Grid Section
@@ -1029,12 +1044,6 @@ struct DropdownView: View {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-        if isWifiLaggy {
-            let label = (content.value.lowercased() == "good" || content.value.lowercased() == "excellent")
-                ? "Good (laggy)"
-                : "\(content.value) (laggy)"
-            return (label, content.unit, Theme.ColorToken.amber)
-        }
         return (content.value, content.unit, wifiRuleTint ?? content.tint)
     }
 

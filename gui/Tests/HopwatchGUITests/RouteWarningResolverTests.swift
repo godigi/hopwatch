@@ -206,4 +206,42 @@ import Testing
         #expect(result.internetWarn)
         #expect(result.culpritHop == "internet")
     }
+
+    @Test func strongSignalWithRouterLagDoesNotFlagMacHardware() {
+        // High router ping/jitter (177ms / ±139ms) on Wi-Fi without client packet loss.
+        // Wi-Fi link is flagged laggy, but Mac hardware status remains good (green checkmark).
+        let degraded = StageResolver.DegradedSnapshot(
+            headline: "Unstable for calls & gaming",
+            subtitle: "8% internet packet loss · 321ms Wi-Fi jitter",
+            isCritical: true,
+            affectedActivities: ["Calls", "Gaming"]
+        )
+        let result = RouteWarningResolver.resolve(
+            linkUp: true,
+            isWiFi: true,
+            stage: .degraded(degraded),
+            firedCategories: [],
+            gwLoss: 0.0,
+            gwPing: 177.0,
+            gwJitter: 139.0,
+            inetLoss: 8.0,
+            inetPing: 370.0,
+            inetJitter: 321.0,
+            hasRecentRoam: false
+        )
+
+        #expect(result.isWifiLaggy)
+        #expect(result.macStatusGood)
+        #expect(result.routerWarn)
+        #expect(result.internetWarn)
+    }
+
+    @Test func distanceGuidanceResolution() {
+        #expect(SignalScale.distanceGuidance(forRSSI: -43) == "Near router")
+        #expect(SignalScale.distanceGuidance(forRSSI: -50) == "Near router")
+        #expect(SignalScale.distanceGuidance(forRSSI: -55) == "Good range")
+        #expect(SignalScale.distanceGuidance(forRSSI: -70) == "Medium range")
+        #expect(SignalScale.distanceGuidance(forRSSI: -80) == "Too far from router")
+        #expect(SignalScale.distanceGuidance(forRSSI: nil) == nil)
+    }
 }

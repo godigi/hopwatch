@@ -13,15 +13,19 @@ import SwiftUI
 ///    dashed markers, drop indicators, and outage breaks.
 /// 4. Quick target toggle: Internet (`1.1.1.1`) vs. Router gateway IP.
 /// 5. Animated beating heart icon synced with packet arrivals.
+/// 6. Live radar beacon ripples on the leading edge (newest probe) ticking every 1.0 second.
+/// 7. Decimal-precision millisecond telemetry giving unmistakable, tangible confirmation of live ICMP traffic.
 struct PingHeartbeatView: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
+    var customHeartbeat: PingHeartbeat? = nil
 
     @State private var heartScale: CGFloat = 1.0
+    @State private var livePulseScale: CGFloat = 1.0
     @State private var hoveredBeat: PingBeat?
     @State private var hoverLocation: CGPoint?
 
     private var heartbeat: PingHeartbeat {
-        coordinator.heartbeat
+        customHeartbeat ?? coordinator.heartbeat
     }
 
     private var linkDown: Bool {
@@ -37,7 +41,9 @@ struct PingHeartbeatView: View {
             ?? coordinator.monitor.latest?.link.gateway
     }
 
-    init() {}
+    init(heartbeat: PingHeartbeat? = nil) {
+        self.customHeartbeat = heartbeat
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -64,6 +70,11 @@ struct PingHeartbeatView: View {
                     lineWidth: 1
                 )
         )
+        .onAppear {
+            if !heartbeat.isRunning && !heartbeat.isPaused {
+                heartbeat.start()
+            }
+        }
         .onChange(of: heartbeat.beatTick) { _, _ in
             triggerHeartPulse()
         }
@@ -78,11 +89,13 @@ struct PingHeartbeatView: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(heartIconColor)
                 .scaleEffect(heartScale)
-                .animation(.spring(response: 0.22, dampingFraction: 0.45), value: heartScale)
 
             Text("Ping Heartbeat")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.ink)
+
+            // Live Cadence Badge
+            liveCadenceBadge
 
             // Target Toggle Pill
             targetTogglePill
@@ -102,6 +115,22 @@ struct PingHeartbeatView: View {
         if lat >= 150 { return Theme.ColorToken.red }
         if lat >= 70 { return Theme.ColorToken.amber }
         return Theme.ColorToken.green
+    }
+
+    private var liveCadenceBadge: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : Theme.ColorToken.green))
+                .frame(width: 4.5, height: 4.5)
+                .scaleEffect(livePulseScale)
+            Text(isPaused ? "Paused" : "1s live")
+                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.muted)
+        }
+        .padding(.horizontal, 4.5)
+        .padding(.vertical, 1.5)
+        .background(Theme.ColorToken.neutralWash)
+        .clipShape(Capsule())
     }
 
     private var targetTogglePill: some View {
@@ -151,7 +180,7 @@ struct PingHeartbeatView: View {
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(.red)
                 } else if let lat = hovered.latencyMs {
-                    Text("\(Int(lat.rounded())) ms")
+                    Text("\(formatLatency(lat)) ms")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(latencyColor(lat))
                 }
@@ -170,7 +199,7 @@ struct PingHeartbeatView: View {
                 .foregroundStyle(Theme.ColorToken.muted)
         } else if let latest = heartbeat.latestBeat {
             if latest.isMiss {
-                HStack(spacing: 2) {
+                HStack(spacing: 2.5) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 9))
                     Text("MISS")
@@ -183,7 +212,7 @@ struct PingHeartbeatView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
             } else if let lat = latest.latencyMs {
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("\(Int(lat.rounded()))")
+                    Text(formatLatency(lat))
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(latencyColor(lat))
                     Text("ms")
@@ -198,6 +227,14 @@ struct PingHeartbeatView: View {
         }
     }
 
+    private func formatLatency(_ ms: Double) -> String {
+        if ms < 100 {
+            return String(format: "%.1f", ms)
+        } else {
+            return "\(Int(ms.rounded()))"
+        }
+    }
+
     private func latencyColor(_ ms: Double) -> Color {
         if ms < 70 { return Theme.ColorToken.green }
         if ms < 150 { return Theme.ColorToken.amber }
@@ -205,9 +242,15 @@ struct PingHeartbeatView: View {
     }
 
     private func triggerHeartPulse() {
-        heartScale = 1.3
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            heartScale = 1.0
+        withAnimation(.easeOut(duration: 0.12)) {
+            heartScale = 1.28
+            livePulseScale = 1.35
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
+                heartScale = 1.0
+                livePulseScale = 1.0
+            }
         }
     }
 
@@ -259,6 +302,9 @@ struct PingHeartbeatView: View {
                 } else {
                     LinegraphZonedCanvas(
                         beats: beats,
+                        beatTick: heartbeat.beatTick,
+                        isPaused: isPaused,
+                        linkDown: linkDown,
                         hoveredBeat: $hoveredBeat,
                         hoverLocation: $hoverLocation
                     )
@@ -274,11 +320,11 @@ struct PingHeartbeatView: View {
             // Latency spread
             if let min = heartbeat.minLatency, let avg = heartbeat.avgLatency, let max = heartbeat.maxLatency {
                 HStack(spacing: 4) {
-                    Text("min \(Int(min.rounded()))ms")
+                    Text("min \(formatLatency(min))ms")
                     Text("·")
-                    Text("avg \(Int(avg.rounded()))ms")
+                    Text("avg \(formatLatency(avg))ms")
                     Text("·")
-                    Text("max \(Int(max.rounded()))ms")
+                    Text("max \(formatLatency(max))ms")
                 }
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted)
@@ -318,8 +364,14 @@ struct PingHeartbeatView: View {
 
 private struct LinegraphZonedCanvas: View {
     let beats: [PingBeat]
+    let beatTick: Int
+    let isPaused: Bool
+    let linkDown: Bool
     @Binding var hoveredBeat: PingBeat?
     @Binding var hoverLocation: CGPoint?
+
+    @State private var beaconScale: CGFloat = 1.0
+    @State private var beaconOpacity: Double = 0.0
 
     @Environment(\.colorScheme) private var colorScheme
     private static let targetSlots = 26
@@ -389,6 +441,8 @@ private struct LinegraphZonedCanvas: View {
                 // 5. Individual Ping Points & MISS Markers
                 ForEach(0..<paddedBeats.count, id: \.self) { idx in
                     let x = CGFloat(idx) * beatWidth + beatWidth / 2
+                    let isLatest = (idx == paddedBeats.count - 1)
+
                     if let beat = paddedBeats[idx] {
                         if beat.isMiss {
                             // Vertical dashed drop marker
@@ -396,11 +450,18 @@ private struct LinegraphZonedCanvas: View {
                                 p.move(to: CGPoint(x: x, y: 2))
                                 p.addLine(to: CGPoint(x: x, y: h - 2))
                             }
-                            .stroke(Color.red.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                            .stroke(Color.red.opacity(0.85), style: StrokeStyle(lineWidth: isLatest ? 2.0 : 1.5, dash: [3, 2]))
+
+                            if isLatest && !isPaused && !linkDown {
+                                Circle()
+                                    .stroke(Color.red.opacity(beaconOpacity), lineWidth: 1.75)
+                                    .frame(width: 12 * beaconScale, height: 12 * beaconScale)
+                                    .position(x: x, y: h / 2)
+                            }
 
                             // "✕" Drop badge
                             Text("✕")
-                                .font(.system(size: 8.5, weight: .black))
+                                .font(.system(size: isLatest ? 10 : 8.5, weight: .black))
                                 .foregroundStyle(.red)
                                 .position(x: x, y: h / 2)
                         } else if let lat = beat.latencyMs {
@@ -408,6 +469,18 @@ private struct LinegraphZonedCanvas: View {
                             let isHovered = (hoveredBeat?.id == beat.id)
 
                             ZStack {
+                                if isLatest && !isPaused && !linkDown {
+                                    // Animated Radar Beacon Ripple Ring
+                                    Circle()
+                                        .stroke(pointColor(lat).opacity(beaconOpacity), lineWidth: 1.5)
+                                        .frame(width: 8 * beaconScale, height: 8 * beaconScale)
+
+                                    // Glowing halo behind latest point
+                                    Circle()
+                                        .fill(pointColor(lat).opacity(0.35))
+                                        .frame(width: 11, height: 11)
+                                }
+
                                 if isHovered {
                                     Circle()
                                         .stroke(Color.primary.opacity(0.7), lineWidth: 1.5)
@@ -415,8 +488,8 @@ private struct LinegraphZonedCanvas: View {
                                 }
                                 Circle()
                                     .fill(pointColor(lat))
-                                    .frame(width: isHovered ? 6 : 4.5, height: isHovered ? 6 : 4.5)
-                                    .overlay(Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 0.75))
+                                    .frame(width: isLatest ? 5.5 : (isHovered ? 6 : 4.5), height: isLatest ? 5.5 : (isHovered ? 6 : 4.5))
+                                    .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: isLatest ? 1.0 : 0.75))
                             }
                             .position(x: x, y: y)
                         }
@@ -454,6 +527,18 @@ private struct LinegraphZonedCanvas: View {
                     hoveredBeat = nil
                 }
             }
+            .onChange(of: beatTick) { _, _ in
+                triggerBeaconPulse()
+            }
+        }
+    }
+
+    private func triggerBeaconPulse() {
+        beaconScale = 1.0
+        beaconOpacity = 0.85
+        withAnimation(.easeOut(duration: 0.85)) {
+            beaconScale = 2.4
+            beaconOpacity = 0.0
         }
     }
 
@@ -552,7 +637,7 @@ private struct LinegraphZonedCanvas: View {
                     Circle()
                         .fill(pointColor(lat))
                         .frame(width: 4, height: 4)
-                    Text("\(Int(lat.rounded())) ms")
+                    Text("\(formatLatency(lat)) ms")
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.ColorToken.ink)
                 }
@@ -565,6 +650,14 @@ private struct LinegraphZonedCanvas: View {
             }
         }
         .position(x: min(max(x, 40), 380), y: bubbleY)
+    }
+
+    private func formatLatency(_ ms: Double) -> String {
+        if ms < 100 {
+            return String(format: "%.1f", ms)
+        } else {
+            return "\(Int(ms.rounded()))"
+        }
     }
 
     // MARK: - Y-Positioning Math (Zone-Aware Mapping)

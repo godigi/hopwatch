@@ -63,6 +63,21 @@ struct SignalScale: Decodable, Sendable {
         }
         return (label, dbmText, band.tint)
     }
+
+    /// Human-friendly physical distance / proximity guidance derived from RSSI.
+    /// Distinguishes physical distance/position from wireless link latency/interference.
+    static func distanceGuidance(forRSSI rssi: Int?) -> String? {
+        guard let rssi else { return nil }
+        if rssi >= -50 {
+            return "Near router"
+        } else if rssi >= -67 {
+            return "Good range"
+        } else if rssi >= -75 {
+            return "Medium range"
+        } else {
+            return "Too far from router"
+        }
+    }
 }
 
 extension SignalScale.Band {

@@ -8,6 +8,23 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Changed
+- Decoupled Wi-Fi signal strength from wireless link latency/jitter. Signal strength now strictly reflects physical RF reception (e.g. "Excellent" at -43 dBm) with a clean green Wi-Fi icon, eliminating confusing "Good (laggy)" label overrides when standing next to the router.
+- Added plain-English distance and proximity guidance under "This Mac" (e.g. `Near router`, `Good range`, `Too far from router`), making it immediately obvious whether moving the laptop will help or if the issue is airtime/router delay.
+- Attributed wireless latency to the transmission medium: the connecting link between Mac and Router highlights amber with clear labels (`Wi-Fi (Laggy)`), while the Mac client node maintains a healthy green checkmark when antenna signal is strong and no client-level fault rules have fired.
+
+### Added
+- Dynamic 1-Second Ping Heartbeat Animation & Radar Beacon:
+  - Added an animated radar ripple / beacon wave on the leading edge (the newest probe on the right edge of the graph) that pulses outward on every 1-second ICMP packet arrival, visually confirming live network traffic.
+  - Added a dedicated "1s live" cadence badge in the header with a pulsing green indicator dot synchronized with packet arrivals.
+  - Added a responsive, spring-based heartbeat thump on the header heart icon.
+  - Added decimal-precision millisecond telemetry (e.g. `47.3 ms`) in both the live header readout and hover tooltips so subtle microsecond latency shifts tick visibly every second rather than staying visually frozen under rounded integer displays.
+  - Added automatic process recovery and dropdown-open activation to guarantee the ping stream is active whenever the menu dropdown is inspected.
+
+### Fixed
+- Fixed Ping Heartbeat stream buffering: bypassed Foundation's 1024-byte `AsyncBytes` line-buffering chunk delay by utilizing a non-blocking `DispatchSourceRead` over POSIX file descriptors, ensuring ICMP reply lines and timeout notifications trigger GUI updates instantaneously every 1.0 second without 7–8 second batching delays.
+- Fixed `PingHeartbeatView` observation hierarchy in the menu dropdown by explicitly binding `heartbeat` directly to child components.
+
 ## [1.21.0] - 2026-10-21
 
 ### Added

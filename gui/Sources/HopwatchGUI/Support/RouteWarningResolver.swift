@@ -72,7 +72,12 @@ enum RouteWarningResolver {
         }
 
         // 2. Mac / Local Link status
-        let macStatusGood = linkUp && !isWifiLaggy && (wifiRuleTint == nil || wifiRuleTint == .green)
+        // Mac client node is in warning if link is down, a client-level Wi-Fi fault rule fired,
+        // or real wireless packet loss occurs without a router-attributed fault.
+        // Elevated ping/jitter without packet loss is airtime/router delay, leaving the client hardware healthy.
+        let isRealWifiLoss = realGWLoss && isWiFi && !firedCategories.contains("router")
+        let isMacFault = (wifiRuleTint != nil && wifiRuleTint != .green) || isRealWifiLoss
+        let macStatusGood = linkUp && !isMacFault
 
         // 3. Router status
         let routerWarn: Bool
