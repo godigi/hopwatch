@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-10-22
+
 ### Changed
 - Decoupled Wi-Fi signal strength from wireless link latency/jitter. Signal strength now strictly reflects physical RF reception (e.g. "Excellent" at -43 dBm) with a clean green Wi-Fi icon, eliminating confusing "Good (laggy)" label overrides when standing next to the router.
 - Added plain-English distance and proximity guidance under "This Mac" (e.g. `Near router`, `Good range`, `Too far from router`), making it immediately obvious whether moving the laptop will help or if the issue is airtime/router delay.
@@ -190,8 +192,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.21.0...HEAD
-[1.21.0]: https://github.com/godigi/hopwatch/releases/tag/v1.21.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/godigi/hopwatch/releases/tag/v1.22.0
+[1.21.0]: https://github.com/godigi/hopwatch/commit/8af9b55d24ca875f223196ab4b69c9b07635b296
 [1.20.1]: https://github.com/godigi/hopwatch/commit/52c71e3dc125133c3c395de6f004394762825f17
 [1.20.0]: https://github.com/godigi/hopwatch/commit/0202371d64474cfd06d9c5b1c5299b8c81ea29a9
 [1.19.1]: https://github.com/godigi/hopwatch/commit/03beb7f6daddef01d2fb94e104363eae01374572
