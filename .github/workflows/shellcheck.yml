@@ -14,6 +14,8 @@ on:
 
 jobs:
   shellcheck:
+    # stuck-job guard, 2026-10-25
+    timeout-minutes: 10
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4

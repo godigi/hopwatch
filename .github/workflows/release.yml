@@ -54,6 +54,8 @@ permissions:
 
 jobs:
   release:
+    # stuck-job guard, 2026-10-25
+    timeout-minutes: 10
     runs-on: macos-latest
     steps:
       # The tag's own tree: the app and CLI are built from exactly the commit
