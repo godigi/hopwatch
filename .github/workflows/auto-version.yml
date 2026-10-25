@@ -38,7 +38,7 @@ concurrency:
 jobs:
   auto-bump:
     # stuck-job guard, 2026-10-25
-    timeout-minutes: 10
+    timeout-minutes: 30
     runs-on: macos-latest
     if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     permissions:
