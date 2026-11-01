@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-11-01
+
 ### Added
 - **Smart Battery-Saver Cadence**: Added `batterySaverCadence` preference (enabled by default) and Settings toggle. When running on battery power or in macOS Low Power Mode, Hopwatch automatically relaxes background sampling to 12s when the connection is stable, immediately resuming fast probing upon packet loss, latency degradation, or user-initiated latency tests.
 - **Customizable Menu Bar Latency & Packet Loss Display**: Added `.dotPingAndLoss` ("Dot, ping time, and packet loss") style in Settings, displaying both live latency and packet loss (e.g. `● 18ms · 0% loss`) directly in the macOS menu bar.
@@ -260,8 +262,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.22.0...HEAD
-[1.22.0]: https://github.com/godigi/hopwatch/releases/tag/v1.22.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.23.0...HEAD
+[1.23.0]: https://github.com/godigi/hopwatch/releases/tag/v1.23.0
+[1.22.0]: https://github.com/godigi/hopwatch/commit/b9538f93648739b5515d34eea0eb29e7b592a752
 [1.21.0]: https://github.com/godigi/hopwatch/commit/8af9b55d24ca875f223196ab4b69c9b07635b296
 [1.20.1]: https://github.com/godigi/hopwatch/commit/52c71e3dc125133c3c395de6f004394762825f17
 [1.20.0]: https://github.com/godigi/hopwatch/commit/0202371d64474cfd06d9c5b1c5299b8c81ea29a9
