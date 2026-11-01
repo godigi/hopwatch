@@ -41,6 +41,17 @@ struct PingHeartbeatView: View {
             ?? coordinator.monitor.latest?.link.gateway
     }
 
+    private var isTargetFiltered: Bool {
+        if let gw = gatewayIP, !gw.isEmpty, heartbeat.target == gw {
+            return coordinator.lossFiltering.filters(.gateway)
+        }
+        return coordinator.lossFiltering.filters(.internet)
+    }
+
+    private var activeTcpMs: Double? {
+        coordinator.liveSample?.tcp.targets.filter(\.ok).compactMap(\.elapsedMs).min()
+    }
+
     init(heartbeat: PingHeartbeat? = nil) {
         self.customHeartbeat = heartbeat
     }
@@ -66,14 +77,18 @@ struct PingHeartbeatView: View {
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.card)
                 .strokeBorder(
-                    heartbeat.hasRecentMiss ? Theme.ColorToken.red.opacity(0.35) : Theme.ColorToken.line,
+                    (!isTargetFiltered && heartbeat.hasRecentMiss) ? Theme.ColorToken.red.opacity(0.35) : Theme.ColorToken.line,
                     lineWidth: 1
                 )
         )
         .onAppear {
-            if !heartbeat.isRunning && !heartbeat.isPaused {
+            heartbeat.setFiltered(isTargetFiltered)
+            if !heartbeat.isRunning && !heartbeat.isPaused && !isTargetFiltered {
                 heartbeat.start()
             }
+        }
+        .onChange(of: isTargetFiltered) { _, filtered in
+            heartbeat.setFiltered(filtered)
         }
         .onChange(of: heartbeat.beatTick) { _, _ in
             triggerHeartPulse()
@@ -84,11 +99,9 @@ struct PingHeartbeatView: View {
 
     private var headerRow: some View {
         HStack(spacing: 6) {
-            // Beating Heart Icon
-            Image(systemName: linkDown ? "heart.slash.fill" : (heartbeat.latestBeat?.isMiss == true ? "exclamationmark.triangle.fill" : "heart.fill"))
+            headerIcon
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(heartIconColor)
-                .scaleEffect(heartScale)
+                .scaleEffect(isTargetFiltered ? 1.0 : heartScale)
 
             Text("Ping Heartbeat")
                 .font(.system(size: 11, weight: .semibold))
@@ -107,6 +120,24 @@ struct PingHeartbeatView: View {
         }
     }
 
+    private var headerIcon: some View {
+        Group {
+            if linkDown {
+                Image(systemName: "heart.slash.fill")
+                    .foregroundStyle(.red)
+            } else if isTargetFiltered {
+                Image(systemName: "shield.slash.fill")
+                    .foregroundStyle(Theme.ColorToken.muted)
+            } else if heartbeat.latestBeat?.isMiss == true {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            } else {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(heartIconColor)
+            }
+        }
+    }
+
     private var heartIconColor: Color {
         if linkDown { return .red }
         if isPaused { return Theme.ColorToken.muted }
@@ -120,10 +151,10 @@ struct PingHeartbeatView: View {
     private var liveCadenceBadge: some View {
         HStack(spacing: 3) {
             Circle()
-                .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : Theme.ColorToken.green))
+                .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green)))
                 .frame(width: 4.5, height: 4.5)
-                .scaleEffect(livePulseScale)
-            Text(isPaused ? "Paused" : "1s live")
+                .scaleEffect(isTargetFiltered ? 1.0 : livePulseScale)
+            Text(isPaused ? "Paused" : (isTargetFiltered ? "ICMP blocked" : "1s live"))
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted)
         }
@@ -139,7 +170,7 @@ struct PingHeartbeatView: View {
         } label: {
             HStack(spacing: 3) {
                 Circle()
-                    .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : Theme.ColorToken.green))
+                    .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green)))
                     .frame(width: 4.5, height: 4.5)
                 Text(heartbeat.target)
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
@@ -161,9 +192,11 @@ struct PingHeartbeatView: View {
         if heartbeat.target == PingHeartbeat.defaultTarget {
             if let gw = gatewayIP, !gw.isEmpty {
                 heartbeat.switchTarget(gw)
+                heartbeat.setFiltered(coordinator.lossFiltering.filters(.gateway))
             }
         } else {
             heartbeat.switchTarget(PingHeartbeat.defaultTarget)
+            heartbeat.setFiltered(coordinator.lossFiltering.filters(.internet))
         }
     }
 
@@ -197,6 +230,28 @@ struct PingHeartbeatView: View {
             Text("PAUSED")
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted)
+        } else if isTargetFiltered {
+            if let tcpMs = activeTcpMs {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("TCP")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                    Text(formatLatency(tcpMs))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(latencyColor(tcpMs))
+                    Text("ms")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            } else {
+                Text("TCP OK")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Theme.ColorToken.green)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Theme.ColorToken.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
         } else if let latest = heartbeat.latestBeat {
             if latest.isMiss {
                 HStack(spacing: 2.5) {
@@ -290,6 +345,31 @@ struct PingHeartbeatView: View {
                             .foregroundStyle(Color.gray.opacity(0.6))
                     }
                 }
+            } else if isTargetFiltered {
+                // Filtered ICMP Watermark
+                ZStack {
+                    Theme.ColorToken.nodeBackground
+                    VStack(spacing: 3) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "shield.slash.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                            Text(heartbeat.target == gatewayIP
+                                 ? "Router declines ICMP ping requests"
+                                 : "ICMP ping blocked by network policy")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(Theme.ColorToken.ink)
+                        }
+                        Text(heartbeat.target == gatewayIP
+                             ? "Common on hotel and guest networks · Traffic flows normally"
+                             : (activeTcpMs != nil
+                                ? "Real connections are active · TCP connect time ~\(Int(round(activeTcpMs!))) ms"
+                                : "Web, DNS, and TCP connections are working normally"))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                    .padding(.horizontal, 10)
+                }
             } else {
                 let beats = heartbeat.recentBeats
                 if beats.isEmpty {
@@ -318,7 +398,11 @@ struct PingHeartbeatView: View {
     private var footerStatsRow: some View {
         HStack {
             // Latency spread
-            if let min = heartbeat.minLatency, let avg = heartbeat.avgLatency, let max = heartbeat.maxLatency {
+            if isTargetFiltered {
+                Text("ICMP probe filtered")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+            } else if let min = heartbeat.minLatency, let avg = heartbeat.avgLatency, let max = heartbeat.maxLatency {
                 HStack(spacing: 4) {
                     Text("min \(formatLatency(min))ms")
                     Text("·")
@@ -337,7 +421,16 @@ struct PingHeartbeatView: View {
             Spacer()
 
             // Reliability & Dropped packets counter
-            if heartbeat.totalCount > 0 {
+            if isTargetFiltered {
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(Theme.ColorToken.green)
+                        .frame(width: 4.5, height: 4.5)
+                    Text("TCP traffic healthy")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.green)
+                }
+            } else if heartbeat.totalCount > 0 {
                 HStack(spacing: 3) {
                     if heartbeat.missCount == 0 {
                         Circle()

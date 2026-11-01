@@ -74,6 +74,61 @@ enum NetworkIdentity {
 
     /// Map weak keys onto the MAC group that shares them.
     ///
+    /// Whether an IP address is a private, link-local, or shared subnet address
+    /// that cannot uniquely identify a physical network or router.
+    static func isPrivateOrLocalIP(_ ip: String) -> Bool {
+        let trimmed = ip.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        // IPv4 check
+        let parts = trimmed.split(separator: ".")
+        if parts.count == 4,
+           let o1 = Int(parts[0]),
+           let o2 = Int(parts[1]),
+           let o3 = Int(parts[2]),
+           let o4 = Int(parts[3]),
+           o1 >= 0 && o1 <= 255, o2 >= 0 && o2 <= 255, o3 >= 0 && o3 <= 255, o4 >= 0 && o4 <= 255 {
+            // 10.0.0.0/8
+            if o1 == 10 { return true }
+            // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+            if o1 == 172 && (o2 >= 16 && o2 <= 31) { return true }
+            // 192.168.0.0/16
+            if o1 == 192 && o2 == 168 { return true }
+            // 169.254.0.0/16 (link-local)
+            if o1 == 169 && o2 == 254 { return true }
+            // 100.64.0.0/10 (CGNAT: 100.64.0.0 - 100.127.255.255)
+            if o1 == 100 && (o2 >= 64 && o2 <= 127) { return true }
+            // 127.0.0.0/8 (loopback)
+            if o1 == 127 { return true }
+            return false
+        }
+        // IPv6 check (fe80::/10 link-local, fc00::/7 unique local)
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("fe8") || lower.hasPrefix("fe9") || lower.hasPrefix("fea") || lower.hasPrefix("feb") {
+            return true
+        }
+        if lower.hasPrefix("fc") || lower.hasPrefix("fd") {
+            return true
+        }
+        if lower == "::1" { return true }
+        return false
+    }
+
+    /// Whether a network key or IP refers to a private/local gateway.
+    static func isPrivateOrLocalGateway(_ keyOrIP: String) -> Bool {
+        let ip: String
+        if keyOrIP.hasPrefix("gw:") {
+            ip = String(keyOrIP.dropFirst(3))
+        } else if let eq = keyOrIP.range(of: "gw=") {
+            let rest = String(keyOrIP[eq.upperBound...])
+            ip = String(rest.split(separator: ",").first ?? "")
+        } else {
+            ip = keyOrIP
+        }
+        return isPrivateOrLocalIP(ip)
+    }
+
+    /// Map weak keys onto the MAC group that shares them.
+    ///
     /// `strong` is what each MAC group is known to have used — its
     /// gateways and SSIDs, in canonical form. `weak` is the set of
     /// non-MAC keys needing a home. The result maps each foldable weak key
@@ -88,7 +143,7 @@ enum NetworkIdentity {
     static func fold(_ strong: [String: [String]], weak: Set<String>) -> [String: String] {
         var claims: [String: Set<String>] = [:]
         for (mac, used) in strong {
-            for key in used where weak.contains(key) {
+            for key in used where weak.contains(key) && !isPrivateOrLocalGateway(key) {
                 claims[key, default: []].insert(mac)
             }
         }

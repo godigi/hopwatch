@@ -190,6 +190,13 @@ import Testing
         // Ethernet
         let eth = PlainEnglishTranslator.translate(summary: "Ethernet negotiated at half duplex")
         #expect(eth.title == "Ethernet Stuck on Half-Duplex")
+
+        // Mac sleep & Wi-Fi roamed
+        let sleep = PlainEnglishTranslator.translate(summary: "Mac was asleep (15m 2s)")
+        #expect(sleep.title == "Mac System Sleep")
+
+        let roam = PlainEnglishTranslator.translate(summary: "Roamed to access point (ch 36, -58 dBm)")
+        #expect(roam.title == "Wi-Fi Access Point Roam")
     }
 
     // MARK: - Fallbacks and Edge Cases

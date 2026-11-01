@@ -493,8 +493,12 @@ def bridge_candidates(groups: dict[str, dict]) -> dict[str, str]:
     candidates means the evidence does not distinguish them, and a wrong
     merge corrupts a chart in a way the user cannot see. Ambiguity is left
     for the app's manual "merge networks" action instead.
+
+    When no MAC group exists for a weak gateway key (gw:), it is bridged onto
+    an ssid: group if gateway, ISP, and channel uniquely point to that SSID.
     """
     mac_groups = {k: g for k, g in groups.items() if k.startswith("mac:")}
+    ssid_groups = {k: g for k, g in groups.items() if k.startswith("ssid:")}
     weak = {k: g for k, g in groups.items() if not k.startswith("mac:") and k != "unknown"}
     bridges: dict[str, str] = {}
     for wk, wg in weak.items():
@@ -512,6 +516,20 @@ def bridge_candidates(groups: dict[str, dict]) -> dict[str, str]:
             matches.append(mk)
         if len(matches) == 1:
             bridges[wk] = matches[0]
+            continue
+
+        if wk.startswith("gw:"):
+            smatches = []
+            for sk, sg in ssid_groups.items():
+                gws = set(wg["gateways"]) & set(sg["gateways"])
+                isps = set(wg["isps"]) & set(sg["isps"])
+                if not gws or not isps:
+                    continue
+                if wg["channels"] and sg["channels"] and not (set(wg["channels"]) & set(sg["channels"])):
+                    continue
+                smatches.append(sk)
+            if len(smatches) == 1:
+                bridges[wk] = smatches[0]
     return bridges
 
 

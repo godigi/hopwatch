@@ -2237,7 +2237,8 @@ struct DashboardSuitabilityStrip: View {
             Text(item.consequence)
                 .font(.system(size: 8.5))
                 .foregroundStyle(item.verdict == .good ? Theme.ColorToken.muted : item.tint)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)

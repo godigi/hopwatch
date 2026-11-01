@@ -46,7 +46,8 @@ enum RouteWarningResolver {
         inetJitter: Double,
         hasRecentRoam: Bool,
         wifiRuleTint: Color? = nil,
-        gatewayPingFiltered: Bool = false
+        gatewayPingFiltered: Bool = false,
+        internetPingFiltered: Bool = false
     ) -> Result {
         // Downstream validation: Packets to the internet must traverse the local gateway.
         // If internet through-traffic is clean (loss <= 1.0%), isolated router ping loss (< 20%)
@@ -97,7 +98,16 @@ enum RouteWarningResolver {
 
         // 4. Internet / Broadband status
         var internetWarn = false
-        if firedCategories.contains("internet") {
+        if internetPingFiltered {
+            // When internet ICMP ping is filtered (ICMP-1 / hotel Wi-Fi), the 100% ICMP loss
+            // is harmless network control-plane filtering. Only real internet fault rules
+            // or an actual degraded/outage stage should warn.
+            if firedCategories.contains("internet") {
+                internetWarn = true
+            } else if case .degraded = stage, !routerWarn, !isWifiLaggy {
+                internetWarn = true
+            }
+        } else if firedCategories.contains("internet") {
             internetWarn = true
         } else if inetLoss >= 3.0 && (gatewayPingFiltered || inetLoss > gwLoss) {
             internetWarn = true

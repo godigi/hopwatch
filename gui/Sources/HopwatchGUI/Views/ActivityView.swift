@@ -84,16 +84,16 @@ struct ActivityView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: activeCount > 0 ? "exclamationmark.triangle.fill" : (issuesCount > 0 ? "clock.arrow.circlepath" : "checkmark.shield.fill"))
+                Image(systemName: activeCount > 0 ? "exclamationmark.triangle.fill" : (allEntries.isEmpty ? "clock" : (issuesCount > 0 ? "clock.arrow.circlepath" : "checkmark.shield.fill")))
                     .font(.system(size: 20))
-                    .foregroundStyle(activeCount > 0 ? .red : (issuesCount > 0 ? .blue : .green))
+                    .foregroundStyle(activeCount > 0 ? .red : (allEntries.isEmpty ? .secondary : (issuesCount > 0 ? .blue : .green)))
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(summaryTitle(activeCount: activeCount, issuesCount: issuesCount))
+                    Text(Self.summaryTitle(activeCount: activeCount, issuesCount: issuesCount, allCount: allEntries.count))
                         .font(.headline)
 
-                    Text(summarySubtitle(allCount: allEntries.count, issuesCount: issuesCount, daysCount: daysCount))
+                    Text(Self.summarySubtitle(allCount: allEntries.count, issuesCount: issuesCount, daysCount: daysCount))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -112,9 +112,12 @@ struct ActivityView: View {
         .padding(12)
     }
 
-    private func summaryTitle(activeCount: Int, issuesCount: Int) -> String {
+    static func summaryTitle(activeCount: Int, issuesCount: Int, allCount: Int) -> String {
         if activeCount > 0 {
             return "\(activeCount) Active Alert\(activeCount == 1 ? "" : "s") Now"
+        }
+        if allCount == 0 {
+            return "No Activity Recorded Yet"
         }
         if issuesCount == 0 {
             return "Connection Stable & Quiet"
@@ -122,7 +125,10 @@ struct ActivityView: View {
         return "Network Activity History"
     }
 
-    private func summarySubtitle(allCount: Int, issuesCount: Int, daysCount: Int) -> String {
+    static func summarySubtitle(allCount: Int, issuesCount: Int, daysCount: Int) -> String {
+        if allCount == 0 {
+            return "Network transitions and disruptions will appear here as they are observed."
+        }
         if issuesCount == 0 {
             return "No packet loss, latency spikes, or disruptions observed across \(max(daysCount, 1)) day(s)"
         }
@@ -130,6 +136,7 @@ struct ActivityView: View {
     }
 
     private func isIssue(_ entry: ActivityEntry) -> Bool {
+        if entry.kind == "gap" || entry.kind == "wifi-roamed" { return false }
         if entry.ruleID != nil { return true }
         if entry.kind == "rule-fired" || entry.kind == "alert" || entry.kind == "vpn-disconnected" {
             return true

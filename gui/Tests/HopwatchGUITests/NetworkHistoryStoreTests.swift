@@ -190,7 +190,7 @@ import Testing
         let store = HistoryStore()
         var net = makeSampleNetwork()
         net.id = "mac:64:d1:54:4a:93:7f"
-        net.gateways = ["10.125.128.1"]
+        net.gateways = ["10.125.128.1", "198.51.100.1"]
         net.ssids = ["Mercure"]
         net.bridgedFrom = ["ssid:Mercure"]
 
@@ -198,14 +198,100 @@ import Testing
         doc.networks = [net]
         store.adoptDocumentForTesting(doc)
 
-        // The weak gateway and ssid keys must fold onto the MAC group
-        #expect(store.canonicalID("gw:10.125.128.1") == "mac:64:d1:54:4a:93:7f")
+        // Weak SSID and public gateway keys fold onto the MAC group
         #expect(store.canonicalID("ssid:Mercure") == "mac:64:d1:54:4a:93:7f")
-        #expect(store.canonicalID("wifi:gw=10.125.128.1") == "mac:64:d1:54:4a:93:7f")
         #expect(store.canonicalID("wifi:ssid=Mercure") == "mac:64:d1:54:4a:93:7f")
+        #expect(store.canonicalID("gw:198.51.100.1") == "mac:64:d1:54:4a:93:7f")
         #expect(store.canonicalID("mac:64:d1:54:4a:93:7f") == "mac:64:d1:54:4a:93:7f")
+
+        // Private/local RFC-1918 gateway IPs must NEVER fold onto a network group
+        #expect(store.canonicalID("gw:10.125.128.1") == "gw:10.125.128.1")
+        #expect(store.canonicalID("wifi:gw=10.125.128.1") == "gw:10.125.128.1")
 
         // An unrelated network must not fold
         #expect(store.canonicalID("gw:192.168.1.1") == "gw:192.168.1.1")
+    }
+
+    @Test @MainActor func privateGatewayIPsNeverFoldAndNeverAdoptCustomNames() {
+        let store = HistoryStore()
+        var net = makeSampleNetwork()
+        net.id = "mac:54:9f:6:cb:48:70"
+        net.gateways = ["192.168.1.254"]
+        net.ssids = ["Carlos&Delianne_5G"]
+
+        var doc = HistoryDocument.empty
+        doc.networks = [net]
+        store.adoptDocumentForTesting(doc)
+
+        // Ensure renaming a gateway IP is rejected
+        store.rename("gw:192.168.1.254", to: "Bete Costa - 2G")
+        #expect(store.customName(for: "gw:192.168.1.254") == nil)
+
+        // Renaming the MAC group works
+        store.rename("mac:54:9f:6:cb:48:70", to: "Carlos&Delianne_5G")
+        #expect(store.customName(for: "mac:54:9f:6:cb:48:70") == "Carlos&Delianne_5G")
+
+        // Looking up custom name for gw:192.168.1.254 must not return Carlos's name
+        #expect(store.customName(for: "gw:192.168.1.254") == nil)
+        #expect(store.canonicalID("gw:192.168.1.254") == "gw:192.168.1.254")
+    }
+
+    @Test @MainActor func corruptedSSIDRenamesArePurged() {
+        let store = HistoryStore()
+        var net1 = makeSampleNetwork()
+        net1.id = "ssid:Flat Classic 203 - 204"
+        net1.ssids = ["Flat Classic 203 - 204"]
+
+        var net2 = makeSampleNetwork()
+        net2.id = "ssid:Brian’s iPhone"
+        net2.ssids = ["Brian’s iPhone"]
+
+        var doc = HistoryDocument.empty
+        doc.networks = [net1, net2]
+
+        // Manually simulate corrupted names in customNames
+        store.rename("ssid:Brian’s iPhone", to: "Flat Classic 203 - 204")
+        #expect(store.customName(for: "ssid:Brian’s iPhone") == "Flat Classic 203 - 204")
+
+        // Adopting the document should detect and purge the cross-SSID corruption
+        store.adoptDocumentForTesting(doc)
+        #expect(store.customName(for: "ssid:Brian’s iPhone") == nil)
+        #expect(store.displayName(for: "ssid:Brian’s iPhone") == "Brian’s iPhone")
+    }
+
+    @Test @MainActor func privateGatewayIPsNeverPersistInArrivalStates() {
+        // When arrivalStates are set, any private gateway key (e.g. gw:192.168.1.1) must be rejected
+        Defaults.arrivalStates = [
+            "gw:192.168.1.1": .declined(depth: .quick, reason: .unhealthy, at: Date()),
+            "mac:68:2a:dd:9f:87:d1": .checked(depth: .full, at: Date(), runID: "run1"),
+            "ssid:Circle 94_5G": .checked(depth: .full, at: Date(), runID: "run2")
+        ]
+
+        let retrieved = Defaults.arrivalStates
+        #expect(retrieved["gw:192.168.1.1"] == nil)
+        #expect(retrieved["mac:68:2a:dd:9f:87:d1"] != nil)
+        #expect(retrieved["ssid:Circle 94_5G"] != nil)
+    }
+
+    @Test func arrivalPolicyWaitsDuringSettling() {
+        // Even with a sample reporting critical severity, if the connection is settling, ArrivalPolicy waits
+        let decision = ArrivalPolicy.decide(
+            hasSample: true,
+            severity: "critical",
+            isExpensive: false,
+            isConstrained: false,
+            isSettling: true
+        )
+        #expect(decision == .wait)
+
+        // Once settling ends, it makes the definitive decision
+        let settledDecision = ArrivalPolicy.decide(
+            hasSample: true,
+            severity: "ok",
+            isExpensive: false,
+            isConstrained: false,
+            isSettling: false
+        )
+        #expect(settledDecision == .full)
     }
 }

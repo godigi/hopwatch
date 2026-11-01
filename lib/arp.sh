@@ -61,6 +61,14 @@ arp_run() {
   # like a regression.
   if [ -n "$GATEWAY" ]; then
     GW_MAC="$(printf '%s\n' "$arp_pairs" | awk -v gw="$GATEWAY" '$1==gw{print $2; exit}')"
+    if [ -z "$GW_MAC" ] && [ -n "${INTERFACE:-}" ]; then
+      local ipconfig_out
+      ipconfig_out="$(ipconfig getsummary "$INTERFACE" 2>/dev/null || true)"
+      GW_MAC="$(printf '%s\n' "$ipconfig_out" | awk '
+        /SERVERID.*Addr/ { print $NF; exit }
+        /source link-address option.*:/ { print $NF; exit }
+      ')"
+    fi
   fi
   if [ -n "$GATEWAY" ] && printf '%s\n' "$arp_out" | grep -qF "($GATEWAY) at (incomplete)"; then
     ARP_GW_INCOMPLETE=1

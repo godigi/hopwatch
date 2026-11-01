@@ -76,6 +76,7 @@ public enum HopAttributionResolver {
         public let badgeTint: Color
         public let isWired: Bool
         public let activeRules: [String]
+        public let isRouterFirewallFiltered: Bool
 
         public init(
             culprit: Culprit,
@@ -88,7 +89,8 @@ public enum HopAttributionResolver {
             badgeTitle: String? = nil,
             badgeTint: Color? = nil,
             isWired: Bool = false,
-            activeRules: [String] = []
+            activeRules: [String] = [],
+            isRouterFirewallFiltered: Bool = false
         ) {
             self.culprit = culprit
             self.macHealth = macHealth
@@ -101,6 +103,7 @@ public enum HopAttributionResolver {
             self.badgeTint = badgeTint ?? culprit.badgeTint
             self.isWired = isWired
             self.activeRules = activeRules
+            self.isRouterFirewallFiltered = isRouterFirewallFiltered
         }
     }
 
@@ -158,6 +161,7 @@ public enum HopAttributionResolver {
         // A filter rule makes one ping leg unmeasurable: TCP-1 the gateway's,
         // ICMP-1 the internet's. Drop exactly that leg's loss, keep the other.
         let filtering = EffectiveLoss.filtering(icmpFilteredFlag: false, ruleIDs: rules)
+        let isRouterFirewallFiltered = ruleSet.contains("TCP-1") || filtering.gatewayLeg
         let effectiveInetLoss = filtering.internetLeg ? nil : inetLoss
         let effectiveGatewayLoss = filtering.gatewayLeg ? nil : gatewayLoss
         let isIsolatedGatewayLoss = (effectiveInetLoss != nil && effectiveInetLoss! <= 1.0 && (effectiveGatewayLoss ?? 0) < 20.0)
@@ -304,7 +308,8 @@ public enum HopAttributionResolver {
             badgeTitle: badgeTitle,
             badgeTint: badgeTint,
             isWired: !isWifi,
-            activeRules: rules
+            activeRules: rules,
+            isRouterFirewallFiltered: isRouterFirewallFiltered
         )
     }
 
@@ -339,7 +344,8 @@ public enum HopAttributionResolver {
                 badgeTitle: res.badgeTitle,
                 badgeTint: res.badgeTint,
                 isWired: res.isWired,
-                activeRules: res.activeRules
+                activeRules: res.activeRules,
+                isRouterFirewallFiltered: res.isRouterFirewallFiltered
             )
         }
         return res
@@ -415,7 +421,7 @@ public struct HopAttributionView: View {
 
                 linkSegment(label: result.isWired ? "Ethernet" : "Wi-Fi", health: result.wifiHealth)
 
-                nodeView(title: "Router", icon: "wifi.router", health: result.routerHealth)
+                nodeView(title: "Router", icon: "wifi.router", health: result.routerHealth, isFirewallFiltered: result.isRouterFirewallFiltered)
 
                 linkSegment(label: "Broadband", health: result.ispHealth)
 
@@ -501,23 +507,36 @@ public struct HopAttributionView: View {
         )
     }
 
-    private func nodeView(title: String, icon: String, health: HopAttributionResolver.HopHealth) -> some View {
+    private func nodeView(title: String, icon: String, health: HopAttributionResolver.HopHealth, isFirewallFiltered: Bool = false) -> some View {
         VStack(spacing: 4) {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: icon)
                     .font(.system(size: 20))
-                    .foregroundStyle(health == .healthy ? .primary : health.tint)
+                    .foregroundStyle(isFirewallFiltered ? .blue : (health == .healthy ? .primary : health.tint))
                     .frame(width: 40, height: 40)
-                    .background(health.tint.opacity(0.12), in: Circle())
+                    .background((isFirewallFiltered ? Color.blue : health.tint).opacity(0.12), in: Circle())
 
-                Image(systemName: health.symbol)
-                    .font(.system(size: 11))
-                    .foregroundStyle(health.tint)
-                    .offset(x: 3, y: -2)
+                if isFirewallFiltered {
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.blue)
+                        .offset(x: 3, y: -2)
+                } else {
+                    Image(systemName: health.symbol)
+                        .font(.system(size: 11))
+                        .foregroundStyle(health.tint)
+                        .offset(x: 3, y: -2)
+                }
             }
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
+
+            if isFirewallFiltered {
+                Text("Firewall 🛡️")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.blue)
+            }
         }
         .frame(minWidth: 56)
     }
@@ -556,7 +575,7 @@ public struct HopAttributionCompactView: View {
         HStack(spacing: 6) {
             miniNode("Mac", icon: "laptopcomputer", health: result.macHealth)
             miniArrow(result.wifiHealth)
-            miniNode("Router", icon: "wifi.router", health: result.routerHealth)
+            miniNode("Router", icon: "wifi.router", health: result.routerHealth, isFirewallFiltered: result.isRouterFirewallFiltered)
             miniArrow(result.ispHealth)
             miniNode("Internet", icon: "globe", health: result.ispHealth)
 
@@ -572,11 +591,11 @@ public struct HopAttributionCompactView: View {
         .help(result.reassurance)
     }
 
-    private func miniNode(_ name: String, icon: String, health: HopAttributionResolver.HopHealth) -> some View {
+    private func miniNode(_ name: String, icon: String, health: HopAttributionResolver.HopHealth, isFirewallFiltered: Bool = false) -> some View {
         HStack(spacing: 3) {
-            Image(systemName: icon)
+            Image(systemName: isFirewallFiltered ? "shield.fill" : icon)
                 .font(.system(size: 10))
-                .foregroundStyle(health.tint)
+                .foregroundStyle(isFirewallFiltered ? .blue : health.tint)
             Text(name)
                 .font(.system(size: 10, weight: .medium))
         }

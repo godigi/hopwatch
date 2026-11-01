@@ -324,6 +324,8 @@ MON_CK_LAST_IN="" MON_CK_LAST=0
 # suppresses a spurious "everything changed" on the first sample.
 MON_HAVE_PREV=0
 MON_PREV_PUB_IP=""
+MON_PREV_PUB_IPV4=""
+MON_PREV_PUB_IPV6=""
 MON_PREV_PUB_CC=""
 MON_PREV_PUB_ISP=""
 MON_PREV_VPN_ACTIVE=""
@@ -430,10 +432,30 @@ _mon_probe_link() {
   # Gateway MAC from the ARP cache — a local table read, no packets. This
   # is the strongest identity a network has and the thing "you're not on
   # the network you think you are" keys off.
+  #
+  # macOS with ifscoped routes (standard for Wi-Fi) reports entries in `arp -an`
+  # but `arp -n <ip>` returns "-- no entry". Check `arp -an` first, then fall back.
   MON_GW_MAC=""
   if [ -n "$MON_GATEWAY" ]; then
-    MON_GW_MAC="$(arp -n "$MON_GATEWAY" 2>/dev/null \
-      | awk '/ at /{ if ($4 != "(incomplete)") print $4; exit }')"
+    MON_GW_MAC="$(arp -an 2>/dev/null \
+      | awk -v gw="$MON_GATEWAY" '
+          / at / && $4 != "(incomplete)" {
+            ip = $2
+            gsub(/[()]/, "", ip)
+            if (ip == gw) { print $4; exit }
+          }')"
+    if [ -z "$MON_GW_MAC" ]; then
+      MON_GW_MAC="$(arp -n "$MON_GATEWAY" 2>/dev/null \
+        | awk '/ at /{ if ($4 != "(incomplete)") print $4; exit }')"
+    fi
+    if [ -z "$MON_GW_MAC" ] && [ -n "$MON_INTERFACE" ]; then
+      local ipconfig_out
+      ipconfig_out="$(ipconfig getsummary "$MON_INTERFACE" 2>/dev/null || true)"
+      MON_GW_MAC="$(printf '%s\n' "$ipconfig_out" | awk '
+        /SERVERID.*Addr/ { print $NF; exit }
+        /source link-address option.*:/ { print $NF; exit }
+      ')"
+    fi
   fi
   _mon_hold_gw_mac "$EPOCHSECONDS"
   # What the network id was built from is also the best answer to "what kind
@@ -1199,13 +1221,30 @@ _mon_rules() {
     MON_MEASUREMENT_STATE="measured"
   fi
 
+  # Check whether TCP reachability is fresh on this cycle. TCP is measured
+  # on the medium tier; on fast cycles it retains its previous value. Relying
+  # on a stale MON_TCP_OK=1 when gateway pings suddenly drop causes transient
+  # TCP-1 false alarms during interface handshakes and network drops.
+  local _mon_tcp_fresh=0
+  if [ -n "${MON_REFRESHED:-}" ]; then
+    case " $MON_REFRESHED " in
+      *" medium "*) _mon_tcp_fresh=1 ;;
+    esac
+  elif [ "${MON_MEDIUM_FRESH:-0}" -eq 1 ]; then
+    _mon_tcp_fresh=1
+  fi
+  local _mon_tcp_usable=0
+  if [ "$_mon_tcp_fresh" -eq 1 ] || [[ " ${MON_PREV_RULES:-} " == *" TCP-1 "* ]]; then
+    [ "${MON_TCP_OK:-0}" = "1" ] && _mon_tcp_usable=1
+  fi
+
   # Prefer the fast HTTPS reachability result when it has run. Fall back to
   # the slower public probe for compatibility with the first sample and with
   # older test/CLI inputs that do not provide MON_WEB_OK.
   local _mon_public_ok="${MON_WEB_OK:-$MON_PUBLIC_OK}"
   # A failed HTTPS probe does not prove the internet is down when other
   # public traffic succeeds. Match the full scan's outage interpretation.
-  if [ "${MON_TCP_OK:-0}" = "1" ] \
+  if [ "$_mon_tcp_usable" -eq 1 ] \
      || loss_below "$MON_INET_LOSS" "$THRESH_ICMP_TOTAL_LOSS_PCT" \
      || loss_below "$MON_INET_LOSS_ALT" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
     _mon_public_ok=1
@@ -1234,7 +1273,7 @@ _mon_rules() {
   local _mon_gw_filtered=0 _mon_gw_corroborated=0
   loss_corroborates_gateway "$MON_INET_LOSS" "$MON_INET_LOSS_ALT" \
     && _mon_gw_corroborated=1
-  if [ "${MON_TCP_OK:-0}" = "1" ] \
+  if [ "$_mon_tcp_usable" -eq 1 ] \
      && [ "$_mon_gw_corroborated" -eq 0 ] \
      && loss_at_least "$MON_GW_LOSS" "$THRESH_ICMP_FILTERED_LOSS_PCT"; then
     _mon_gw_filtered=1
@@ -1806,7 +1845,14 @@ _mon_auto_reconnect() {
 # own inputs were measured; otherwise retain it for the next cycle that
 # can evaluate recovery. The VPN flag is observed independently of traffic.
 _mon_snapshot_prev() {
-  [ -n "$MON_PUB_IP" ]    && MON_PREV_PUB_IP="$MON_PUB_IP"
+  if [ -n "$MON_PUB_IP" ]; then
+    MON_PREV_PUB_IP="$MON_PUB_IP"
+    if [[ "$MON_PUB_IP" == *:* ]]; then
+      MON_PREV_PUB_IPV6="$MON_PUB_IP"
+    elif [[ "$MON_PUB_IP" == *.* ]]; then
+      MON_PREV_PUB_IPV4="$MON_PUB_IP"
+    fi
+  fi
   [ -n "$MON_PUB_CC" ]    && MON_PREV_PUB_CC="$MON_PUB_CC"
   [ -n "$MON_PUB_ISP" ]   && MON_PREV_PUB_ISP="$MON_PUB_ISP"
   [ -n "$MON_VPN_NAME" ]  && MON_PREV_VPN_NAME="$MON_VPN_NAME"
@@ -1912,6 +1958,8 @@ _mon_emit() {
   NETDIAG_MON_CADENCE_S="$1" \
   NETDIAG_MON_HAVE_PREV="$MON_HAVE_PREV" \
   NETDIAG_MON_PREV_PUB_IP="$MON_PREV_PUB_IP" \
+  NETDIAG_MON_PREV_PUB_IPV4="$MON_PREV_PUB_IPV4" \
+  NETDIAG_MON_PREV_PUB_IPV6="$MON_PREV_PUB_IPV6" \
   NETDIAG_MON_PREV_PUB_CC="$MON_PREV_PUB_CC" \
   NETDIAG_MON_PREV_PUB_ISP="$MON_PREV_PUB_ISP" \
   NETDIAG_MON_PREV_VPN_ACTIVE="$MON_PREV_VPN_ACTIVE" \
@@ -2089,6 +2137,8 @@ monitor_run() {
         # observation: counters from before it are not evidence now.
         MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
         _mon_auto_reconnect_reset
+        MON_CLEARABLE_RULES=""
+        MON_RULES="$MON_PREV_RULES"
         MON_SEQ=$((MON_SEQ + 1))
         _mon_emit "$MONITOR_FAST_INTERVAL" || { _mon_note_emit_failed; break; }
         _mon_snapshot_prev
@@ -2143,6 +2193,9 @@ monitor_run() {
         MON_GW_LOSS_STREAK=0 MON_INET_LOSS_STREAK=0
         _mon_conn_reset
         _mon_hog_reset
+        _mon_clear_measurements
+        MON_PREV_RULES=""
+        MON_PREV_PUB_IPV4="" MON_PREV_PUB_IPV6=""
         # Not on the first cycle: every network is "new" to a process that
         # has just started, and that would discard the carried-over attempt.
         [ -z "$prev_network_id_before" ] || _mon_auto_reconnect_reset
@@ -2279,6 +2332,7 @@ monitor_run() {
         if ! printf '%s' "$MON_REFRESHED" | grep -qw medium; then
           MON_REFRESHED+="medium "
           _mon_probe_tcp
+          MON_MEDIUM_FRESH=1
         fi
         if ! printf '%s' "$MON_REFRESHED" | grep -qw slow; then
           MON_REFRESHED+="slow "

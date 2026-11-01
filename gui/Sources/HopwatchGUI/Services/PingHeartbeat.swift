@@ -45,6 +45,7 @@ final class PingHeartbeat: @unchecked Sendable {
     private(set) var latestBeat: PingBeat?
     private(set) var isRunning: Bool = false
     private(set) var isPaused: Bool = false
+    private(set) var isFiltered: Bool = false
     private(set) var target: String = defaultTarget
     private(set) var beatTick: Int = 0
 
@@ -109,8 +110,21 @@ final class PingHeartbeat: @unchecked Sendable {
             self.target = target
         }
         isExplicitlyStopped = false
-        guard !isRunning, !isTestingMode else { return }
+        guard !isRunning, !isTestingMode, !isFiltered else { return }
         spawnPingProcess()
+    }
+
+    func setFiltered(_ filtered: Bool) {
+        guard isFiltered != filtered else { return }
+        isFiltered = filtered
+        if filtered {
+            terminatePingProcess()
+            beats.removeAll()
+            latestBeat = nil
+            isRunning = false
+        } else if !isExplicitlyStopped && !isPaused && !isTestingMode {
+            spawnPingProcess()
+        }
     }
 
     func stop() {
@@ -129,6 +143,7 @@ final class PingHeartbeat: @unchecked Sendable {
     func resume() {
         guard isPaused else { return }
         isPaused = false
+        guard !isFiltered else { return }
         spawnPingProcess()
     }
 
@@ -138,7 +153,7 @@ final class PingHeartbeat: @unchecked Sendable {
         beats.removeAll()
         latestBeat = nil
         beatTick = 0
-        if isRunning && !isPaused {
+        if isRunning && !isPaused && !isFiltered {
             terminatePingProcess()
             spawnPingProcess()
         }
@@ -175,6 +190,7 @@ final class PingHeartbeat: @unchecked Sendable {
     }
 
     func seedFromSamples(_ samples: [MonitorSample]) {
+        guard !isFiltered else { return }
         guard beats.isEmpty else { return }
         let recent = samples.suffix(Self.maxBeats)
         for sample in recent {
@@ -277,6 +293,7 @@ final class PingHeartbeat: @unchecked Sendable {
     // MARK: - Process Execution
 
     private func spawnPingProcess() {
+        guard !isFiltered else { return }
         terminatePingProcess()
 
         let proc = Process()
@@ -357,11 +374,11 @@ final class PingHeartbeat: @unchecked Sendable {
     }
 
     private func scheduleAutoRecoveryIfNeeded() {
-        guard !isExplicitlyStopped, !isPaused, !isTestingMode else { return }
+        guard !isExplicitlyStopped, !isPaused, !isTestingMode, !isFiltered else { return }
         log.info("ping heartbeat stream ended; scheduling auto-recovery in 1s")
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard let self, !self.isRunning, !self.isExplicitlyStopped, !self.isPaused, !self.isTestingMode else { return }
+            guard let self, !self.isRunning, !self.isExplicitlyStopped, !self.isPaused, !self.isTestingMode, !self.isFiltered else { return }
             self.spawnPingProcess()
         }
     }

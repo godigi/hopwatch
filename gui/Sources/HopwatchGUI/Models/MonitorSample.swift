@@ -206,7 +206,11 @@ struct MonitorSample: Decodable, Sendable {
             get {
                 if let explicit = explicitMine { return explicit }
                 guard let nid = historyJoinID ?? id else { return false }
-                return Defaults.networkOwned.contains(nid) || (self.id.map { Defaults.networkOwned.contains($0) } ?? false)
+                if Defaults.networkOwned.contains(nid) { return true }
+                if let id, Defaults.networkOwned.contains(id) { return true }
+                if let canonical = HopwatchGUI.NetworkIdentity.canonical(nid),
+                   Defaults.networkOwned.contains(canonical) { return true }
+                return false
             }
             set {
                 explicitMine = newValue

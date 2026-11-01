@@ -348,4 +348,37 @@ import Testing
         // A CLI older than the field never sends it: not warranted.
         #expect(try decode("").autoReconnect == nil)
     }
+
+    @Test @MainActor func wifiDisplayNamePrioritizesLiveSSIDOverStaleMACAdoptedName() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.setLiveSSIDForTesting("Brian’s iPhone")
+
+        // Suppose previous network router MAC was adopted as "Flat Classic 203 - 204"
+        coordinator.history.rename("mac:54:9f:6:cb:48:70", to: "Flat Classic 203 - 204")
+
+        // And monitor sample still reflects the previous network router MAC
+        var sample = MonitorSample()
+        sample.network = .init(id: "wifi:mac=54:9f:6:cb:48:70", groupId: "mac:54:9f:6:cb:48:70")
+        sample.link = .init(up: true, type: "wifi", gateway: "192.168.1.1", gatewayMAC: "54:9f:6:cb:48:70")
+        coordinator.handleSampleForTesting(sample)
+
+        // Despite monitor sample carrying the previous router MAC with a custom name,
+        // wifiDisplayName must report the authoritative live Wi-Fi SSID
+        #expect(coordinator.wifiDisplayName == "Brian’s iPhone")
+    }
+
+    @Test @MainActor func adoptLiveSSIDRejectsSSIDAndGatewayKeys() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.setLiveSSIDForTesting("Flat Classic 203 - 204")
+
+        // An SSID key (e.g. from personal hotspot or no-MAC network) must NEVER adopt another SSID
+        var sample = MonitorSample()
+        sample.ts = ISO8601DateFormatter().string(from: Date())
+        sample.network = .init(id: "wifi:ssid=Brian’s iPhone", groupId: "ssid:Brian’s iPhone")
+        sample.link = .init(up: true, type: "wifi", gateway: "172.20.10.1")
+        coordinator.handleSampleForTesting(sample)
+
+        #expect(coordinator.history.customName(for: "ssid:Brian’s iPhone") == nil)
+        #expect(coordinator.history.displayName(for: "ssid:Brian’s iPhone") == "Brian’s iPhone")
+    }
 }

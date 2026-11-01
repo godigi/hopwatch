@@ -553,7 +553,8 @@ struct DropdownView: View {
             inetJitter: inetJitter,
             hasRecentRoam: coordinator.hasRecentRoam,
             wifiRuleTint: wifiRuleTint,
-            gatewayPingFiltered: lossFiltering.filters(.gateway)
+            gatewayPingFiltered: lossFiltering.filters(.gateway),
+            internetPingFiltered: lossFiltering.filters(.internet)
         )
     }
 
@@ -843,7 +844,9 @@ struct DropdownView: View {
             vpnName: coordinator.liveSample?.vpn.name ?? snap?.vpn.name,
             currentJitter: coordinator.currentJitter,
             effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering
+            lossFiltering: coordinator.lossFiltering,
+            isSettling: coordinator.isSettling,
+            isArrivalCheck: coordinator.isArrivalCheck
         )
         return SuitabilityEngine.evaluateAll(inputs)
     }
@@ -1098,9 +1101,7 @@ struct DropdownView: View {
         let snapshotCandidate = coordinator.currentRunResult?.snapshot
             ?? coordinator.latestRun?.snapshot
             ?? coordinator.hydratedReport?.run
-        let owned = coordinator.history.isOwned(
-            networkID: sampleCandidate?.network.id ?? snapshotCandidate?.network.id
-        )
+        let owned = coordinator.isCurrentNetworkOwned
         let activeAlert: StageResolver.AlertSnapshot? = {
             if case .alerted(let stageAlert) = stage {
                 return stageAlert
@@ -1200,8 +1201,7 @@ struct DropdownView: View {
     }
 
     private var isNetworkOwned: Bool {
-        coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
-            || (coordinator.liveSample?.network.isMine ?? false)
+        coordinator.isCurrentNetworkOwned
     }
 
     private var routerGatewayIP: String? {

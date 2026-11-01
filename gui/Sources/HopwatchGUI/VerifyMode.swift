@@ -1977,6 +1977,9 @@ private enum VerifyHarness {
         check(ArrivalPolicy.decide(hasSample: false, severity: "ok",
                                    isExpensive: false, isConstrained: false) == .wait,
               "hasSample is what gates the decision, not the severity string")
+        check(ArrivalPolicy.decide(hasSample: true, severity: "critical",
+                                   isExpensive: false, isConstrained: false, isSettling: true) == .wait,
+              "settling connection waits for steady state rather than prematurely downgrading")
 
         check(ArrivalPolicy.decide(hasSample: true, severity: "ok",
                                    isExpensive: false, isConstrained: false) == .full,
@@ -2433,6 +2436,12 @@ private enum VerifyHarness {
         check(MenuBarStyle.allCases.contains(.dotAndPing), "MenuBarStyle.allCases includes .dotAndPing")
         check(MenuBarStyle.dotAndPing.rawValue == "dot+ping", "MenuBarStyle.dotAndPing rawValue is dot+ping")
         check(MenuBarStyle.dotAndPing.label == "Dot and ping time", "MenuBarStyle.dotAndPing label is Dot and ping time")
+        check(MenuBarStyle.allCases.contains(.dotPingAndLoss), "MenuBarStyle.allCases includes .dotPingAndLoss")
+        check(MenuBarStyle.dotPingAndLoss.rawValue == "dot+ping+loss", "MenuBarStyle.dotPingAndLoss rawValue is dot+ping+loss")
+        check(MenuBarStyle.dotPingAndLoss.label == "Dot, ping time, and packet loss", "MenuBarStyle.dotPingAndLoss label is Dot, ping time, and packet loss")
+        check(MenuBarLabel.formatLoss(lossPct: 0.0) == "0% loss", "formatLoss formats 0%")
+        check(MenuBarLabel.formatLoss(lossPct: 4.8) == "5% loss", "formatLoss rounds loss%")
+        check(MenuBarLabel.formatLoss(lossPct: nil) == nil, "formatLoss returns nil when unmeasured")
         check(MenuBarLabel.formatPing(internetRtt: 18.2, gatewayRtt: nil) == "18ms", "formatPing rounds internet RTT with ms")
         check(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 5.4) == "5ms", "formatPing falls back to gateway RTT")
         check(MenuBarLabel.formatPing(internetRtt: 25.1, gatewayRtt: 3.0) == "25ms", "formatPing prioritizes internet RTT")

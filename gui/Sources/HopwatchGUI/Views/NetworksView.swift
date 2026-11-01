@@ -163,6 +163,34 @@ struct NetworksView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
+            if coordinator.linkIsWiFi && !coordinator.locationPermissions.isAuthorized {
+                HStack(spacing: 6) {
+                    Image(systemName: "location.slash.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text("SSIDs hidden by macOS")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(coordinator.locationPermissions.isDeniedOrRestricted ? "Settings" : "Enable") {
+                        if coordinator.locationPermissions.isDeniedOrRestricted {
+                            coordinator.locationPermissions.openSystemSettings()
+                        } else {
+                            coordinator.locationPermissions.requestOrOpenSettings()
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.blue)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+            }
             List(selection: $selectedNetworkID) {
                 if !store.isLoading && store.document.networks.isEmpty {
                     Text("No networks recorded yet. Run a check to start building history.")
@@ -431,84 +459,92 @@ struct NetworksView: View {
                 }
             }
 
-            // Subtitle metadata: Badges + SSID, Gateway, ISP, and date range seen
-            HStack(spacing: 6) {
-                if isCurrent(net) {
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 6, height: 6)
-                        Text("Active Now")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.green)
+            // Subtitle metadata: Badges row, plus SSID / Gateway / ISP and date range seen
+            let isPortal = Defaults.portalNetworks.contains(net.id) || net.ssids.contains { Defaults.portalNetworks.contains("ssid:\($0)") }
+            let hasBadges = isCurrent(net) || isWiFi(net) || isEthernet(net) || net.synthesized || isPortal
+            if hasBadges {
+                HStack(spacing: 6) {
+                    if isCurrent(net) {
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                            Text("Active Now")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.green)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.15), in: Capsule())
+                        .fixedSize()
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Color.green.opacity(0.15), in: Capsule())
-                    .fixedSize()
-                }
 
-                if isWiFi(net) {
-                    Label("Wi-Fi", systemImage: "wifi")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1), in: Capsule())
-                        .fixedSize()
-                } else if isEthernet(net) {
-                    Label("Ethernet", systemImage: "cable.connector")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1), in: Capsule())
-                        .fixedSize()
-                }
-
-                if net.synthesized {
-                    Text("Inferred")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1), in: Capsule())
-                        .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
-                        .fixedSize()
-                }
-
-                let isPortal = Defaults.portalNetworks.contains(net.id) || net.ssids.contains { Defaults.portalNetworks.contains("ssid:\($0)") }
-                if isPortal {
-                    HStack(spacing: 3) {
-                        Image(systemName: "lock.shield")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Portal")
+                    if isWiFi(net) {
+                        Label("Wi-Fi", systemImage: "wifi")
                             .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                            .fixedSize()
+                    } else if isEthernet(net) {
+                        Label("Ethernet", systemImage: "cable.connector")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                            .fixedSize()
                     }
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.orange.opacity(0.12), in: Capsule())
-                    .help("This network requires a captive portal sign-in.")
-                    .fixedSize()
-                }
 
-                let subtitle = networkDetailSubtitle(net)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                    if net.synthesized {
+                        Text("Inferred")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                            .help("Grouped by inference — these runs predate network identity, or were bridged by matching gateway and ISP.")
+                            .fixedSize()
+                    }
 
-                if net.firstSeenDate != nil, net.lastSeenDate != nil {
+                    if isPortal {
+                        HStack(spacing: 3) {
+                            Image(systemName: "lock.shield")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("Portal")
+                                .font(.caption2.weight(.medium))
+                        }
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                        .help("This network requires a captive portal sign-in.")
+                        .fixedSize()
+                    }
+                }
+            }
+
+            let subtitle = networkDetailSubtitle(net)
+            let hasDate = net.firstSeenDate != nil && net.lastSeenDate != nil
+            if !subtitle.isEmpty || hasDate {
+                HStack(spacing: 6) {
                     if !subtitle.isEmpty {
-                        Text("·")
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if hasDate {
+                        if !subtitle.isEmpty {
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("Seen \(dateRange(net))")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
-                    Text("Seen \(dateRange(net))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
                 }
             }
         }
@@ -812,7 +848,7 @@ struct NetworksView: View {
     /// made, and never re-selects after they deliberately deselect.
     private func selectCurrentNetworkIfNeeded() {
         guard selectedNetworkID == nil, !userDeselected,
-              let currentID = coordinator.liveSample?.network.historyJoinID else { return }
+              let currentID = coordinator.confirmedNetworkID ?? coordinator.resolvedNetworkID(for: coordinator.liveSample) ?? coordinator.liveSample?.network.historyJoinID else { return }
         selectedNetworkID = store.canonicalID(currentID)
     }
 
@@ -846,7 +882,7 @@ struct NetworksView: View {
     }
 
     private func isCurrent(_ net: HistoryDocument.Network) -> Bool {
-        guard let id = coordinator.liveSample?.network.historyJoinID else { return false }
+        guard let id = coordinator.confirmedNetworkID ?? coordinator.resolvedNetworkID(for: coordinator.liveSample) ?? coordinator.liveSample?.network.historyJoinID else { return false }
         return store.canonicalID(id) == net.id
     }
 

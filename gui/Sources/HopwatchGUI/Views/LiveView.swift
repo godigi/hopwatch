@@ -96,8 +96,10 @@ struct LiveView: View {
                               hasRecentRoam: false
                           )
                       },
-                      emptyTitle: "No packet-loss measurement in the last hour.",
-                      emptySubtitle: "Measurements appear here as the monitor takes them.",
+                      emptyTitle: samples.isEmpty ? "Measuring packet loss…" : "No packet-loss measurement in the last hour.",
+                      emptySubtitle: samples.isEmpty
+                          ? "Measurements appear here as the monitor takes them — the first one lands within seconds."
+                          : "No packet loss data recorded in the last hour.",
                       emptyIcon: "waveform.path.ecg",
                       unit: "%",
                       advice: "0% loss is expected. Non-zero loss causes robotic audio, buffering, or dropped calls.")
@@ -725,7 +727,16 @@ struct HoverLabel: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
             } else if let value {
-                Text(String(format: "%.0f %@", value, unit))
+                let formattedValue: String = {
+                    if unit == "%" {
+                        return LossFormatter.formatPct(value)
+                    } else if value < 10 && value.truncatingRemainder(dividingBy: 1) != 0 {
+                        return String(format: "%.1f %@", value, unit)
+                    } else {
+                        return String(format: "%.0f %@", value, unit)
+                    }
+                }()
+                Text(formattedValue)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
             }

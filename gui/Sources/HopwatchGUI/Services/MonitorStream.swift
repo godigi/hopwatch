@@ -260,7 +260,14 @@ final class MonitorStream {
         // Leaving degraded at its own setting would make a struggling link
         // sample *slower* during a latency test than a healthy one — the
         // opposite of what the user asked for by starting the test.
-        let fast = burstInterval ?? Defaults.fastInterval
+        let fast: Int
+        if let burst = burstInterval {
+            fast = burst
+        } else if Defaults.batterySaverCadence && (PowerSourceHelper.isOnBattery || PowerSourceHelper.isLowPowerMode) {
+            fast = max(Defaults.fastInterval, 12)
+        } else {
+            fast = Defaults.fastInterval
+        }
         let degraded = burstInterval ?? Defaults.degradedInterval
         let home = URL(fileURLWithPath: NSHomeDirectory())
         let hopwatchDir = home.appendingPathComponent("hopwatch")

@@ -826,3 +826,53 @@ assert d['gateway']['rtt_avg_ms'] is None, d['gateway']
 assert d['internet']['rtt_avg_ms'] == 2.5, d['internet']
 "
 }
+
+@test "monitor_sample: dual-stack address family toggle on same network does not flap public-ip-changed" {
+  # Switching from IPv6 back to known previous IPv4 on identical network should not emit public-ip-changed
+  run env -i PATH="$PATH" NETDIAG_MON_SEQ=2 NETDIAG_MON_HAVE_PREV=1 \
+      NETDIAG_MON_PUB_IP="198.51.100.1" NETDIAG_MON_PREV_PUB_IP="2001:db8::1" \
+      NETDIAG_MON_PREV_PUB_IPV4="198.51.100.1" NETDIAG_MON_PREV_PUB_IPV6="2001:db8::1" \
+      NETDIAG_MON_PUB_ISP="Example ISP" NETDIAG_MON_PREV_PUB_ISP="Example ISP" \
+      NETDIAG_MON_PUB_CC="US" NETDIAG_MON_PREV_PUB_CC="US" \
+      python3 "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+changes = [c for c in d.get('changes', []) if c.get('id') == 'public-ip-changed']
+assert len(changes) == 0, f'Expected 0 public-ip-changed events, got {changes}'
+"
+
+  # Genuine change to a different IPv4 address must still emit public-ip-changed
+  run env -i PATH="$PATH" NETDIAG_MON_SEQ=3 NETDIAG_MON_HAVE_PREV=1 \
+      NETDIAG_MON_PUB_IP="198.51.100.2" NETDIAG_MON_PREV_PUB_IP="2001:db8::1" \
+      NETDIAG_MON_PREV_PUB_IPV4="198.51.100.1" NETDIAG_MON_PREV_PUB_IPV6="2001:db8::1" \
+      NETDIAG_MON_PUB_ISP="Example ISP" NETDIAG_MON_PREV_PUB_ISP="Example ISP" \
+      NETDIAG_MON_PUB_CC="US" NETDIAG_MON_PREV_PUB_CC="US" \
+      python3 "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+changes = [c for c in d.get('changes', []) if c.get('id') == 'public-ip-changed']
+assert len(changes) == 1, f'Expected 1 public-ip-changed event, got {changes}'
+assert changes[0]['from'] == '198.51.100.1'
+assert changes[0]['to'] == '198.51.100.2'
+"
+}
+
+@test "monitor_sample: paused sample never emits changes or clears rules" {
+  run env -i PATH="$PATH" NETDIAG_MON_SEQ=2 NETDIAG_MON_HAVE_PREV=1 \
+      NETDIAG_MON_PAUSED=1 \
+      NETDIAG_MON_PREV_RULES="CONN-1" \
+      NETDIAG_MON_RULES="" \
+      NETDIAG_MON_CLEARABLE_RULES="CONN-1" \
+      python3 "$HELPERS/monitor_sample.py"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d.get('changes', []) == [], f'Expected empty changes when paused, got {d.get(\"changes\")}'
+assert d['status']['paused'] is True
+"
+}

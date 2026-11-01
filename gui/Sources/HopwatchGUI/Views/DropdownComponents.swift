@@ -316,6 +316,7 @@ struct ActivityRow: View {
 
     private var tagText: String? {
         if entry.kind == "rule-cleared" { return "Resolved" }
+        if entry.kind == "gap" { return "Sleep" }
         if let sev = severity {
             switch sev {
             case "warn", "warning": return "Warning"
@@ -342,7 +343,7 @@ struct ActivityRow: View {
                     Text(entry.displaySummary)
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .truncationMode(entry.displaySummary.contains(" → ") || entry.kind.hasSuffix("-changed") ? .middle : .tail)
 
                     if let tag = tagText {
                         Text(tag)
@@ -397,6 +398,8 @@ enum EventStyle {
             return "exclamationmark.triangle.fill"
         case "rule-cleared":
             return "checkmark.circle.fill"
+        case "gap":
+            return "moon.fill"
         default:
             return "circle.fill"
         }
@@ -1067,13 +1070,14 @@ struct ExperienceGridView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(status.tint)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.75)
 
             if let metric = status.metric {
                 Text(metric)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(Theme.ColorToken.muted)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
         }
         .help(status.helpText ?? "\(title): \(status.label)")

@@ -35,6 +35,7 @@ enum Defaults {
             Key.slowInterval: 300,
             Key.menuBarStyle: MenuBarStyle.dotAndFlag.rawValue,
             Key.expertExpanded: false,
+            Key.batterySaverCadence: true,
             Key.pauseOnDisplaySleep: true,
             Key.pauseOnBattery: false,
             Key.scanOnNewNetwork: true,
@@ -100,6 +101,7 @@ enum Defaults {
         static let seenNetworks       = "seenNetworks"
         static let arrivalStates      = "arrivalStates"
         static let hasOnboarded       = "hasOnboarded"
+        static let batterySaverCadence = "batterySaverCadence"
         static let pauseOnDisplaySleep = "pauseOnDisplaySleep"
         static let pauseOnBattery     = "pauseOnBattery"
         static let scanOnNewNetwork   = "scanOnNewNetwork"
@@ -252,6 +254,10 @@ enum Defaults {
     /// absent): the default fast-tier interval.
     static let assumedMonitorCadenceS = 5
 
+    static var batterySaverCadence: Bool {
+        get { d.object(forKey: Key.batterySaverCadence) as? Bool ?? true }
+        set { d.set(newValue, forKey: Key.batterySaverCadence) }
+    }
     static var pauseOnDisplaySleep: Bool {
         get { d.bool(forKey: Key.pauseOnDisplaySleep) }
         set { d.set(newValue, forKey: Key.pauseOnDisplaySleep) }
@@ -388,10 +394,16 @@ enum Defaults {
     static var arrivalStates: [String: ArrivalState] {
         get {
             guard let data = d.data(forKey: Key.arrivalStates) else { return [:] }
-            return (try? JSONDecoder().decode([String: ArrivalState].self, from: data)) ?? [:]
+            let states = (try? JSONDecoder().decode([String: ArrivalState].self, from: data)) ?? [:]
+            let sanitized = states.filter { !NetworkIdentity.isPrivateOrLocalGateway($0.key) }
+            if sanitized.count != states.count, let cleanData = try? JSONEncoder().encode(sanitized) {
+                d.set(cleanData, forKey: Key.arrivalStates)
+            }
+            return sanitized
         }
         set {
-            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            let sanitized = newValue.filter { !NetworkIdentity.isPrivateOrLocalGateway($0.key) }
+            guard let data = try? JSONEncoder().encode(sanitized) else { return }
             d.set(data, forKey: Key.arrivalStates)
         }
     }
@@ -413,7 +425,8 @@ enum Defaults {
     static func migratedArrivalStates(from legacy: Set<String>) -> [String: ArrivalState] {
         var out: [String: ArrivalState] = [:]
         for raw in legacy {
-            guard let id = NetworkIdentity.canonical(raw) else { continue }
+            guard let id = NetworkIdentity.canonical(raw),
+                  !NetworkIdentity.isPrivateOrLocalGateway(id) else { continue }
             out[id] = .checked(depth: .full, at: .distantPast, runID: nil)
         }
         return out
@@ -424,8 +437,14 @@ enum Defaults {
     /// run, and a second pass would resurrect networks the user has since
     /// been re-checked on.
     static func migrateArrivalStatesIfNeeded() {
-        guard d.data(forKey: Key.arrivalStates) == nil else { return }
-        arrivalStates = migratedArrivalStates(from: legacySeenNetworks)
+        if d.data(forKey: Key.arrivalStates) == nil {
+            arrivalStates = migratedArrivalStates(from: legacySeenNetworks)
+        } else {
+            // Purge any legacy private/local gateway IP keys (e.g. gw:192.168.1.1)
+            // from persisted arrivalStates so common subnets never falsely suppress
+            // new network arrival checks.
+            _ = arrivalStates
+        }
     }
 
     // MARK: - Alerts
@@ -458,17 +477,19 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
     case dotAndFlag = "dot+flag"
     case dotFlagAndIP = "dot+flag+ip"
     case dotAndPing = "dot+ping"
+    case dotPingAndLoss = "dot+ping+loss"
     case dynamic = "dynamic"
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .dotOnly:      return "Status dot only"
-        case .dotAndFlag:   return "Status dot and country flag"
-        case .dotFlagAndIP: return "Status dot, flag, and IP address"
-        case .dotAndPing:   return "Dot and ping time"
-        case .dynamic:      return "Smart / Dynamic (Minimal, shows ping when degraded)"
+        case .dotOnly:        return "Status dot only"
+        case .dotAndFlag:     return "Status dot and country flag"
+        case .dotFlagAndIP:   return "Status dot, flag, and IP address"
+        case .dotAndPing:     return "Dot and ping time"
+        case .dotPingAndLoss: return "Dot, ping time, and packet loss"
+        case .dynamic:        return "Smart / Dynamic (Minimal, shows ping when degraded)"
         }
     }
 }

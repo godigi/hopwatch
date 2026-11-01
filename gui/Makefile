@@ -109,12 +109,14 @@ endif
 	@codesign --verify --verbose=1 "$(APP_DIR)" 2>&1 | sed 's/^/  /'
 
 run: sign
+	@killall Hopwatch 2>/dev/null || pkill -f Hopwatch 2>/dev/null || true
 	@killall HopwatchGUI 2>/dev/null || pkill -f HopwatchGUI 2>/dev/null || true
 	@killall NetdiagGUI 2>/dev/null || pkill -f NetdiagGUI 2>/dev/null || true
 	open "$(APP_DIR)"
 	@echo "launched. logs: log stream --predicate 'subsystem == \"$(BUNDLE_ID)\"'"
 
 install: sign
+	@killall Hopwatch 2>/dev/null || pkill -f Hopwatch 2>/dev/null || true
 	@killall HopwatchGUI 2>/dev/null || pkill -f HopwatchGUI 2>/dev/null || true
 	@killall NetdiagGUI 2>/dev/null || pkill -f NetdiagGUI 2>/dev/null || true
 	@rm -rf "/Applications/$(APP).app"

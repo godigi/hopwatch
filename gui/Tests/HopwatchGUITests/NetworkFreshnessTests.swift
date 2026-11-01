@@ -186,4 +186,68 @@ import Testing
         #expect(coordinator.currentSpeedTest != nil) // It remains a dated historical result.
         #expect(coordinator.currentSuitabilitySpeed == nil)
     }
+
+    @Test @MainActor func wifiPrivateGatewayResolvesToKnownSSIDForSpeedTestAndConfirmedID() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.setLiveSSIDForTesting("Circle 94_5G")
+
+        // Monitor emitted a private gateway on Wi-Fi (macOS hidden SSID fallback)
+        var hiddenWifiSample = sample(network: "gw:192.168.1.1")
+        hiddenWifiSample.network.groupId = "gw:192.168.1.1"
+        hiddenWifiSample.link = .init(up: true, type: "wifi")
+        coordinator.monitor.adoptGallerySample(hiddenWifiSample)
+
+        // confirmedNetworkID resolves to the known SSID
+        #expect(coordinator.confirmedNetworkID == "ssid:Circle 94_5G")
+
+        // A speed test measured on this SSID is accepted and not withheld
+        coordinator.adoptSessionStateForTesting(
+            speed: .init(downMbps: 660, upMbps: 662),
+            speedAt: Date().addingTimeInterval(-1800),
+            speedNetwork: "ssid:Circle 94_5G"
+        )
+        #expect(coordinator.currentSpeedTest?.speed.downMbps == 660)
+        #expect(coordinator.currentSpeedTest?.speed.upMbps == 662)
+    }
+
+    @Test @MainActor func wifiPrivateGatewayRecognizesOwnershipAndLearnedPortal() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.setLiveSSIDForTesting("Circle 94_5G")
+
+        // Mark "ssid:Circle 94_5G" as owned
+        coordinator.history.setOwned(true, for: "ssid:Circle 94_5G")
+        #expect(Defaults.networkOwned.contains("ssid:Circle 94_5G"))
+
+        var sample = sample(network: "gw:192.168.1.1")
+        sample.network.groupId = "gw:192.168.1.1"
+        sample.network.id = "wifi:gw=192.168.1.1"
+        sample.link = .init(up: true, type: "wifi")
+        coordinator.monitor.adoptGallerySample(sample)
+
+        // isCurrentNetworkOwned recognizes the owned network despite gw: sample
+        #expect(coordinator.isCurrentNetworkOwned == true)
+
+        // Learned portal check in AlertEngine with liveSSID
+        Defaults.recordPortalNetwork("ssid:Circle 94_5G")
+        coordinator.alerts.liveSSID = { "Circle 94_5G" }
+        // Verify AlertEngine suppressed captive false alarms
+        #expect(Defaults.portalNetworks.contains("ssid:Circle 94_5G"))
+
+        // Cleanup
+        Defaults.removePortalNetwork("ssid:Circle 94_5G")
+        coordinator.history.setOwned(false, for: "ssid:Circle 94_5G")
+    }
+
+    @Test @MainActor func bridgedNetworksFoldDirectlyInHistoryStore() {
+        let store = HistoryStore()
+        var net = HistoryDocument.Network(id: "ssid:Circle 94_5G", label: "Circle 94_5G")
+        net.bridgedFrom = ["gw:192.168.1.1"]
+        var doc = HistoryDocument()
+        doc.schema = 2
+        doc.networks = [net]
+        store.adoptDocumentForTesting(doc)
+
+        #expect(store.canonicalID("gw:192.168.1.1") == "ssid:Circle 94_5G")
+        #expect(store.canonicalID("ssid:Circle 94_5G") == "ssid:Circle 94_5G")
+    }
 }

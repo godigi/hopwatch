@@ -334,11 +334,12 @@ struct NetworkDetailCard: View {
         return nil
     }
 
-    private var reliabilityDisplay: String {
+    var reliabilityDisplay: String {
         if memory.checkCount < 5 {
             if memory.checkCount == 0 { return "—" }
             if memory.incidentCount == 0 { return "All Clean" }
-            return "\(memory.checkCount - memory.incidentCount)/\(memory.checkCount) Clean"
+            let clean = max(0, memory.checkCount - memory.incidentCount)
+            return "\(clean)/\(memory.checkCount) Clean"
         }
         if let rel = memory.reliabilityPercent {
             return String(format: "%.0f%%", rel)

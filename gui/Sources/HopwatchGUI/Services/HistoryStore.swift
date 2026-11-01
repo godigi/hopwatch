@@ -46,6 +46,17 @@ final class HistoryStore {
     private static func migrateRawKeys(_ dict: [String: String]) -> [String: String] {
         var out = dict
         for (key, value) in dict {
+            if key.hasPrefix("gw:") || key.contains(":gw=") || NetworkIdentity.isPrivateOrLocalGateway(key) {
+                out.removeValue(forKey: key)
+                continue
+            }
+            if key.hasPrefix("ssid:") {
+                let originalSSID = String(key.dropFirst(5))
+                if value == originalSSID {
+                    out.removeValue(forKey: key)
+                    continue
+                }
+            }
             guard let canonical = NetworkIdentity.canonical(key), canonical != key else { continue }
             if out[canonical] == nil { out[canonical] = value }
             out.removeValue(forKey: key)
@@ -73,11 +84,13 @@ final class HistoryStore {
         d.runs = runs
         document = d
         rebuildFoldedKeys()
+        purgeCorruptedSSIDRenames()
     }
 
     func adoptDocumentForTesting(_ doc: HistoryDocument) {
         document = doc
         rebuildFoldedKeys()
+        purgeCorruptedSSIDRenames()
         canonicalIDCache.removeAll()
     }
 
@@ -111,6 +124,7 @@ final class HistoryStore {
             lastError = nil
             lastLoadedAt = Date()
             rebuildFoldedKeys()
+            purgeCorruptedSSIDRenames()
             // A fresh document invalidates every memoized median: the
             // store may have grown new runs, and stale numbers under a
             // "computed once" cache are worse than the repeated scan it
@@ -131,13 +145,22 @@ final class HistoryStore {
     // MARK: - Naming
 
     func customName(for networkID: String) -> String? {
+        if networkID.hasPrefix("gw:") || NetworkIdentity.isPrivateOrLocalGateway(networkID) {
+            return nil
+        }
         let key = canonicalID(networkID)
+        if key.hasPrefix("gw:") || NetworkIdentity.isPrivateOrLocalGateway(key) {
+            return nil
+        }
         return customNames[key]
     }
 
     func displayName(for networkID: String) -> String {
         let key = canonicalID(networkID)
-        if let custom = customNames[key], !custom.isEmpty { return custom }
+        if !key.hasPrefix("gw:") && !NetworkIdentity.isPrivateOrLocalGateway(key),
+           let custom = customNames[key], !custom.isEmpty {
+            return custom
+        }
         if let net = document.networks.first(where: { $0.id == key }) {
             // Prefer a recorded SSID (available only when Location was
             // granted at scan time) over the CLI's label, which is the
@@ -154,14 +177,24 @@ final class HistoryStore {
     /// not a diagnostic judgment: the full label stays in the document,
     /// and `haystack(for:)` in NetworksView still searches the raw value.
     static func cleanLabel(_ label: String) -> String {
-        if let range = label.range(of: " via ") {
-            return String(label[..<range.lowerBound])
+        var result = label
+        if result.hasPrefix("ssid:") {
+            result = String(result.dropFirst(5))
         }
-        return label
+        if let range = result.range(of: " via ") {
+            return String(result[..<range.lowerBound])
+        }
+        return result
     }
 
     func rename(_ networkID: String, to name: String) {
+        if networkID.hasPrefix("gw:") || NetworkIdentity.isPrivateOrLocalGateway(networkID) {
+            return
+        }
         let key = canonicalID(networkID)
+        if key.hasPrefix("gw:") || NetworkIdentity.isPrivateOrLocalGateway(key) {
+            return
+        }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { customNames.removeValue(forKey: key) } else { customNames[key] = trimmed }
         Defaults.networkNames = customNames
@@ -171,7 +204,9 @@ final class HistoryStore {
     func isOwned(networkID: String?) -> Bool {
         guard let networkID, !networkID.isEmpty else { return false }
         let key = canonicalID(networkID)
-        return Defaults.networkOwned.contains(key) || Defaults.networkOwned.contains(networkID)
+        return Defaults.networkOwned.contains(key)
+            || Defaults.networkOwned.contains(networkID)
+            || (NetworkIdentity.canonical(networkID).map { Defaults.networkOwned.contains($0) } ?? false)
     }
 
     func setOwned(_ owned: Bool, for networkID: String) {
@@ -194,12 +229,15 @@ final class HistoryStore {
     private func rebuildFoldedKeys() {
         var strong: [String: [String]] = [:]
         var weak: Set<String> = []
+        var explicitBridges: [String: String] = [:]
         for net in document.networks {
             var used: [String] = []
             for gw in net.gateways {
                 let key = "gw:\(gw)"
                 used.append(key)
-                weak.insert(key)
+                if !NetworkIdentity.isPrivateOrLocalGateway(key) {
+                    weak.insert(key)
+                }
             }
             for ssid in net.ssids {
                 let key = "ssid:\(ssid)"
@@ -209,12 +247,43 @@ final class HistoryStore {
             for b in net.bridgedFrom {
                 if let can = NetworkIdentity.canonical(b) {
                     used.append(can)
-                    weak.insert(can)
+                    explicitBridges[can] = net.id
+                    if !NetworkIdentity.isPrivateOrLocalGateway(can) {
+                        weak.insert(can)
+                    }
                 }
             }
             strong[net.id] = used
         }
-        foldedKeys = NetworkIdentity.fold(strong, weak: weak)
+        var folded = NetworkIdentity.fold(strong, weak: weak)
+        folded.merge(explicitBridges) { _, explicit in explicit }
+        foldedKeys = folded
+    }
+
+    /// Automatically clean up any corrupted `ssid:` entries in `customNames`.
+    /// Caused when `adoptLiveSSIDAsNameIfNeeded` previously raced across a network switch,
+    /// adopting the new network's SSID onto the previous network's SSID key.
+    private func purgeCorruptedSSIDRenames() {
+        var cleaned = customNames
+        var changed = false
+        let allKnownSSIDs = Set(document.networks.flatMap(\.ssids))
+        for (key, value) in customNames where key.hasPrefix("ssid:") {
+            let originalSSID = String(key.dropFirst(5))
+            if value == originalSSID {
+                cleaned.removeValue(forKey: key)
+                changed = true
+                continue
+            }
+            if allKnownSSIDs.contains(value) && value != originalSSID {
+                cleaned.removeValue(forKey: key)
+                changed = true
+            }
+        }
+        if changed {
+            customNames = cleaned
+            Defaults.networkNames = cleaned
+            invalidateNetworkCaches()
+        }
     }
 
     @ObservationIgnored

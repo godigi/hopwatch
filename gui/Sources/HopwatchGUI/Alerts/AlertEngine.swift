@@ -105,6 +105,8 @@ final class AlertEngine {
     /// Supplied by NetworkEventWatcher: true for 30 s after any network
     /// transition.
     var inNetworkGracePeriod: () -> Bool = { false }
+    /// Injected by `HopwatchCoordinator` to provide the authoritative Wi-Fi SSID.
+    var liveSSID: () -> String? = { nil }
     /// Injected by `NetdiagCoordinator` once the rules catalog has a
     /// version to answer from: rule ID in, the catalog's severity rank out
     /// (higher is worse). Default ranks everything 0 — before the catalog
@@ -183,6 +185,9 @@ final class AlertEngine {
             return true
         }
         if let ssid = sample.link.ssid, !ssid.isEmpty, Defaults.portalNetworks.contains("ssid:\(ssid)") {
+            return true
+        }
+        if let live = liveSSID(), !live.isEmpty, Defaults.portalNetworks.contains("ssid:\(live)") {
             return true
         }
         return false

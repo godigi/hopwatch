@@ -64,7 +64,7 @@ struct TrendsView: View {
     }
 
     private var defaultNetworkID: String? {
-        guard let raw = coordinator.monitor.latest?.network.historyJoinID else { return nil }
+        guard let raw = coordinator.confirmedNetworkID ?? coordinator.resolvedNetworkID(for: coordinator.monitor.latest) ?? coordinator.monitor.latest?.network.historyJoinID else { return nil }
         let canonical = store.canonicalID(raw)
         return store.mergedNetworks.contains(where: { $0.id == canonical }) ? canonical : nil
     }
@@ -355,7 +355,7 @@ struct TrendsView: View {
             name = "Upload Speed"
         case "wifi_rssi_dbm", "wifi_rssi":
             name = "Wi-Fi Signal"
-        case "wifi_snr_db":
+        case "wifi_snr_db", "wifi_snr":
             name = "Wi-Fi SNR"
         default:
             name = m.label
@@ -363,10 +363,18 @@ struct TrendsView: View {
         let samples: Int
         if let networkID, let net = store.mergedNetworks.first(where: { $0.id == networkID }) {
             samples = net.metricSamples[m.key]
+                ?? (m.key == "inet_rtt_ms" ? net.metricSamples["internet_rtt_ms"] : nil)
+                ?? (m.key == "internet_rtt_ms" ? net.metricSamples["inet_rtt_ms"] : nil)
                 ?? (m.key == "speed_down_mbps" ? net.metricSamples["speedtest_down_mbps"] : nil)
                 ?? (m.key == "speed_up_mbps" ? net.metricSamples["speedtest_up_mbps"] : nil)
+                ?? (m.key == "wifi_rssi_dbm" ? net.metricSamples["wifi_rssi"] : nil)
+                ?? (m.key == "wifi_rssi" ? net.metricSamples["wifi_rssi_dbm"] : nil)
+                ?? (m.key == "wifi_snr_db" ? net.metricSamples["wifi_snr"] : nil)
+                ?? (m.key == "wifi_snr" ? net.metricSamples["wifi_snr_db"] : nil)
                 ?? (m.key == "bufferbloat_gw_ms" ? net.metricSamples["bufferbloat_gw_delta_ms"] : nil)
+                ?? (m.key == "bufferbloat_gw_delta_ms" ? net.metricSamples["bufferbloat_gw_ms"] : nil)
                 ?? (m.key == "bufferbloat_inet_ms" ? net.metricSamples["bufferbloat_inet_delta_ms"] : nil)
+                ?? (m.key == "bufferbloat_inet_delta_ms" ? net.metricSamples["bufferbloat_inet_ms"] : nil)
                 ?? 0
         } else {
             samples = m.samples
@@ -475,7 +483,17 @@ struct TrendsView: View {
                 noData(descriptor)
             } else {
                 let allValues = points.map(\.1) + inetPoints.map(\.1)
-                let clamp = Clamp.forValues(allValues, p90: stat?.p90)
+                let clamp: Clamp? = {
+                    if !inetPoints.isEmpty {
+                        guard let c = Clamp.forValues(allValues, p90: nil) else { return nil }
+                        let clippedInet = inetPoints.filter { c.exceeds($0.1) }.count
+                        if clippedInet > max(1, inetPoints.count / 10) {
+                            return nil
+                        }
+                        return c
+                    }
+                    return Clamp.forValues(points.map(\.1), p90: stat?.p90)
+                }()
                 Chart {
                     // Drawn first, so the line and points sit on top of it.
                     if hasBand, let p10 = stat?.p10, let p90 = stat?.p90,

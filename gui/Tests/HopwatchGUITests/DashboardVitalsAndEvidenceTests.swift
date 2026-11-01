@@ -167,4 +167,21 @@ import Testing
         #expect(fastResult.points.count == 1)
         #expect(fastResult.points.first?.value == 18.4)
     }
+
+    @Test func networkDetailCardReliabilityNeverProducesNegativeCleanCount() {
+        let memory = NetworkMemory(id: "ssid:test", displayName: "Test", checkCount: 2, incidentCount: 3)
+        let card = NetworkDetailCard(memory: memory)
+        #expect(card.reliabilityDisplay == "0/2 Clean")
+    }
+
+    @Test func activityViewSummaryHandlesEmptyStateHonesty() {
+        #expect(ActivityView.summaryTitle(activeCount: 0, issuesCount: 0, allCount: 0) == "No Activity Recorded Yet")
+        #expect(ActivityView.summarySubtitle(allCount: 0, issuesCount: 0, daysCount: 1) == "Network transitions and disruptions will appear here as they are observed.")
+
+        #expect(ActivityView.summaryTitle(activeCount: 0, issuesCount: 0, allCount: 5) == "Connection Stable & Quiet")
+        #expect(ActivityView.summarySubtitle(allCount: 5, issuesCount: 0, daysCount: 1) == "No packet loss, latency spikes, or disruptions observed across 1 day(s)")
+
+        #expect(ActivityView.summaryTitle(activeCount: 1, issuesCount: 1, allCount: 5) == "1 Active Alert Now")
+        #expect(ActivityView.summaryTitle(activeCount: 0, issuesCount: 2, allCount: 5) == "Network Activity History")
+    }
 }

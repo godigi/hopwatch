@@ -11,15 +11,25 @@ import AppKit
         #expect(MenuBarStyle.dotAndPing.rawValue == "dot+ping")
         #expect(MenuBarStyle.dotAndPing.label == "Dot and ping time")
         #expect(MenuBarStyle(rawValue: "dot+ping") == .dotAndPing)
+
+        #expect(MenuBarStyle.allCases.contains(.dotPingAndLoss))
+        #expect(MenuBarStyle.dotPingAndLoss.rawValue == "dot+ping+loss")
+        #expect(MenuBarStyle.dotPingAndLoss.label == "Dot, ping time, and packet loss")
+        #expect(MenuBarStyle(rawValue: "dot+ping+loss") == .dotPingAndLoss)
     }
 
-    @Test func formatsPingCorrectly() {
+    @Test func formatsPingAndLossCorrectly() {
         #expect(MenuBarLabel.formatPing(internetRtt: 18.2, gatewayRtt: nil) == "18ms")
         #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: 4.8) == "5ms")
         #expect(MenuBarLabel.formatPing(internetRtt: 24.6, gatewayRtt: 5.2) == "25ms")
         #expect(MenuBarLabel.formatPing(internetRtt: 0.0, gatewayRtt: nil) == "0ms")
         #expect(MenuBarLabel.formatPing(internetRtt: nil, gatewayRtt: nil) == nil)
         #expect(MenuBarLabel.formatPing(internetRtt: -5.0, gatewayRtt: nil) == nil)
+
+        #expect(MenuBarLabel.formatLoss(lossPct: 0.0) == "0% loss")
+        #expect(MenuBarLabel.formatLoss(lossPct: 3.4) == "3% loss")
+        #expect(MenuBarLabel.formatLoss(lossPct: nil) == nil)
+        #expect(MenuBarLabel.formatLoss(lossPct: -1.0) == nil)
     }
 
     @Test @MainActor func showInDockDefaultsAndToggles() {
@@ -73,9 +83,11 @@ import AppKit
         #expect(offscreenFitting.height > 500 && offscreenFitting.height < 880)
         #expect(abs(proposedSize.height - offscreenFitting.height) <= 1.0)
 
-        let topMaxY: CGFloat = (NSScreen.main?.visibleFrame.maxY ?? 1073) - 2
+        let targetScreen = NSScreen.main ?? NSScreen.screens[0]
+        let topMaxY: CGFloat = targetScreen.visibleFrame.maxY - 2
+        let panelX: CGFloat = targetScreen.visibleFrame.minX + max(20, targetScreen.visibleFrame.width / 2 - 210)
         let panel = NSPanel(
-            contentRect: NSRect(x: 900, y: topMaxY - offscreenFitting.height, width: 420, height: offscreenFitting.height),
+            contentRect: NSRect(x: panelX, y: topMaxY - offscreenFitting.height, width: 420, height: offscreenFitting.height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false

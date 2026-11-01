@@ -44,9 +44,14 @@ enum ArrivalPolicy {
     ///   - isExpensive: `NWPath.isExpensive` — cellular, including a
     ///     personal hotspot.
     ///   - isConstrained: `NWPath.isConstrained` — Low Data Mode.
+    ///   - isSettling: whether the connection is in its initial stabilization
+    ///     window (DHCP negotiation, ARP resolution, initial handshakes). While
+    ///     settling, transient probe fluctuations must not cause a premature
+    ///     downgrade, and the honest answer is `.wait`.
     static func decide(hasSample: Bool, severity: String,
-                       isExpensive: Bool, isConstrained: Bool) -> Decision {
-        guard hasSample else { return .wait }
+                       isExpensive: Bool, isConstrained: Bool,
+                       isSettling: Bool = false) -> Decision {
+        guard hasSample, !isSettling else { return .wait }
 
         // Cost before health, deliberately. Both downgrade to the quick
         // check, so the only thing the order changes is which reason the

@@ -68,6 +68,38 @@ setup() {
   [ "$(cat "$BATS_TEST_TMPDIR/before-ping")" = "||0|0" ]
 }
 
+@test "new network clears stale tier readings, rules, and streaks" {
+  _mon_probe_link() {
+    MON_LINK_UP=1 MON_NETWORK_ID="network-$MON_SEQ"
+  }
+  _mon_probe_gateway() {
+    if [ "$MON_SEQ" -eq 1 ]; then
+      printf '%s|%s|%s|%s|%s|%s\n' \
+        "$MON_CONN_STREAK" "$MON_DNS_STREAK" "$MON_TCP_OK" \
+        "$MON_DNS_OK" "$MON_PREV_RULES" "$MON_PREV_PUB_IPV4" \
+        > "$BATS_TEST_TMPDIR/before-ping-stale"
+    fi
+  }
+  _mon_emit() {
+    MON_CONN_STREAK=3 MON_DNS_STREAK=3
+    MON_TCP_OK=1 MON_DNS_OK=0
+    MON_PREV_RULES="D1 TCP-1 "
+    MON_PREV_PUB_IPV4="198.51.100.1"
+  }
+  local probe
+  for probe in vpn internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_rules() { :; }
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=2
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run
+  [ "$(cat "$BATS_TEST_TMPDIR/before-ping-stale")" = "0|0||||" ]
+}
+
 @test "resume refreshes all probe tiers before emitting reused connection data" {
   _mon_probe_link() { MON_LINK_UP=1 MON_NETWORK_ID="same-network"; }
   _mon_emit() {
@@ -344,6 +376,27 @@ scanner_rules() {
   [ "$m" = "$(scanner_rules)" ]
   [[ "$m" == *"G2"* ]] || return 1
   [[ "$m" != *"TCP-1"* ]] || return 1
+}
+
+@test "transient TCP-1 does not fire on fast-tier gateway loss when TCP was not refreshed" {
+  # During interface handshake or drop, gateway loss jumps to 100 on a fast cycle.
+  # TCP-1 must not fire using stale MON_TCP_OK=1 from a past cycle; G2 fires instead.
+  reset_state
+  MON_GW_LOSS=100 MON_TCP_OK=1 MON_REFRESHED="fast " MON_PREV_RULES=""
+  _mon_rules
+  [[ " $MON_RULES " != *" TCP-1 "* ]]
+  [[ " $MON_RULES " == *" G2 "* ]]
+  [ "$MON_SEVERITY" = "critical" ]
+}
+
+@test "TCP-1 holds across fast cycles once confirmed on medium tier" {
+  # On an ICMP-filtering network where TCP-1 already fired, it continues holding
+  # on fast cycles where TCP is not re-probed.
+  reset_state
+  MON_GW_LOSS=100 MON_TCP_OK=1 MON_REFRESHED="fast " MON_PREV_RULES="TCP-1 "
+  _mon_rules
+  [[ " $MON_RULES " == *" TCP-1 "* ]]
+  [[ " $MON_RULES " != *" G2 "* ]]
 }
 
 @test "an ICMP-filtering network is not a critical severity" {
@@ -1385,6 +1438,58 @@ assert 'changes' not in json.load(sys.stdin)
 "
 }
 
+@test "monitor_sample: dual-stack address family toggle on same network does not flap public-ip-changed" {
+  # Toggling from IPv4 to IPv6 on same ISP/CC/SSID without prior IPv6 does not emit change
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_PUB_IP="2a02:587:2100::1" NETDIAG_MON_PREV_PUB_IP="2.84.1.90" \
+           NETDIAG_MON_PUB_ISP="OTEnet" NETDIAG_MON_PREV_PUB_ISP="OTEnet" \
+           NETDIAG_MON_PUB_CC="GR" NETDIAG_MON_PREV_PUB_CC="GR" \
+           NETDIAG_MON_SSID="Home" NETDIAG_MON_PREV_SSID="Home"
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert 'changes' not in json.load(sys.stdin)
+"
+
+  # Toggling back to known IPv4 does not emit change
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_PUB_IP="2.84.1.90" NETDIAG_MON_PREV_PUB_IP="2a02:587:2100::1" \
+           NETDIAG_MON_PREV_PUB_IPV4="2.84.1.90" NETDIAG_MON_PREV_PUB_IPV6="2a02:587:2100::1" \
+           NETDIAG_MON_PUB_ISP="OTEnet" NETDIAG_MON_PREV_PUB_ISP="OTEnet" \
+           NETDIAG_MON_PUB_CC="GR" NETDIAG_MON_PREV_PUB_CC="GR" \
+           NETDIAG_MON_SSID="Home" NETDIAG_MON_PREV_SSID="Home"
+  printf '%s' "$output" | python3 -c "
+import json,sys
+assert 'changes' not in json.load(sys.stdin)
+"
+
+  # Real change within the IPv4 family on the same network does emit change
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_PUB_IP="2.84.1.99" NETDIAG_MON_PREV_PUB_IP="2a02:587:2100::1" \
+           NETDIAG_MON_PREV_PUB_IPV4="2.84.1.90" NETDIAG_MON_PREV_PUB_IPV6="2a02:587:2100::1" \
+           NETDIAG_MON_PUB_ISP="OTEnet" NETDIAG_MON_PREV_PUB_ISP="OTEnet" \
+           NETDIAG_MON_PUB_CC="GR" NETDIAG_MON_PREV_PUB_CC="GR" \
+           NETDIAG_MON_SSID="Home" NETDIAG_MON_PREV_SSID="Home"
+  printf '%s' "$output" | python3 -c "
+import json,sys
+ch = json.load(sys.stdin)['changes']
+assert len(ch) == 1, ch
+assert ch[0]['id'] == 'public-ip-changed'
+assert ch[0]['from'] == '2.84.1.90' and ch[0]['to'] == '2.84.1.99'
+"
+
+  # Address family change across different networks (e.g. Wi-Fi SSID change) DOES emit change
+  run emit NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_PUB_IP="2a02:587:2100::1" NETDIAG_MON_PREV_PUB_IP="2.84.1.90" \
+           NETDIAG_MON_PUB_ISP="OTEnet" NETDIAG_MON_PREV_PUB_ISP="OTEnet" \
+           NETDIAG_MON_PUB_CC="GR" NETDIAG_MON_PREV_PUB_CC="GR" \
+           NETDIAG_MON_SSID="Cafe" NETDIAG_MON_PREV_SSID="Home"
+  printf '%s' "$output" | python3 -c "
+import json,sys
+ch = json.load(sys.stdin)['changes']
+assert any(c['id'] == 'public-ip-changed' and c['from'] == '2.84.1.90' and c['to'] == '2a02:587:2100::1' for c in ch)
+"
+}
+
 @test "monitor_sample: country move phrased as VPN exit when VPN is up" {
   run emit NETDIAG_MON_HAVE_PREV=1 NETDIAG_MON_VPN_ACTIVE=1 \
            NETDIAG_MON_PREV_VPN_ACTIVE=1 \
@@ -2276,6 +2381,29 @@ except Exception:
     echo "a genuine gap was not reported on the cycle that saw it:"; echo "$output"; return 1; }
   printf '%s\n' "$output" | grep -qx 'emit paused=1 gap=\[\]' || {
     echo "the pause marker repeated the previous gap:"; echo "$output"; return 1; }
+}
+
+@test "monitor: pause announcement preserves previous rules and clears no rules" {
+  local probe
+  for probe in link vpn gateway internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_rules() { MON_RULES="CONN-1"; MON_CLEARABLE_RULES="CONN-1"; }
+  _mon_sleep() { :; }
+  _mon_emit() {
+    printf 'emit paused=%s rules=[%s] clearable=[%s]\n' "$MON_PAUSED" "$MON_RULES" "$MON_CLEARABLE_RULES"
+    case "$MON_PAUSED" in
+      0) MON_PAUSED=1 ;;
+      *) MON_STOP=1 ;;
+    esac
+  }
+  MON_PAUSED=0 MON_STOP=0 MON_SEQ=0 MONITOR_COUNT=0 MON_LINK_UP=1
+  run monitor_run
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qx 'emit paused=0 rules=\[CONN-1\] clearable=\[CONN-1\]' || {
+    echo "active sample rules mismatch:"; echo "$output"; return 1; }
+  printf '%s\n' "$output" | grep -qx 'emit paused=1 rules=\[CONN-1\] clearable=\[\]' || {
+    echo "paused sample did not preserve rules or failed to empty clearable:"; echo "$output"; return 1; }
 }
 
 @test "monitor: gap_s reaches the emitted sample" {

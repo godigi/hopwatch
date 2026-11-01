@@ -128,6 +128,8 @@ enum SuitabilityEngine {
         /// derives it from the sample's `icmp_filtered` flag and rule IDs plus
         /// `firedRules`, so every call site agrees even if it forgets to pass it.
         var lossFiltering: EffectiveLoss.Filtering?
+        var isSettling: Bool
+        var isArrivalCheck: Bool
 
         init(
             monitorSample: MonitorSample? = nil,
@@ -142,7 +144,9 @@ enum SuitabilityEngine {
             vpnName: String? = nil,
             currentJitter: Double? = nil,
             effectiveLoss: Double? = nil,
-            lossFiltering: EffectiveLoss.Filtering? = nil
+            lossFiltering: EffectiveLoss.Filtering? = nil,
+            isSettling: Bool = false,
+            isArrivalCheck: Bool = false
         ) {
             self.lossFiltering = lossFiltering
             self.monitorSample = monitorSample?.status.paused == true ? nil : monitorSample
@@ -157,6 +161,8 @@ enum SuitabilityEngine {
             self.vpnName = vpnName
             self.currentJitter = currentJitter
             self.effectiveLoss = effectiveLoss
+            self.isSettling = isSettling
+            self.isArrivalCheck = isArrivalCheck
         }
 
         /// The legs a filter makes unmeasurable, resolved once for all evaluators.
@@ -178,7 +184,19 @@ enum SuitabilityEngine {
     }
 
     static func evaluateAll(_ inputs: Inputs) -> [Item] {
-        [
+        if inputs.isSettling || inputs.isArrivalCheck {
+            let isCheckingNetwork = inputs.isArrivalCheck
+            let status = isCheckingNetwork ? "Checking…" : "Settling…"
+            let help = isCheckingNetwork ? "Running initial check on network." : "Stabilizing connection baseline."
+            return [
+                Item(id: "calls", title: "Calls", icon: "video", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "gaming", title: "Gaming", icon: "gamecontroller", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "streaming", title: "Streaming", icon: "play.rectangle", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "vpn", title: "VPN", icon: "lock.shield", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "browsing", title: "Browsing", icon: "safari", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help)
+            ]
+        }
+        return [
             evaluateCalls(inputs),
             evaluateStreaming(inputs),
             evaluateGaming(inputs),
@@ -302,6 +320,22 @@ enum SuitabilityEngine {
         }
 
         // 3. Good conditions:
+        let pingFiltered = inputs.filtering.internetLeg
+        if pingFiltered {
+            let tcpMs = inputs.monitorSample?.tcp.targets.filter(\.ok).compactMap(\.elapsedMs).min()
+            let callMetric = tcpMs != nil ? "\(Int(round(tcpMs!)))ms TCP" : "TCP 443 ok"
+            return Item(
+                id: "calls",
+                title: "Calls",
+                icon: "video",
+                status: "Clear audio",
+                metric: callMetric,
+                tint: Theme.ColorToken.green,
+                verdict: .good,
+                helpText: "Voice and video calls work over TCP/UDP while ICMP ping is blocked by network policy"
+            )
+        }
+
         guard inputs.monitorSample?.internet.rttAvgMs != nil,
               inputs.currentJitter != nil || inputs.monitorSample?.internet.rttJitterMs != nil,
               inputs.measuredLoss != nil else {
@@ -570,25 +604,25 @@ enum SuitabilityEngine {
         }
 
         // Good conditions:
-        guard !pingFiltered,
-              inputs.currentJitter != nil || inputs.monitorSample?.internet.rttJitterMs != nil,
-              inputs.measuredLoss != nil else {
-            return awaiting("gaming", "Gaming", "gamecontroller")
-        }
-        // Ping <= 35ms with jitter < 8ms and loss < 1%: competitive tier ("Responsive")
-        // Ping 35-80ms with jitter < 20ms: smooth multiplayer ("Smooth")
         if pingFiltered {
             return Item(
                 id: "gaming",
                 title: "Gaming",
                 icon: "gamecontroller",
-                status: "Smooth",
-                metric: metric,
-                tint: Theme.ColorToken.green,
-                verdict: .good,
-                helpText: "ICMP ping blocked by network, but TCP 443 connection is healthy"
+                status: "Unmeasured",
+                metric: "No ICMP",
+                tint: Theme.ColorToken.muted,
+                verdict: .unknown,
+                helpText: "Gaming latency cannot be established because ICMP ping is blocked by network policy"
             )
         }
+
+        guard inputs.currentJitter != nil || inputs.monitorSample?.internet.rttJitterMs != nil,
+              inputs.measuredLoss != nil else {
+            return awaiting("gaming", "Gaming", "gamecontroller")
+        }
+        // Ping <= 35ms with jitter < 8ms and loss < 1%: competitive tier ("Responsive")
+        // Ping 35-80ms with jitter < 20ms: smooth multiplayer ("Smooth")
 
         if ping <= 35.0 && jitter < 8.0 && loss < 1.0 {
             return Item(

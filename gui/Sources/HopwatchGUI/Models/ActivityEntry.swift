@@ -147,6 +147,18 @@ extension ActivityEntry {
                 continue
             }
 
+            // Auto-close any open episodes from a departed network when events occur on a different network.
+            if let curNet = event.network, !curNet.isEmpty {
+                let departedKeys = open.keys.filter { $0.network != nil && $0.network != curNet }
+                for depKey in departedKeys {
+                    if var existing = open.removeValue(forKey: depKey) {
+                        existing.end = event.date
+                        existing.isLowerBound = true
+                        episodes.append(existing)
+                    }
+                }
+            }
+
             if event.kind == "rule-updated", let ruleID = event.ruleID {
                 let key = Key(network: event.network, ruleID: ruleID)
                 if let evidence = event.evidence, open[key] != nil {
@@ -223,8 +235,15 @@ extension ActivityEntry {
                 break
             }
         }
-        // Whatever is still firing.
-        for episode in open.values { episodes.append(episode) }
+        // Whatever is still firing on the active connection.
+        let lastKnownNetwork = chronological.last?.network
+        for var episode in open.values {
+            if let lastKnownNetwork, let epNet = episode.network, !epNet.isEmpty, epNet != lastKnownNetwork {
+                episode.end = episode.lastSeen
+                episode.isLowerBound = true
+            }
+            episodes.append(episode)
+        }
 
         return group(episodes: episodes, loose: loose, calendar: calendar)
     }
@@ -471,6 +490,16 @@ extension ActivityEntry {
 
     /// Presentation labels identify observed talkers without claiming causation.
     var displaySummary: String {
+        if kind == "gap" {
+            if let duration = totalDuration, duration >= 1 {
+                return "Mac was asleep (\(Self.duration(duration)))"
+            }
+            if let match = summary.range(of: #"\d+"#, options: .regularExpression),
+               let secs = Double(summary[match]), secs >= 1 {
+                return "Mac was asleep (\(Self.duration(secs)))"
+            }
+            return "Mac was asleep"
+        }
         guard ruleID == "HOG-1" else { return summary }
         let names = Set(trafficEvidence.map(\.identity))
         let prefix = kind == "rule-cleared" ? "Resolved: " : ""

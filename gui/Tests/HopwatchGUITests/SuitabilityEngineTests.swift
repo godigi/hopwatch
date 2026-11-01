@@ -16,6 +16,29 @@ import Testing
         #expect(SuitabilityEngine.evaluateBrowsing(inputs).verdict == .good)
     }
 
+    @Test func filteredPingEvaluatesCallsAndGamingAsHealthyOverTCP() {
+        var sample = MonitorSample()
+        sample.gateway.lossPct = 100
+        sample.internet.lossPct = 100
+        sample.status.rules = ["TCP-1", "ICMP-1"]
+        sample.dns.ok = true
+        sample.tcp.anyOk = true
+        sample.tcp.targets = [
+            .init(host: "1.1.1.1", port: 443, ok: true, elapsedMs: 42.0)
+        ]
+        let inputs = SuitabilityEngine.Inputs(monitorSample: sample)
+
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        #expect(calls.verdict == .good)
+        #expect(calls.status == "Clear audio")
+        #expect(calls.metric.contains("42ms TCP"))
+
+        let gaming = SuitabilityEngine.evaluateGaming(inputs)
+        #expect(gaming.verdict == .unknown)
+        #expect(gaming.status == "Unmeasured")
+        #expect(gaming.metric == "No ICMP")
+    }
+
     @Test func streamingWorksFineWithBadPingAndHighBandwidth() {
         // High ping (350ms) and bufferbloat, but 100 Mbps download speed and 0% loss
         var sample = MonitorSample()
@@ -921,6 +944,55 @@ import Testing
         #expect(browsing.verdict == .degraded)
         #expect(!browsing.consequence.isEmpty)
         #expect(browsing.consequence.contains("Retransmissions") || browsing.consequence.contains("delay"))
+    }
+
+    @Test func settlingAndArrivalCheckSuppressWildOpinions() {
+        var noisySample = MonitorSample()
+        // Noisy transient spike during Wi-Fi association/DHCP: 113ms ping, 67ms jitter
+        noisySample.internet = .init(lossPct: 0.0, rttAvgMs: 113.0, rttJitterMs: 67.0)
+        noisySample.status = .init(severity: "ok", measurement: "measured")
+
+        // 1. While settling, items return .unknown awaiting and degraded experience is nil
+        let settlingInputs = SuitabilityEngine.Inputs(
+            monitorSample: noisySample,
+            isLinkUp: true,
+            currentJitter: 67.0,
+            effectiveLoss: 0.0,
+            isSettling: true
+        )
+        let settlingItems = SuitabilityEngine.evaluateAll(settlingInputs)
+        #expect(settlingItems.allSatisfy { $0.verdict == .unknown })
+        #expect(settlingItems.first { $0.id == "calls" }?.status == "Settling…")
+        #expect(settlingItems.first { $0.id == "gaming" }?.status == "Settling…")
+
+        let degradedWhileSettling = SuitabilityEngine.synthesizeDegradedExperience(
+            items: settlingItems,
+            monitorSample: noisySample,
+            currentJitter: 67.0,
+            effectiveLoss: 0.0
+        )
+        #expect(degradedWhileSettling == nil)
+
+        // 2. While arrival check is running, items return .unknown checking and degraded experience is nil
+        let arrivalInputs = SuitabilityEngine.Inputs(
+            monitorSample: noisySample,
+            isLinkUp: true,
+            currentJitter: 67.0,
+            effectiveLoss: 0.0,
+            isArrivalCheck: true
+        )
+        let arrivalItems = SuitabilityEngine.evaluateAll(arrivalInputs)
+        #expect(arrivalItems.allSatisfy { $0.verdict == .unknown })
+        #expect(arrivalItems.first { $0.id == "calls" }?.status == "Checking…")
+        #expect(arrivalItems.first { $0.id == "gaming" }?.status == "Checking…")
+
+        let degradedWhileArrival = SuitabilityEngine.synthesizeDegradedExperience(
+            items: arrivalItems,
+            monitorSample: noisySample,
+            currentJitter: 67.0,
+            effectiveLoss: 0.0
+        )
+        #expect(degradedWhileArrival == nil)
     }
 }
 

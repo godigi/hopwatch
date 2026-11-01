@@ -146,4 +146,27 @@ import Testing
         #expect(heartbeat.latestBeat == nil)
         #expect(heartbeat.beatTick == 0)
     }
+
+    @Test @MainActor func filteredStateManagement() {
+        let heartbeat = PingHeartbeat()
+        heartbeat.adoptTestBeat(latencyMs: 15.0, isMiss: false, seq: 1)
+        #expect(!heartbeat.beats.isEmpty)
+
+        // Setting filtered clears beats and latestBeat, marking isFiltered true
+        heartbeat.setFiltered(true)
+        #expect(heartbeat.isFiltered)
+        #expect(heartbeat.beats.isEmpty)
+        #expect(heartbeat.latestBeat == nil)
+        #expect(!heartbeat.isRunning)
+
+        // Seeding while filtered is suppressed
+        var s = MonitorSample()
+        s.internet.rttAvgMs = 20.0
+        heartbeat.seedFromSamples([s])
+        #expect(heartbeat.beats.isEmpty)
+
+        // Clearing filtered restores unmuted state
+        heartbeat.setFiltered(false)
+        #expect(!heartbeat.isFiltered)
+    }
 }

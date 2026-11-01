@@ -8,6 +8,74 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Added
+- **Smart Battery-Saver Cadence**: Added `batterySaverCadence` preference (enabled by default) and Settings toggle. When running on battery power or in macOS Low Power Mode, Hopwatch automatically relaxes background sampling to 12s when the connection is stable, immediately resuming fast probing upon packet loss, latency degradation, or user-initiated latency tests.
+- **Customizable Menu Bar Latency & Packet Loss Display**: Added `.dotPingAndLoss` ("Dot, ping time, and packet loss") style in Settings, displaying both live latency and packet loss (e.g. `● 18ms · 0% loss`) directly in the macOS menu bar.
+- **Router Firewall Shield Badge 🛡️**: In `HopAttributionView` and compact status cards, rendered an explicit blue shield badge and `"Firewall 🛡️"` label on the Router node when gateway ICMP pings are blocked (`TCP-1`), reassuring users that their router is protected by a firewall rather than failing.
+- **1-Click Markdown Incident Report Export**: Enhanced `ActivityDetailCard` with a 1-click "Copy Incident Report" action that formats a clean, sanitized Markdown report with condition name, timing, occurrences, network name, ISP, IP transitions, and diagnostic advice for IT support or ISP chat.
+- **Contextual Location Permission Helper**: Added an actionable banner above the network list in the Networks tab when connected to Wi-Fi without Location Services authorization, explaining why SSIDs are withheld by macOS with a 1-click button to open System Settings.
+- **Wi-Fi Roaming & Mesh Handoff Quality Enrichment**: Enriched `wifi-roamed` events with the destination channel and RSSI (e.g. `"Roamed to access point (ch 36, -58 dBm)"`).
+- **Mac System Sleep Humanization**: Replaced raw, alarming observation gap summaries (`"Not observed for 902s"`) with human-friendly sleep representations: `"Mac was asleep (15m 2s)"`, with a `moon.fill` symbol and `"Sleep"` badge.
+- **DNS Resolver Health Telemetry**: Enriched DNS server telemetry in the dashboard with live resolver response time (e.g. `192.168.1.1 (12 ms)`).
+
+### Fixed
+- Fixed network identity resolution, router MAC discovery, and weak gateway bridging:
+  - Added router MAC extraction fallback via `ipconfig getsummary "$INTERFACE"` in `lib/arp.sh` and `lib/monitor.sh` when `arp -an` returns empty under adhoc-signed subshells on macOS Sequoia.
+  - Bridged weak `gw:` records to unambiguous Wi-Fi `ssid:` groups in `helpers/history.py` when the gateway IP, ISP, and wireless channel uniquely match, unifying isolated private gateway checks with canonical Wi-Fi history while preserving separate identities between 2.4 GHz and 5 GHz networks.
+  - Incorporated explicit CLI bridges (`bridgedFrom`) directly into `HistoryStore.foldedKeys`, allowing weak gateway keys to fold directly onto canonical Wi-Fi networks in the GUI.
+  - Resolved router ownership (`isOwned` / `isCurrentNetworkOwned`) and admin shortcuts through canonical network identity, ensuring custom router settings and admin actions work seamlessly on Wi-Fi.
+  - Updated `NetworksView` and `TrendsView` to resolve the current network via `confirmedNetworkID ?? resolvedNetworkID(...)`, ensuring the active network is correctly highlighted, selected, and defaulted.
+  - Scoped `HopwatchCoordinator.currentNetworkEvents` to canonical SSID groups and connected live CoreWLAN SSID to `AlertEngine`, preventing false captive portal alerts on known networks.
+- Fixed dangling open episodes when departing a network: In `ActivityEntry.fold()`, open episodes from a departed network are automatically closed at departure time with `isLowerBound = true`, preventing historical network faults from remaining open indefinitely when disconnecting or changing locations.
+- Excluded `gap` (sleep) and `wifi-roamed` events from `ActivityView.isIssue(_:)` so neutral system transitions do not inflate the "Issues Only" filter count.
+- Fixed missing speed test metrics and "not tested yet" display on Wi-Fi networks:
+  - Added Wi-Fi network key normalization in `HopwatchCoordinator` (`resolvedNetworkID`): when macOS hides the Wi-Fi SSID from the background CLI monitor helper causing it to emit a fallback private gateway key (e.g. `gw:192.168.1.1`), the coordinator now resolves the active network ID to the known CoreWLAN SSID (`ssid:<name>`).
+  - Updated `confirmedNetworkID`, `reconcileNetworkIdentity`, `currentSpeedTest`, and `runIsForNetwork` to use the resolved network key, ensuring stored throughput tests and live scan results for the active Wi-Fi network are properly matched and displayed rather than being withheld as an unknown or mismatched network.
+  - Ensured `adoptStoredSpeedTest` runs once history completes loading when `latestSpeedTest` is unpopulated, preventing asynchronous history loading from leaving speed test figures uninitialized.
+- Fixed premature degraded alarms ("Unstable for calls & gaming") and suppressed full check upon joining new networks:
+  - Disallowed RFC 1918 private/local gateway IP keys (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`) from persisting in `arrivalStates` and from being folded onto MAC groups in `NetworkIdentity.fold`. Purged stale private gateway entries from preferences so common router subnets (e.g. `192.168.1.1`) never falsely suppress new network baseline checks.
+  - Prioritized active Wi-Fi SSID over weak private gateway keys in `considerArrival` when evaluating arrival check candidacy on wireless links.
+  - Extended connection settling grace period from 4 seconds to 15 seconds after network changes and wake events, ensuring DHCP lease acquisition, ARP resolution, and initial handshakes settle before steady-state verdicts are evaluated.
+  - Updated `ArrivalPolicy.decide` to return `.wait` while the connection is settling, preventing initial association packet spikes from permanently downgrading arrival scans to `.quick(.unhealthy)`. Once settled, a full check runs automatically.
+  - Suppressed premature service degradation verdicts ("Severe stutter", "Frequent spikes") in `SuitabilityEngine` during settling and arrival scan execution, showing calm "Settling…" / "Checking…" states rather than flashing false critical alarms on single-packet handshake spikes.
+  - Guarded `currentJitter` on brand new connections so raw single-cycle ping stddev spikes (≥30ms) require multi-sample confirmation before asserting elevated jitter.
+- Fixed dual-stack IPv4/IPv6 public IP flapping in CLI monitor:
+  - Tracked IPv4 and IPv6 public IP addresses distinctly across monitor cycles in `helpers/monitor_sample.py` and `lib/monitor.sh`.
+  - Prevented transient curl fallback switches between IPv4 and IPv6 on dual-stack networks (where ISP, country, and network identity remain unchanged) from emitting spurious `public-ip-changed` events unless the respective address family's IP actually changed.
+- Fixed transient `TCP-1` and `D1` rule firings during interface drop, roam, and handshake in `lib/monitor.sh`:
+  - Guarded `TCP-1` evaluation so it only fires when confirmed by a fresh medium-tier check (`MON_MEDIUM_FRESH=1` or `MON_REFRESHED` contains `medium`), preventing stale `MON_TCP_OK=1` readings from past cycles from falsely diagnosing ICMP filtering when a network begins dropping. Established `TCP-1` states continue to hold across fast cycles.
+  - On network changes (`network_changed=1`), cleared stale tier readings (`_mon_clear_measurements`), previous rules (`MON_PREV_RULES=""`), dual-stack family records, and connection confirmation streaks (`_mon_conn_reset`), ensuring fresh multi-sample confirmations are required before `TCP-1` or `D1` can fire on a newly joined or transitioning network.
+- Fixed visual layout and text clipping in Hopwatch menu bar dropdown and dashboard views:
+  - Applied `minimumScaleFactor(0.75)` on status labels and metric text in `ExperienceGridView` so compound metrics (e.g. `0% loss · 1ms jitter`) and status labels fit cleanly in the 4-column layout without truncation.
+  - Allowed activity subtitles (`item.consequence`) in `DashboardSuitabilityStrip` ("What should work") to wrap up to 2 lines with unconstrained vertical sizing, resolving clipping across Voice Calls, Online Gaming, Video Streaming, and Web Browsing cards.
+  - Switched `ActivityRow` transition event summaries containing `" → "` (e.g. ISP, country, or public IP changes) to middle truncation so both origin and destination entities remain readable.
+- Fixed paused monitor state desynchronization during display sleep and wake in `lib/monitor.sh` and `helpers/monitor_sample.py`:
+  - When display sleep triggers monitor pause (`MON_PAUSED=1`), `lib/monitor.sh`'s pause announcement cycle now sets `MON_CLEARABLE_RULES=""` and preserves `MON_RULES="$MON_PREV_RULES"`, preventing active rules from being cleared without measurements while probing is suspended.
+  - Guarded `helpers/monitor_sample.py`'s `_changes()` when `_env("PAUSED") == "1"` so pause announcements never append spurious `rule-cleared` events to `events.jsonl`.
+  - Added `unset NETDIAG_MON_JOURNAL MONITOR_JOURNAL` to `tests/setup_suite.bash` to prevent developer shell environments from leaking test events into the user's live `~/net-diag/events.jsonl`.
+- Fixed Wi-Fi network name reporting previous network after switching connections (e.g. reporting a previous Airbnb or hotel network while connected to personal phone hotspot):
+  - Fixed a race condition where `adoptLiveSSIDAsNameIfNeeded` adopted the newly connected Wi-Fi SSID onto the *previous* network's ID before the monitor child process produced a new sample, writing cross-pollinated renames (such as `"ssid:Brian’s iPhone" = "Flat Classic 203 - 204"`) into persistent `networkNames` preferences.
+  - Restricted `adoptLiveSSIDAsNameIfNeeded` to hardware router `mac:` keys on fresh samples from the active connection, strictly forbidding automated SSID adoption onto `ssid:` or `gw:` keys.
+  - Made `CoreWLAN`'s live SSID authoritative in `wifiDisplayName`: prevented stale router MAC custom names from overriding the live Wi-Fi SSID when connected.
+  - Fixed `NetworkEventWatcher.Event.ssidChanged` transition handling in `handleNetworkEvent` which previously skipped connection invalidation when `knownSSID` was unset or transitional, leaving previous network state active.
+  - Added automatic purge of corrupted cross-SSID custom name entries in `HistoryStore.load()` and `migrateRawKeys`.
+- Fixed all tabs for data display and telemetry formatting issues:
+  - **Overview**: Resolved `DashboardCheckTable` row states under ICMP filtering so router packet loss shows "Blocked [Declined by router]" (neutral) instead of a false 100% critical alert, internet packet loss shows "Filtered (TCP ok)", router latency shows "Blocked" rather than claiming "Good", and unmeasured jitter displays "Measuring…" with a neutral badge rather than falsely asserting "0 ms [Good]".
+  - **Live Monitoring**: Packet loss chart hover tooltip now uses decimal precision formatting so fractional loss (e.g. 0.4%) displays accurately instead of rounding down to "0 %". Empty state now shows "Measuring packet loss…" to match companion charts.
+  - **Activity**: Summary card now displays honest "No Activity Recorded Yet" on a fresh install or clean history rather than declaring "Connection Stable & Quiet across 1 day(s)".
+  - **Trends**: Resolved sample count aliases for Wi-Fi signal, Wi-Fi SNR, internet ping, and bufferbloat metrics in the metric picker so sample counts no longer show as `(0)` when samples are recorded. Prevented router latency p90 clamping from clipping companion internet ping lines or marking normal WAN latency as outliers.
+  - **Networks**: Split network header metadata into a dedicated status badge row and an SSID / Gateway / ISP / Date row to prevent aggressive horizontal truncation. Guarded `NetworkDetailCard` reliability calculation against negative clean ratios (e.g. `-1/2 Clean`).
+  - **Settings**: Renamed the secondary "What’s New…" button on available updates to "Review Update…" to eliminate adjacent duplicate labels.
+- Fixed Dashboard Connection Reliability widget staying frozen or displaying "No history yet" / "Monitoring started recently": `DashboardReliabilityCard` now dynamically synthesizes live availability via `AvailabilityEngine` directly from active `NetworkEvent` transition history and live heartbeat telemetry rather than relying solely on a stale point-in-time snapshot from a manual scan. Real connection drops, router packet loss episodes, and total downtime update in real time.
+- Fixed Wi-Fi network misidentification on shared router gateway subnets: private/local RFC 1918 gateway IPs (e.g. `192.168.1.254`, `192.168.1.1`, `10.x.x.x`) are no longer folded onto previously visited network groups in `HistoryStore`, and live CoreWLAN SSIDs are prioritized over weak gateway keys and adopted names in `wifiDisplayName`. Stale runs from other locations sharing the same private gateway IP are prevented from hydrating or displaying as the active network.
+- Fixed false positive Ping Heartbeat alarms on ICMP-filtering networks: when a network policy drops ICMP ping packets wholesale (common on hotel, apartment, guest, and corporate Wi-Fi), Ping Heartbeat now gracefully recognizes the filtered probe state instead of spawning continuous failing `/sbin/ping` processes and rendering alarming red `MISS` drop markers and a false 100% loss alert. Displays calm, reassuring telemetry (`ICMP probe filtered · TCP traffic healthy` and active TCP connect latency when available).
+- Fixed false positive Internet hop warning under ICMP filtering: `RouteWarningResolver` now properly honors `internetPingFiltered` (`ICMP-1`), preventing 100% ICMP probe silence from erroneously painting the Internet node and broadband route amber when actual TCP web connectivity is healthy.
+- Fixed Gaming suitability evaluating to "Not measured" when ICMP ping is filtered: resolved an unreachable condition in `SuitabilityEngine.evaluateGaming` so healthy TCP connections accurately report "Smooth" multiplayer capability.
+- Added TCP fallback latency evaluation in `SuitabilityEngine.evaluateCalls`: calls now evaluate to "Clear audio" using available TCP/HTTPS connection latency when ICMP pings are blocked by network policy.
+
+### Added
+- Added `DataSanityWatchdog` invariant engine to proactively validate UI telemetry against ground truth: continuously checks invariants across event history, heartbeat misses, and reliability calculations, asserting that no widget displays empty or misleading "no prior data" placeholders when network faults are actively recorded.
+
 ## [1.22.0] - 2026-10-22
 
 ### Changed

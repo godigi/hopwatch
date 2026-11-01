@@ -308,6 +308,14 @@ struct SettingsView: View {
             SettingsCard(title: "Battery & Energy Optimization", icon: "battery.100.bolt", subtitle: "Prevent unneeded wakeups when on battery or asleep.") {
                 VStack(spacing: 12) {
                     SettingsToggleRow(
+                        title: "Smart battery-saver cadence",
+                        description: "Relaxes background sampling interval to 12s on battery when connection is stable, immediately resuming fast probing upon any packet loss or latency degradation.",
+                        isOn: $appSettings.batterySaverCadence
+                    )
+
+                    Divider()
+
+                    SettingsToggleRow(
                         title: "Pause while display is asleep",
                         description: "Avoids reporting false connectivity drop alerts while your Mac is sleeping and saves power.",
                         isOn: $appSettings.pauseOnDisplaySleep
@@ -438,6 +446,10 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.ColorToken.ink)
                 case .dotAndPing:
                     Text("12ms")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                case .dotPingAndLoss:
+                    Text("12ms · 0% loss")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.ColorToken.ink)
                 case .dynamic:
@@ -1128,7 +1140,7 @@ struct SettingsView: View {
                                     .frame(width: 90)
                             } else if coordinator.updateChecker.hasUpdate {
                                 HStack(spacing: 8) {
-                                    Button("What’s New…") {
+                                    Button("Review Update…") {
                                         coordinator.showSoftwareUpdate()
                                     }
                                     .controlSize(.small)

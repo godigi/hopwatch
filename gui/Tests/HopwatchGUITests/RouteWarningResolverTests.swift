@@ -207,6 +207,33 @@ import Testing
         #expect(result.culpritHop == "internet")
     }
 
+    @Test func internetPingFilteredWithCleanTCPDoesNotWarnInternet() {
+        // Both router and outside world drop ICMP ping (100% loss to both, TCP-1 & ICMP-1),
+        // but the network is healthy and real TCP traffic works fine (stage: .healthy).
+        // Neither Router nor Internet should be warned, and culprit should be nil.
+        let result = RouteWarningResolver.resolve(
+            linkUp: true,
+            isWiFi: true,
+            stage: .healthy,
+            firedCategories: [],
+            gwLoss: 100.0,
+            gwPing: 0.0,
+            gwJitter: 0.0,
+            inetLoss: 100.0,
+            inetPing: 0.0,
+            inetJitter: 0.0,
+            hasRecentRoam: false,
+            gatewayPingFiltered: true,
+            internetPingFiltered: true
+        )
+
+        #expect(!result.routerWarn)
+        #expect(!result.isWifiLaggy)
+        #expect(result.macStatusGood)
+        #expect(!result.internetWarn)
+        #expect(result.culpritHop == nil)
+    }
+
     @Test func strongSignalWithRouterLagDoesNotFlagMacHardware() {
         // High router ping/jitter (177ms / ±139ms) on Wi-Fi without client packet loss.
         // Wi-Fi link is flagged laggy, but Mac hardware status remains good (green checkmark).

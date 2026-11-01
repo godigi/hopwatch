@@ -209,7 +209,7 @@ def _changes() -> list[dict]:
     values erases the comparison baseline and interface/SSID changes
     are never reported.
     """
-    if _env("HAVE_PREV") != "1":
+    if _env("HAVE_PREV") != "1" or _env("PAUSED") == "1":
         return []
     out: list[dict] = []
 
@@ -252,15 +252,56 @@ def _changes() -> list[dict]:
 
     diff("PUB_CC", "PREV_PUB_CC", "country-changed", "public.country",
          exit_phrase)
-    diff("PUB_IP", "PREV_PUB_IP", "public-ip-changed", "public.ip",
-         lambda a, b: "Public IP changed")
+
+    pub_ip_now, pub_ip_prev = _env("PUB_IP"), _env("PREV_PUB_IP")
+    if pub_ip_now is not None and pub_ip_prev is not None and pub_ip_now != pub_ip_prev:
+        now_v6, prev_v6 = ":" in pub_ip_now, ":" in pub_ip_prev
+        now_v4, prev_v4 = "." in pub_ip_now, "." in pub_ip_prev
+        family_toggled = (now_v6 and prev_v4) or (now_v4 and prev_v6)
+
+        same_net = (
+            (_env("PUB_ISP") is None or _env("PREV_PUB_ISP") is None or _env("PUB_ISP") == _env("PREV_PUB_ISP"))
+            and (_env("PUB_CC") is None or _env("PREV_PUB_CC") is None or _env("PUB_CC") == _env("PREV_PUB_CC"))
+            and (_env("SSID") is None or _env("PREV_SSID") is None or _env("SSID") == _env("PREV_SSID"))
+            and (_env("INTERFACE") is None or _env("PREV_INTERFACE") is None or _env("INTERFACE") == _env("PREV_INTERFACE"))
+        )
+
+        if family_toggled and same_net:
+            prev_family_ip = _env("PREV_PUB_IPV6") if now_v6 else _env("PREV_PUB_IPV4")
+            if prev_family_ip and prev_family_ip != pub_ip_now:
+                out.append({
+                    "id": "public-ip-changed",
+                    "field": "public.ip",
+                    "from": prev_family_ip,
+                    "to": pub_ip_now,
+                    "summary": "Public IP changed",
+                })
+        else:
+            out.append({
+                "id": "public-ip-changed",
+                "field": "public.ip",
+                "from": pub_ip_prev,
+                "to": pub_ip_now,
+                "summary": "Public IP changed",
+            })
+
     diff("PUB_ISP", "PREV_PUB_ISP", "isp-changed", "public.isp",
          lambda a, b: f"Internet provider changed: {a} → {b}")
     diff("SSID", "PREV_SSID", "wifi-network-changed", "link.ssid",
          lambda a, b: f"Wi-Fi network changed: {a} → {b}")
     if _env("SSID") is not None and _env("SSID") == _env("PREV_SSID"):
-        diff("BSSID", "PREV_BSSID", "wifi-roamed", "link.bssid",
-             lambda a, b: "Roamed to a different Wi-Fi access point")
+        def _roam_summary(a, b):
+            chan = _env("WIFI_CHAN")
+            rssi = _env("WIFI_RSSI")
+            detail = []
+            if chan:
+                detail.append(f"ch {chan}")
+            if rssi:
+                detail.append(f"{rssi} dBm")
+            if detail:
+                return f"Roamed to access point ({', '.join(detail)})"
+            return "Roamed to a different Wi-Fi access point"
+        diff("BSSID", "PREV_BSSID", "wifi-roamed", "link.bssid", _roam_summary)
     diff("INTERFACE", "PREV_INTERFACE", "interface-changed",
          "link.interface",
          lambda a, b: f"Network interface changed: {a} → {b}")

@@ -583,10 +583,10 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity)
 
                 DashboardReliabilityCard(
-                    observationSummary: reliabilityObservationSummary,
-                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "No history yet",
-                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "—",
-                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "—"
+                    observationSummary: coordinator.liveAvailability.observationSummary,
+                    outageCount: coordinator.liveAvailability.outageCountText,
+                    totalDowntime: coordinator.liveAvailability.totalDowntimeText,
+                    longestOutage: coordinator.liveAvailability.longestOutageText
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -604,43 +604,13 @@ struct HomeView: View {
                 )
 
                 DashboardReliabilityCard(
-                    observationSummary: reliabilityObservationSummary,
-                    outageCount: currentRunResult?.snapshot.availability?.outages.map { "\($0) outages" } ?? "No history yet",
-                    totalDowntime: currentRunResult?.snapshot.availability?.downtimeS.map { formatSeconds($0) } ?? "—",
-                    longestOutage: currentRunResult?.snapshot.availability?.longestOutageS.map { formatSeconds($0) } ?? "—"
+                    observationSummary: coordinator.liveAvailability.observationSummary,
+                    outageCount: coordinator.liveAvailability.outageCountText,
+                    totalDowntime: coordinator.liveAvailability.totalDowntimeText,
+                    longestOutage: coordinator.liveAvailability.longestOutageText
                 )
             }
         }
-    }
-
-    private var reliabilityObservationSummary: String {
-        guard let avail = currentRunResult?.snapshot.availability else {
-            return "Monitoring started recently · No prior data in last 24h"
-        }
-        let unobserved = avail.unobservedPct ?? 100
-        if unobserved >= 99 {
-            return "Monitoring started recently · No history recorded in last 24h"
-        } else if unobserved > 0 {
-            let observedPct = max(1, 100 - unobserved)
-            let observedHours = Double(24 * observedPct) / 100.0
-            if observedHours >= 1.0 {
-                return String(format: "Last 24h · Monitored for ~%.0fh (%d%% offline or asleep)", observedHours, unobserved)
-            } else {
-                let observedMins = max(1, Int(round(observedHours * 60)))
-                return "Last 24h · Monitored for ~\(observedMins)m (\(unobserved)% offline or asleep)"
-            }
-        } else {
-            return "Last 24 hours · Continuously monitored"
-        }
-    }
-
-    private func formatSeconds(_ s: Int) -> String {
-        let mins = s / 60
-        let secs = s % 60
-        if mins > 0 {
-            return "\(mins)m \(secs)s"
-        }
-        return "\(secs)s"
     }
 
     // MARK: - Suitability Strip Section
@@ -672,7 +642,9 @@ struct HomeView: View {
             vpnName: vpnProviderName,
             currentJitter: coordinator.currentJitter,
             effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering
+            lossFiltering: coordinator.lossFiltering,
+            isSettling: coordinator.isSettling,
+            isArrivalCheck: coordinator.isArrivalCheck
         )
         return SuitabilityEngine.evaluateAll(inputs)
     }
@@ -746,7 +718,6 @@ struct HomeView: View {
         let isRoamBlip = coordinator.hasRecentRoam && gwLoss < 10.0
         let inetRtt = coordinator.liveSample?.internet.rttAvgMs ?? snap?.internetLatency.rttAvgMs
         let measuredJitter = coordinator.currentJitter ?? snap?.internetLatency.rttJitterMs
-        let inetJitter = measuredJitter ?? 0
         let measuredInetLoss = coordinator.liveSample?.internet.lossPct ?? snap?.internetLatency.lossPct
         let loss1 = measuredInetLoss ?? 0
         let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
@@ -757,31 +728,42 @@ struct HomeView: View {
             ?? snap?.wifi?.channel
             ?? snap?.wifiScan?.currentChannel
 
+        let isFilteredGateway = coordinator.lossFiltering.gatewayLeg || lossFiltering.gatewayLeg
+        let isFilteredInternet = coordinator.lossFiltering.internetLeg || lossFiltering.internetLeg
+
         // 1. Jitter (Matching user mockup)
-        let jitterBadge: DashboardCheckTable.GradeBadge = {
-            if inetJitter >= 20 {
-                return .init(label: "Unstable", tone: .critical)
-            } else if inetJitter >= 10 {
-                return .init(label: "Degraded", tone: .warn)
-            } else {
-                return .init(label: "Good", tone: .good)
+        let (jitterMeasured, jitterBadge, jitterIsWarning, jitterIsGood): (String, DashboardCheckTable.GradeBadge, Bool, Bool) = {
+            guard let j = measuredJitter else {
+                return ("Measuring…", .init(label: "Measuring", tone: .neutral), false, false)
             }
+            let b: DashboardCheckTable.GradeBadge = {
+                if j >= 20 {
+                    return .init(label: "Unstable", tone: .critical)
+                } else if j >= 10 {
+                    return .init(label: "Degraded", tone: .warn)
+                } else {
+                    return .init(label: "Good", tone: .good)
+                }
+            }()
+            return ("\(Int(round(j))) ms", b, j >= 10, j < 10)
         }()
         rows.append(.init(
             id: "jitter",
             icon: "waveform.path",
             label: "Jitter",
-            measured: "\(Int(round(inetJitter))) ms",
+            measured: jitterMeasured,
             subvalue: nil,
             usual: "—",
             badge: jitterBadge,
-            isWarning: inetJitter >= 10,
-            isGood: inetJitter < 10
+            isWarning: jitterIsWarning,
+            isGood: jitterIsGood
         ))
 
         // 2. Packet loss to router (Matching user mockup)
         let gwLossBadge: DashboardCheckTable.GradeBadge = {
-            if isRoamBlip {
+            if isFilteredGateway {
+                return .init(label: "Declined by router", tone: .neutral)
+            } else if isRoamBlip {
                 return .init(label: "Roamed", tone: .good)
             } else if gwLoss >= 10.0 {
                 return .init(label: "Unstable", tone: .critical)
@@ -793,14 +775,14 @@ struct HomeView: View {
         }()
         rows.append(.init(
             id: "gw-loss",
-            icon: (!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network",
+            icon: isFilteredGateway ? "slash.circle" : ((!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network"),
             label: "Packet loss to router",
-            measured: LossFormatter.formatPct(gwLoss),
+            measured: isFilteredGateway ? "Blocked" : LossFormatter.formatPct(gwLoss),
             subvalue: nil,
             usual: "0%",
             badge: gwLossBadge,
-            isWarning: !isRoamBlip && gwLoss >= 3.0,
-            isGood: (isRoamBlip || gwLoss < 1.0)
+            isWarning: !isFilteredGateway && !isRoamBlip && gwLoss >= 3.0,
+            isGood: isFilteredGateway || isRoamBlip || gwLoss < 1.0
         ))
 
         // 3. Wi-Fi channel (Matching user mockup)
@@ -872,44 +854,53 @@ struct HomeView: View {
         // 7. Router Ping
         let gwUsual = mem?.typicalGatewayLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
         let gwPingBadge: DashboardCheckTable.GradeBadge = {
-            guard let r = gwRtt else { return .init(label: "Good", tone: .good) }
+            if isFilteredGateway {
+                return .init(label: "Blocked", tone: .neutral)
+            }
+            guard let r = gwRtt else { return .init(label: "—", tone: .neutral) }
             if r > 50 { return .init(label: "Slow", tone: .warn) }
             return .init(label: "Good", tone: .good)
         }()
         rows.append(.init(
             id: "router",
-            icon: "network",
+            icon: isFilteredGateway ? "slash.circle" : "network",
             label: "Router latency",
-            measured: gwRtt != nil ? "\(Int(round(gwRtt!))) ms" : "—",
+            measured: isFilteredGateway ? "Blocked" : (gwRtt != nil ? "\(Int(round(gwRtt!))) ms" : "—"),
             subvalue: nil,
             usual: gwUsual,
             badge: gwPingBadge,
-            isWarning: gwRtt != nil && gwRtt! > 50,
-            isGood: gwRtt != nil && gwRtt! <= 50
+            isWarning: !isFilteredGateway && gwRtt != nil && gwRtt! > 50,
+            isGood: !isFilteredGateway && gwRtt != nil && gwRtt! <= 50
         ))
 
         // 8. Internet Ping
         let inetUsual = mem?.typicalInternetLatencyMs.map { String(format: "%.1f ms", $0) } ?? "—"
         let inetPingBadge: DashboardCheckTable.GradeBadge = {
-            guard let r = inetRtt else { return .init(label: "Good", tone: .good) }
+            if isFilteredInternet {
+                return .init(label: "TCP ok", tone: .good)
+            }
+            guard let r = inetRtt else { return .init(label: "—", tone: .neutral) }
             if r > 120 { return .init(label: "Elevated", tone: .warn) }
             return .init(label: "Good", tone: .good)
         }()
         rows.append(.init(
             id: "internet",
-            icon: inetRtt != nil && inetRtt! > 120 ? "exclamationmark.triangle.fill" : "globe",
+            icon: (!isFilteredInternet && inetRtt != nil && inetRtt! > 120) ? "exclamationmark.triangle.fill" : "globe",
             label: "Internet latency",
-            measured: inetRtt != nil ? "\(Int(round(inetRtt!))) ms" : "—",
+            measured: isFilteredInternet ? "TCP ok" : (inetRtt != nil ? "\(Int(round(inetRtt!))) ms" : "—"),
             subvalue: nil,
             usual: inetUsual,
             badge: inetPingBadge,
-            isWarning: inetRtt != nil && inetRtt! > 120,
-            isGood: inetRtt != nil && inetRtt! <= 120
+            isWarning: !isFilteredInternet && inetRtt != nil && inetRtt! > 120,
+            isGood: isFilteredInternet || (inetRtt != nil && inetRtt! <= 120)
         ))
 
         // 9. Internet packet loss
-        let lossText = "\(LossFormatter.formatPct(loss1)) / \(LossFormatter.formatPct(loss2))"
+        let lossText = isFilteredInternet ? "Filtered (TCP ok)" : "\(LossFormatter.formatPct(loss1)) / \(LossFormatter.formatPct(loss2))"
         let lossBadge: DashboardCheckTable.GradeBadge = {
+            if isFilteredInternet {
+                return .init(label: "Filtered", tone: .neutral)
+            }
             if loss1 >= 10.0 { return .init(label: "Unstable", tone: .critical) }
             if loss1 >= 3.0 { return .init(label: "Degraded", tone: .warn) }
             if loss1 > 0 { return .init(label: "Minor", tone: .warn) }
@@ -917,14 +908,14 @@ struct HomeView: View {
         }()
         rows.append(.init(
             id: "loss",
-            icon: loss1 >= 3.0 ? "exclamationmark.triangle.fill" : "checkmark",
+            icon: (!isFilteredInternet && loss1 >= 3.0) ? "exclamationmark.triangle.fill" : "checkmark",
             label: "Internet packet loss",
             measured: lossText,
             subvalue: nil,
             usual: "0%",
             badge: lossBadge,
-            isWarning: loss1 >= 3.0,
-            isGood: loss1 < 1.0
+            isWarning: !isFilteredInternet && loss1 >= 3.0,
+            isGood: isFilteredInternet || loss1 < 1.0
         ))
 
         // 10. DNS
@@ -1001,11 +992,11 @@ struct HomeView: View {
 
         let evidence: [String: Bool] = [
             "jitter": measuredJitter != nil,
-            "gw-loss": measuredGwLoss != nil && !coordinator.lossFiltering.gatewayLeg,
+            "gw-loss": isFilteredGateway || measuredGwLoss != nil,
             "wifi-signal": rssi != nil,
-            "router": gwRtt != nil,
-            "internet": inetRtt != nil,
-            "loss": measuredInetLoss != nil && !coordinator.lossFiltering.internetLeg,
+            "router": isFilteredGateway || gwRtt != nil,
+            "internet": isFilteredInternet || inetRtt != nil,
+            "loss": isFilteredInternet || measuredInetLoss != nil,
             "mtu": snap?.mtu.effective != nil || snap?.mtu.pathSize != nil,
             "ipv6": snap != nil,
             "speed": speedDown != nil
@@ -1121,6 +1112,7 @@ struct HomeView: View {
 
     private var routerPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
+        if lossFiltering.filters(.gateway) { return "—" }
         // A live reading or nothing: the scan's figure is from some other
         // moment and, beside a "Live" card, reads as now.
         guard let sample = coordinator.liveSample else { return "—" }
@@ -1204,7 +1196,8 @@ struct HomeView: View {
             inetJitter: inetJitter,
             hasRecentRoam: coordinator.hasRecentRoam,
             wifiRuleTint: wifiRuleTint,
-            gatewayPingFiltered: lossFiltering.filters(.gateway)
+            gatewayPingFiltered: lossFiltering.filters(.gateway),
+            internetPingFiltered: lossFiltering.filters(.internet)
         )
     }
 
@@ -1479,7 +1472,13 @@ struct HomeView: View {
 
     private var dnsServerText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        return coordinator.liveSample?.dns.resolver ?? currentRunResult?.snapshot.dns.first?.resolver ?? "—"
+        guard let resolver = coordinator.liveSample?.dns.resolver ?? currentRunResult?.snapshot.dns.first?.resolver else {
+            return "—"
+        }
+        if let ms = coordinator.liveSample?.dns.elapsedMs {
+            return "\(resolver) (\(Int(ms.rounded())) ms)"
+        }
+        return resolver
     }
 
     private var vpnDetailText: String {
@@ -1653,8 +1652,7 @@ struct HomeView: View {
     }
 
     private var isNetworkOwned: Bool {
-        coordinator.history.isOwned(networkID: coordinator.liveSample?.network.id)
-            || (coordinator.liveSample?.network.isMine ?? false)
+        coordinator.isCurrentNetworkOwned
     }
 
     private var routerAdminURL: URL? {
@@ -1693,16 +1691,14 @@ struct HomeView: View {
             ?? coordinator.latestRun?.snapshot
             ?? coordinator.hydratedReport?.run
         let sampleCandidate = coordinator.liveSample ?? coordinator.monitor.latest
+        let owned = coordinator.isCurrentNetworkOwned
         if let run = coordinator.currentNetworkRun {
-            let owned = coordinator.history.isOwned(networkID: run.snapshot.network.id)
-                || run.snapshot.network.isMine
             text = SupportSummaryFormatter.format(
                 snapshot: run.snapshot,
                 catalog: coordinator.rulesCatalog.catalog,
                 networkIsOwned: owned
             )
         } else if let sample = sampleCandidate {
-            let owned = coordinator.history.isOwned(networkID: sample.network.id)
             text = SupportSummaryFormatter.format(
                 sample: sample,
                 alert: coordinator.alerts.urgentActiveSorted.first.map {
@@ -1722,8 +1718,6 @@ struct HomeView: View {
                 fallbackSnapshot: snapshotCandidate
             )
         } else if let snapshot = snapshotCandidate {
-            let owned = coordinator.history.isOwned(networkID: snapshot.network.id)
-                || snapshot.network.isMine
             text = SupportSummaryFormatter.format(
                 snapshot: snapshot,
                 catalog: coordinator.rulesCatalog.catalog,

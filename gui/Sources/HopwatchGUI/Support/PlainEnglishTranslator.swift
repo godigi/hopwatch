@@ -166,6 +166,9 @@ public enum PlainEnglishTranslator {
         "TIME-1": "DESYNC-1",
         "CLOCK-1": "DESYNC-1",
         "PORTAL-1": "CP-1",
+        "GAP": "gap",
+        "SLEEP": "gap",
+        "WIFI-ROAMED": "wifi-roamed",
         // Map CLI codes to prompt-friendly alias definitions where exact matches are expected
         "W1": "WIFI-1",
         "W2": "WIFI-2",
@@ -182,6 +185,12 @@ public enum PlainEnglishTranslator {
     private static func translateSummaryPatterns(_ summary: String) -> PlainExplanation? {
         let lower = summary.lowercased()
 
+        if lower.contains("asleep") || lower.contains("not observed for") || lower.contains("system sleep") {
+            return curatedRules["gap"]
+        }
+        if lower.contains("roamed") || lower.contains("wifi-roamed") || lower.contains("access point roam") {
+            return curatedRules["wifi-roamed"]
+        }
         if lower.contains("bufferbloat") || lower.contains("under load") || lower.contains("saturation") {
             return curatedRules["BLOAT-1"]
         }
@@ -440,6 +449,16 @@ public enum PlainEnglishTranslator {
             title: "Ping Blocked, Web Traffic Working",
             explanation: "Ping diagnostic packets are blocked by a firewall, but web and application traffic flows normally.",
             action: "No action needed — web browsing and apps are functioning properly."
+        ),
+        "gap": PlainExplanation(
+            title: "Mac System Sleep",
+            explanation: "Your Mac was asleep or the lid was closed during this window, pausing background network monitoring.",
+            action: "Normal behavior when your Mac sleeps or hibernates. No action needed."
+        ),
+        "wifi-roamed": PlainExplanation(
+            title: "Wi-Fi Access Point Roam",
+            explanation: "Your Mac seamlessly roamed to a different Wi-Fi access point or mesh node on your network.",
+            action: "Normal behavior on mesh or multi-access-point Wi-Fi networks. No action needed."
         ),
         "D3": PlainExplanation(
             title: "Slow DNS Server",

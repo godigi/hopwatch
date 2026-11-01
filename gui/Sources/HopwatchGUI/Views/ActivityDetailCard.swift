@@ -85,7 +85,7 @@ struct ActivityDetailCard: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        Text(copied ? "Copied" : "Copy Details")
+                        Text(copied ? "Report Copied" : "Copy Incident Report")
                     }
                     .font(.caption2.weight(.medium))
                 }
@@ -250,25 +250,39 @@ struct ActivityDetailCard: View {
 
     // MARK: - Clipboard Action
     private func copyToClipboard() {
-        var text = "\(explanation.title)\n"
-        text += "Summary: \(entry.summary)\n"
-        if let ruleID = entry.ruleID { text += "Rule: \(ruleID)\n" }
-        text += "Explanation: \(explanation.explanation)\n"
-        if let from = entry.fromValue, let to = entry.toValue {
-            text += "IP: \(from) → \(to)\n"
+        var lines: [String] = []
+        lines.append("### Hopwatch Network Incident Report")
+        lines.append("- **Condition:** \(explanation.title)" + (entry.ruleID.map { " [\($0)]" } ?? ""))
+        lines.append("- **Summary:** \(entry.summary)")
+        lines.append("- **Recorded:** \(entry.latest.formatted(date: .abbreviated, time: .standard))")
+        if entry.occurrences > 1 || entry.totalDuration != nil {
+            var timing = "\(entry.occurrences) occurrence\(entry.occurrences == 1 ? "" : "s")"
+            if let duration = entry.totalDuration {
+                timing += " · total duration \(ActivityEntry.duration(duration))\(entry.durationIsLowerBound ? "+" : "")"
+            }
+            lines.append("- **Frequency:** \(timing)")
+        }
+        if let network = coordinator.wifiDisplayName, !network.isEmpty {
+            lines.append("- **Network:** \(network)")
         }
         if let isp = entry.extraDetail ?? coordinator.currentPublicInfo?.isp {
-            text += "ISP: \(isp)\n"
+            lines.append("- **Service Provider (ISP):** \(isp)")
+        }
+        if let from = entry.fromValue, let to = entry.toValue {
+            lines.append("- **Public IP Transition:** `\(from)` → `\(to)`")
         }
         for ev in entry.trafficEvidence {
-            text += "Traffic: \(ev.detail)\n"
-            if let lat = ev.latencyDetail { text += "Latency: \(lat)\n" }
+            lines.append("- **Traffic Detail:** \(ev.detail)")
+            if let lat = ev.latencyDetail {
+                lines.append("  - *Latency Impact:* \(lat)")
+            }
         }
+        lines.append("- **Diagnosis:** \(explanation.explanation)")
         if !explanation.action.isEmpty {
-            text += "Action: \(explanation.action)\n"
+            lines.append("- **Recommended Action:** \(explanation.action)")
         }
-        text += "Date: \(entry.latest.formatted(date: .abbreviated, time: .standard))"
 
+        let text = lines.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
 

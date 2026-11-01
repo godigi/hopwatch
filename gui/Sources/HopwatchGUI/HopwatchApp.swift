@@ -388,6 +388,14 @@ struct MenuBarLabel: View {
                 if let ping = pingString {
                     Text(ping).font(Theme.Font.compactMonospace)
                 }
+            case .dotPingAndLoss:
+                if let ping = pingString {
+                    if let loss = lossString {
+                        Text("\(ping) · \(loss)").font(Theme.Font.compactMonospace)
+                    } else {
+                        Text(ping).font(Theme.Font.compactMonospace)
+                    }
+                }
             case .dynamic:
                 if coordinator.currentHealth != .healthy && coordinator.currentHealth != .checking {
                     if let ping = pingString {
@@ -454,6 +462,18 @@ struct MenuBarLabel: View {
     static func formatPing(internetRtt: Double?, gatewayRtt: Double?,
                            filtering: EffectiveLoss.Filtering = .none) -> String? {
         PingReadout.menuBarPing(internetRtt: internetRtt, gatewayRtt: gatewayRtt, filtering: filtering)
+    }
+
+    static func formatLoss(lossPct: Double?) -> String? {
+        guard let lossPct, lossPct >= 0 else { return nil }
+        return "\(LossFormatter.formatPct(lossPct)) loss"
+    }
+
+    private var lossString: String? {
+        if coordinator.linkIsDown { return nil }
+        let filtering = EffectiveLoss.filtering(sample: coordinator.monitor.latest)
+        let loss = filtering.internetLeg ? nil : (coordinator.liveSample?.internet.lossPct ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct)
+        return Self.formatLoss(lossPct: loss)
     }
 
     private var pingString: String? {

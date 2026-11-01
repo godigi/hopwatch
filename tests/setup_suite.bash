@@ -26,7 +26,7 @@
 # result by asking the CLI itself where it would write.
 
 setup_suite() {
-  unset HOPWATCH_LOG_DIR NETDIAG_LOG_DIR LOG_DIR
+  unset HOPWATCH_LOG_DIR NETDIAG_LOG_DIR LOG_DIR NETDIAG_MON_JOURNAL MONITOR_JOURNAL
   # Kept for the isolation test, which has to be able to say "this is not the
   # real home" without trusting the variable it is checking.
   export HOPWATCH_TEST_REAL_HOME="$HOME"

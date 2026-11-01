@@ -39,6 +39,9 @@ final class AppSettings {
     var pauseOnDisplaySleep: Bool {
         didSet { Defaults.pauseOnDisplaySleep = pauseOnDisplaySleep }
     }
+    var batterySaverCadence: Bool {
+        didSet { Defaults.batterySaverCadence = batterySaverCadence }
+    }
     var pauseOnBattery: Bool {
         didSet { Defaults.pauseOnBattery = pauseOnBattery }
     }
@@ -146,6 +149,7 @@ final class AppSettings {
         mediumInterval = Defaults.mediumInterval
         slowInterval = Defaults.slowInterval
         pauseOnDisplaySleep = Defaults.pauseOnDisplaySleep
+        batterySaverCadence = Defaults.batterySaverCadence
         pauseOnBattery = Defaults.pauseOnBattery
         scanOnNewNetwork = Defaults.scanOnNewNetwork
         scanOnAlert = Defaults.scanOnAlert

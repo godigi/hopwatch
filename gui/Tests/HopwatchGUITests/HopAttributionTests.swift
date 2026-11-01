@@ -272,6 +272,25 @@ import Testing
         #expect(result.routerHealth == .healthy)
         #expect(result.ispHealth == .healthy)
         #expect(result.badgeTitle == "All Hops Healthy")
+        #expect(result.isRouterFirewallFiltered == false)
+    }
+
+    @Test func routerFirewallShieldBadgeDetected() {
+        // TCP-1: Gateway ping blocked by router firewall while web traffic works
+        let result = HopAttributionResolver.resolve(
+            rules: ["TCP-1"],
+            isWifi: true,
+            wifiRSSI: -50,
+            gatewayRTT: nil,
+            gatewayLoss: 100.0,
+            inetRTT: 18.0,
+            inetLoss: 0.0
+        )
+        #expect(result.isRouterFirewallFiltered == true)
+        #expect(result.culprit == .none)
+        #expect(result.wifiHealth == .healthy)
+        #expect(result.routerHealth == .healthy)
+        #expect(result.ispHealth == .healthy)
     }
 
     @Test func wifiHandoverDetectedAttributesToWifiNotice() {

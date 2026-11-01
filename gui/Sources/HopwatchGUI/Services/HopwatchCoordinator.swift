@@ -233,7 +233,10 @@ final class HopwatchCoordinator {
     }
 
     var isSettling: Bool {
-        events.withinGracePeriod(4)
+        if let connectionChangedAt, Date().timeIntervalSince(connectionChangedAt) < 15 {
+            return true
+        }
+        return events.withinGracePeriod(15)
     }
 
     func recordResolution(title: String, message: String, icon: String = "checkmark.circle.fill") {
@@ -259,6 +262,9 @@ final class HopwatchCoordinator {
         notifications.scope = appSettings.notificationScope
         alerts.inNetworkGracePeriod = { [weak events] in
             events?.withinGracePeriod() ?? false
+        }
+        alerts.liveSSID = { [weak self] in
+            self?.wifiDisplayName ?? self?.liveSSID
         }
         alerts.hasCustomDNS = { [weak self] in self?.hasCustomDNS ?? false }
         alerts.onAlertFired = { [weak self] def, firingRules in
@@ -528,7 +534,7 @@ final class HopwatchCoordinator {
             // throughput on a cold launch's first screen. With no network
             // identified yet there is nothing to scope to, and `handleSample`
             // calls `adoptStoredSpeedTest(for:)` the moment one is.
-            let current = explicitNetworkID ?? monitor.latest?.network.historyJoinID
+            let current = explicitNetworkID ?? confirmedNetworkID ?? resolvedNetworkID(for: monitor.latest) ?? monitor.latest?.network.historyJoinID
             if let current { adoptStoredSpeedTest(for: current) }
         }
     }
@@ -541,7 +547,7 @@ final class HopwatchCoordinator {
         let hydratedID = hydratedReport.flatMap { $0.context.networkID ?? $0.run.network.historyJoinID }
         if let st = hydratedReport?.run.speedtest, st.downMbps != nil,
            let hydratedID,
-           RunScope.isSameNetwork(run: hydratedID, live: networkID, canonical: history.canonicalID) {
+           runIsForNetwork(hydratedID, live: networkID) {
             latestSpeedTest = st
             latestSpeedTestAt = hydratedReport?.run.timestamp.flatMap { FastISO8601.parse($0) }
             latestSpeedTestNetwork = networkID
@@ -569,7 +575,11 @@ final class HopwatchCoordinator {
     /// fractional seconds, so lexicographic order is already chronological
     /// order and the parse can be skipped.
     private func newestCheckID(onNetwork networkID: String) -> String? {
-        history.runs(networkID: networkID, window: .all)
+        var runs = history.runs(networkID: networkID, window: .all)
+        if runs.isEmpty, let liveSsid = liveSSID, !liveSsid.isEmpty {
+            runs = history.runs(networkID: "ssid:\(liveSsid)", window: .all)
+        }
+        return runs
             .filter { $0.isCheck && $0.runID != nil }
             .max { ($0.ts ?? "") < ($1.ts ?? "") }?
             .runID
@@ -688,12 +698,27 @@ final class HopwatchCoordinator {
         await repairTask?.value
     }
 
+    /// Normalises a monitor sample's network key when macOS hides the SSID
+    /// from the CLI helper and falls back to a generic private gateway IP.
+    /// On Wi-Fi, if CoreWLAN in the GUI knows the live SSID, resolve the
+    /// private gateway key to `ssid:<name>` so history, scans, and speed tests
+    /// match the real network.
+    func resolvedNetworkID(for sample: MonitorSample?) -> String? {
+        guard let sample, let id = sample.network.historyJoinID else { return nil }
+        if (sample.link.isWiFi || liveSSID != nil), NetworkIdentity.isPrivateOrLocalGateway(id) {
+            if let ssid = liveSSID ?? Self.readableSSID(sample.link.ssid) {
+                return "ssid:\(ssid)"
+            }
+        }
+        return id
+    }
+
     /// A decoded sample is the first positive evidence of an identity change
     /// when CoreWLAN/NWPath did not deliver an event. Invalidate older async
     /// work before evaluating this sample, while retaining the sample itself.
     @discardableResult
     func reconcileNetworkIdentity(for sample: MonitorSample) -> Bool {
-        guard !sample.status.paused, let id = sample.network.historyJoinID else { return false }
+        guard !sample.status.paused, let id = resolvedNetworkID(for: sample) else { return false }
         guard id != lastNetworkID else { return false }
         if let previous = lastNetworkID {
             if history.canonicalID(previous) == history.canonicalID(id) {
@@ -710,6 +735,7 @@ final class HopwatchCoordinator {
         // The CLI's pause marker repeats the last path's identity and
         // readings; it must not revive them after a connection boundary.
         guard !sample.status.paused else { return }
+        refreshLiveWiFi()
         let previousNetworkID = lastNetworkID
         let identityChanged = reconcileNetworkIdentity(for: sample)
         // A different network: whatever name was remembered belonged to the
@@ -725,8 +751,7 @@ final class HopwatchCoordinator {
         } else if sample.publicInfo.ok == true && !(sample.publicInfo.countryISO ?? "").isEmpty {
             lastKnownPublicInfo = sample.publicInfo
         }
-        refreshLiveWiFi()
-        adoptLiveSSIDAsNameIfNeeded()
+        adoptLiveSSIDAsNameIfNeeded(for: sample)
         if let ssid = Self.readableSSID(sample.link.ssid) ?? liveSSID {
             lastAssociatedSSID = ssid
         }
@@ -756,6 +781,14 @@ final class HopwatchCoordinator {
         considerInvestigationBurst(sample)
 
         considerAutoReconnect(sample)
+
+        let isTargetFiltered: Bool = {
+            if let gw = sample.link.gateway, !gw.isEmpty, heartbeat.target == gw {
+                return lossFiltering.filters(.gateway)
+            }
+            return lossFiltering.filters(.internet)
+        }()
+        heartbeat.setFiltered(isTargetFiltered)
 
         if heartbeat.beats.isEmpty {
             heartbeat.seedFromSamples(currentSamples)
@@ -823,7 +856,7 @@ final class HopwatchCoordinator {
 
         // Not identified yet — the CLI has no group and no usable record
         // id. Decide nothing: `nil` here has never meant "a new network".
-        guard let id = sample.network.historyJoinID else { return }
+        guard let id = resolvedNetworkID(for: sample) else { return }
 
         // The sample that finally names a network is also the first moment
         // cold-launch hydration can be scoped to one — `start()` runs it
@@ -837,7 +870,7 @@ final class HopwatchCoordinator {
             // A throughput figure is about one network. Swap it for this
             // network's own stored one (or none) before any view can draw
             // the previous network's under the new name.
-            if latestSpeedTestNetwork.map({ history.canonicalID($0) }) != history.canonicalID(id) {
+            if latestSpeedTestNetwork.map({ history.canonicalID($0) }) != history.canonicalID(id) || latestSpeedTest == nil {
                 adoptStoredSpeedTest(for: id)
             }
             if currentNetworkRun == nil { Task { await hydrateFromHistoryIfNeeded() } }
@@ -846,6 +879,8 @@ final class HopwatchCoordinator {
             // A different network's backoff is meaningless.
             arrivalAttempts = 0
             nextArrivalAttemptAt = nil
+        } else if latestSpeedTest == nil {
+            adoptStoredSpeedTest(for: id)
         }
 
         // Deliberately outside the id-changed guard above. The previous
@@ -867,14 +902,26 @@ final class HopwatchCoordinator {
     /// having. Monitoring covers the continuous question; this covers the
     /// one-off one. See CLAUDE.md's three-depth table.
     private func considerArrival(for id: String, sample: MonitorSample) {
-        let canonical = history.canonicalID(id)
-        let state = Defaults.arrivalStates[id] ?? Defaults.arrivalStates[canonical] ?? .unchecked
+        // On Wi-Fi, never use a private gateway IP as the primary arrival key
+        let targetID: String = {
+            if sample.link.isWiFi || liveSSID != nil, NetworkIdentity.isPrivateOrLocalGateway(id) {
+                if let ssid = liveSSID ?? Self.readableSSID(sample.link.ssid) {
+                    return "ssid:\(ssid)"
+                }
+            }
+            return id
+        }()
+
+        let canonical = history.canonicalID(targetID)
+        let state = Defaults.arrivalStates[targetID]
+            ?? (NetworkIdentity.isPrivateOrLocalGateway(canonical) ? nil : Defaults.arrivalStates[canonical])
+            ?? .unchecked
         // Assigned only on a real change. Under `@Observable` a write
         // invalidates every observer whether or not the value differs, and
         // this runs once per monitor sample — every 5 s on the fast tier.
         // Unguarded, the arrival card would redraw on a timer for as long
         // as the app is open.
-        if arrivalNetworkID != id { arrivalNetworkID = id }
+        if arrivalNetworkID != targetID { arrivalNetworkID = targetID }
         if arrivalState != state { arrivalState = state }
 
         // Published before the guards below, because the card renders what
@@ -893,7 +940,8 @@ final class HopwatchCoordinator {
         switch ArrivalPolicy.decide(hasSample: true,
                                     severity: sample.status.severity,
                                     isExpensive: events.pathIsExpensive,
-                                    isConstrained: events.pathIsConstrained) {
+                                    isConstrained: events.pathIsConstrained,
+                                    isSettling: isSettling) {
         case .wait:
             // Unreachable from here — we hold a sample. Kept exhaustive
             // rather than defaulted so a future case cannot be silently
@@ -901,12 +949,12 @@ final class HopwatchCoordinator {
             return
 
         case .full:
-            attemptArrival(id: id, depth: .full, reason: "new network")
+            attemptArrival(id: targetID, depth: .full, reason: "new network")
 
         case .quick(let why):
             // A decision, not a failure: recorded so it does not retry,
             // and rendered as a button rather than a spinner.
-            attemptArrival(id: id, depth: .quick,
+            attemptArrival(id: targetID, depth: .quick,
                            reason: "new network (\(why.rawValue))",
                            declineWith: why)
         }
@@ -1094,6 +1142,13 @@ final class HopwatchCoordinator {
         }
     }
 
+    private var isTestingLiveSSID = false
+
+    func setLiveSSIDForTesting(_ ssid: String?) {
+        liveSSID = ssid
+        isTestingLiveSSID = (ssid != nil)
+    }
+
     /// Gallery fixture for the moved-network state (`--gallery-moved`): the
     /// monitor now says the Mac is on a network the hydrated report and the
     /// stored speed test are *not* about, and its public lookup came back
@@ -1200,7 +1255,10 @@ final class HopwatchCoordinator {
 
     /// Write one network's arrival state to both the store and the
     /// observable mirror, so the two cannot disagree.
+    /// Private/local gateway IPs (RFC 1918) are strictly rejected so they
+    /// cannot poison other networks sharing common gateway subnets (e.g. 192.168.1.1).
     private func setArrivalState(_ state: ArrivalState, for id: String) {
+        guard !NetworkIdentity.isPrivateOrLocalGateway(id) else { return }
         var all = Defaults.arrivalStates
         all[id] = state
         Defaults.arrivalStates = all
@@ -1230,20 +1288,24 @@ final class HopwatchCoordinator {
         if history.canonicalID(measured) == history.canonicalID(scanNetwork) {
             return true
         }
-        // Fallback: check if one is a weak gateway key and the snapshot or other key agrees on gateway IP
+        // Fallback: check if one is a weak non-private gateway key and the snapshot or other key agrees on gateway IP
         if scanNetwork.starts(with: "gw:") {
             let gw = String(scanNetwork.dropFirst(3))
-            if let snapGw = snapshot?.gateway.ip, snapGw == gw {
-                return true
-            }
-            if measured.starts(with: "gw:") && String(measured.dropFirst(3)) == gw {
-                return true
+            if !NetworkIdentity.isPrivateOrLocalGateway(gw) {
+                if let snapGw = snapshot?.gateway.ip, snapGw == gw {
+                    return true
+                }
+                if measured.starts(with: "gw:") && String(measured.dropFirst(3)) == gw {
+                    return true
+                }
             }
         }
         if measured.starts(with: "gw:") {
             let gw = String(measured.dropFirst(3))
-            if let snapGw = snapshot?.gateway.ip, snapGw == gw {
-                return true
+            if !NetworkIdentity.isPrivateOrLocalGateway(gw) {
+                if let snapGw = snapshot?.gateway.ip, snapGw == gw {
+                    return true
+                }
             }
         }
         // Fallback: check if one is an ssid key and the SSID matches liveSSID or snapshot SSID
@@ -1488,17 +1550,16 @@ final class HopwatchCoordinator {
         case .ssidChanged(let newSSID):
             let readable = Self.readableSSID(newSSID)
             let knownSSID = self.liveSSID ?? self.lastAssociatedSSID
-            // Only invalidate on positive evidence that the user associated to a
-            // different named Wi-Fi network. On flaky or multi-AP networks (hotels),
-            // CoreWLAN fires ssidDidChange with nil or the same SSID during a brief
-            // re-association; invalidating and restarting the monitor there blanks
-            // the UI and resets rolling loss history while on the same network.
-            guard let readable, let knownSSID, readable != knownSSID else {
+            // If readable is nil (transitioning/unreadable) or matches the known SSID (AP roam),
+            // refresh Wi-Fi state and force a resample without wiping the connection.
+            guard let readable, readable != knownSSID else {
                 log.debug("ssidDidChange without a new SSID — refreshing Wi-Fi and forcing monitor refresh only")
                 refreshLiveWiFi()
                 monitor.forceRefresh()
                 return
             }
+            lastAssociatedSSID = readable
+            liveSSID = readable
         }
         invalidateCurrentConnection()
         if Defaults.monitoringEnabled {
@@ -1518,6 +1579,9 @@ final class HopwatchCoordinator {
         if isScanning {
             cancelScan()
             clearPendingArrival()
+        }
+        if sample == nil {
+            lastNetworkID = nil
         }
         connectionGeneration += 1
         connectionChangedAt = Date()
@@ -1677,6 +1741,9 @@ final class HopwatchCoordinator {
                 // and the network list are one record out of date until
                 // this reload.
                 await self.history.load()
+                if self.latestSpeedTest == nil, let current = self.confirmedNetworkID {
+                    self.adoptStoredSpeedTest(for: current)
+                }
                 guard generation == self.connectionGeneration else { return }
                 self.finishArrivalIfPending(runID: result.snapshot.runID,
                                             measured: result.snapshot.network.historyJoinID)
@@ -2125,6 +2192,7 @@ final class HopwatchCoordinator {
     /// CoreWLAN returns a redacted `<SSID>` / nil in that state, and
     /// passing that through would surface a raw placeholder as a name.
     func refreshLiveWiFi() {
+        guard !isTestingLiveSSID else { return }
         // CoreWLAN's `interface()` returns the current Wi-Fi interface, but
         // has been observed returning nil on some builds even when
         // associated; fall back to the first power-on interface from
@@ -2167,10 +2235,21 @@ final class HopwatchCoordinator {
     /// (a user rename, or a real SSID the CLI captured under sudo), and
     /// writes at most once per network per name change rather than every
     /// sample.
-    private func adoptLiveSSIDAsNameIfNeeded() {
+    private func adoptLiveSSIDAsNameIfNeeded(for sample: MonitorSample? = nil) {
         guard let live = liveSSID, !live.isEmpty,
-              !live.contains("<redacted>"), !live.contains("hidden by macOS"),
-              let id = monitor.latest?.network.historyJoinID else { return }
+              !live.contains("<redacted>"), !live.contains("hidden by macOS") else { return }
+        let currentSample = sample ?? monitor.latest
+        guard let s = currentSample, !s.status.paused, s.link.up, s.link.isWiFi else { return }
+        // Only ever adopt an SSID name onto a hardware router MAC key.
+        // Never adopt onto an ssid: key (it already is an SSID) or gw: key (weak RFC1918 IP).
+        guard let id = s.network.historyJoinID, id.starts(with: "mac:") else { return }
+        // Ensure the sample is from the current connection, not in-flight from before a network switch.
+        if let boundary = connectionChangedAt {
+            guard s.timestamp >= boundary else { return }
+        }
+        if let sampleSSID = Self.readableSSID(s.link.ssid), !sampleSSID.isEmpty {
+            guard sampleSSID == live else { return }
+        }
         // If the user has assigned their own custom name (and it's not a placeholder), don't overwrite it
         if let custom = history.customName(for: id), !custom.isEmpty,
            !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
@@ -2237,7 +2316,19 @@ final class HopwatchCoordinator {
         if RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID) {
             return true
         }
-        return networkMatches(scanNetwork: live, measured: runNetwork)
+        // Fallback: if one is an SSID key and matches liveSSID, while the other is a private gateway on Wi-Fi
+        if let liveSsid = liveSSID, !liveSsid.isEmpty {
+            let liveTarget = "ssid:\(liveSsid)"
+            if (runNetwork == liveTarget || history.canonicalID(runNetwork) == liveTarget) &&
+                (NetworkIdentity.isPrivateOrLocalGateway(live) || live == liveTarget) {
+                return true
+            }
+            if (live == liveTarget || history.canonicalID(live) == liveTarget) &&
+                (NetworkIdentity.isPrivateOrLocalGateway(runNetwork) || runNetwork == liveTarget) {
+                return true
+            }
+        }
+        return false
     }
 
     /// The one place a stored or session run becomes "the report for the
@@ -2290,7 +2381,7 @@ final class HopwatchCoordinator {
     /// drawn before the first sample of the new network cannot beat it.
     var currentSpeedTest: (speed: RunSnapshot.Speedtest, at: Date?)? {
         guard let speed = latestSpeedTest else { return nil }
-        guard let live = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return nil }
+        guard let live = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return nil }
         guard runIsForNetwork(latestSpeedTestNetwork, live: live) else { return nil }
         return (speed, latestSpeedTestAt)
     }
@@ -2383,7 +2474,7 @@ final class HopwatchCoordinator {
     }
 
     var confirmedNetworkID: String? {
-        if let sample = liveSample { return sample.network.historyJoinID }
+        if let sample = liveSample { return resolvedNetworkID(for: sample) }
         // A user-requested scan can establish identity while monitoring is
         // switched off. It must have begun after every pending boundary.
         guard let identity = scanIdentity,
@@ -2394,10 +2485,10 @@ final class HopwatchCoordinator {
     }
 
     var currentSamples: [MonitorSample] {
-        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return [] }
+        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return [] }
         let canonical = history.canonicalID(id)
         return monitor.recent.filter {
-            !$0.status.paused && $0.network.historyJoinID.map(history.canonicalID) == canonical
+            !$0.status.paused && (resolvedNetworkID(for: $0).map(history.canonicalID) == canonical || $0.network.historyJoinID.map(history.canonicalID) == canonical)
         }
     }
 
@@ -2407,12 +2498,20 @@ final class HopwatchCoordinator {
     /// when `nil`. Never another network's: a surface that must not cap at
     /// 24 h (the "nothing has changed in…" line) still scopes by identity.
     func currentNetworkEvents(withinHours hours: Double?) -> [NetworkEvent] {
-        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : monitor.latest?.network.historyJoinID) else { return [] }
+        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return [] }
         let canonical = history.canonicalID(id)
         let pool = hours.map { eventLog.within(hours: $0) } ?? eventLog.events
-        return pool.filter {
-            $0.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
-                || $0.network.map(history.canonicalID) == canonical
+        return pool.filter { event in
+            if event.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
+                || event.network.map(history.canonicalID) == canonical {
+                return true
+            }
+            if let net = event.network, NetworkIdentity.isPrivateOrLocalGateway(net) {
+                if let liveSsid = liveSSID, (canonical == "ssid:\(liveSsid)" || canonical == history.canonicalID("ssid:\(liveSsid)")) {
+                    return true
+                }
+            }
+            return false
         }
     }
 
@@ -2420,6 +2519,26 @@ final class HopwatchCoordinator {
     /// 24 h), for any surface that shows "what happened last".
     var latestCurrentNetworkEvent: NetworkEvent? {
         NetworkEvent.latestCondition(in: currentNetworkEvents)
+    }
+
+    /// Synthesized live availability reflecting real-time network interruptions, drops,
+    /// and uptime, updated continuously as monitoring samples and events occur.
+    var liveAvailability: AvailabilityEngine.Result {
+        let events = currentNetworkEvents
+        let result = AvailabilityEngine.evaluate(
+            networkEvents: events,
+            allRecentEvents: eventLog.within(hours: 24),
+            currentRunAvailability: currentRunResult?.snapshot.availability,
+            heartbeatMisses: heartbeat.missCount,
+            heartbeatTotal: heartbeat.totalCount,
+            networkConnectedAt: connectionChangedAt
+        )
+        _ = DataSanityWatchdog.checkAvailability(
+            result: result,
+            events: events,
+            heartbeatMisses: heartbeat.missCount
+        )
+        return result
     }
 
     var vpnFreshness: String {
@@ -2519,6 +2638,12 @@ final class HopwatchCoordinator {
         // No believable newest sample, no jitter: the averaged fallback
         // below is only meaningful as "the last few seconds of this link".
         guard let live = liveSample else { return nil }
+        // On a newly joined connection with fewer than 2 samples, a single-packet
+        // handshake delay can produce an unrepresentative transient jitter spike.
+        // Wait for at least 2 samples before asserting elevated jitter.
+        if currentSamples.count < 2, (live.liveJitterMs ?? 0) >= 30.0 {
+            return nil
+        }
         if let jitter = live.liveJitterMs { return jitter }
         // `movingJitter` keeps only samples from this network, link up, not
         // paused and within a few cadences of the newest — not the hour the
@@ -2743,7 +2868,9 @@ final class HopwatchCoordinator {
                 vpnName: sample.vpn.name,
                 currentJitter: currentJitter,
                 effectiveLoss: effectiveLoss,
-                lossFiltering: lossFiltering
+                lossFiltering: lossFiltering,
+                isSettling: isSettling,
+                isArrivalCheck: isArrivalCheck
             ))
             if let degraded = SuitabilityEngine.synthesizeDegradedExperience(
                 items: items,
@@ -2768,6 +2895,18 @@ final class HopwatchCoordinator {
         return "Nothing obviously wrong — your network looks healthy."
     }
 
+    /// Whether the current network is marked as owned by the user ("My Network").
+    var isCurrentNetworkOwned: Bool {
+        let candidate = confirmedNetworkID
+            ?? resolvedNetworkID(for: liveSample ?? monitor.latest)
+            ?? liveSample?.network.historyJoinID
+            ?? monitor.latest?.network.historyJoinID
+            ?? liveSample?.network.id
+            ?? monitor.latest?.network.id
+        guard let candidate else { return false }
+        return history.isOwned(networkID: candidate)
+    }
+
     /// A displayable network name, or `nil` when there isn't a clean one —
     /// never the raw `network.id`/`network.label` a redacted or
     /// not-yet-permitted record can carry (`"wifi:mac=…"`,
@@ -2780,29 +2919,34 @@ final class HopwatchCoordinator {
     /// `HistoryStore.displayName` — a raw `network.id` in that state is a
     /// MAC-keyed string nobody recognizes, not a name.
     var wifiDisplayName: String? {
-        // A user-assigned rename wins over everything — it is the name the
-        // user themselves typed, so it is the name they expect to see.
-        // Looked up by the history group key so a rename made anywhere
-        // (the Networks tab, the adopt-as-name path) is found from here
-        // too.
-        if let id = monitor.latest?.network.historyJoinID {
+        // CoreWLAN's live SSID is the authoritative, hardware-verified source of truth
+        // for the current Wi-Fi network's name.
+        if let live = liveSSID, !live.isEmpty,
+           !live.contains("<redacted>"), !live.contains("hidden by macOS") {
+            // Check if the user assigned an explicit custom rename to this Wi-Fi SSID
+            if let custom = history.customName(for: "ssid:\(live)"), !custom.isEmpty,
+               !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
+               !Self.isRawNetworkKey(custom),
+               custom != live {
+                return custom
+            }
+            return live
+        }
+
+        // Without live SSID, check if the current network has a user-assigned rename (on a non-gateway key)
+        if let id = monitor.latest?.network.historyJoinID, !id.starts(with: "gw:"),
+           !NetworkIdentity.isPrivateOrLocalGateway(id) {
             if let custom = history.customName(for: id), !custom.isEmpty,
                !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
                !Self.isRawNetworkKey(custom) {
                 return custom
             }
         }
-        // CoreWLAN's live SSID, available only with Location Services. The
-        // CLI's own SSID reading is redacted by TCC even when the app is
-        // granted (see `liveSSID`'s header), so this is the primary source
-        // for the current network's real name — not a fallback.
-        if let live = liveSSID, !live.isEmpty,
-           !live.contains("<redacted>"), !live.contains("hidden by macOS") {
-            return live
-        }
+
         // Without live SSID or custom rename, check if HistoryStore has a
         // recorded SSID from a past scan.
-        if let id = monitor.latest?.network.historyJoinID {
+        if let id = monitor.latest?.network.historyJoinID, !id.starts(with: "gw:"),
+           !NetworkIdentity.isPrivateOrLocalGateway(id) {
             let hist = history.displayName(for: id)
             if !hist.isEmpty, hist != id, !hist.contains("<redacted>"),
                !hist.contains("hidden by macOS"), !Self.isRawNetworkKey(hist) {
