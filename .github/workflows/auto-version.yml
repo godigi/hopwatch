@@ -37,7 +37,10 @@ concurrency:
 
 jobs:
   auto-bump:
-    runs-on: macos-latest
+    # Self-hosted on prod1 (godigi/vps2 deploy/gha-runners): this job needs
+    # only python3, git and gh, all on the runner host's PATH, so it does
+    # not need a macOS machine. bats.yml and release.yml do, and stay hosted.
+    runs-on: [self-hosted, linux, x64, vps]
     if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     permissions:
       contents: write
@@ -52,11 +55,6 @@ jobs:
           ref: main
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
 
       - name: Auto-Bump Version
         run: |
