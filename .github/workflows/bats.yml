@@ -7,6 +7,8 @@ on:
 
 jobs:
   bats:
+    # stuck-job guard, 2026-10-25
+    timeout-minutes: 40
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
