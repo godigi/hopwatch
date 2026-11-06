@@ -1,5 +1,5 @@
 cask "hopwatch" do
-  version "1.23.0"
+  version "1.23.1"
   sha256 :no_check
 
   url "https://github.com/godigi/hopwatch/releases/download/v#{version}/Hopwatch-#{version}.dmg"

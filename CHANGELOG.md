@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-11-07
+
 ### Fixed
 - **Automatic Arrival Full Check Recovery on Unhealthy Link Clearance**:
   - When connecting to a new network that is temporarily struggling or reporting elevated severity (e.g. initial socket exhaustion `SOCK-1` or DHCP settling glitches), Hopwatch continues to safely downgrade the initial arrival check to a quick check to avoid saturating a failing link. However, rather than permanently marking the network as declined and leaving speed and bufferbloat untested indefinitely, Hopwatch now automatically retries the full check once the network link becomes healthy and steady. Hotspot/metered declines remain sticky to prevent unrequested cellular data usage.
@@ -322,8 +324,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.23.0...HEAD
-[1.23.0]: https://github.com/godigi/hopwatch/releases/tag/v1.23.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.23.1...HEAD
+[1.23.1]: https://github.com/godigi/hopwatch/releases/tag/v1.23.1
+[1.23.0]: https://github.com/godigi/hopwatch/commit/88326623acff0545af1da67884f03f31ac328e27
 [1.22.0]: https://github.com/godigi/hopwatch/commit/b9538f93648739b5515d34eea0eb29e7b592a752
 [1.21.0]: https://github.com/godigi/hopwatch/commit/8af9b55d24ca875f223196ab4b69c9b07635b296
 [1.20.1]: https://github.com/godigi/hopwatch/commit/52c71e3dc125133c3c395de6f004394762825f17
