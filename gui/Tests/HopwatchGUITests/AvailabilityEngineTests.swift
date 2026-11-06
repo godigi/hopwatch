@@ -171,4 +171,23 @@ import Testing
         #expect(result.longestOutageText == "1m 50s")
         #expect(result.observationSummary.contains("12% offline or asleep"))
     }
+
+    @Test func ongoingOutageAccumulatesLiveElapsedDuration() {
+        let now = Date(timeIntervalSince1970: 1700000000)
+        let ongoingEvent = NetworkEvent(
+            date: now.addingTimeInterval(-95),
+            kind: "rule-fired",
+            summary: "No network connection at all",
+            ruleID: "N1",
+            network: "wifi:gw=192.168.0.1"
+        )
+        let result = AvailabilityEngine.evaluate(
+            networkEvents: [ongoingEvent],
+            currentRunAvailability: nil,
+            now: now
+        )
+        #expect(result.outages == 1)
+        #expect(result.downtimeSeconds == 95)
+        #expect(result.longestOutageSeconds == 95)
+    }
 }

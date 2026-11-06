@@ -16,7 +16,12 @@ enum RelativeTime {
     }()
 
     static func string(from date: Date) -> String {
-        formatter.localizedString(for: date, relativeTo: Date())
+        let now = Date()
+        let elapsed = now.timeIntervalSince(date)
+        if elapsed < 1.0 {
+            return "just now"
+        }
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 }
 

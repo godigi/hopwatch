@@ -74,6 +74,12 @@ setup() {
   [[ "$output" == *"conflict"* ]] || return 1
 }
 
+@test "--wifi-only with --quick is rejected as a conflict" {
+  run "$NETDIAG" --wifi-only --quick
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"conflict"* ]] || return 1
+}
+
 @test "stacking two --*-only flags is rejected as mutually exclusive" {
   run "$NETDIAG" --wifi-only --dns-only
   [ "$status" -eq 3 ]

@@ -488,7 +488,7 @@ assert [x['id'] for x in r] == ['restart-mac'], r
 
 @test "CP-1 offers open-sign-in, critical and warn alike" {
   load_diagnosis; diag_baseline
-  CAPTIVE_PORTAL=1 CAPTIVE_PORTAL_CODE=302 PUBLIC_OK=0
+  CAPTIVE_PORTAL=1 CAPTIVE_PORTAL_CODE=302 CAPTIVE_PORTAL_URL="http://192.168.1.1/login" PUBLIC_OK=0
   diagnosis_run >/dev/null
   run diagnosis_json
   printf '%s' "$output" | python3 -c "

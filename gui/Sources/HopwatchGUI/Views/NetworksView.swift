@@ -110,10 +110,11 @@ struct NetworksView: View {
     /// "SPACEX-STARLINK via 192.168.50.1" still works even though
     /// `displayName` now strips the " via ..." suffix.
     private func haystack(for net: HistoryDocument.Network) -> String {
-        var parts: [String] = [store.displayName(for: net.id), net.label]
+        var parts: [String] = [store.displayName(for: net.id), net.label, net.id]
         parts += net.ssids
         parts += net.gateways
         parts += net.isps
+        parts += net.bridgedFrom
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 

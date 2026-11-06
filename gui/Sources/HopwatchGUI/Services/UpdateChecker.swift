@@ -18,6 +18,7 @@ final class UpdateChecker {
     var isDownloading = false
     var isPreloaded = false
     private var preloadedAppPath: String?
+    private var preloadTempDir: URL?
     private var preloadTask: Task<Void, Never>?
     var downloadProgress: Double = 0.0
     var hasUpdate = false
@@ -166,12 +167,17 @@ final class UpdateChecker {
         preloadTask = Task { [weak self] in
             guard let self else { return }
             defer { self.preloadTask = nil }
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchPreload-\(UUID().uuidString)")
+            self.preloadTempDir = tempDir
             do {
-                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchPreload-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 let downloader = FileDownloader()
                 let downloadedURL = try await downloader.download(from: downloadURL) { _ in }
-                guard let ext = Self.archiveExtension(forAssetNamed: asset?.name) else { return }
+                try Task.checkCancellation()
+                guard let ext = Self.archiveExtension(forAssetNamed: asset?.name) else {
+                    try? FileManager.default.removeItem(at: tempDir)
+                    return
+                }
                 let archivePath = tempDir.appendingPathComponent("update.\(ext)")
                 try FileManager.default.moveItem(at: downloadedURL, to: archivePath)
 
@@ -202,13 +208,17 @@ final class UpdateChecker {
                     try? await Self.runTool("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force", "-quiet"])
                 }
 
+                try Task.checkCancellation()
                 if let appPath {
                     self.preloadedAppPath = appPath
                     self.isPreloaded = true
                     self.statusMessage = "v\(release.cleanVersion) ready to install"
                     self.log.notice("Update v\(release.cleanVersion) preloaded and ready to install.")
+                } else {
+                    try? FileManager.default.removeItem(at: tempDir)
                 }
             } catch {
+                try? FileManager.default.removeItem(at: tempDir)
                 self.log.debug("Background preload failed: \(error.localizedDescription)")
             }
         }
@@ -229,6 +239,16 @@ final class UpdateChecker {
             return
         }
 
+        // Cancel any in-flight background preload to avoid duplicate concurrent downloads
+        if let preloadTask {
+            preloadTask.cancel()
+            self.preloadTask = nil
+            if let preloadTempDir {
+                try? FileManager.default.removeItem(at: preloadTempDir)
+                self.preloadTempDir = nil
+            }
+        }
+
         // Look for installable asset (preferring direct .zip archive, falling back to .dmg)
         let asset = release.assets.first(where: { $0.name.lowercased().hasSuffix(".zip") })
             ?? release.assets.first(where: { $0.isInstallableArchive })
@@ -246,8 +266,8 @@ final class UpdateChecker {
         Task { [weak self] in
             guard let self else { return }
             defer { self.isDownloading = false }
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchUpdate-\(UUID().uuidString)")
             do {
-                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("HopwatchUpdate-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
                 self.statusMessage = "Downloading v\(release.cleanVersion)…"
@@ -266,6 +286,7 @@ final class UpdateChecker {
                 // like "../../x.zip" would have walked out of the temp
                 // directory. Only the extension is used; the file name is ours.
                 guard let ext = Self.archiveExtension(forAssetNamed: asset?.name) else {
+                    try? FileManager.default.removeItem(at: tempDir)
                     self.openReleasePage()
                     return
                 }
@@ -314,8 +335,10 @@ final class UpdateChecker {
                 }
 
                 // If unpack did not locate a direct .app, open release page
+                try? FileManager.default.removeItem(at: tempDir)
                 self.openReleasePage()
             } catch {
+                try? FileManager.default.removeItem(at: tempDir)
                 self.log.error("Installation failed: \(error.localizedDescription, privacy: .public)")
                 self.errorMessage = "Failed to install update."
                 self.openReleasePage()

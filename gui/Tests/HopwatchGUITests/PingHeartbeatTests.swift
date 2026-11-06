@@ -124,7 +124,14 @@ import Testing
         s3.internet.rttAvgMs = nil
         s3.internet.lossPct = nil
 
-        heartbeat.seedFromSamples([s1, s2, s3])
+        // Unmeasured sample with link up and 0% loss must be skipped rather than fabricated as a miss
+        var s4 = MonitorSample()
+        s4.seq = 4
+        s4.link.up = true
+        s4.internet.rttAvgMs = nil
+        s4.internet.lossPct = 0
+
+        heartbeat.seedFromSamples([s1, s2, s3, s4])
 
         #expect(heartbeat.beats.count == 3)
         #expect(heartbeat.beats[0].latencyMs == 25.0)
@@ -133,6 +140,23 @@ import Testing
         #expect(heartbeat.beats[1].latencyMs == nil)
         #expect(heartbeat.beats[2].isMiss == true)
         #expect(heartbeat.beats[2].latencyMs == nil)
+    }
+
+    @Test @MainActor func seedingHonorsGatewayTarget() {
+        let heartbeat = PingHeartbeat(target: "192.168.1.1")
+        var s = MonitorSample()
+        s.seq = 1
+        s.link.up = true
+        s.link.gateway = "192.168.1.1"
+        s.gateway.rttAvgMs = 4.5
+        s.gateway.lossPct = 0
+        s.internet.rttAvgMs = 42.0
+        s.internet.lossPct = 0
+
+        heartbeat.seedFromSamples([s])
+        #expect(heartbeat.beats.count == 1)
+        #expect(heartbeat.beats[0].latencyMs == 4.5)
+        #expect(heartbeat.beats[0].isMiss == false)
     }
 
     @Test @MainActor func resetClearsBeatsAndRestoresTarget() {
@@ -168,5 +192,15 @@ import Testing
         // Clearing filtered restores unmuted state
         heartbeat.setFiltered(false)
         #expect(!heartbeat.isFiltered)
+    }
+
+    @Test func commandArgumentsSelectsPing6ForIPv6Target() {
+        let v4 = PingHeartbeat.commandArguments(for: "192.168.1.1")
+        #expect(v4.executable == "/sbin/ping")
+        #expect(v4.arguments == ["-n", "-i", "1", "-W", "1000", "192.168.1.1"])
+
+        let v6 = PingHeartbeat.commandArguments(for: "fe80::1%en0")
+        #expect(v6.executable == "/sbin/ping6")
+        #expect(v6.arguments == ["-n", "-i", "1", "fe80::1%en0"])
     }
 }

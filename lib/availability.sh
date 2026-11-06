@@ -63,11 +63,19 @@ availability_run() {
       THRESH_MON_IDENTITY_HOLD_S="$THRESH_MON_IDENTITY_HOLD_S" \
       python3 "$HELPERS_DIR/events.py" \
       --journal "$journal" --hours "$THRESH_AV_WINDOW_HOURS" 2>/dev/null \
-    | NETDIAG_AV_NETWORK="$NETWORK_ID" \
+    | HELPERS_DIR="$HELPERS_DIR" \
+      NETDIAG_AV_NETWORK="$NETWORK_ID" \
       NETDIAG_AV_OUTAGE_RULES="$THRESH_AV_OUTAGE_RULES" \
       NETDIAG_AV_FLAP_MAX_S="$THRESH_AV_FLAP_MAX_S" \
       python3 -c '
 import json, os, sys
+helpers_dir = os.environ.get("HELPERS_DIR")
+if helpers_dir:
+    sys.path.insert(0, helpers_dir)
+try:
+    from history import canonical_network_id
+except Exception:
+    def canonical_network_id(n): return n
 
 # Reads the reader'"'"'s output; applies no cutoff of its own. Every number
 # it compares against arrives from lib/thresholds.sh through the
@@ -77,7 +85,7 @@ try:
 except ValueError:
     raise SystemExit(1)
 
-network = os.environ.get("NETDIAG_AV_NETWORK", "")
+target_net = canonical_network_id(os.environ.get("NETDIAG_AV_NETWORK", "")) or os.environ.get("NETDIAG_AV_NETWORK", "")
 outage_rules = set((os.environ.get("NETDIAG_AV_OUTAGE_RULES") or "").split())
 try:
     flap_max = int(os.environ.get("NETDIAG_AV_FLAP_MAX_S", "0"))
@@ -85,7 +93,8 @@ except ValueError:
     flap_max = 0
 
 episodes = [e for e in d.get("episodes", [])
-            if e.get("network") == network and e.get("rule") in outage_rules]
+            if (canonical_network_id(e.get("network")) or e.get("network")) == target_net
+            and e.get("rule") in outage_rules]
 durations = [int(e.get("duration_s") or 0) for e in episodes]
 flaps = [s for s in durations if 0 < s <= flap_max] if flap_max else []
 

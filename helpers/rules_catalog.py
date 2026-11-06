@@ -913,7 +913,7 @@ RULES: list[dict[str, object]] = [
             "server stay quiet while this one is firing."
         ),
         "doc": "DIAGNOSIS-RULES.md#conn-1--new-connections-are-being-refused-or-dropped",
-        "impacts": {"calls": "degraded", "streaming": "degraded", "browsing": "degraded"},
+        "impacts": {"browsing": "degraded"},
         "fix": (
             "If the report names an app, quit it and run the check again. "
             "Otherwise restart your router, which empties its list of open "

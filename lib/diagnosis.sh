@@ -354,7 +354,7 @@ diagnosis_run() {
     # The one fix for a portal is to complete its page. Guarded because the
     # bats suite sources this file without lib/repairs.sh.
     if declare -f repair_offer >/dev/null 2>&1; then
-      repair_offer CP-1 open-sign-in "" ${CAPTIVE_PORTAL_URL:+"url=$CAPTIVE_PORTAL_URL"}
+      repair_offer CP-1 open-sign-in ""
     fi
   fi
 
@@ -467,14 +467,15 @@ diagnosis_run() {
       conn_capture_holder_evidence
       IFS='|' read -r _cn_name _ _cn_flows _cn_syn <<<"$(printf '%s\n' "${CONN_HOLDERS:-}" | head -1)"
       # Name an app only when it holds a large enough share of all the
-      # Mac's open and half-open flows AND enough of them in absolute terms
-      # (THRESH_CONN_HOLDER_MIN_FLOWS) AND resolves to a regular GUI app the
-      # user can quit. Anything else names nothing and offers no button: the
-      # sentence and the button must agree, as in SOCK-1.
+      # Mac's open and half-open flows (THRESH_CONN_HOLDER_SHARE_PCT) AND
+      # enough of them in absolute terms (THRESH_CONN_HOLDER_MIN_FLOWS), AND
+      # resolves to a regular GUI app the user can quit. Anything else names
+      # nothing and offers no button: the sentence and the button must agree,
+      # as in SOCK-1.
       if [ -n "$_cn_name" ] && [ -n "${CONN_HOLDER_APP_BUNDLE:-}" ] \
          && is_numeric "$_cn_flows" && [ "$_cn_flows" -ge "$THRESH_CONN_HOLDER_MIN_FLOWS" ] \
          && is_numeric "${CONN_HOLDER_TOP_SHARE_PCT:-}" \
-         && [ "$CONN_HOLDER_TOP_SHARE_PCT" -ge "$THRESH_SOCK_HOLDER_SHARE_PCT" ]; then
+         && [ "$CONN_HOLDER_TOP_SHARE_PCT" -ge "$THRESH_CONN_HOLDER_SHARE_PCT" ]; then
         _cn_app_bundle="$CONN_HOLDER_APP_BUNDLE"
         _cn_app_name="${CONN_HOLDER_APP_NAME:-$_cn_name}"
       fi

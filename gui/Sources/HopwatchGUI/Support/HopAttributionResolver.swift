@@ -112,15 +112,15 @@ public enum HopAttributionResolver {
     // SOCK-1: this Mac cannot open a UDP socket. The fault is on the Mac, so
     // it must not fall through to blaming the router or the ISP.
     private static let macCriticalRules: Set<String> = ["SOCK-1", "NT-1"]
-    private static let macWarningRules: Set<String> = ["BR-1", "NT-1", "EDNS-1", "HOG-1", "CONN-1"]
+    private static let macWarningRules: Set<String> = ["BR-1", "EDNS-1", "HOG-1", "CONN-1"]
 
     private static let wifiCriticalRules: Set<String> = ["G1", "WD-1", "WF-1", "WJ-1"]
     private static let wifiWarningRules: Set<String> = ["W1", "W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
 
-    private static let routerCriticalRules: Set<String> = ["G2", "DI-1", "N1c"]
-    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "DH-3", "ETH-1", "ETH-2"]
+    private static let routerCriticalRules: Set<String> = ["G2", "DI-1", "N1c", "DH-3"]
+    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "ETH-1", "ETH-2"]
 
-    private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1", "N1b", "L1", "CP-1", "D1"]
+    private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1b", "L1", "CP-1", "D1"]
     private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "D5", "DI-2", "M1", "SP-1", "BL-1", "V6-1", "V6-2"]
 
     // MARK: - Resolution
@@ -183,14 +183,26 @@ public enum HopAttributionResolver {
         }
 
         // 4. Attribute Primary Culprit (Local precedes Upstream in root cause analysis)
-        let culprit: Culprit
+        var culprit: Culprit
         var headline: String
         let reassurance: String
         var badgeTitle: String
         var badgeTint: Color? = nil
 
-        // A recent Wi-Fi Roaming handover explains transient gateway packet loss
-        if recentRoamed && isWifi && wifiHealth != .critical && (gatewayLoss ?? 0) < 20.0 {
+        if ruleSet.contains("N1") {
+            culprit = isWifi ? .wifi : .router
+            if isWifi { wifiHealth = .critical } else { routerHealth = .critical }
+            headline = "No Network Connection"
+            badgeTitle = "Culprit: Disconnected"
+            reassurance = isWifi
+                ? "Your Mac is not connected to any Wi-Fi network. Select a Wi-Fi network in Control Center to connect."
+                : "Your Mac has no network connection. Plug in an Ethernet cable or connect to Wi-Fi."
+        } else if ruleSet.contains("SOCK-1") {
+            culprit = .mac
+            headline = "System Out of Network Sockets"
+            badgeTitle = "Culprit: Socket Exhaustion"
+            reassurance = "Your Mac has exhausted its available network sockets, preventing applications from opening new connections."
+        } else if recentRoamed && isWifi && wifiHealth != .critical && (gatewayLoss ?? 0) < 20.0 {
             culprit = .wifi
             headline = "Switched Wi-Fi Access Point"
             badgeTitle = "Notice: Wi-Fi Roamed"
@@ -214,10 +226,17 @@ public enum HopAttributionResolver {
                 badgeTitle = "Culprit: macOS AirDrop"
                 reassurance = "Apple Wireless Direct Link (AirDrop/Sidecar) channel hopping is causing periodic latency spikes. Setting AirDrop to 'Receiving Off' in Control Center restores steady ping."
             } else if ruleSet.contains("W6") {
+                headline = "Connected to 2.4 GHz Wi-Fi Band"
+                let hasDrops = gatewayLoss != nil && gatewayLoss! > 0
+                badgeTitle = hasDrops ? "Culprit: 2.4 GHz Band" : "Advisory: 2.4 GHz Band"
                 reassurance = "Your Mac is connected to the slower 2.4 GHz band while a faster 5 GHz band is available. Toggling Wi-Fi off and back on will prompt your Mac to join 5 GHz."
             } else if ruleSet.contains("W4") {
+                headline = "Wi-Fi Transmit Rate Collapsed"
+                badgeTitle = "Culprit: Slow Wi-Fi Rate"
                 reassurance = "Your Wi-Fi signal appears strong, but your transmit rate has collapsed. Moving closer or switching Wi-Fi bands will restore link speed."
             } else if ruleSet.contains("W5") {
+                headline = "Asymmetric Wi-Fi Link"
+                badgeTitle = "Culprit: Asymmetric Wi-Fi"
                 reassurance = "Your Mac hears the router well, but the router struggles to hear your Mac (asymmetric link). Moving closer balances transmission power."
             } else if ruleSet.contains("WS-1") {
                 headline = "Wi-Fi Channel Crowded"
@@ -284,8 +303,25 @@ public enum HopAttributionResolver {
             headline = "Mac System / Application Issue"
             badgeTitle = culprit.badgeTitle
             if ruleSet.contains("NT-1") {
+                headline = "System Clock Out of Sync"
+                badgeTitle = "Culprit: System Clock"
                 reassurance = "Your Mac's system clock has drifted significantly from network time, which can disrupt TLS handshakes and secure connections."
+            } else if ruleSet.contains("SOCK-1") {
+                headline = "System Out of Network Sockets"
+                badgeTitle = "Culprit: Socket Exhaustion"
+                reassurance = "Your Mac has exhausted its available network sockets, preventing applications from opening new connections."
+            } else if ruleSet.contains("HOG-1") {
+                headline = "Heavy Local App Traffic"
+                badgeTitle = "Culprit: Local App Traffic"
+                reassurance = "An application on your Mac is transferring heavy traffic and saturating the connection, adding queue latency."
+            } else if ruleSet.contains("CONN-1") {
+                headline = "High Connection Volume"
+                badgeTitle = "Culprit: Connection Flood"
+                reassurance = "Many simultaneous or half-open network connections from your Mac are pressuring the router's connection table."
             } else if ruleSet.contains("EDNS-1") {
+                headline = "Encrypted DNS Profile Active"
+                badgeTitle = "Notice: Encrypted DNS"
+                badgeTint = .blue
                 reassurance = "An encrypted DNS profile is active on your Mac. If lookups fail, check your installed profile in System Settings."
             } else {
                 reassurance = "A local application or system configuration on your Mac is affecting network connectivity."
@@ -583,10 +619,10 @@ public struct HopAttributionCompactView: View {
 
             Text(result.badgeTitle)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(result.culprit.badgeTint)
+                .foregroundStyle(result.badgeTint)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(result.culprit.badgeTint.opacity(0.12), in: Capsule())
+                .background(result.badgeTint.opacity(0.12), in: Capsule())
         }
         .help(result.reassurance)
     }

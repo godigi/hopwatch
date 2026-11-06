@@ -201,6 +201,12 @@ struct LiveView: View {
                 }
             }
             Spacer(minLength: 0)
+            Text(cadenceLabel)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.secondary.opacity(0.08), in: Capsule())
         }
         .padding(12)
         .cardStyle()
@@ -223,9 +229,7 @@ struct LiveView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Open Login Page") {
-                    if let url = URL(string: "http://captive.apple.com/hotspot-detect.html") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    coordinator.openPortalPage()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -357,8 +361,8 @@ struct LiveView: View {
         guard let ms = routerMs else {
             return samples.isEmpty ? .secondary : .red
         }
-        if ms < 5 { return .green }
-        if ms < 15 { return .yellow }
+        if ms < 25 { return .green }
+        if ms < 60 { return .yellow }
         return .red
     }
 
@@ -369,8 +373,8 @@ struct LiveView: View {
             if samples.isEmpty { return "Measuring…" }
             return "Unresponsive to ping"
         }
-        if ms < 4 { return "Normal local link" }
-        if ms < 15 { return "Moderate latency" }
+        if ms < 25 { return "Normal local link" }
+        if ms < 60 { return "Moderate latency" }
         return "High router ping"
     }
 

@@ -448,9 +448,10 @@ struct DashboardRouteView: View {
                         }
                         .frame(height: 54)
 
-                        hopNode(icon: "globe", isWarning: internetWarn && !linkDown, flag: linkDown ? nil : countryFlag,
+                        let isUnknown = linkDown || ((internetPingText == "—" || internetPingText == "no reply") && !internetWarn)
+                        hopNode(icon: "globe", isWarning: internetWarn && !linkDown, flag: isUnknown ? nil : countryFlag,
                                 isCulprit: culpritHop == "internet" && !linkDown, isCritical: isCritical,
-                                state: linkDown || ((internetPingText == "—" || internetPingText == "no reply") && !internetWarn) ? .unknown : .normal)
+                                state: isUnknown ? .unknown : .normal)
 
                         Text("Internet")
                             .font(.system(size: 12, weight: .semibold))
@@ -469,15 +470,20 @@ struct DashboardRouteView: View {
                                 .lineLimit(1)
                             if let isp = ispName, !isp.isEmpty {
                                 Text(isp)
-                                    .font(.system(size: 8, weight: .medium))
-                                    .foregroundStyle(Theme.ColorToken.muted)
-                                    .lineLimit(1)
+                                     .font(.system(size: 8, weight: .medium))
+                                     .foregroundStyle(Theme.ColorToken.muted)
+                                     .lineLimit(1)
                             } else if let countryName, !countryName.isEmpty {
                                 Text(countryName)
                                     .font(.system(size: 8, weight: .semibold))
                                     .foregroundStyle(Theme.ColorToken.muted)
                                     .lineLimit(1)
                             }
+                        } else if isUnknown {
+                            Text(internetDetailText ?? "Checking…")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ColorToken.muted)
+                                .lineLimit(1)
                         } else if let isp = ispName, !isp.isEmpty {
                             Text(isp)
                                 .font(.system(size: 10, weight: .medium))
@@ -2084,8 +2090,13 @@ struct DashboardNetworkDetailsPanel: View {
 // MARK: - 9. Recent Activity Panel
 
 struct DashboardRecentActivityPanel: View {
+    @Environment(HopwatchCoordinator.self) private var coordinator
     let events: [ActivityEntry]
     let onOpenActivity: () -> Void
+
+    private func severity(for entry: ActivityEntry) -> String? {
+        entry.ruleID.flatMap { coordinator.rulesCatalog.catalog?[$0]?.severity }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2123,7 +2134,7 @@ struct DashboardRecentActivityPanel: View {
 
                         HStack(alignment: .top, spacing: 10) {
                             Circle()
-                                .fill(EventStyle.tint(for: entry.kind))
+                                .fill(EventStyle.tint(for: entry.kind, severity: severity(for: entry)))
                                 .frame(width: 7, height: 7)
                                 .padding(.top, 4)
 

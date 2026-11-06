@@ -57,7 +57,8 @@ enum AvailabilityEngine {
 
         for entry in folded {
             guard let ruleID = entry.ruleID else { continue }
-            let durationS = Int(round(entry.totalDuration ?? 0))
+            let ongoingElapsed = entry.isOngoing ? max(0, now.timeIntervalSince(entry.latest)) : 0
+            let durationS = Int(round((entry.totalDuration ?? 0) + ongoingElapsed))
             if hardOutageRules.contains(ruleID) {
                 liveHardOutages += max(1, entry.occurrences)
                 liveHardDowntimeS += durationS

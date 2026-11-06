@@ -1927,6 +1927,12 @@ private enum VerifyHarness {
         check(!ArrivalState.declined(depth: .full, reason: .hotspot, at: now)
                 .needsAttempt(now: now),
               "declined is a decision, not a failure, so it does not retry")
+        check(ArrivalState.declined(depth: .quick, reason: .unhealthy, at: now)
+                .needsAttempt(now: now),
+              "a check downgraded to quick for link health retries when healthy")
+        check(!ArrivalState.declined(depth: .quick, reason: .hotspot, at: now)
+                .needsAttempt(now: now),
+              "hotspot decline is a cost decision and does not retry")
 
         // A scan that crashed leaves .checking behind. Without a staleness
         // rule that network is wedged forever, which is the same class of

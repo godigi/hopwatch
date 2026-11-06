@@ -197,6 +197,12 @@ import Testing
 
         let roam = PlainEnglishTranslator.translate(summary: "Roamed to access point (ch 36, -58 dBm)")
         #expect(roam.title == "Wi-Fi Access Point Roam")
+
+        // Benign "0% packet loss" or "No packet loss" must not match L2 ("Moderate Internet Packet Loss")
+        let zeroLoss = PlainEnglishTranslator.translate(summary: "Connection healthy with 0% packet loss")
+        #expect(zeroLoss.title != "Moderate Internet Packet Loss")
+        let noLoss = PlainEnglishTranslator.translate(summary: "No packet loss observed during probe")
+        #expect(noLoss.title != "Moderate Internet Packet Loss")
     }
 
     // MARK: - Fallbacks and Edge Cases

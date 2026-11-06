@@ -76,6 +76,9 @@ final class AppSettings {
     var autoCheckUpdates: Bool {
         didSet { Defaults.autoCheckUpdates = autoCheckUpdates }
     }
+    var autoDownloadAndInstallUpdates: Bool {
+        didSet { Defaults.autoDownloadAndInstallUpdates = autoDownloadAndInstallUpdates }
+    }
     var notificationsEnabled: Bool {
         didSet { Defaults.notificationsEnabled = notificationsEnabled }
     }
@@ -160,6 +163,7 @@ final class AppSettings {
         hasOnboarded = Defaults.hasOnboarded
         locationBannerDismissed = Defaults.locationBannerDismissed
         autoCheckUpdates = Defaults.autoCheckUpdates
+        autoDownloadAndInstallUpdates = Defaults.autoDownloadAndInstallUpdates
         notificationsEnabled = Defaults.notificationsEnabled
         notificationScope = NotificationScope(rawValue: Defaults.notificationScope) ?? .all
         showInDock = Defaults.showInDock

@@ -294,4 +294,19 @@ import Testing
         )
         #expect(settledDecision == .full)
     }
+
+    @Test func arrivalStateNeedsAttemptRetriesWhenUnhealthyDeclineBecomesHealthy() {
+        let now = Date()
+        let unhealthyDeclined = ArrivalState.declined(depth: .quick, reason: .unhealthy, at: now)
+        #expect(unhealthyDeclined.needsAttempt(now: now))
+        #expect(unhealthyDeclined.isDeclined)
+
+        let hotspotDeclined = ArrivalState.declined(depth: .quick, reason: .hotspot, at: now)
+        #expect(!hotspotDeclined.needsAttempt(now: now))
+        #expect(hotspotDeclined.isDeclined)
+
+        let fullChecked = ArrivalState.checked(depth: .full, at: now, runID: "run1")
+        #expect(!fullChecked.needsAttempt(now: now))
+        #expect(!fullChecked.isDeclined)
+    }
 }

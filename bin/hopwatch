@@ -622,6 +622,7 @@ fi
 if [ -n "$FOCUS" ] && [ "$WATCH" -eq 0 ] && [ "$SUMMARY" -eq 0 ]; then
   case "$FOCUS" in
     mtu)  [ "$QUICK" -eq 0 ] || { printf 'hopwatch: --mtu-only and --quick conflict (--quick skips the MTU probe)\n' >&2; exit 3; } ;;
+    wifi) [ "$QUICK" -eq 0 ] || { printf 'hopwatch: --wifi-only and --quick conflict (--quick skips the WiFi neighbourhood scan and disconnect history)\n' >&2; exit 3; } ;;
     bufferbloat) [ "$QUICK" -eq 0 ] || { printf 'hopwatch: --bufferbloat-only and --quick conflict (--quick skips the bufferbloat probe)\n' >&2; exit 3; } ;;
     ping) [ "$QUICK" -eq 0 ] || { printf 'hopwatch: --ping-only and --quick conflict (--quick skips the internet loss probe)\n' >&2; exit 3; } ;;
     # Same shape as the conflict above: a run whose only job is the speed
@@ -769,7 +770,7 @@ if [ "$INSTALL_WATCHER" -eq 1 ] || [ "$UNINSTALL_WATCHER" -eq 1 ] \
   [ "$INSTALL_RECORDER" -eq 1 ] && install_recorder_run
   [ "$UNINSTALL_RECORDER" -eq 1 ] && uninstall_recorder_run
   [ "$INSTALL_WATCHER" -eq 1 ] && install_watcher_run
-  uninstall_watcher_run
+  [ "$UNINSTALL_WATCHER" -eq 1 ] && uninstall_watcher_run
 fi
 if [ "$SUMMARY" -eq 1 ]; then
   # --summary now judges each metric line, so it needs the cutoffs, and

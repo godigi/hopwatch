@@ -63,21 +63,24 @@ enum RouteWarningResolver {
         let realGWJitter = gwJitter >= 25.0 && (inetJitter >= 20.0 || inetJitter == 0) && !gatewayPingFiltered
 
         // 1. Wi-Fi Laggy evaluation
-        // Wi-Fi is laggy when wireless latency/jitter is elevated or Wi-Fi rules indicate degradation.
-        // Isolated gateway packet loss without Wi-Fi degradation is a Router issue, not Wi-Fi.
+        // Wi-Fi is laggy when wireless latency/jitter is elevated (realGWPing / realGWJitter)
+        // or a critical Wi-Fi degradation rule is firing with elevated latency.
+        // Advisory Wi-Fi rules (e.g. channel crowding) on clean pings do not make the physical link laggy.
         let isWifiLaggy: Bool
         if !isWiFi || stage == .healthy {
             isWifiLaggy = false
         } else {
-            isWifiLaggy = (wifiRuleTint != nil && wifiRuleTint != .green) || realGWPing || realGWJitter
+            let hasElevatedLag = realGWPing || realGWJitter
+            let isCriticalWifi = wifiRuleTint == .red && (gwPing >= 25.0 || gwJitter >= 15.0)
+            isWifiLaggy = hasElevatedLag || isCriticalWifi
         }
 
         // 2. Mac / Local Link status
-        // Mac client node is in warning if link is down, a client-level Wi-Fi fault rule fired,
+        // Mac client node is in warning if link is down, a critical client-level Wi-Fi fault rule fired,
         // or real wireless packet loss occurs without a router-attributed fault.
         // Elevated ping/jitter without packet loss is airtime/router delay, leaving the client hardware healthy.
         let isRealWifiLoss = realGWLoss && isWiFi && !firedCategories.contains("router")
-        let isMacFault = (wifiRuleTint != nil && wifiRuleTint != .green) || isRealWifiLoss
+        let isMacFault = (wifiRuleTint != nil && wifiRuleTint == .red) || isRealWifiLoss
         let macStatusGood = linkUp && !isMacFault
 
         // 3. Router status

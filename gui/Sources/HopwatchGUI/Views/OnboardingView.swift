@@ -43,8 +43,8 @@ struct OnboardingView: View {
                  detail: coordinator.locationPermissions.isAuthorized
                      ? "Granted. Hopwatch can identify your Wi-Fi network and monitor connection health."
                      : (coordinator.locationPermissions.isDeniedOrRestricted
-                         ? "Required. Access is currently denied in System Settings. Click Open Settings to enable Location Services for Hopwatch so it can detect Wi-Fi network names and disconnects."
-                         : "Required. macOS hides Wi-Fi network names and disconnect details from apps unless you grant Location Services access. Hopwatch uses this solely to identify your Wi-Fi network."),
+                         ? "Recommended. Access is currently denied in System Settings. Click Open Settings to enable Location Services so Hopwatch can show real Wi-Fi network names and roaming events."
+                         : "Recommended. macOS hides Wi-Fi network names and disconnect details from apps unless you grant Location Services access. Hopwatch uses this solely to identify your Wi-Fi network."),
                  done: coordinator.locationPermissions.isAuthorized,
                  action: coordinator.locationPermissions.isDeniedOrRestricted ? "Open Settings" : "Allow") {
                 if coordinator.locationPermissions.isDeniedOrRestricted {
@@ -66,7 +66,7 @@ struct OnboardingView: View {
 
             HStack(alignment: .firstTextBaseline) {
                 if !coordinator.locationPermissions.isAuthorized {
-                    Text("Location Services permission is required to use Hopwatch so it can identify your Wi-Fi network and detect disconnects.")
+                    Text("Without Location Services, Hopwatch groups networks by router MAC address instead of Wi-Fi name. You can grant it anytime in Settings.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
@@ -83,7 +83,6 @@ struct OnboardingView: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!coordinator.locationPermissions.isAuthorized)
                 .fixedSize()
             }
         }

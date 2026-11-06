@@ -98,6 +98,10 @@ def judged_value(key: str, value: float, record: dict) -> float | None:
         if any(isinstance(d, dict) and d.get("rule") == "TCP-1"
                for d in record.get("diagnosis") or []):
             return None
+    if key == "inet_loss_pct":
+        if any(isinstance(d, dict) and d.get("rule") == "ICMP-1"
+               for d in record.get("diagnosis") or []):
+            return None
     if key == "ntp_drift_s":
         return abs(value)
     if key == "mtu_effective":

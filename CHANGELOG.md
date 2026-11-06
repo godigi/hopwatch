@@ -8,6 +8,66 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Fixed
+- **Automatic Arrival Full Check Recovery on Unhealthy Link Clearance**:
+  - When connecting to a new network that is temporarily struggling or reporting elevated severity (e.g. initial socket exhaustion `SOCK-1` or DHCP settling glitches), Hopwatch continues to safely downgrade the initial arrival check to a quick check to avoid saturating a failing link. However, rather than permanently marking the network as declined and leaving speed and bufferbloat untested indefinitely, Hopwatch now automatically retries the full check once the network link becomes healthy and steady. Hotspot/metered declines remain sticky to prevent unrequested cellular data usage.
+- **Stale Scan Snapshot Diagnosis Decoupling from Live Suitability**:
+  - Centralized active rule resolution in `HopwatchCoordinator.activeFiredRules`: when the background monitor is actively watching the network, real-time monitor rules (e.g. `SOCK-1`, `CONN-1`, `D1`, `N1`, `G1`, `P1`) that have cleared or are no longer observed in the live stream are strictly authoritative. Stale diagnosis findings from a past scan (or an arrival check that completed during a transient fault) no longer poison the live experience grid or paint the connection as "Offline" / "Unreachable" when the live link is healthy. Scan-only environmental findings (e.g. `BL-1` bufferbloat, `N4` double NAT, `M1` MTU) continue to inform suitability until a fresh scan runs.
+- **Relative Timestamp Formatting Polish (`RelativeTime`)**:
+  - Clamped event age formatting in `RelativeTime.string(from:)` so events occurring under 1 second ago (or with minor subsecond clock dispatch skew) cleanly render as `"just now"` rather than awkward future-tense strings like `"in 0s"`.
+- **In-Flight Scan Phase & Duration Transparency**:
+  - Enhanced the status hero banner and Ping Heartbeat watermark during diagnostic and arrival checks to display live phase subtitles via `coordinator.activeScanProgressSubtitle` (e.g. `"Testing bufferbloat & latency under load…"`, `"Speed test: ↓ Download · 45.2 Mbps"`, `"Checking route…"`) instead of remaining on static text for over a minute.
+- **Torrent Flow Flood & Peer Stall Attribution (`CONN-1`)**:
+  - Calibrated flow holder attribution thresholds (`THRESH_CONN_HOLDER_MIN_FLOWS = 40` and `THRESH_CONN_HOLDER_SHARE_PCT = 40%`) in `lib/thresholds.sh` and `lib/diagnosis.sh` so torrent engines (such as Stremio's bundled helper) flooding BitTorrent peers with dozens of `SYN_SENT` half-open connections are accurately named and offered the 1-click "Quit <app>" button rather than falling back to an anonymous router restart suggestion.
+- **Accurate Activity Suitability & Consistent Experience Badges**:
+  - Scoped `CONN-1` rule impacts in `helpers/rules_catalog.py` exclusively to `browsing` (matching `D1` and GUI verify fixtures), eliminating contradictory warnings where established audio/video calls with 0% packet loss and clean streaming links with hundreds of Mbps bandwidth were falsely marked as "May cut out" or "May buffer".
+  - Prevented contradictory status/metric pairings in `SuitabilityEngine`: when packet loss is 0.0% and jitter is low, Calls displays "Glitch risk" rather than claiming audio "May cut out", Streaming displays "Route check" when degraded without claiming a clean link buffers, and Gaming displays "Spike risk" rather than asserting "Lag likely" when real-time ping is under 35 ms.
+- **Wi-Fi Hop Attribution Fidelity**:
+  - Prevented advisory Wi-Fi scan findings (such as neighbor channel crowding `WS-1`) on clean wireless links (e.g. 4 ms latency, 1 ms jitter, 0% loss) from falsely painting the connecting link amber and labeling it `Wi-Fi (Laggy)`. Wireless links are now judged as laggy only when physical transmission latency/jitter or packet loss is actually elevated.
+- **Clean Initial Check Telemetry on New Network Connection**:
+  - Eliminated false "Monitoring paused" status on the "Your connection" card and Ping Heartbeat strip when testing a new network or running diagnostic scans (`isScanning` / `isArrivalCheck`). The connection card now accurately displays "Testing new network" or "Check in progress", and heartbeat displays an active "• Checking" badge with a progress indicator instead of claiming monitoring is paused.
+  - Reset and cleared Ping Heartbeat packet drop history when starting and concluding new network baseline checks, preventing transient packet drops from initial Wi-Fi 4-way handshakes and DHCP negotiation from lingering as alarming red packet loss warnings (e.g. `! 4 missed (12.5%)`). Footer stats calmly display "Awaiting first check results…" during the check.
+  - Guarded Router node detail (`routerDetailText`) to display "Checking…" while awaiting initial measurements rather than prematurely asserting "default gateway".
+  - Prevented premature public IP country name and flag from rendering on the Internet route node before internet connectivity and latency are verified.
+  - Prevented `PingHeartbeat.seedFromSamples` from fabricating false `MISS` drops on unmeasured cycles, made seeding gateway-target aware, and ensured pre-arrival samples are never re-seeded after an arrival check reset.
+- **Diagnostic Attribution, Signal Clarity & UI Consistency**:
+  - Updated `HopAttributionResolver` so `W6` (2.4 GHz band) and `W4`/`W5` carry accurate headlines and advisory/culprit badges (e.g. `Advisory: 2.4 GHz Band`) rather than falling back to `"Culprit: Weak Wi-Fi"`, and distinguished `SOCK-1`, `HOG-1`, `CONN-1`, `NT-1`, and `EDNS-1` badges on the Mac hop. Fixed `HopAttributionCompactView` to honor `result.badgeTint`.
+  - Fixed `PlainEnglishTranslator.translateSummaryPatterns` so benign phrases like `"0% packet loss"` or `"no packet loss"` are not misclassified as `"Moderate Internet Packet Loss"` (`L2`).
+  - Decoupled physical Wi-Fi signal strength from link lag and advisory Wi-Fi rules in `HomeView` and `DropdownView`, keeping strong RSSI readings green while wireless latency is shown on the link connector.
+  - Aligned `LiveView` Router Ping gauge thresholds (`< 25 ms` green, `< 60 ms` yellow) with the Dashboard and Popover, surfaced the active probing cadence pill in `LiveView`, and wired the Captive Portal login button to `coordinator.openPortalPage()`.
+  - Updated `ActivityView.isIssue` to exclude informational rules (`severity == "info"`) and `rule-cleared` entries from the incident count and `"Issues Only"` filter, and passed rule severity into `EventStyle.tint` in `MenuActivitySnippetView` and `DashboardRecentActivityPanel`.
+  - Wired `"Smart battery-saver cadence"` toggle changes and `NSProcessInfoPowerStateDidChange` events to `coordinator.applyCadenceSettings()`, added clipboard confirmation toasts in `HomeView` and `SettingsView`, and expanded `NetworksView` search to match network IDs and bridged keys.
+- **Suitability, Availability, Incident Reports & Support Export Refinements**:
+  - Aligned `SuitabilityEngine` settling/arrival tile ordering and labels (`VPN / Remote`, `shield`, `globe`), matched actual tile statuses (`"Lag spikes"`, `"MTU clamped"`, `"Slow lookups"`) in `defaultConsequence`, avoided displaying a fabricated `"2ms jit"` metric when jitter is unmeasured, and removed duplicate dead probe checks in `evaluateBrowsing`.
+  - Updated `AvailabilityEngine.evaluate` to include live elapsed duration (`now.timeIntervalSince(entry.latest)`) for ongoing open outages so total downtime and longest outage stay accurate in real time.
+  - Refined `ActivityDetailCard` so `HOG-1` entries without captured process names fall back to the rule blurb rather than contradicting their own title, prevented stamping the current live public IP/ISP onto historical `public-ip-changed` events, and fixed transition labels (`ISP Transition`, `Country Transition`, `Wi-Fi Transition`) in Markdown incident exports.
+  - Updated `SupportSummaryFormatter` to honor ICMP ping filtering (`TCP-1` and `ICMP-1`) instead of blaming the router or ISP for `"dropping 100% of packets"`, and checked for heavy local traffic (`TR-1`, `HOG-1`, or high Mbps) before claiming `"Mac traffic is low"`.
+  - Allowed completing `OnboardingView` when Location Services is declined or unavailable (matching the gateway-MAC fallback design), cancelled in-flight background preloads in `UpdateChecker.installUpdate()` and cleaned up temporary directories on failure, added clamped outlier markers for Internet Ping in `TrendsView` along with `"All networks"` speed test peak badges, and aligned `NetworkDetailCard` latency delta text with `gatewayLatencyVerdict`.
+  - Fixed `AlertEngine.gatewayChangeHolds` to resolve readable SSIDs via `liveSSID` fallback instead of treating `"<redacted>"` as a literal SSID, cleared stale `"— resolved"` notifications when an alert re-raises inside its cooldown, guarded `--uninstall-watcher` dispatch in `bin/hopwatch`, and rejected the conflicting `--wifi-only --quick` flag pair.
+- **Captive Portal Repair, Power & Window Management, and Check Table Polish**:
+  - Fixed `CP-1` (`open-sign-in`) repair offer in `lib/diagnosis.sh` and `lib/repairs.sh` so it no longer attaches a `url=...` parameter rejected by `repair_validate()` with exit status `3`.
+  - Preserved `"Show Hopwatch in Dock & App Switcher"` (`Defaults.showInDock`) in `HopwatchCoordinator.applyActivationPolicy()` when all windows close, and removed duplicate `windowAppeared()` / `windowDisappeared()` calls in `SettingsView`.
+  - Removed the redundant unconditional `monitor.forceRefresh()` (`SIGUSR2`) right after `monitor.start()` in `HopwatchCoordinator.handleNetworkEvent` so newly spawned monitor processes are never signaled before installing their trap.
+  - Wired `"Pause on low battery"` (`Defaults.pauseOnBattery`) via `PowerSourceHelper.isLowBattery` and `HopwatchCoordinator.evaluateBatteryPauseState()`, and mirrored `autoDownloadAndInstallUpdates` on `@Observable` `AppSettings`.
+  - Updated `PingHeartbeat` to select `/sbin/ping6` when targeting an IPv6 gateway address instead of failing in an IPv4 `/sbin/ping` respawn loop.
+  - Updated `HomeView` Check Details table to compute `"Usual"` Wi-Fi Signal and SNR baselines from `HistoryStore.median`, show a warning icon when MTU is reduced (`< 1400`), format download-only speed results cleanly, and check `snap?.measuredIPv6 != nil` so `--quick` runs do not falsely report `"IPv4-only connection"`.
+  - Updated `DropdownView.quietLine` to use an uncapped lookback window (`withinHours: nil`) with day formatting matching `HomeView`, preserved active session state in `reconcileNetworkIdentity` when Location Services upgrades a `gw:` key to `ssid:` on the same gateway, and logged JSON decode errors in `HopwatchRunner`.
+- **Harness & Verification Integrity (`VerifyMode`)**:
+  - Restored strict scoping in `HopwatchCoordinator.hydrateFromHistoryIfNeeded`: speed test hydration on cold launch is gated exclusively on live monitor or explicit test network confirmation, preventing unconfirmed runs on disk from prematurely populating the speed test widget.
+  - Aligned `ActivityEntry.fold` with multi-network fault folding rules: open episodes on one network are not closed prematurely when orphan clears or events arrive on a different network, and network keys are canonicalized through `NetworkIdentity.canonical` to prevent SSID resolution jitter from splitting episodes.
+  - Fixed `NetworkIdentity.fold` to allow private RFC-1918 gateway keys to fold onto their uniquely observed MAC group, and preserved fail-closed legacy migration behavior for saved arrival states.
+- **Root Cause & Culprit Attribution (`HopAttributionResolver`)**:
+  - Prevented disconnected states (`N1`: "No network connection at all") from being misattributed as upstream ISP outages with contradictory claims that "Wi-Fi is healthy and router is reachable", correctly attributing them as link disconnections.
+  - Prioritized critical Mac-level faults (`SOCK-1`: system UDP socket exhaustion) over advisory Wi-Fi or router warnings in the culprit chain, promoted DHCP failure (`DH-3`) to critical router health, and eliminated duplicate `NT-1` classification.
+- **Availability Outage Precision (`lib/availability.sh`)**:
+  - Canonicalized network IDs via `canonical_network_id` when parsing journal episodes for `AV-1` and `AV-2`, ensuring background recorder episodes reliably match GUI scans that include SSID hints.
+- **Filtered Ping Handling in Baseline & Show Regressions**:
+  - Suppressed ICMP-filtered legs (`TCP-1` gateway loss and `ICMP-1` internet loss) in `helpers/history.py` (`build_comparison`) and `helpers/baseline.py`, preventing intentional ICMP firewall silence from flagging false loss regressions and `BL-1` warnings.
+- **Redaction Privacy & UI Polish**:
+  - Filtered buffered parallel output in `lib/common.sh` through `_redact_line` during `--expert --redact` runs.
+  - Synchronized `PingHeartbeatView` hover readout with `beatTick` during stationary mouse hovering and clamped tooltip callouts to dynamic container width.
+  - Formatted `ExpertPanel` to omit unmeasured alternate internet loss rows on quick scans and surfaced internet bufferbloat metrics (`bufferbloat Δ internet` and grade).
+
 ## [1.23.0] - 2026-11-01
 
 ### Added

@@ -73,7 +73,7 @@ enum SuitabilityEngine {
                     return "Ultra-low ping, zero desync"
                 case .degraded:
                     if status == "May rubberband" { return "Player desync & missed inputs" }
-                    if status == "Spike risk" { return "Intermittent hit registration lag" }
+                    if status == "Spike risk" || status == "Lag spikes" { return "Intermittent hit registration lag" }
                     return "Player desync & rollbacks"
                 case .broken:
                     return "Constant rubberbanding"
@@ -86,7 +86,7 @@ enum SuitabilityEngine {
                     return "Clean route & single NAT"
                 case .degraded:
                     if status == "Double NAT" { return "VoIP / tunnel rekeys risk" }
-                    if status == "Reduced MTU" { return "Fragmentation overhead" }
+                    if status == "Reduced MTU" || status == "MTU clamped" { return "Fragmentation overhead" }
                     return "Tunnel rekeys or MTU choke"
                 case .broken:
                     return "VPN tunnels fail to connect"
@@ -98,7 +98,7 @@ enum SuitabilityEngine {
                 case .good:
                     return "Fast DNS & page loads"
                 case .degraded:
-                    if status == "DNS slow" { return "Initial domain lookup delay" }
+                    if status == "DNS slow" || status == "Slow lookups" { return "Initial domain lookup delay" }
                     return "Retransmissions delay web loads"
                 case .broken:
                     return "Websites fail to load"
@@ -190,10 +190,10 @@ enum SuitabilityEngine {
             let help = isCheckingNetwork ? "Running initial check on network." : "Stabilizing connection baseline."
             return [
                 Item(id: "calls", title: "Calls", icon: "video", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "gaming", title: "Gaming", icon: "gamecontroller", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
                 Item(id: "streaming", title: "Streaming", icon: "play.rectangle", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "vpn", title: "VPN", icon: "lock.shield", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "browsing", title: "Browsing", icon: "safari", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help)
+                Item(id: "gaming", title: "Gaming", icon: "gamecontroller", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "vpn", title: "VPN / Remote", icon: "shield", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
+                Item(id: "browsing", title: "Browsing", icon: "globe", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help)
             ]
         }
         return [
@@ -228,7 +228,11 @@ enum SuitabilityEngine {
         }
 
         let loss = inputs.resolvedLoss
-        let jitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs ?? 2.0
+        let measuredJitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs
+        let jitter = measuredJitter ?? 2.0
+        let lossAndJitterMetric = measuredJitter != nil
+            ? "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+            : LossFormatter.formatLoss(loss)
         let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
         let upMbps = inputs.speedTest?.upMbps
         let downMbps = inputs.speedTest?.downMbps
@@ -243,11 +247,11 @@ enum SuitabilityEngine {
 
             if loss >= 8.0 {
                 status = "Frequent cutouts"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "High packet loss (≥8%) causing severe audio dropouts, choppy speech, and frozen video"
             } else if jitter >= 50.0 {
                 status = "Severe stutter"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "Extreme jitter (≥50ms) causing jitter buffer overruns, severe robotic distortion, and audio stutter"
             } else if ping >= 400.0 {
                 status = "Heavy delay"
@@ -259,7 +263,7 @@ enum SuitabilityEngine {
                 help = "Insufficient upload bandwidth (<0.4 Mbps) to sustain stable voice or video calls"
             } else {
                 status = "Frequent cutouts"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "Network conditions causing frequent audio cutouts or call failures"
             }
 
@@ -283,11 +287,11 @@ enum SuitabilityEngine {
 
             if loss >= 3.0 {
                 status = "May cut out"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "Elevated packet loss (≥3%) may cause words to drop, robotic audio, and momentary video stutter"
             } else if jitter >= 25.0 {
                 status = "Audio stutter"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "Elevated jitter (≥25ms) causing audio pitch warping, robotic voice, or micro-stutters"
             } else if ping >= 250.0 {
                 status = "Audio delay"
@@ -301,9 +305,13 @@ enum SuitabilityEngine {
                 status = "Video limited"
                 metric = String(format: "%.1f Mbps ↓", down)
                 help = "Low download bandwidth (<1.5 Mbps) may cause incoming video feeds to drop resolution or pause"
+            } else if loss == 0.0 && jitter < 15.0 {
+                status = "Glitch risk"
+                metric = lossAndJitterMetric
+                help = "Channel contention or route issues may cause occasional audio glitches"
             } else {
                 status = "May cut out"
-                metric = "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
+                metric = lossAndJitterMetric
                 help = "Network conditions or route issues may cause intermittent voice or video degradation"
             }
 
@@ -465,12 +473,13 @@ enum SuitabilityEngine {
         }
 
         if impacts.contains("degraded") || loss >= 8.0 {
+            let streamMetric = loss >= 8.0 ? LossFormatter.formatLoss(loss) : "Route check"
             return Item(
                 id: "streaming",
                 title: "Streaming",
                 icon: "play.rectangle",
                 status: "May buffer",
-                metric: metric,
+                metric: streamMetric,
                 tint: Theme.ColorToken.amber,
                 verdict: .degraded,
                 helpText: "Packet loss or route congestion may cause occasional video buffering"
@@ -509,7 +518,8 @@ enum SuitabilityEngine {
         }
 
         let rtt = inputs.monitorSample?.internet.rttAvgMs
-        let jitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs ?? 2.0
+        let measuredJitter = inputs.currentJitter ?? inputs.monitorSample?.internet.rttJitterMs
+        let jitter = measuredJitter ?? 2.0
         let loss = inputs.resolvedLoss
 
         let impacts = catalogImpacts(for: "gaming", in: inputs)
@@ -541,8 +551,10 @@ enum SuitabilityEngine {
             metric = loss > 0 ? LossFormatter.formatLoss(loss) : "TCP 443 ok"
         } else if loss > 0 {
             metric = String(format: "%.0f ms · %@", ping, LossFormatter.formatLoss(loss))
-        } else {
+        } else if measuredJitter != nil {
             metric = String(format: "%.0f ms · %.0fms jit", ping, jitter)
+        } else {
+            metric = String(format: "%.0f ms", ping)
         }
 
         // Broken conditions: constant rollbacks, extreme jitter desync, or unplayable ping
@@ -587,6 +599,9 @@ enum SuitabilityEngine {
             } else if ping >= 80.0 {
                 status = "Noticeable delay"
                 help = "Elevated ping (≥80ms) causes slight delay between actions and server response"
+            } else if ping < 35.0 && jitter < 10.0 && loss == 0.0 {
+                status = "Spike risk"
+                help = "Channel contention or route issues may cause occasional latency spikes despite low average ping"
             } else {
                 status = "Lag likely"
                 help = "Network conditions or route issues may cause intermittent lag in games"
@@ -873,13 +888,7 @@ enum SuitabilityEngine {
         }
         let metric: String
         let help: String
-        if dnsOk == false || tcpOk == false {
-            // One failed probe, not yet a finding. Saying "TCP 443 ok" over it
-            // would be false, and saying "blocked" would be a verdict the
-            // monitor has not reached.
-            metric = "Rechecking"
-            help = "One probe failed. The monitor repeats it before reporting a problem."
-        } else if let dnsMs = dnsElapsed, dnsMs < 60.0 {
+        if let dnsMs = dnsElapsed, dnsMs < 60.0 {
             metric = String(format: "%.0fms DNS", dnsMs)
             help = "Fast DNS lookups (<60ms) and responsive HTTPS connectivity for snappy web browsing"
         } else if loss > 0 {

@@ -32,8 +32,17 @@ struct PingHeartbeatView: View {
         coordinator.linkIsDown
     }
 
+    private var isScanning: Bool {
+        coordinator.isScanning
+    }
+
+    private var isArrivalCheck: Bool {
+        coordinator.isArrivalCheck
+    }
+
     private var isPaused: Bool {
-        coordinator.monitor.isPausedForAnyReason
+        !isScanning && (!coordinator.appSettings.monitoringEnabled
+            || coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason))
     }
 
     private var gatewayIP: String? {
@@ -125,6 +134,9 @@ struct PingHeartbeatView: View {
             if linkDown {
                 Image(systemName: "heart.slash.fill")
                     .foregroundStyle(.red)
+            } else if isScanning {
+                Image(systemName: "circle.dashed")
+                    .foregroundStyle(Theme.ColorToken.blue)
             } else if isTargetFiltered {
                 Image(systemName: "shield.slash.fill")
                     .foregroundStyle(Theme.ColorToken.muted)
@@ -140,6 +152,7 @@ struct PingHeartbeatView: View {
 
     private var heartIconColor: Color {
         if linkDown { return .red }
+        if isScanning { return Theme.ColorToken.blue }
         if isPaused { return Theme.ColorToken.muted }
         if heartbeat.latestBeat?.isMiss == true { return .red }
         guard let lat = heartbeat.latestBeat?.latencyMs else { return Theme.ColorToken.muted }
@@ -151,16 +164,16 @@ struct PingHeartbeatView: View {
     private var liveCadenceBadge: some View {
         HStack(spacing: 3) {
             Circle()
-                .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green)))
+                .fill(linkDown ? .red : (isScanning ? Theme.ColorToken.blue : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green))))
                 .frame(width: 4.5, height: 4.5)
-                .scaleEffect(isTargetFiltered ? 1.0 : livePulseScale)
-            Text(isPaused ? "Paused" : (isTargetFiltered ? "ICMP blocked" : "1s live"))
+                .scaleEffect((isTargetFiltered || isScanning) ? 1.0 : livePulseScale)
+            Text(isScanning ? (isArrivalCheck ? "Checking" : "Testing") : (isPaused ? "Paused" : (isTargetFiltered ? "ICMP blocked" : "1s live")))
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Theme.ColorToken.muted)
+                .foregroundStyle(isScanning ? Theme.ColorToken.blue : Theme.ColorToken.muted)
         }
         .padding(.horizontal, 4.5)
         .padding(.vertical, 1.5)
-        .background(Theme.ColorToken.neutralWash)
+        .background(isScanning ? Theme.ColorToken.blueWash : Theme.ColorToken.neutralWash)
         .clipShape(Capsule())
     }
 
@@ -170,7 +183,7 @@ struct PingHeartbeatView: View {
         } label: {
             HStack(spacing: 3) {
                 Circle()
-                    .fill(linkDown ? .red : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green)))
+                    .fill(linkDown ? .red : (isScanning ? Theme.ColorToken.blue : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green))))
                     .frame(width: 4.5, height: 4.5)
                 Text(heartbeat.target)
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
@@ -226,6 +239,10 @@ struct PingHeartbeatView: View {
                 .padding(.vertical, 1.5)
                 .background(Color.red.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 3))
+        } else if isScanning {
+            Text(isArrivalCheck ? "CHECKING" : "TESTING")
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.blue)
         } else if isPaused {
             Text("PAUSED")
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
@@ -331,6 +348,18 @@ struct PingHeartbeatView: View {
                         .foregroundStyle(Color.red.opacity(0.85))
                     }
                 }
+            } else if isScanning {
+                // Scanning / Testing View
+                ZStack {
+                    Theme.ColorToken.nodeBackground
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(coordinator.activeScanProgressSubtitle ?? (isArrivalCheck ? "Checking new network…" : "Diagnostic check in progress…"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
             } else if isPaused {
                 // Paused Watermark
                 ZStack {
@@ -397,8 +426,12 @@ struct PingHeartbeatView: View {
 
     private var footerStatsRow: some View {
         HStack {
-            // Latency spread
-            if isTargetFiltered {
+            if isScanning {
+                Text(isArrivalCheck ? "Awaiting first check results…" : "Sampling paused during check")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
+            } else if isTargetFiltered {
                 Text("ICMP probe filtered")
                     .font(.system(size: 9))
                     .foregroundStyle(Theme.ColorToken.muted)
@@ -418,34 +451,36 @@ struct PingHeartbeatView: View {
                     .foregroundStyle(Theme.ColorToken.muted)
             }
 
-            Spacer()
+            if !isScanning {
+                Spacer()
 
-            // Reliability & Dropped packets counter
-            if isTargetFiltered {
-                HStack(spacing: 3) {
-                    Circle()
-                        .fill(Theme.ColorToken.green)
-                        .frame(width: 4.5, height: 4.5)
-                    Text("TCP traffic healthy")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.ColorToken.green)
-                }
-            } else if heartbeat.totalCount > 0 {
-                HStack(spacing: 3) {
-                    if heartbeat.missCount == 0 {
+                // Reliability & Dropped packets counter
+                if isTargetFiltered {
+                    HStack(spacing: 3) {
                         Circle()
                             .fill(Theme.ColorToken.green)
                             .frame(width: 4.5, height: 4.5)
-                        Text("100% replied")
+                        Text("TCP traffic healthy")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(Theme.ColorToken.green)
-                    } else {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 8.5))
-                            .foregroundStyle(Theme.ColorToken.red)
-                        Text("\(heartbeat.missCount) missed (\(String(format: "%.1f", heartbeat.lossPct))%)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.ColorToken.red)
+                    }
+                } else if heartbeat.totalCount > 0 {
+                    HStack(spacing: 3) {
+                        if heartbeat.missCount == 0 {
+                            Circle()
+                                .fill(Theme.ColorToken.green)
+                                .frame(width: 4.5, height: 4.5)
+                            Text("100% replied")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Theme.ColorToken.green)
+                        } else {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 8.5))
+                                .foregroundStyle(Theme.ColorToken.red)
+                            Text("\(heartbeat.missCount) missed (\(String(format: "%.1f", heartbeat.lossPct))%)")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.red)
+                        }
                     }
                 }
             }
@@ -601,7 +636,7 @@ private struct LinegraphZonedCanvas: View {
                         .position(x: x, y: h / 2)
 
                     // Floating Tooltip Bubble
-                    hoverBubble(for: hovered, x: x, height: h, y150: y150, y70: y70)
+                    hoverBubble(for: hovered, x: x, width: w, height: h, y150: y150, y70: y70)
                 }
             }
             .contentShape(Rectangle())
@@ -622,6 +657,14 @@ private struct LinegraphZonedCanvas: View {
             }
             .onChange(of: beatTick) { _, _ in
                 triggerBeaconPulse()
+                if let location = hoverLocation {
+                    let idx = Int(location.x / beatWidth)
+                    if idx >= 0 && idx < paddedBeats.count {
+                        hoveredBeat = paddedBeats[idx]
+                    } else {
+                        hoveredBeat = nil
+                    }
+                }
             }
         }
     }
@@ -700,7 +743,7 @@ private struct LinegraphZonedCanvas: View {
     // MARK: - Hover Callout Bubble
 
     @ViewBuilder
-    private func hoverBubble(for beat: PingBeat, x: CGFloat, height: CGFloat, y150: CGFloat, y70: CGFloat) -> some View {
+    private func hoverBubble(for beat: PingBeat, x: CGFloat, width: CGFloat, height: CGFloat, y150: CGFloat, y70: CGFloat) -> some View {
         let yPoint: CGFloat = {
             if let lat = beat.latencyMs {
                 return yForLatency(lat, height: height, y150: y150, y70: y70)
@@ -742,7 +785,7 @@ private struct LinegraphZonedCanvas: View {
                 .shadow(color: Color.black.opacity(0.18), radius: 2, y: 1)
             }
         }
-        .position(x: min(max(x, 40), 380), y: bubbleY)
+        .position(x: min(max(x, 40), max(40, width - 40)), y: bubbleY)
     }
 
     private func formatLatency(_ ms: Double) -> String {

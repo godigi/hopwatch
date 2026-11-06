@@ -456,10 +456,17 @@ enum SupportSummaryFormatter {
             signalStr = nil
         }
 
+        let ruleIDs = snapshot.diagnosis.compactMap(\.rule)
+        let filtering = EffectiveLoss.filtering(icmpFilteredFlag: false, ruleIDs: ruleIDs)
+        let effectiveGwLoss: Double? = filtering.gatewayLeg ? nil : snapshot.gateway.lossPct
+        let effectiveInetLoss: Double? = filtering.internetLeg ? nil : snapshot.internetLatency.lossPct
+
         // Gateway loss & latency
         var gwFormatted = gwIP
         var gwStats: [String] = []
-        if let loss = snapshot.gateway.lossPct, loss > 0 {
+        if filtering.gatewayLeg {
+            gwStats.append("ICMP ping filtered")
+        } else if let loss = effectiveGwLoss, loss > 0 {
             gwStats.append("\(LossFormatter.formatPct(loss)) loss")
         }
         if let rtt = snapshot.gateway.rttAvgMs, rtt > 0 {
@@ -474,13 +481,15 @@ enum SupportSummaryFormatter {
 
         // Internet latency
         var internetStr: String?
-        if let inetLoss = snapshot.internetLatency.lossPct, let inetRTT = snapshot.internetLatency.rttAvgMs {
+        if filtering.internetLeg && snapshot.internetLatency.rttAvgMs == nil {
+            internetStr = "ICMP ping filtered by firewall (TCP/HTTPS reachable)"
+        } else if let inetLoss = effectiveInetLoss, let inetRTT = snapshot.internetLatency.rttAvgMs {
             var parts = ["\(LossFormatter.formatPct(inetLoss)) loss", String(format: "%.1f ms avg latency", inetRTT)]
             if let jit = snapshot.internetLatency.rttJitterMs, jit > 0 {
                 parts.append(String(format: "±%.1f ms jitter", jit))
             }
             internetStr = parts.joined(separator: ", ")
-        } else if let inetLoss = snapshot.internetLatency.lossPct, inetLoss > 0 {
+        } else if let inetLoss = effectiveInetLoss, inetLoss > 0 {
             internetStr = "\(LossFormatter.formatPct(inetLoss)) packet loss to public targets"
         } else if let inetRTT = snapshot.internetLatency.rttAvgMs, inetRTT > 0 {
             internetStr = "Reachable (\(String(format: "%.1f ms avg", inetRTT)))"
@@ -566,9 +575,9 @@ enum SupportSummaryFormatter {
         if !degradedSuitability.isEmpty {
             let names = degradedSuitability.compactMap { $0.label ?? $0.activity?.capitalized }.joined(separator: ", ")
             impact = "\(names) may be degraded or unresponsive"
-        } else if (snapshot.gateway.lossPct ?? 0) >= 10 || (snapshot.internetLatency.lossPct ?? 0) >= 10 {
+        } else if (effectiveGwLoss ?? 0) >= 10 || (effectiveInetLoss ?? 0) >= 10 {
             impact = "Audio/video calls dropping and websites timing out"
-        } else if (snapshot.gateway.lossPct ?? 0) >= 2 || (snapshot.internetLatency.lossPct ?? 0) >= 2 {
+        } else if (effectiveGwLoss ?? 0) >= 2 || (effectiveInetLoss ?? 0) >= 2 {
             impact = "Occasional call stutter and delayed page loading"
         } else if (snapshot.gateway.rttAvgMs ?? 0) > 150 || (snapshot.internetLatency.rttAvgMs ?? 0) > 200 {
             impact = "High latency causing delay and lag during interactive use"
@@ -576,9 +585,9 @@ enum SupportSummaryFormatter {
 
         // Problem fallback if still nil
         if problem == nil {
-            if let gwLoss = snapshot.gateway.lossPct, gwLoss >= 1 {
+            if let gwLoss = effectiveGwLoss, gwLoss >= 1 {
                 problem = "Packet loss between device and local router (\(LossFormatter.formatPct(gwLoss)))"
-            } else if let netLoss = snapshot.internetLatency.lossPct, netLoss >= 1 {
+            } else if let netLoss = effectiveInetLoss, netLoss >= 1 {
                 problem = "Packet loss between router and internet (\(LossFormatter.formatPct(netLoss)))"
             } else if let rtt = snapshot.gateway.rttAvgMs, rtt > 150 {
                 problem = "High latency to local router (\(Int(round(rtt))) ms)"
@@ -599,11 +608,11 @@ enum SupportSummaryFormatter {
                 action = !networkIsOwned
                     ? "Please check if you can move closer to the access point or switch to a closer network band."
                     : "Move closer to your router or reposition Wi-Fi antennas."
-            } else if (snapshot.gateway.lossPct ?? 0) >= 1 {
+            } else if (effectiveGwLoss ?? 0) >= 1 {
                 action = !networkIsOwned
                     ? "Please restart or power-cycle the local Wi-Fi router / access point for this area."
                     : "Restart your router (unplug for 15 seconds, then plug back in)."
-            } else if (snapshot.internetLatency.lossPct ?? 0) >= 1 {
+            } else if (effectiveInetLoss ?? 0) >= 1 {
                 action = !networkIsOwned
                     ? "Please check if your internet provider has an ongoing outage in this area."
                     : "Check your modem/ONT connection, or contact your ISP to report an outage."
@@ -616,10 +625,18 @@ enum SupportSummaryFormatter {
 
         // Local verification
         let localVerification: String
+        let hasHeavyLocalTraffic = ruleIDs.contains("TR-1")
+            || ruleIDs.contains("HOG-1")
+            || (snapshot.traffic?.downMbps ?? 0) > 25.0
+            || (snapshot.traffic?.upMbps ?? 0) > 10.0
         if isCaptive {
             localVerification = "Wi-Fi link is connected; internet access blocked by captive portal"
         } else if let tr = snapshot.traffic, let down = tr.downMbps, let up = tr.upMbps {
-            localVerification = "Mac traffic is low (\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up); issue is upstream on network/router"
+            if hasHeavyLocalTraffic {
+                localVerification = "High local Mac bandwidth (\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up) detected during check"
+            } else {
+                localVerification = "Mac traffic is low (\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up); issue is upstream on network/router"
+            }
         } else {
             localVerification = "Local link is idle and healthy; issue is upstream on network/router"
         }
@@ -632,9 +649,9 @@ enum SupportSummaryFormatter {
             snr: snapshot.wifi?.snr,
             isWired: isWired,
             gatewayIP: gwIP,
-            gatewayLoss: snapshot.gateway.lossPct,
+            gatewayLoss: effectiveGwLoss,
             gatewayRTT: snapshot.gateway.rttAvgMs,
-            inetLoss: snapshot.internetLatency.lossPct,
+            inetLoss: effectiveInetLoss,
             inetRTT: snapshot.internetLatency.rttAvgMs,
             dnsFailed: dnsFailed,
             vpnActive: snapshot.vpn.active,
@@ -718,10 +735,17 @@ enum SupportSummaryFormatter {
             signalStr = nil
         }
 
+        let sampleRules = sample.status.rules + Array(alert?.rules ?? [])
+        let filtering = EffectiveLoss.filtering(icmpFilteredFlag: sample.status.icmpFiltered == true, ruleIDs: sampleRules)
+        let effectiveGwLoss: Double? = filtering.gatewayLeg ? nil : sample.gateway.lossPct
+        let effectiveInetLoss: Double? = filtering.internetLeg ? nil : sample.internet.lossPct
+
         // Gateway loss & latency
         var gwFormatted = gwIP
         var gwStats: [String] = []
-        if let loss = sample.gateway.lossPct, loss > 0 {
+        if filtering.gatewayLeg {
+            gwStats.append("ICMP ping filtered")
+        } else if let loss = effectiveGwLoss, loss > 0 {
             gwStats.append("\(LossFormatter.formatPct(loss)) loss")
         }
         if let rtt = sample.gateway.rttAvgMs, rtt > 0 {
@@ -739,13 +763,15 @@ enum SupportSummaryFormatter {
 
         // Internet path
         var internetStr: String?
-        if let inetLoss = sample.internet.lossPct, let inetRTT = sample.internet.rttAvgMs {
+        if filtering.internetLeg && sample.internet.rttAvgMs == nil {
+            internetStr = "ICMP ping filtered by firewall (TCP/HTTPS reachable)"
+        } else if let inetLoss = effectiveInetLoss, let inetRTT = sample.internet.rttAvgMs {
             var parts = ["\(LossFormatter.formatPct(inetLoss)) loss", String(format: "%.1f ms avg latency", inetRTT)]
             if let jit = sample.internet.rttJitterMs, jit > 0 {
                 parts.append(String(format: "±%.1f ms jitter", jit))
             }
             internetStr = parts.joined(separator: ", ")
-        } else if let inetLoss = sample.internet.lossPct, inetLoss > 0 {
+        } else if let inetLoss = effectiveInetLoss, inetLoss > 0 {
             internetStr = "\(LossFormatter.formatPct(inetLoss)) packet loss to public targets"
         } else if let inetRTT = sample.internet.rttAvgMs, inetRTT > 0 {
             internetStr = "Reachable (\(String(format: "%.1f ms avg", inetRTT)))"
@@ -829,13 +855,13 @@ enum SupportSummaryFormatter {
                 problem = sample.link.offline?.precursor ?? "Disconnected from local network"
                 impact = "Internet is completely offline"
                 action = "Check Wi-Fi connection and ensure the router is powered on."
-            } else if let gwLoss = sample.gateway.lossPct, gwLoss >= 1 {
+            } else if let gwLoss = effectiveGwLoss, gwLoss >= 1 {
                 problem = "Losing \(LossFormatter.formatPct(gwLoss)) of packets to the local router"
                 impact = gwLoss >= 10 ? "Audio/video calls dropping and websites timing out" : "Occasional call stutter and slower browsing"
                 action = !networkIsOwned
                     ? "Please restart or power-cycle the local Wi-Fi router / access point for this area."
                     : "Restart your router (unplug for 15 seconds, then plug back in)."
-            } else if let netLoss = sample.internet.lossPct, netLoss >= 1 {
+            } else if let netLoss = effectiveInetLoss, netLoss >= 1 {
                 problem = "Losing \(LossFormatter.formatPct(netLoss)) of packets to the internet"
                 impact = netLoss >= 10 ? "Audio/video calls dropping and web requests timing out" : "Occasional call stutter and slower browsing"
                 action = !networkIsOwned
@@ -888,9 +914,9 @@ enum SupportSummaryFormatter {
             snr: resolvedSNR,
             isWired: isWired,
             gatewayIP: gwIP,
-            gatewayLoss: sample.gateway.lossPct,
+            gatewayLoss: effectiveGwLoss,
             gatewayRTT: sample.gateway.rttAvgMs,
-            inetLoss: sample.internet.lossPct,
+            inetLoss: effectiveInetLoss,
             inetRTT: sample.internet.rttAvgMs,
             dnsFailed: dnsFailed,
             vpnActive: sample.vpn.active,

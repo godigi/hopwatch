@@ -330,10 +330,7 @@ _repair_do_open_sign_in() {
     REPAIR_MESSAGE="Would open ${CAPTIVE_CANARY_URL} in your browser. Nothing was changed."
     return 0
   fi
-  local target_url=""
-  target_url="$(repair_param_get url)"
-  [ -n "$target_url" ] || target_url="${CAPTIVE_PORTAL_URL:-$CAPTIVE_CANARY_URL}"
-  if open "$target_url" >/dev/null 2>&1 || open "$CAPTIVE_CANARY_URL" >/dev/null 2>&1; then
+  if open "$CAPTIVE_CANARY_URL" >/dev/null 2>&1; then
     REPAIR_OK=1
     REPAIR_MESSAGE="Opened the sign-in page in your browser. Hopwatch keeps watching and will notice when the network lets you through."
   else

@@ -522,6 +522,13 @@ struct TrendsView: View {
                                       y: .value("Internet Ping", value))
                                 .foregroundStyle(Color.purple)
                                 .symbolSize(inetPoints.count > 200 ? 4 : 16)
+                            if let clamp, clamp.exceeds(pt.1) {
+                                PointMark(x: .value("When", pt.0),
+                                          y: .value("Internet Ping", clamp.upper))
+                                    .symbol(.triangle)
+                                    .symbolSize(40)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
 
@@ -620,12 +627,28 @@ struct TrendsView: View {
                 .padding(14)
                 .cardStyle()
             } else {
+                let displayedRuns = Array(speedRuns.prefix(5))
+                let windowMaxDown = speedRuns.compactMap {
+                    $0.metrics["speed_down_mbps"] ?? $0.metrics["speedtest.down_mbps"]
+                }.max() ?? 0
+                let referencePeak = selectedNetworkMemory?.peakDownMbps ?? windowMaxDown
+                let peakRunID: String? = {
+                    guard referencePeak > 0 else { return nil }
+                    return displayedRuns.max(by: { a, b in
+                        let aDown = a.metrics["speed_down_mbps"] ?? a.metrics["speedtest.down_mbps"] ?? 0
+                        let bDown = b.metrics["speed_down_mbps"] ?? b.metrics["speedtest.down_mbps"] ?? 0
+                        return aDown < bDown
+                    }).flatMap { best in
+                        let bestDown = best.metrics["speed_down_mbps"] ?? best.metrics["speedtest.down_mbps"] ?? 0
+                        return bestDown >= referencePeak - 0.5 ? best.id : nil
+                    }
+                }()
+
                 VStack(spacing: 8) {
-                    ForEach(speedRuns.prefix(5)) { run in
+                    ForEach(displayedRuns) { run in
                         let down = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"] ?? 0
                         let up = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
-                        let peak = selectedNetworkMemory?.peakDownMbps ?? 0
-                        let isPeak = peak > 0 && down >= peak - 0.5
+                        let isPeak = (run.id == peakRunID)
 
                         HStack(alignment: .center, spacing: 10) {
                             Image(systemName: "arrow.up.arrow.down.circle.fill")

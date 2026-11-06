@@ -216,4 +216,30 @@ import Testing
         #expect(!summary.contains("restart the router"))
         #expect(!summary.contains("power-cycle the local Wi-Fi router"))
     }
+
+    @Test func filteredIcmpLossDoesNotReportRouterPacketLossInSupportSummary() throws {
+        let json = """
+        {
+          "schema": 2,
+          "ts": "2026-10-18T14:15:00Z",
+          "link": {"up": true, "type": "wifi", "ssid": "CorpWiFi", "gateway": "10.0.0.1"},
+          "wifi": {"rssi": -58, "snr": 32, "channel": "36"},
+          "gateway": {"loss_pct": 100.0},
+          "internet": {"loss_pct": 0.0, "rtt_avg_ms": 22.0},
+          "status": {"severity": "warn", "icmp_filtered": true, "rules": ["TCP-1", "D1"]}
+        }
+        """.data(using: .utf8)!
+        let sample = try JSONDecoder().decode(MonitorSample.self, from: json)
+
+        let summary = SupportSummaryFormatter.format(
+            sample: sample,
+            alert: nil,
+            catalog: nil,
+            networkIsOwned: false
+        )
+
+        #expect(summary.contains("ICMP ping filtered"))
+        #expect(!summary.contains("dropping 100% of packets"))
+        #expect(!summary.contains("Losing 100% of packets"))
+    }
 }

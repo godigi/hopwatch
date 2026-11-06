@@ -69,6 +69,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// with its own "— resolved", and "Wi-Fi Restored" over a slow-but-up
     /// link claims a reconnect that never happened.
     private(set) var announcedOutages: Set<String> = []
+    /// Tracks alerts whose `netdiag.<id>.resolved` banner is currently posted.
+    private(set) var announcedResolutions: Set<String> = []
 
     static let captivePortalCategoryID = "CAPTIVE_PORTAL"
     static let openPortalActionID = "OPEN_PORTAL_ACTION"
@@ -301,7 +303,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             return false
         }
 
-        if !replacing { lastNotifiedAt[id] = now }
+        if !replacing {
+            lastNotifiedAt[id] = now
+            clearResolvedNotification(id: id)
+        }
         // `announce: false` is for an event: something that happened and is
         // over (public IP changed). It has no fault to clear and no
         // resolution to announce, so recording it here would let the next
@@ -429,10 +434,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         guard notificationsEnabled && isAuthorized else { return }
 
+        announcedResolutions.insert(id)
         let resolvedTitle = "\(title) — resolved"
         if let handler = onPostNotification {
             handler("netdiag.\(id).resolved", resolvedTitle, "", true)
-        } else {
+        } else if Bundle.main.bundleIdentifier != nil {
             let content = UNMutableNotificationContent()
             content.title = resolvedTitle
             content.sound = nil
@@ -441,10 +447,16 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Removes any lingering "— resolved" notification for an alert that has re-fired.
+    func clearResolvedNotification(id: String) {
+        guard announcedResolutions.remove(id) != nil else { return }
+        removeNotification(id: "netdiag.\(id).resolved")
+    }
+
     private func removeNotification(id: String) {
         if let handler = onRemoveNotification {
             handler(id)
-        } else {
+        } else if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
         }
     }
@@ -453,5 +465,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func clearAnnouncedFaults() {
         announcedFaults.removeAll()
         announcedOutages.removeAll()
+        announcedResolutions.removeAll()
     }
 }

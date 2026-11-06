@@ -813,10 +813,12 @@ def build_comparison(rec: dict, network_runs: list[dict],
         for other in network_runs:
             v = metric_value(other, path)
             if v is not None:
-                samples.append(abs(v) if out_key == "ntp_drift_s" else v)
+                v = judged_value(out_key, v, other)
+            if v is not None:
+                samples.append(v)
         value = metric_value(rec, path)
-        if value is not None and out_key == "ntp_drift_s":
-            value = abs(value)
+        if value is not None:
+            value = judged_value(out_key, value, rec)
         metrics[out_key] = judge_metric(value, samples,
                                         unit, direction, min_samples, tail_pctl)
     return {"metrics": metrics}

@@ -756,12 +756,13 @@ struct ConnectionRouteView: View {
                     }
                     .frame(height: 52)
 
+                    let isUnknown = linkDown || (!internetStatusGood && !internetWarn)
                     hopNode(
                         icon: "globe",
                         isWarning: internetWarn,
                         statusGood: internetStatusGood,
-                        flag: linkDown ? nil : countryFlag,
-                        state: linkDown || (!internetStatusGood && !internetWarn) ? .unknown : .normal
+                        flag: isUnknown ? nil : countryFlag,
+                        state: isUnknown ? .unknown : .normal
                     )
 
                     Text("Internet")
@@ -780,6 +781,11 @@ struct ConnectionRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                                 .lineLimit(1)
                         }
+                    } else if isUnknown {
+                        Text(internetDetail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                            .lineLimit(1)
                     } else {
                         if let countryName, !countryName.isEmpty {
                             Text(countryName)
@@ -1133,8 +1139,13 @@ struct MenuSpeedView: View {
 }
 
 struct MenuActivitySnippetView: View {
+    @Environment(HopwatchCoordinator.self) private var coordinator
     let event: ActivityEntry?
     let onOpenActivity: () -> Void
+
+    private func severity(for entry: ActivityEntry) -> String? {
+        entry.ruleID.flatMap { coordinator.rulesCatalog.catalog?[$0]?.severity }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1155,7 +1166,7 @@ struct MenuActivitySnippetView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(EventStyle.tint(for: event.kind))
+                            .fill(EventStyle.tint(for: event.kind, severity: severity(for: event)))
                             .frame(width: 7, height: 7)
                         Text(event.displaySummary)
                             .font(.system(size: 11, weight: .semibold))

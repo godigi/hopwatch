@@ -58,9 +58,18 @@ enum ArrivalState: Codable, Sendable, Equatable {
             return true
         case .checking(_, let startedAt):
             return now.timeIntervalSince(startedAt) > Self.stallWindow
-        case .checked, .declined:
+        case .declined(let depth, let reason, _):
+            // When declined for health, we still want a full check once the
+            // network is healthy so throughput and bufferbloat are measured.
+            return depth != .full && reason == .unhealthy
+        case .checked:
             return false
         }
+    }
+
+    var isDeclined: Bool {
+        if case .declined = self { return true }
+        return false
     }
 
     var debugLabel: String {

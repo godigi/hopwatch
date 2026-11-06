@@ -179,6 +179,7 @@ final class HopwatchCoordinator {
     private var pendingArrivalNetworkID: String?
     private var pendingArrivalDepth: ArrivalDepth?
     private var pendingArrivalDecline: DeclineReason?
+    private var heartbeatSeedMinSeq: Int = 0
     /// The severity seen on the previous sample, used by `handleSample` to
     /// detect the ok/info → warn/critical edge that auto-starts an
     /// investigation burst. Stored on the coordinator rather than read back
@@ -417,14 +418,15 @@ final class HopwatchCoordinator {
         applyActivationPolicy()
     }
 
-    private func applyActivationPolicy() {
-        let regular = openWindowCount > 0
+    func applyActivationPolicy() {
+        let hasWindows = openWindowCount > 0
+        let regular = hasWindows || Defaults.showInDock
         NSApp?.setActivationPolicy(regular ? .regular : .accessory)
         // Activating on open is what makes the window arrive in front
         // rather than behind whatever was frontmost, and is also the nudge
         // the app switcher needs to pick up a policy that just changed to
         // `.regular` at runtime.
-        if regular { NSApp?.activate(ignoringOtherApps: true) }
+        if hasWindows { NSApp?.activate(ignoringOtherApps: true) }
     }
 
     // MARK: - Cold-launch hydration
@@ -534,7 +536,7 @@ final class HopwatchCoordinator {
             // throughput on a cold launch's first screen. With no network
             // identified yet there is nothing to scope to, and `handleSample`
             // calls `adoptStoredSpeedTest(for:)` the moment one is.
-            let current = explicitNetworkID ?? confirmedNetworkID ?? resolvedNetworkID(for: monitor.latest) ?? monitor.latest?.network.historyJoinID
+            let current = explicitNetworkID ?? resolvedNetworkID(for: monitor.latest) ?? monitor.latest?.network.historyJoinID
             if let current { adoptStoredSpeedTest(for: current) }
         }
     }
@@ -725,6 +727,18 @@ final class HopwatchCoordinator {
                 lastNetworkID = id
                 return false
             }
+            // When Location Services permission is granted while already connected to a Wi-Fi
+            // network whose identity had fallen back to a private gateway key (`gw:<ip>`),
+            // `resolvedNetworkID` upgrades to `ssid:<name>` on the exact same gateway session.
+            // Adopt the upgraded SSID identity in place without invalidating the active session.
+            if previous.hasPrefix("gw:"), id.hasPrefix("ssid:"),
+               sample.network.historyJoinID == previous {
+                lastNetworkID = id
+                if arrivalNetworkID == previous {
+                    arrivalNetworkID = id
+                }
+                return false
+            }
             invalidateCurrentConnection(preserving: sample)
         }
         lastNetworkID = id
@@ -791,7 +805,8 @@ final class HopwatchCoordinator {
         heartbeat.setFiltered(isTargetFiltered)
 
         if heartbeat.beats.isEmpty {
-            heartbeat.seedFromSamples(currentSamples)
+            let eligible = currentSamples.filter { ($0.seq ?? 0) >= heartbeatSeedMinSeq }
+            heartbeat.seedFromSamples(eligible)
         }
 
         // The first cycle of a monitor process records monitor-started, matching
@@ -811,7 +826,7 @@ final class HopwatchCoordinator {
                 continuesPrevious: NetworkEvent.continuesPrevious(
                     appRestarted: monitor.childContinuesPrevious,
                     previousNetwork: previousNetworkID,
-                    currentNetwork: sample.network.historyJoinID))
+                    currentNetwork: resolvedNetworkID(for: sample) ?? sample.network.historyJoinID))
         }
 
         for change in sample.changes {
@@ -949,9 +964,15 @@ final class HopwatchCoordinator {
             return
 
         case .full:
-            attemptArrival(id: targetID, depth: .full, reason: "new network")
+            let reason = state.isDeclined ? "new network (now healthy)" : "new network"
+            attemptArrival(id: targetID, depth: .full, reason: reason)
 
         case .quick(let why):
+            // If already declined for this reason at quick depth, do not re-run
+            // the quick check; wait until the network becomes healthy.
+            if case .declined(let d, let r, _) = state, d == .quick, r == why {
+                return
+            }
             // A decision, not a failure: recorded so it does not retry,
             // and rendered as a button rather than a spinner.
             attemptArrival(id: targetID, depth: .quick,
@@ -987,6 +1008,8 @@ final class HopwatchCoordinator {
         pendingArrivalNetworkID = id
         pendingArrivalDepth = depth
         pendingArrivalDecline = declineWith
+        heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
+        heartbeat.reset()
     }
 
     /// Stand in for the arrival state the monitor would have established,
@@ -1569,8 +1592,7 @@ final class HopwatchCoordinator {
                 monitor.start()
             }
         }
-        log.debug("network event — refreshing history and forcing monitor refresh")
-        monitor.forceRefresh()
+        log.debug("network event — refreshing history")
         Task { await history.load() }
         updateChecker.performDailyCheck()
     }
@@ -1601,6 +1623,7 @@ final class HopwatchCoordinator {
         lastSeverity = "ok"
         previousActiveAlerts = [:]
         alerts.invalidateConnection()
+        heartbeatSeedMinSeq = 0
         heartbeat.reset()
         notifications.clearAnnouncedFaults()
         dismissActiveResolution()
@@ -1678,6 +1701,11 @@ final class HopwatchCoordinator {
         progress.reset()
         let generation = connectionGeneration
         let scanNetwork = confirmedNetworkID
+        let wasArrival = isArrivalCheck
+        if wasArrival {
+            heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
+            heartbeat.reset()
+        }
 
         // Both halves matter. Pausing the monitor keeps the scan's speed
         // test and bufferbloat probe from poisoning the samples and
@@ -1706,6 +1734,10 @@ final class HopwatchCoordinator {
                 // must not go on saying it is checking once the child is gone.
                 self.alerts.scanEnded()
                 self.monitor.resume(reason: Self.scanPauseReason)
+                if wasArrival {
+                    self.heartbeatSeedMinSeq = (self.monitor.latest?.seq ?? 0) + 1
+                    self.heartbeat.reset()
+                }
                 self.heartbeat.resume()
                 self.syncAlertPauseState()
                 // Whatever happened — a clean exit, a crash, Cancel — the
@@ -2171,6 +2203,34 @@ final class HopwatchCoordinator {
                 await self?.history.load()
             }
         }
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.evaluateBatteryPauseState()
+                if Defaults.batterySaverCadence {
+                    self?.applyCadenceSettings()
+                }
+            }
+        }
+    }
+
+    /// Evaluates whether background monitoring and ping heartbeats should be paused
+    /// due to low battery (< 20% while unplugged) when `Defaults.pauseOnBattery` is enabled.
+    func evaluateBatteryPauseState() {
+        let shouldPause = Defaults.pauseOnBattery && PowerSourceHelper.isLowBattery
+        if shouldPause {
+            monitor.pause(reason: "low battery")
+            heartbeat.pause()
+        } else {
+            monitor.resume(reason: "low battery")
+            if !monitor.isPausedForAnyReason {
+                heartbeat.resume()
+            }
+        }
+        syncAlertPauseState()
     }
 
     // MARK: - Presentation helpers
@@ -2597,6 +2657,58 @@ final class HopwatchCoordinator {
         )
     }
 
+    /// The rules actively considered firing for suitability and experience evaluation.
+    ///
+    /// When the monitor is actively running and producing samples for the current connection,
+    /// it is the real-time authority for monitor-tracked rules (e.g. SOCK-1, CONN-1, D1, N1, G1, P1).
+    /// If such a rule appeared in a completed diagnostic run snapshot from minutes ago, but the live
+    /// monitor has since cleared it or does not report it, the stale snapshot rule must not poison
+    /// the live suitability grid (e.g. claiming "Browsing: Offline" when the connection is live and healthy).
+    /// Conversely, scan-only rules (e.g. bufferbloat BL-1, double NAT N4, MTU M1) that the monitor
+    /// does not evaluate are preserved from the fresh snapshot until the next scan.
+    var activeFiredRules: Set<String> {
+        let liveRules = Set(liveSample?.status.rules ?? [])
+        guard let snap = freshNetworkRunSnapshot else { return liveRules }
+        let snapRules = snap.diagnosis.compactMap(\.rule)
+        guard liveSample != nil else { return Set(snapRules) }
+
+        let catalog = rulesCatalog.catalog
+        var combined = liveRules
+        for ruleID in snapRules {
+            let scope = catalog?[ruleID]?.scope
+            let isMonitored = scope == "both" || scope == "monitor"
+                || ruleID == "SOCK-1" || ruleID == "CONN-1" || ruleID == "HOG-1"
+                || ruleID.hasPrefix("D") || ruleID.hasPrefix("P")
+                || ruleID.hasPrefix("G") || ruleID.hasPrefix("N")
+                || ruleID.hasPrefix("WJ") || ruleID.hasPrefix("CP")
+            if !isMonitored {
+                combined.insert(ruleID)
+            }
+        }
+        return combined
+    }
+
+    /// Subtitle describing the in-flight diagnostic or arrival scan phase.
+    /// Returns nil if not scanning or if no specific phase detail is active.
+    var activeScanProgressSubtitle: String? {
+        guard isScanning else { return nil }
+        if progress.isSpeedTesting, let speed = progress.speed {
+            let arrow = speed.directionSymbol.map { "\($0) " } ?? ""
+            let stage = speed.stage.isEmpty ? "Speed test" : PhaseLabel.humanised(speed.stage)
+            if let mbps = speed.mbps {
+                return String(format: "%@%@ · %.1f Mbps", arrow, stage, mbps)
+            }
+            return "\(arrow)\(stage)…"
+        }
+        if let bb = progress.bufferbloat, bb.stage != "" {
+            return "Testing bufferbloat & latency under load…"
+        }
+        if let running = progress.runningPhase {
+            return "\(running.label)…"
+        }
+        return nil
+    }
+
     /// Which loss legs are unmeasurable by ping, from the live sample and any
     /// run diagnosis in view. Pass this to `SuitabilityEngine` alongside
     /// `effectiveLoss` so "filtered, unknown" is not mistaken for "not yet
@@ -2604,8 +2716,7 @@ final class HopwatchCoordinator {
     var lossFiltering: EffectiveLoss.Filtering {
         EffectiveLoss.filtering(
             icmpFilteredFlag: liveSample?.status.icmpFiltered == true,
-            ruleIDs: (liveSample?.status.rules ?? [])
-                + (freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) ?? [])
+            ruleIDs: Array(activeFiredRules)
         )
     }
 

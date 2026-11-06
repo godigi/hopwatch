@@ -156,6 +156,8 @@ import Testing
         )
         #expect(w6.culprit == .wifi)
         #expect(w6.wifiHealth == .warning)
+        #expect(w6.headline == "Connected to 2.4 GHz Wi-Fi Band")
+        #expect(w6.badgeTitle == "Advisory: 2.4 GHz Band")
         #expect(w6.reassurance.contains("slower 2.4 GHz band"))
 
         // WS-1: Crowded Wi-Fi channel with zero packet loss

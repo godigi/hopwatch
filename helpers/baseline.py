@@ -170,7 +170,20 @@ def evaluate(current: dict, history: list[dict],
         cur = get_nested(current, path)
         if cur is None:
             continue
-        hist = [get_nested(r, path) for r in history]
+        hist_records = history
+        if path == "gateway.loss_pct":
+            if any(isinstance(d, dict) and d.get("rule") == "TCP-1"
+                   for d in current.get("diagnosis") or []):
+                continue
+            hist_records = [r for r in history if not any(isinstance(d, dict) and d.get("rule") == "TCP-1"
+                                                          for d in r.get("diagnosis") or [])]
+        elif path == "internet.loss_pct":
+            if any(isinstance(d, dict) and d.get("rule") == "ICMP-1"
+                   for d in current.get("diagnosis") or []):
+                continue
+            hist_records = [r for r in history if not any(isinstance(d, dict) and d.get("rule") == "ICMP-1"
+                                                          for d in r.get("diagnosis") or [])]
+        hist = [get_nested(r, path) for r in hist_records]
         hist_clean: list[float | int | str] = [v for v in hist if v is not None]
         if not hist_clean:
             continue

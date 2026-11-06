@@ -38,6 +38,7 @@ struct SettingsView: View {
     @State private var alertSearchText = ""
     @State private var selectedAlertCategory: AlertCategory = .all
     @State private var copiedPathToast: String? = nil
+    @State private var copiedReportsPathToast: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,11 +71,7 @@ struct SettingsView: View {
             await coordinator.alerts.refreshAuthorization()
             coordinator.locationPermissions.refresh()
         }
-        .onAppear {
-            coordinator.windowAppeared()
-        }
         .onDisappear {
-            coordinator.windowDisappeared()
             coordinator.applyCadenceSettings()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -312,6 +309,9 @@ struct SettingsView: View {
                         description: "Relaxes background sampling interval to 12s on battery when connection is stable, immediately resuming fast probing upon any packet loss or latency degradation.",
                         isOn: $appSettings.batterySaverCadence
                     )
+                    .onChange(of: appSettings.batterySaverCadence) { _, _ in
+                        coordinator.applyCadenceSettings()
+                    }
 
                     Divider()
 
@@ -328,6 +328,9 @@ struct SettingsView: View {
                         description: "Temporarily suspends background network monitoring when your battery drops below 20%.",
                         isOn: $appSettings.pauseOnBattery
                     )
+                    .onChange(of: appSettings.pauseOnBattery) { _, _ in
+                        coordinator.evaluateBatteryPauseState()
+                    }
                 }
             }
 
@@ -377,6 +380,9 @@ struct SettingsView: View {
                         description: "Keeps Hopwatch accessible in your macOS Dock and ⌘⇥ App Switcher at all times.",
                         isOn: $appSettings.showInDock
                     )
+                    .onChange(of: appSettings.showInDock) { _, _ in
+                        coordinator.applyActivationPolicy()
+                    }
 
                     Divider()
 
@@ -1003,9 +1009,17 @@ struct SettingsView: View {
                         Spacer()
 
                         HStack(spacing: 8) {
-                            Button("Copy Path") {
+                            Button {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(reportsDirectoryURL.path, forType: .string)
+                                copiedReportsPathToast = "Copied!"
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedReportsPathToast = nil }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: copiedReportsPathToast != nil ? "checkmark" : "doc.on.doc")
+                                    Text(copiedReportsPathToast ?? "Copy Path")
+                                }
+                                .font(.system(size: 11))
                             }
                             .controlSize(.small)
 
@@ -1177,10 +1191,7 @@ struct SettingsView: View {
                     SettingsToggleRow(
                         title: "Automatically download and install updates in background",
                         description: "Pre-caches updates quietly so restarting Hopwatch is instantaneous.",
-                        isOn: Binding(
-                            get: { Defaults.autoDownloadAndInstallUpdates },
-                            set: { Defaults.autoDownloadAndInstallUpdates = $0 }
-                        )
+                        isOn: $appSettings.autoDownloadAndInstallUpdates
                     )
                 }
             }

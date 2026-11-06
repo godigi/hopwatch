@@ -330,7 +330,9 @@ final class AlertEngine {
     private func gatewayChangeHolds(_ def: AlertDefinition,
                                     sample: MonitorSample,
                                     previous: MonitorSample?) -> Bool {
-        guard let ssid = sample.link.ssid, !ssid.isEmpty else {
+        let ssid = HopwatchCoordinator.readableSSID(sample.link.ssid)
+            ?? HopwatchCoordinator.readableSSID(liveSSID())
+        guard let ssid, !ssid.isEmpty else {
             pendingTransition.removeValue(forKey: def.id)
             return false
         }
@@ -349,8 +351,16 @@ final class AlertEngine {
             pendingTransition.removeValue(forKey: def.id)
         }
 
+        let prevSSID = previous.flatMap { prev -> String? in
+            if let s = HopwatchCoordinator.readableSSID(prev.link.ssid) { return s }
+            // When SSID in the raw sample was redacted, treat as the same Wi-Fi network
+            // if both samples share the same non-empty network ID or both lacked an inline SSID.
+            if prev.network.id != nil && prev.network.id == sample.network.id { return ssid }
+            return nil
+        }
+
         guard let prev = previous,
-              let prevSSID = prev.link.ssid, prevSSID == ssid,
+              prevSSID == ssid,
               let prevMAC = prev.link.gatewayMAC, !prevMAC.isEmpty,
               let mac, prevMAC != mac else { return false }
         pendingTransition[def.id] = .gatewayChanged(ssid: ssid, knownMAC: prevMAC)
@@ -561,6 +571,9 @@ final class AlertEngine {
                   now.timeIntervalSince(last) < def.cooldown {
             // Still inside the cooldown: track it as active so the
             // dropdown shows it, but do not interrupt again.
+            // Clear any lingering "— resolved" banner so Notification Center
+            // does not claim the fault is resolved while it is active again.
+            notificationManager.clearResolvedNotification(id: def.id)
             //
             // No scan runs for this raise (the handler below is skipped),
             // so there is nothing a holding line could be waiting for: it

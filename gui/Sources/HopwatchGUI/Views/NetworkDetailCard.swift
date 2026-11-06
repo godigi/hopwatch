@@ -284,10 +284,17 @@ struct NetworkDetailCard: View {
 
     private func latencyDeltaText(_ comp: NetworkComparison) -> String? {
         guard let delta = comp.gatewayLatencyDeltaMs else { return nil }
-        let rounded = abs(round(delta))
-        if delta <= -3 { return "\(Int(rounded)) ms faster" }
-        if delta >= 5 { return "\(Int(rounded)) ms slower" }
-        return "Typical"
+        let rounded = max(1, Int(abs(round(delta))))
+        switch comp.gatewayLatencyVerdict {
+        case .faster:
+            return "\(rounded) ms faster"
+        case .slower, .degraded:
+            return "\(rounded) ms slower"
+        case .normal:
+            if delta <= -3 { return "\(rounded) ms faster" }
+            if delta >= 5 { return "\(rounded) ms slower" }
+            return "Typical"
+        }
     }
 
     private func speedRatioText(_ comp: NetworkComparison) -> String? {

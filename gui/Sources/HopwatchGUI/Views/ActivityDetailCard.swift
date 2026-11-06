@@ -102,7 +102,7 @@ struct ActivityDetailCard: View {
     // MARK: - Diagnostic Context Section
     @ViewBuilder
     private var diagnosticContextSection: some View {
-        if entry.ruleID == "HOG-1" || !entry.trafficEvidence.isEmpty {
+        if !entry.trafficEvidence.isEmpty {
             hogDiagnosticView
         } else if entry.kind == "public-ip-changed" || entry.summary.contains("Public IP") {
             publicIPDiagnosticView
@@ -203,7 +203,7 @@ struct ActivityDetailCard: View {
                     }
                 }
 
-                if let to = entry.toValue ?? coordinator.currentPublicInfo?.ip {
+                if let to = entry.toValue {
                     GridRow {
                         Text("New Public IP:")
                             .font(.caption)
@@ -214,7 +214,7 @@ struct ActivityDetailCard: View {
                     }
                 }
 
-                if let isp = entry.extraDetail ?? coordinator.currentPublicInfo?.isp {
+                if let isp = entry.extraDetail {
                     GridRow {
                         Text("Internet Provider:")
                             .font(.caption)
@@ -265,11 +265,28 @@ struct ActivityDetailCard: View {
         if let network = coordinator.wifiDisplayName, !network.isEmpty {
             lines.append("- **Network:** \(network)")
         }
-        if let isp = entry.extraDetail ?? coordinator.currentPublicInfo?.isp {
+        if let extra = entry.extraDetail, !extra.isEmpty {
+            if extra.hasPrefix("IP: ") {
+                lines.append("- **Public IP:** \(extra.dropFirst(4))")
+            } else {
+                lines.append("- **Service Provider (ISP):** \(extra)")
+            }
+        } else if let isp = coordinator.currentPublicInfo?.isp, !isp.isEmpty {
             lines.append("- **Service Provider (ISP):** \(isp)")
         }
         if let from = entry.fromValue, let to = entry.toValue {
-            lines.append("- **Public IP Transition:** `\(from)` → `\(to)`")
+            let transitionLabel: String
+            switch entry.kind {
+            case "isp-changed":
+                transitionLabel = "ISP Transition"
+            case "country-changed":
+                transitionLabel = "Country Transition"
+            case "wifi-network-changed":
+                transitionLabel = "Wi-Fi Transition"
+            default:
+                transitionLabel = "Public IP Transition"
+            }
+            lines.append("- **\(transitionLabel):** `\(from)` → `\(to)`")
         }
         for ev in entry.trafficEvidence {
             lines.append("- **Traffic Detail:** \(ev.detail)")

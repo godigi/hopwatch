@@ -195,9 +195,12 @@ final class PingHeartbeat: @unchecked Sendable {
         let recent = samples.suffix(Self.maxBeats)
         for sample in recent {
             if sample.status.paused { continue }
-            let rtt = sample.internet.rttAvgMs
-            let loss = sample.internet.lossPct ?? 0
-            let isMiss = !sample.link.up || (loss >= 100) || (rtt == nil)
+            let isGatewayTarget = (sample.link.gateway != nil && !sample.link.gateway!.isEmpty && target == sample.link.gateway)
+            let rtt = isGatewayTarget ? sample.gateway.rttAvgMs : sample.internet.rttAvgMs
+            let loss = (isGatewayTarget ? sample.gateway.lossPct : sample.internet.lossPct) ?? 0
+            // Unmeasured cycles where the link is up and loss < 100 must not fabricate packet drops.
+            if sample.link.up && loss < 100 && rtt == nil { continue }
+            let isMiss = !sample.link.up || (loss >= 100)
             let beat = PingBeat(
                 timestamp: sample.timestamp,
                 latencyMs: isMiss ? nil : rtt,
@@ -292,18 +295,37 @@ final class PingHeartbeat: @unchecked Sendable {
 
     // MARK: - Process Execution
 
+    /// Selects `/sbin/ping6` for IPv6 targets (containing `:`) and `/sbin/ping` for IPv4 targets.
+    nonisolated static func commandArguments(for target: String) -> (executable: String, arguments: [String]) {
+        if target.contains(":") {
+            return (
+                "/sbin/ping6",
+                [
+                    "-n",       // Numeric output only, avoid DNS reverse lookups
+                    "-i", "1",  // 1-second heartbeat interval
+                    target
+                ]
+            )
+        }
+        return (
+            "/sbin/ping",
+            [
+                "-n",           // Numeric output only, avoid DNS reverse lookups
+                "-i", "1",      // 1-second heartbeat interval
+                "-W", "1000",   // 1000ms reply timeout
+                target
+            ]
+        )
+    }
+
     private func spawnPingProcess() {
         guard !isFiltered else { return }
         terminatePingProcess()
 
+        let cmd = Self.commandArguments(for: target)
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/sbin/ping")
-        proc.arguments = [
-            "-n",           // Numeric output only, avoid DNS reverse lookups
-            "-i", "1",      // 1-second heartbeat interval
-            "-W", "1000",   // 1000ms reply timeout
-            target
-        ]
+        proc.executableURL = URL(fileURLWithPath: cmd.executable)
+        proc.arguments = cmd.arguments
 
         let pipe = Pipe()
         stdoutPipe = pipe

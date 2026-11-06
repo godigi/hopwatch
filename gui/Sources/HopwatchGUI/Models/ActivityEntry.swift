@@ -120,6 +120,11 @@ extension ActivityEntry {
         var open: [Key: Episode] = [:]
         var loose: [NetworkEvent] = []
 
+        func canonicalNet(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            return NetworkIdentity.canonical(raw) ?? raw
+        }
+
         for event in chronological {
             if event.kind == "monitor-started" {
                 // A restart this app made itself, while running, on the same
@@ -147,26 +152,16 @@ extension ActivityEntry {
                 continue
             }
 
-            // Auto-close any open episodes from a departed network when events occur on a different network.
-            if let curNet = event.network, !curNet.isEmpty {
-                let departedKeys = open.keys.filter { $0.network != nil && $0.network != curNet }
-                for depKey in departedKeys {
-                    if var existing = open.removeValue(forKey: depKey) {
-                        existing.end = event.date
-                        existing.isLowerBound = true
-                        episodes.append(existing)
-                    }
-                }
-            }
+            let net = canonicalNet(event.network)
 
             if event.kind == "rule-updated", let ruleID = event.ruleID {
-                let key = Key(network: event.network, ruleID: ruleID)
+                let key = Key(network: net, ruleID: ruleID)
                 if let evidence = event.evidence, open[key] != nil {
                     open[key]?.trafficEvidence.append(evidence)
                     open[key]?.lastSeen = event.date
                 } else if let evidence = event.evidence {
                     // The opening event may precede this view's rolling window.
-                    open[key] = Episode(ruleID: ruleID, network: event.network,
+                    open[key] = Episode(ruleID: ruleID, network: net,
                         kind: "rule-fired", summary: event.summary, start: event.date,
                         end: nil, lastSeen: event.date, isLowerBound: true,
                         trafficEvidence: [evidence])
@@ -182,7 +177,7 @@ extension ActivityEntry {
                 continue
             }
 
-            let key = Key(network: event.network, ruleID: ruleID)
+            let key = Key(network: net, ruleID: ruleID)
             switch event.kind {
             case "rule-fired":
                 if open[key] != nil {
@@ -194,7 +189,7 @@ extension ActivityEntry {
                     if let evidence = event.evidence { open[key]?.trafficEvidence.append(evidence) }
                     continue
                 }
-                open[key] = Episode(ruleID: ruleID, network: event.network, kind: event.kind,
+                open[key] = Episode(ruleID: ruleID, network: net, kind: event.kind,
                                     summary: event.summary, start: event.date,
                                     end: nil, lastSeen: event.date,
                                     isLowerBound: false,
@@ -224,7 +219,7 @@ extension ActivityEntry {
                     // then leaves `totalDuration` nil, so the row states the
                     // resolution and invents no duration for it.
                     episodes.append(Episode(
-                        ruleID: ruleID, network: event.network, kind: event.kind,
+                        ruleID: ruleID, network: net, kind: event.kind,
                         summary: event.summary, start: event.date,
                         end: event.date, lastSeen: event.date,
                         isLowerBound: false,
@@ -235,15 +230,8 @@ extension ActivityEntry {
                 break
             }
         }
-        // Whatever is still firing on the active connection.
-        let lastKnownNetwork = chronological.last?.network
-        for var episode in open.values {
-            if let lastKnownNetwork, let epNet = episode.network, !epNet.isEmpty, epNet != lastKnownNetwork {
-                episode.end = episode.lastSeen
-                episode.isLowerBound = true
-            }
-            episodes.append(episode)
-        }
+        // Whatever is still firing.
+        for episode in open.values { episodes.append(episode) }
 
         return group(episodes: episodes, loose: loose, calendar: calendar)
     }

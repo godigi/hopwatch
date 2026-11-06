@@ -1432,7 +1432,13 @@ collect_parallel() {
     vars="$PAR_TMP/$name.vars"
     if [ -s "$out" ]; then
       if _should_print_stdout; then
-        cat "$out"
+        if [ "${OPT_REDACT:-0}" -eq 1 ]; then
+          while IFS= read -r line || [ -n "$line" ]; do
+            _redact_line "$line"
+          done < "$out"
+        else
+          cat "$out"
+        fi
       fi
       sed $'s/\033\\[[0-9;]*m//g' "$out" >> "$LOG" 2>/dev/null || true
     fi

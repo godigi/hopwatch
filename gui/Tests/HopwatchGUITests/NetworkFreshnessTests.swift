@@ -250,4 +250,78 @@ import Testing
         #expect(store.canonicalID("gw:192.168.1.1") == "ssid:Circle 94_5G")
         #expect(store.canonicalID("ssid:Circle 94_5G") == "ssid:Circle 94_5G")
     }
+
+    @Test @MainActor func arrivalCheckResetsHeartbeatAndDoesNotShowStaleAssociationMisses() {
+        let coordinator = HopwatchCoordinator()
+        // Simulate association transient missed packets
+        coordinator.heartbeat.adoptTestBeat(latencyMs: nil, isMiss: true, seq: 1)
+        coordinator.heartbeat.adoptTestBeat(latencyMs: nil, isMiss: true, seq: 2)
+        #expect(coordinator.heartbeat.missCount == 2)
+
+        // Invalidating connection or starting arrival check resets heartbeat
+        coordinator.invalidateCurrentConnection()
+        #expect(coordinator.heartbeat.beats.isEmpty)
+        #expect(coordinator.heartbeat.missCount == 0)
+    }
+
+    @Test @MainActor func staleScanMonitoredRuleDoesNotPoisonActiveFiredRulesWhenLiveMonitorIsClean() {
+        let coordinator = HopwatchCoordinator()
+        coordinator.monitor.adoptGallerySample(sample(network: "ssid:home"))
+
+        var snapshot = RunSnapshot()
+        snapshot.network = .init(id: "ssid:home", groupId: "ssid:home")
+        snapshot.diagnosis = [
+            .init(severity: "critical", rule: "SOCK-1", summary: "Cannot open connections"),
+            .init(severity: "warn", rule: "BL-1", summary: "Bufferbloat under load")
+        ]
+        let result = RunResult(snapshot: snapshot, rawJSON: "{}", exitCode: 0,
+                               startedAt: Date().addingTimeInterval(-60), finishedAt: Date())
+        coordinator.adoptSessionStateForTesting(latestRun: result,
+            speed: nil, speedAt: nil, speedNetwork: nil)
+
+        // Live monitor has no rules (clean connection)
+        #expect(coordinator.liveSample?.status.rules.isEmpty == true)
+
+        // Stale monitor-scoped rule SOCK-1 should be evicted from active fired rules,
+        // while scan-only rule BL-1 (bufferbloat) is preserved for suitability.
+        let active = coordinator.activeFiredRules
+        #expect(!active.contains("SOCK-1"))
+        #expect(active.contains("BL-1"))
+    }
+
+    @Test func relativeTimeNeverRendersFutureTenseForJustNowOrClockSkew() {
+        let now = Date()
+        #expect(RelativeTime.string(from: now) == "just now")
+        #expect(RelativeTime.string(from: now.addingTimeInterval(0.5)) == "just now")
+        #expect(RelativeTime.string(from: now.addingTimeInterval(5.0)) == "just now")
+
+        let past = now.addingTimeInterval(-15)
+        let formatted = RelativeTime.string(from: past)
+        #expect(formatted != "in 0s")
+        #expect(formatted.contains("ago"))
+    }
+
+    @Test @MainActor func locationPermissionUpgradeFromGatewayToSSIDDoesNotInvalidateSession() {
+        let coordinator = HopwatchCoordinator()
+
+        var gwSample = MonitorSample()
+        gwSample.ts = ISO8601DateFormatter().string(from: Date())
+        gwSample.link.up = true
+        gwSample.link.type = "wifi"
+        gwSample.link.gateway = "192.168.1.1"
+        gwSample.network.id = "gw:192.168.1.1"
+        gwSample.network.groupId = "gw:192.168.1.1"
+
+        // 1. Initial sample before Location Services is granted
+        let firstChange = coordinator.reconcileNetworkIdentity(for: gwSample)
+        #expect(firstChange == true)
+        coordinator.heartbeat.adoptTestBeat(latencyMs: 14.0, isMiss: false, seq: 1)
+        #expect(coordinator.heartbeat.beats.count == 1)
+
+        // 2. Location Services is granted on the same gateway -> liveSSID is now known
+        coordinator.setLiveSSIDForTesting("OfficeWiFi")
+        let upgradedChange = coordinator.reconcileNetworkIdentity(for: gwSample)
+        #expect(upgradedChange == false)
+        #expect(coordinator.heartbeat.beats.count == 1)
+    }
 }

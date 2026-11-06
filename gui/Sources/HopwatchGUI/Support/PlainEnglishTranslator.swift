@@ -227,7 +227,13 @@ public enum PlainEnglishTranslator {
         if lower.contains("severe packet loss") || lower.contains("severe internet loss") || lower.contains("heavy packet loss") {
             return curatedRules["L1"]
         }
-        if lower.contains("packet loss") || lower.contains("loss") || lower.contains("dropped packets") {
+        let hasBenignLossPhrase = lower.contains("no packet loss")
+            || lower.contains("0% packet loss")
+            || lower.contains("0.0% packet loss")
+            || lower.contains("without packet loss")
+            || lower.contains("without loss")
+            || lower.contains("zero packet loss")
+        if !hasBenignLossPhrase && (lower.contains("packet loss") || lower.contains("dropped packets")) {
             return curatedRules["L2"]
         }
         if lower.contains("internet unreachable") || lower.contains("outage") || lower.contains("no internet") || lower.contains("offline") {

@@ -199,7 +199,7 @@ struct RunReportView: View {
             .disabled(didCopySupport)
             .help("Copies a non-technical summary suitable for front desk, host, or network support.")
 
-            Text("Plain text, with your network name, IP addresses and location masked.")
+            Text("Export a redacted report or copy a plain-English summary for support / IT.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)

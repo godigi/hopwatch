@@ -136,8 +136,12 @@ struct ActivityView: View {
     }
 
     private func isIssue(_ entry: ActivityEntry) -> Bool {
-        if entry.kind == "gap" || entry.kind == "wifi-roamed" { return false }
-        if entry.ruleID != nil { return true }
+        if entry.kind == "gap" || entry.kind == "wifi-roamed" || entry.kind == "rule-cleared" { return false }
+        if let ruleID = entry.ruleID {
+            let sev = coordinator.rulesCatalog.catalog?[ruleID]?.severity
+            if sev == "info" { return false }
+            return true
+        }
         if entry.kind == "rule-fired" || entry.kind == "alert" || entry.kind == "vpn-disconnected" {
             return true
         }

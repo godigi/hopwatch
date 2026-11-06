@@ -143,7 +143,7 @@ enum NetworkIdentity {
     static func fold(_ strong: [String: [String]], weak: Set<String>) -> [String: String] {
         var claims: [String: Set<String>] = [:]
         for (mac, used) in strong {
-            for key in used where weak.contains(key) && !isPrivateOrLocalGateway(key) {
+            for key in used where weak.contains(key) {
                 claims[key, default: []].insert(mac)
             }
         }

@@ -264,17 +264,13 @@ THRESH_SOCK_HOLDER_SHARE_PCT=50
 # While a first failure is waiting for its confirmation the monitor
 # re-probes at the fast cadence rather than waiting out the 60 s medium tier.
 #
-# THRESH_CONN_HOLDER_MIN_FLOWS: the floor under THRESH_SOCK_HOLDER_SHARE_PCT
-# when naming the app. SOCK-1 needs no floor because exhausting ephemeral
-# ports takes thousands of sockets; CONN-1 has no such tell, so "holds most of
-# the UDP sockets and half-open connections" is true of any browser on a quiet
-# Mac (a handful of QUIC sockets is most of a handful). A torrent client that
-# floods a router's connection table holds hundreds (measured: 210 UDP
-# sockets and 67 connections stuck in SYN_SENT). Below this the top holder is
-# just a busy app and telling the user to quit it would be a guess.
+# THRESH_CONN_HOLDER_MIN_FLOWS & THRESH_CONN_HOLDER_SHARE_PCT: the floor
+# when naming the app. An app holding at least this many combined UDP/TCP flows
+# and this share of system flows is identified as the culprit.
 THRESH_CONN_RESOLVERS_TOGETHER=2
 THRESH_MON_CONN_CONFIRM_CYCLES=2
-THRESH_CONN_HOLDER_MIN_FLOWS=100
+THRESH_CONN_HOLDER_MIN_FLOWS=40
+THRESH_CONN_HOLDER_SHARE_PCT=40
 
 # HOG-1 — one app on this Mac is using up the connection. Judged from a
 # `nettop` capture (see lib/common.sh, hog_capture_evidence), and only after

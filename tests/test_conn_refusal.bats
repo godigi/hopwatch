@@ -267,6 +267,34 @@ stub_flood() {
   [ -z "$REPAIR_OFFERS" ]
 }
 
+@test "CONN-1: an app holding >= 40 flows with >= 40% share is named as culprit" {
+  reset_state; flaky_dns_pair
+  netstat() {
+    case "$*" in
+      *udp*) for i in $(seq 1 50); do printf 'udp4 0 0 *.%s *.*\n' "$i"; done ;;
+      *tcp*) for i in $(seq 1 45); do printf 'tcp4 0 0 10.0.0.5.%s 1.2.3.4.6881 SYN_SENT\n' "$i"; done ;;
+    esac
+  }
+  lsof() {
+    printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
+    case "$*" in
+      *SYN_SENT*) for i in $(seq 1 42); do printf 'node 19668 me %su IPv4 0x1 0t0 TCP 10.0.0.5:%s->1.2.3.4:6881 (SYN_SENT)\n' "$i" "$((50000 + i))"; done ;;
+      *UDP*)      for i in $(seq 1 5); do printf 'node 19668 me %su IPv4 0x1 0t0 UDP *:%s\n' "$i" "$((40000 + i))"; done
+                  for i in $(seq 1 20); do printf 'Google\\x20Chrome 900 me %su IPv4 0x1 0t0 UDP *:%s\n' "$i" "$((30000 + i))"; done ;;
+    esac
+  }
+  lsappinfo() {
+    case "$*" in
+      *" 19668") printf '"CFBundleIdentifier"="com.stremio.app"\n"LSDisplayName"="Stremio"\n"ApplicationType"="Foreground"\n' ;;
+      *)         printf '"CFBundleIdentifier"=[ NULL ]\n"ApplicationType"=[ NULL ]\n' ;;
+    esac
+  }
+  scan
+  local t; t="$(diag_text_for CONN-1)"
+  [[ "$t" == *"Stremio has 47 connections open or still trying to connect"* ]]
+  [[ "$REPAIR_OFFERS" == CONN-1$'\x1f'quit-app$'\x1f'"Quit Stremio"$'\x1f'* ]]
+}
+
 @test "CONN-1: a big holder with a small share of everything is not named either" {
   reset_state; flaky_dns_pair; stub_flood
   netstat() {

@@ -993,6 +993,21 @@ import Testing
             effectiveLoss: 0.0
         )
         #expect(degradedWhileArrival == nil)
+
+        // 3. Settling and arrival items match the standard tile order and labels
+        #expect(settlingItems.map(\.id) == ["calls", "streaming", "gaming", "vpn", "browsing"])
+        #expect(settlingItems.first { $0.id == "vpn" }?.title == "VPN / Remote")
+        #expect(settlingItems.first { $0.id == "vpn" }?.icon == "shield")
+        #expect(settlingItems.first { $0.id == "browsing" }?.icon == "globe")
+    }
+
+    @Test func unmeasuredJitterDoesNotFabricateTwoMilliseconds() {
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 5.0, rttAvgMs: 18.0, rttJitterMs: nil)
+        let inputs = SuitabilityEngine.Inputs(monitorSample: sample, isLinkUp: true, currentJitter: nil, effectiveLoss: 5.0)
+        let calls = SuitabilityEngine.evaluateCalls(inputs)
+        #expect(calls.verdict == .degraded)
+        #expect(calls.metric == "5% loss")
     }
 }
 

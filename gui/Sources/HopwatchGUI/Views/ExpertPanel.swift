@@ -125,13 +125,25 @@ struct ExpertPanel: View {
             ("gateway loss", v(s.gateway.lossPct, "%", "%.1f")),
             ("internet RTT (\(s.internetLatency.target ?? "?"))", v(s.internetLatency.rttAvgMs, "ms")),
             ("internet loss (\(s.internetLatency.target ?? "?"))", v(s.internetLatency.lossPct, "%", "%.1f")),
-            ("internet loss (\(s.internetLatency.targetAlt ?? "?"))", v(s.internetLatency.lossPctAlt, "%", "%.1f")),
+        ]
+        if let alt = s.internetLatency.targetAlt {
+            rows.append(("internet loss (\(alt))", v(s.internetLatency.lossPctAlt, "%", "%.1f")))
+        }
+        rows += [
             ("public IP", s.publicInfo.ip ?? "null"),
             ("ASN / ISP", "\(s.publicInfo.asn ?? "?") \(s.publicInfo.isp ?? "")"),
             ("country", "\(s.publicInfo.country ?? "?") (\(s.publicInfo.countryISO ?? "??"))"),
             ("path MTU", i(s.mtu.effective, "bytes")),
             ("bufferbloat Δ gateway", v(s.bufferbloat.gwDeltaMs, "ms")),
             ("bufferbloat grade", s.bufferbloat.gwGrade ?? "null"),
+        ]
+        if let inetDelta = s.bufferbloat.inetDeltaMs {
+            rows.append(("bufferbloat Δ internet", v(inetDelta, "ms")))
+        }
+        if let inetGrade = s.bufferbloat.inetGrade {
+            rows.append(("bufferbloat grade (internet)", inetGrade))
+        }
+        rows += [
             ("clock drift", v(s.ntp.driftSeconds, "s", "%+.3f")),
             ("IPv6 available", s.ipv6.available ? "yes" : "no"),
         ]

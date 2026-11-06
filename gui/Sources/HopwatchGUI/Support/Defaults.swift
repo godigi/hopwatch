@@ -425,8 +425,7 @@ enum Defaults {
     static func migratedArrivalStates(from legacy: Set<String>) -> [String: ArrivalState] {
         var out: [String: ArrivalState] = [:]
         for raw in legacy {
-            guard let id = NetworkIdentity.canonical(raw),
-                  !NetworkIdentity.isPrivateOrLocalGateway(id) else { continue }
+            guard let id = NetworkIdentity.canonical(raw) else { continue }
             out[id] = .checked(depth: .full, at: .distantPast, runID: nil)
         }
         return out

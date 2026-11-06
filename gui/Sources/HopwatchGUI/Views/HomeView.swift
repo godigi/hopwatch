@@ -48,6 +48,22 @@ struct HomeView: View {
                     canShare: coordinator.supportsShare
                 )
 
+                if let feedback = shareFeedback {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.ColorToken.green)
+                            .font(.system(size: 11))
+                        Text(feedback)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Theme.ColorToken.nodeBackground)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().strokeBorder(Theme.ColorToken.line, lineWidth: 1))
+                }
+
                 // Location Banner (if location permissions are restricted on Wi-Fi)
                 locationWarningBanner
 
@@ -490,7 +506,7 @@ struct HomeView: View {
                 iconTint: Theme.ColorToken.blue,
                 iconBackground: Theme.ColorToken.blueWash,
                 headline: "Running diagnostic check…",
-                subtitle: "Pinging route and checking services…"
+                subtitle: coordinator.activeScanProgressSubtitle ?? "Pinging route and checking services…"
             )
         case .arrived:
             DashboardStatusHeroView(
@@ -498,7 +514,7 @@ struct HomeView: View {
                 iconTint: Theme.ColorToken.blue,
                 iconBackground: Theme.ColorToken.blueWash,
                 headline: coordinator.wifiDisplayName.map { "Checking new network: \($0)" } ?? "Checking new network",
-                subtitle: "Pinging route and checking services…"
+                subtitle: coordinator.activeScanProgressSubtitle ?? "Pinging route and checking services…"
             )
         case .notReporting:
             // The monitor's process is up and its last line is old (a hung
@@ -624,11 +640,7 @@ struct HomeView: View {
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
         let snap = currentRunResult?.snapshot
-        var firedSet = Set(coordinator.liveSample?.status.rules ?? [])
-        if let snapRules = snap?.diagnosis.compactMap(\.rule) {
-            firedSet.formUnion(snapRules)
-        }
-        let fired = Array(firedSet)
+        let fired = Array(coordinator.activeFiredRules)
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: coordinator.liveSample,
             speedTest: coordinator.currentSuitabilitySpeed,
@@ -791,6 +803,12 @@ struct HomeView: View {
         }
 
         // 4. Signal (Matching user mockup)
+        let netID = coordinator.confirmedNetworkID ?? snap?.network.id
+        let rssiUsual = netID.flatMap { coordinator.history.median(metric: "wifi_rssi_dbm", networkID: $0) }
+            .map { "\(Int(round($0))) dBm" } ?? "—"
+        let snrUsual = netID.flatMap { coordinator.history.median(metric: "wifi_snr_db", networkID: $0) }
+            .map { "\(Int(round($0))) dB" } ?? "—"
+
         if isConnectedToWiFi {
             let signalBadge: DashboardCheckTable.GradeBadge = {
                 guard let r = rssi else { return .init(label: "Good", tone: .good) }
@@ -805,7 +823,7 @@ struct HomeView: View {
                 label: "Signal",
                 measured: rssi.map { "\($0) dBm" } ?? "Connected",
                 subvalue: nil,
-                usual: "−62 dBm",
+                usual: rssiUsual,
                 badge: signalBadge,
                 isWarning: rssi != nil && rssi! < -70,
                 isGood: rssi != nil && rssi! >= -65
@@ -824,7 +842,7 @@ struct HomeView: View {
                 label: "Noise",
                 measured: "\(n) dBm",
                 subvalue: nil,
-                usual: "−86 dBm",
+                usual: "—",
                 badge: noiseBadge,
                 isWarning: n > -85,
                 isGood: n <= -85
@@ -844,7 +862,7 @@ struct HomeView: View {
                 label: "SNR",
                 measured: "\(s) dB",
                 subvalue: nil,
-                usual: "25 dB",
+                usual: snrUsual,
                 badge: snrBadge,
                 isWarning: s < 20,
                 isGood: s >= 20
@@ -932,14 +950,14 @@ struct HomeView: View {
         )
         rows.append(.init(
             id: "mtu",
-            icon: "checkmark",
+            icon: mtu >= 1400 ? "checkmark" : "exclamationmark.triangle.fill",
             label: "Packet size (MTU)",
             measured: "\(mtu) bytes",
             subvalue: nil,
             usual: "—",
             badge: mtuBadge,
-            isWarning: false,
-            isGood: true
+            isWarning: mtu < 1400,
+            isGood: mtu >= 1400
         ))
 
         // 13. IPv6
@@ -970,6 +988,9 @@ struct HomeView: View {
             if let d = speedDown, let u = speedUp {
                 return String(format: "↓ %.0f · ↑ %.0f Mbps", d, u)
             }
+            if let d = speedDown {
+                return String(format: "↓ %.0f Mbps", d)
+            }
             return "Skipped in this check"
         }()
         let speedBadge: DashboardCheckTable.GradeBadge = {
@@ -998,7 +1019,7 @@ struct HomeView: View {
             "internet": isFilteredInternet || inetRtt != nil,
             "loss": isFilteredInternet || measuredInetLoss != nil,
             "mtu": snap?.mtu.effective != nil || snap?.mtu.pathSize != nil,
-            "ipv6": snap != nil,
+            "ipv6": snap?.measuredIPv6 != nil,
             "speed": speedDown != nil
         ]
         return rows.map {
@@ -1071,13 +1092,7 @@ struct HomeView: View {
         if coordinator.liveSample == nil && resolvedRSSI == nil { return "—" }
         if !isConnectedToWiFi { return "Ethernet" }
         guard let rssi = resolvedRSSI else { return "—" }
-        let base = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
-        if isWifiLaggy {
-            return (base.lowercased() == "good" || base.lowercased() == "excellent")
-                ? "Good (laggy)"
-                : "\(base) (laggy)"
-        }
-        return base
+        return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
     }
 
     private var wifiSignalDetail: String {
@@ -1093,13 +1108,7 @@ struct HomeView: View {
         if coordinator.liveSample == nil && resolvedRSSI == nil { return Theme.ColorToken.muted }
         if !isConnectedToWiFi { return Theme.ColorToken.green }
         guard let rssi = resolvedRSSI else { return Theme.ColorToken.muted }
-        if isWifiLaggy {
-            return Theme.ColorToken.amber
-        }
         let content = SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale)
-        if let ruleTint = wifiRuleTint {
-            return ruleTint == .red ? Theme.ColorToken.red : Theme.ColorToken.amber
-        }
         return content.tint
     }
 
@@ -1149,7 +1158,7 @@ struct HomeView: View {
     }
 
     private var firedRules: Set<String> {
-        Set(coordinator.liveSample?.status.rules ?? coordinator.freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) ?? [])
+        coordinator.activeFiredRules
     }
 
     private var firedCategories: Set<String> {
@@ -1280,6 +1289,7 @@ struct HomeView: View {
     private var routerDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        guard coordinator.liveSample != nil || coordinator.freshNetworkRunSnapshot != nil else { return "Checking…" }
         if lossFiltering.filters(.gateway) {
             return "Ping blocked"
         }
@@ -1735,6 +1745,11 @@ struct HomeView: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        Task { @MainActor in
+            shareFeedback = "Support summary copied"
+            try? await Task.sleep(for: .seconds(2))
+            shareFeedback = nil
+        }
     }
 
     private func copyShareableReport() {
@@ -1742,6 +1757,9 @@ struct HomeView: View {
             guard let text = try? await coordinator.shareCurrentReportText() else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+            shareFeedback = "Diagnostic report copied"
+            try? await Task.sleep(for: .seconds(2))
+            shareFeedback = nil
         }
     }
 

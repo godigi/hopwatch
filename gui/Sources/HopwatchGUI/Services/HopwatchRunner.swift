@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let runnerLog = Logger(subsystem: "com.godigi.hopwatch", category: "runner")
 
 enum HopwatchError: LocalizedError {
     case binaryNotFound
@@ -150,8 +153,14 @@ struct HopwatchRunner {
         if status == 3 {
             throw NetdiagError.scriptError(out.isEmpty ? "exit status 3" : String(out.prefix(400)))
         }
-        guard let data = out.data(using: .utf8),
-              let snapshot = try? JSONDecoder().decode(RunSnapshot.self, from: data) else {
+        guard let data = out.data(using: .utf8) else {
+            throw NetdiagError.badJSON(String(out.prefix(200)))
+        }
+        let snapshot: RunSnapshot
+        do {
+            snapshot = try JSONDecoder().decode(RunSnapshot.self, from: data)
+        } catch {
+            runnerLog.error("RunSnapshot decode failed: \(error.localizedDescription, privacy: .public)")
             throw NetdiagError.badJSON(String(out.prefix(200)))
         }
         return RunResult(snapshot: snapshot, rawJSON: out, exitCode: status,
@@ -168,11 +177,15 @@ struct HopwatchRunner {
 
         let (out, _, status) = try await execute(arguments: args)
         if status != 0 { throw NetdiagError.scriptError(String(out.prefix(400))) }
-        guard let data = out.data(using: .utf8),
-              let doc = try? JSONDecoder().decode(HistoryDocument.self, from: data) else {
+        guard let data = out.data(using: .utf8) else {
             throw NetdiagError.badJSON(String(out.prefix(200)))
         }
-        return doc
+        do {
+            return try JSONDecoder().decode(HistoryDocument.self, from: data)
+        } catch {
+            runnerLog.error("HistoryDocument decode failed: \(error.localizedDescription, privacy: .public)")
+            throw NetdiagError.badJSON(String(out.prefix(200)))
+        }
     }
 
     /// What `hopwatch --repair=ID --json` prints.

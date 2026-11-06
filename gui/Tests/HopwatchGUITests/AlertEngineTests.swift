@@ -206,4 +206,47 @@ import Testing
         )
         #expect(HealthResolver.resolve(healthInputs) == .healthy, "HealthResolver must remain healthy when live sample is healthy")
     }
+
+    @Test @MainActor func reRaisingAlertInsideCooldownClearsResolvedBanner() {
+        let notifMgr = NotificationManager()
+        notifMgr.setAuthorizedForTesting(true)
+        notifMgr.notificationsEnabled = true
+
+        var removedIDs: [String] = []
+        notifMgr.onPostNotification = { _, _, _, _ in }
+        notifMgr.onRemoveNotification = { id in removedIDs.append(id) }
+
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let engine = AlertEngine(notificationManager: notifMgr)
+        engine.now = { clock }
+
+        var failingSample = MonitorSample()
+        failingSample.link.up = true
+        failingSample.status.rules = ["L1"]
+
+        var healthySample = MonitorSample()
+        healthySample.link.up = true
+        healthySample.status.rules = []
+
+        // 1. Fire internet-degraded after its 25s dwell
+        engine.evaluate(sample: failingSample)
+        clock = clock.addingTimeInterval(30)
+        engine.evaluate(sample: failingSample)
+        #expect(engine.active["internet-degraded"] != nil)
+
+        // 2. Clear -> posts netdiag.internet-degraded.resolved
+        clock = clock.addingTimeInterval(5)
+        engine.evaluate(sample: healthySample)
+        #expect(engine.active["internet-degraded"] == nil)
+        #expect(notifMgr.announcedResolutions.contains("internet-degraded"))
+
+        // 3. Re-fire inside the 600s cooldown -> clears the resolved banner
+        clock = clock.addingTimeInterval(5)
+        engine.evaluate(sample: failingSample)
+        clock = clock.addingTimeInterval(30)
+        engine.evaluate(sample: failingSample)
+        #expect(engine.active["internet-degraded"] != nil)
+        #expect(removedIDs.contains("netdiag.internet-degraded.resolved"))
+        #expect(!notifMgr.announcedResolutions.contains("internet-degraded"))
+    }
 }

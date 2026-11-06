@@ -454,7 +454,7 @@ struct DropdownView: View {
                 iconTint: Theme.ColorToken.blue,
                 iconBackground: Theme.ColorToken.neutralWash,
                 headline: "Running full check…",
-                subtitle: "Pinging route and checking services…",
+                subtitle: coordinator.activeScanProgressSubtitle ?? "Pinging route and checking services…",
                 isChecking: true
             )
         case .arrived:
@@ -463,7 +463,7 @@ struct DropdownView: View {
                 iconTint: Theme.ColorToken.blue,
                 iconBackground: Theme.ColorToken.neutralWash,
                 headline: coordinator.wifiDisplayName.map { "Checking new network: \($0)" } ?? "Checking new network",
-                subtitle: "Pinging route and checking services…",
+                subtitle: coordinator.activeScanProgressSubtitle ?? "Pinging route and checking services…",
                 isChecking: true
             )
         case .paused(let reason):
@@ -495,12 +495,13 @@ struct DropdownView: View {
 
     private var quietLine: String {
         var parts: [String] = []
-        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents, now: .now) {
+        if let since = NetworkEvent.timeSinceLast(coordinator.currentNetworkEvents(withinHours: nil), now: .now) {
             if since < 60 {
                 parts.append("Nothing has changed in under a minute")
             } else {
                 let f = DateComponentsFormatter()
-                f.allowedUnits = since >= 3600 ? [.hour, .minute] : [.minute]
+                f.allowedUnits = since >= 86_400 ? [.day, .hour]
+                    : (since >= 3_600 ? [.hour, .minute] : [.minute])
                 f.unitsStyle = .abbreviated
                 if let s = f.string(from: since) {
                     parts.append("Nothing has changed in \(s)")
@@ -611,8 +612,10 @@ struct DropdownView: View {
     }
 
     private var isWifiSignalWeak: Bool {
-        guard let rssi = resolvedRSSI else { return false }
-        return rssi < -75 || (wifiRuleTint != nil && wifiRuleTint != .green)
+        if let rssi = resolvedRSSI {
+            return rssi < -75
+        }
+        return wifiRuleTint != nil && wifiRuleTint != .green
     }
 
     private var isGatewayJitterDominant: Bool {
@@ -667,10 +670,13 @@ struct DropdownView: View {
             vpnFreshness: coordinator.vpnFreshness,
             cadenceText: coordinator.latestSampleIsStale
                 ? "Not reporting"
-                : (coordinator.monitor.isPausedForAnyReason ? "Monitoring paused"
-                   : coordinator.monitor.isRunning
-                    ? "Live · every \(cadence) seconds"
-                    : "Monitoring off")
+                : (coordinator.isScanning
+                   ? (coordinator.isArrivalCheck ? "Testing new network" : "Check in progress")
+                   : (coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason) || !appSettings.monitoringEnabled
+                      ? "Monitoring paused"
+                      : (coordinator.monitor.isRunning
+                         ? "Live · every \(cadence) seconds"
+                         : "Monitoring off")))
         )
     }
 
@@ -727,6 +733,7 @@ struct DropdownView: View {
     private var routerDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        guard coordinator.liveSample != nil else { return "Checking…" }
         if lossFiltering.filters(.gateway) {
             return "Ping blocked"
         }
@@ -1010,11 +1017,7 @@ struct DropdownView: View {
     }
 
     private var firedRules: Set<String> {
-        var rules = Set(coordinator.liveSample?.status.rules ?? [])
-        if let snapRules = coordinator.freshNetworkRunSnapshot?.diagnosis.compactMap(\.rule) {
-            rules.formUnion(snapRules)
-        }
-        return rules
+        coordinator.activeFiredRules
     }
 
     private var currentJitter: Double? {
@@ -1047,7 +1050,8 @@ struct DropdownView: View {
             return ("wired", nil, .secondary)
         }
         let content = SignalScale.cellContent(rssi: resolvedRSSI, scale: coordinator.signalScale.scale)
-        return (content.value, content.unit, wifiRuleTint ?? content.tint)
+        let tint = resolvedRSSI != nil ? content.tint : (wifiRuleTint ?? content.tint)
+        return (content.value, content.unit, tint)
     }
 
     private var wifiRuleTint: Color? {
