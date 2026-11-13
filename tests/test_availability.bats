@@ -102,6 +102,34 @@ rules_fired() { printf ' %s ' "${DIAG_RULE[*]}"; }
   [ "$AV_OUTAGE_COUNT" -eq 0 ] || { echo "counted $AV_OUTAGE_COUNT"; return 1; }
 }
 
+@test "an outage left open when the Mac moved to another network ends there, not at the end of the journal" {
+  # P2 on this network, then the Mac moves to another one (the journal has
+  # no clear for what it left), then comes back and the recorder writes
+  # something much later. The outage lasted until the move, ten minutes, not
+  # until the last line: counting that as downtime is what made returning to
+  # a network report an outage it had not had.
+  python3 - "$J" <<'PY'
+import datetime, json, sys
+now = datetime.datetime.now(datetime.timezone.utc)
+def t(minutes_ago): return (now - datetime.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+rows = [
+    (120, 1, "wifi:mac=aa", "rule-fired", {"from": None, "to": "P2"}),
+    (110, 2, "wifi:mac=bb", "rule-fired", {"from": None, "to": "G3"}),
+    (100, 3, "wifi:mac=bb", "rule-cleared", {"from": "G3", "to": None}),
+    (5, 4, "wifi:mac=aa", "gap", {"gap_s": 30}),
+]
+with open(sys.argv[1], "a") as f:
+    for ago, seq, net, kind, extra in rows:
+        f.write(json.dumps(dict({"t": t(ago), "seq": seq, "network": net,
+                                 "network_label": "L", "kind": kind,
+                                 "summary": "s"}, **extra)) + "\n")
+PY
+  availability_run >/dev/null
+  [ "$AV_MEASURED" -eq 1 ]
+  [ "$AV_OUTAGE_COUNT" -eq 1 ] || { echo "count=$AV_OUTAGE_COUNT"; return 1; }
+  [ "$AV_DOWNTIME_S" -eq 600 ] || { echo "total=$AV_DOWNTIME_S"; return 1; }
+}
+
 @test "outages are counted, totalled, and the longest is kept" {
   episode N1 30 300
   episode P1 60 200

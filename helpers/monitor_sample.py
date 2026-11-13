@@ -192,6 +192,37 @@ def _rules_at_start() -> list[dict]:
     return out
 
 
+def _rules_left_behind() -> list[dict]:
+    """`rule-cleared` entries for the network the monitor just moved off, for
+    the journal only.
+
+    The monitor starts a new network with no rules carried over, so the diff
+    in `_changes()` sees nothing to clear: the old network's rules simply stop
+    appearing. In the stream that is right, and these are kept out of it. In
+    the journal it left every fault that was firing when the Mac moved on with
+    no end, and `helpers/events.py` held each open to the end of the file.
+
+    Each entry is filed against the network that was left, not the one the
+    sample is on: it carries that network's id and label, and
+    `_journal_append` writes them in place of the sample's own.
+    """
+    rules = (_env("LEFT_RULES") or "").split()
+    if not rules:
+        return []
+    network = _env("LEFT_NETWORK") or None
+    label = _env("LEFT_LABEL") or None
+    out = []
+    for rid in sorted(set(rules)):
+        title = _get_rule_title(rid)
+        out.append({"id": "rule-cleared", "field": "status.rules",
+                    "from": rid, "to": None,
+                    "summary": (f"Resolved: {title}" if title
+                                else f"Issue {rid} cleared"),
+                    "left_network": True,
+                    "network": network, "network_label": label})
+    return out
+
+
 def _changes() -> list[dict]:
     """Field-level diff against the previous sample (NETDIAG_MON_PREV_*).
 
@@ -433,9 +464,16 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
         lines.append(dict(base, kind="gap", gap_s=gap,
                           summary=f"Not observed for {gap}s"))
 
-    for change in _rules_at_start() + changes:
+    for change in _rules_left_behind() + _rules_at_start() + changes:
         extra = ({"already_firing": True}
                  if change.get("already_firing") else {})
+        line_base = base
+        if change.get("left_network"):
+            # The fault belonged to the network the monitor was on before
+            # this sample, so the clear is filed there.
+            line_base = dict(base, network=change.get("network"),
+                             network_label=change.get("network_label"))
+            extra["left_network"] = True
         if change.get("evidence") is not None:
             extra["evidence"] = change["evidence"]
         # SOCK-1's evidence goes on the line that records the fault, not in
@@ -445,7 +483,7 @@ def _journal_append(sample: dict, changes: list[dict]) -> None:
             evidence = _sock_evidence()
             if evidence is not None:
                 extra["evidence"] = evidence
-        lines.append(dict(base, kind=change.get("id"),
+        lines.append(dict(line_base, kind=change.get("id"),
                           field=change.get("field"),
                           **{"from": change.get("from")},
                           to=change.get("to"),
