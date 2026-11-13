@@ -19,10 +19,14 @@ import Testing
         )
         let output = SupportSummaryFormatter.format(params)
 
-        #expect(output.contains("Network: Hotel-WiFi"))
+        // Identifying values are masked; the gateway is not one of them.
+        #expect(output.contains("Network: [redacted]"))
         #expect(output.contains("Local Gateway: 192.168.1.1"))
-        #expect(output.contains("Client Device: 192.168.1.105 (en0)"))
-        #expect(output.contains("AP BSSID: 18:e8:29:ab:cd:ef"))
+        #expect(output.contains("Client Device: [redacted] (en0)"))
+        #expect(output.contains("AP BSSID: [redacted]"))
+        #expect(!output.contains("Hotel-WiFi"))
+        #expect(!output.contains("192.168.1.105"))
+        #expect(!output.contains("18:e8:29:ab:cd:ef"))
         #expect(output.contains("Issue: Losing 15% of packets to the router"))
         #expect(output.contains("Impact: Video calls dropping"))
         #expect(output.contains("Why This Is Not a Computer or Distance Issue"))
@@ -72,12 +76,16 @@ import Testing
             catalog: catalog,
             networkIsOwned: false
         )
-        #expect(notOwnedSummary.contains("Hotel-Guest"))
+        #expect(notOwnedSummary.contains("Network: [redacted]"))
         #expect(notOwnedSummary.contains("10.0.0.1"))
         #expect(notOwnedSummary.contains("Good (-65 dBm)"))
-        #expect(notOwnedSummary.contains("AP BSSID: 3c:37:86:11:22:33"))
-        #expect(notOwnedSummary.contains("Client Device: 10.0.0.52 (en0)"))
-        #expect(notOwnedSummary.contains("Public Endpoint: 198.51.100.1 (Spectrum, Orlando, United States)"))
+        #expect(notOwnedSummary.contains("AP BSSID: [redacted]"))
+        #expect(notOwnedSummary.contains("Client Device: [redacted] (en0)"))
+        // ISP and country stay; the public IP and the city do not.
+        #expect(notOwnedSummary.contains("Public Endpoint: [redacted] (Spectrum, [redacted], United States)"))
+        for leaked in ["Hotel-Guest", "Hotel Guest WiFi", "3c:37:86:11:22:33", "10.0.0.52", "198.51.100.1", "Orlando"] {
+            #expect(!notOwnedSummary.contains(leaked), "leaked \(leaked)")
+        }
         #expect(notOwnedSummary.contains("Why This Is Not a Computer or Distance Issue"))
         #expect(notOwnedSummary.contains("Computer / Laptop Ruled Out:"))
         #expect(notOwnedSummary.contains("Wi-Fi Signal / Distance Ruled Out: Wireless signal between this computer and the access point is Good (-65 dBm, SNR 28 dB, well above the -75 dBm minimum threshold)"))
@@ -117,17 +125,20 @@ import Testing
             networkIsOwned: false
         )
 
-        #expect(summary.contains("CoffeeShop-Guest"))
+        #expect(summary.contains("Network: [redacted]"))
         #expect(summary.contains("192.168.1.1"))
-        #expect(summary.contains("MAC: 00:11:22:33:44:55"))
-        #expect(summary.contains("Client Device: 192.168.1.42 (en0)"))
-        #expect(summary.contains("AP BSSID: aa:bb:cc:dd:ee:ff"))
+        #expect(summary.contains("MAC: [redacted]"))
+        #expect(summary.contains("Client Device: [redacted] (en0)"))
+        #expect(summary.contains("AP BSSID: [redacted]"))
+        for leaked in ["CoffeeShop-Guest", "00:11:22:33:44:55", "192.168.1.42", "aa:bb:cc:dd:ee:ff", "203.0.113.5", "Austin"] {
+            #expect(!summary.contains(leaked), "leaked \(leaked)")
+        }
         #expect(summary.contains("Good (-67 dBm)"))
         #expect(summary.contains("Why This Is Not a Computer or Distance Issue"))
         #expect(summary.contains("Computer / Laptop Ruled Out:"))
         #expect(summary.contains("Wi-Fi Signal / Distance Ruled Out:"))
         #expect(summary.contains("Actual Fault Location (Local Router / Access Point):"))
-        #expect(summary.contains("Public Endpoint: 203.0.113.5 (Starlink, Austin, United States)"))
+        #expect(summary.contains("Public Endpoint: [redacted] (Starlink, [redacted], United States)"))
         #expect(summary.contains("Losing 14% of packets to the local router"))
         #expect(summary.contains("Suggested Action: Please restart or power-cycle the local Wi-Fi router / access point"))
         #expect(summary.contains("https://github.com/godigi/hopwatch"))
@@ -209,7 +220,8 @@ import Testing
             networkIsOwned: false
         )
 
-        #expect(summary.contains("Network: Mercure"))
+        #expect(summary.contains("Network: [redacted]"))
+        #expect(!summary.contains("Mercure"))
         #expect(summary.contains("Issue: Wi-Fi sign-in / captive portal authentication required to access the internet"))
         #expect(summary.contains("Suggested Action: Please provide the guest Wi-Fi portal URL or login instructions."))
         #expect(summary.contains("Actual Fault Location (Captive Portal / Sign-In Gateway)"))
@@ -241,5 +253,70 @@ import Testing
         #expect(summary.contains("ICMP ping filtered"))
         #expect(!summary.contains("dropping 100% of packets"))
         #expect(!summary.contains("Losing 100% of packets"))
+    }
+
+    @Test func weakSignalUsesOneCutoffAcrossRatingAndIsolation() {
+        // W1 fires strictly below -75 dBm. -75 is Fair, -76 is Weak, and the
+        // rating and the isolation bullet must never disagree about it.
+        #expect(SupportSummaryFormatter.describeSignal(rssi: -75).contains("Fair"))
+        #expect(SupportSummaryFormatter.describeSignal(rssi: -76).contains("Weak"))
+
+        let weak = HopAttributionResolver.resolve(rules: [], isWifi: true, wifiRSSI: -76)
+        #expect(weak.wifiHealth == .warning)
+        let atCutoff = HopAttributionResolver.resolve(rules: [], isWifi: true, wifiRSSI: -75)
+        #expect(atCutoff.wifiHealth == .healthy)
+
+        let bullets = SupportSummaryFormatter.buildIsolation(
+            attribution: weak, rssi: -76, snr: nil, isWired: false, gatewayIP: nil,
+            gatewayLoss: nil, gatewayRTT: nil, inetLoss: nil, inetRTT: nil,
+            dnsFailed: false, vpnActive: false, observedProblem: nil, ispName: nil
+        ).bullets
+        #expect(bullets.contains(where: { $0.hasPrefix("Room Wi-Fi Coverage Issue:") }))
+    }
+
+    @Test func deviceStatusFollowsAttributionForAFaultOnThisMac() throws {
+        let json = """
+        {
+          "schema": 2,
+          "ts": "2026-10-18T14:20:00Z",
+          "link": {"up": true, "type": "wifi", "ssid": "Office", "gateway": "10.0.0.1"},
+          "wifi": {"rssi": -50, "snr": 40, "channel": "36"},
+          "gateway": {"loss_pct": 0.0, "rtt_avg_ms": 40.0},
+          "internet": {"loss_pct": 0.0, "rtt_avg_ms": 90.0},
+          "status": {"severity": "warn", "rules": ["HOG-1"]}
+        }
+        """.data(using: .utf8)!
+        let sample = try JSONDecoder().decode(MonitorSample.self, from: json)
+        let summary = SupportSummaryFormatter.format(sample: sample, alert: nil, catalog: nil, networkIsOwned: false)
+        #expect(summary.contains("Device Status: This Mac is part of the problem"))
+        #expect(!summary.contains("Local link is idle and healthy"))
+    }
+
+    @Test func encryptedDNSProfileNeverBlamesThisComputer() throws {
+        let json = """
+        {
+          "schema": 2,
+          "ts": "2026-10-18T14:25:00Z",
+          "link": {"up": true, "type": "wifi", "ssid": "Home", "gateway": "192.168.1.1"},
+          "wifi": {"rssi": -50, "snr": 40, "channel": "36"},
+          "gateway": {"loss_pct": 0.0, "rtt_avg_ms": 2.0},
+          "internet": {"loss_pct": 0.0, "rtt_avg_ms": 12.0},
+          "status": {"severity": "ok", "rules": ["EDNS-1"]}
+        }
+        """.data(using: .utf8)!
+        let sample = try JSONDecoder().decode(MonitorSample.self, from: json)
+        let attribution = HopAttributionResolver.resolve(sample: sample)
+        #expect(attribution.macHealth == .healthy)
+        let summary = SupportSummaryFormatter.format(sample: sample, alert: nil, catalog: nil, networkIsOwned: false)
+        #expect(!summary.contains("Diagnostics indicate the issue is originating on this computer"))
+    }
+
+    @Test func redactionKeepsProviderAndIgnoresPlaceholders() {
+        let secrets = SupportSummaryFormatter.Redaction.secrets(from: ["Unknown Network", "ab", "Cafe Wi-Fi", nil, "[redacted]"])
+        #expect(secrets == ["Cafe Wi-Fi"])
+        #expect(SupportSummaryFormatter.Redaction.ssid(fromNetworkID: "wifi:ssid=Home,mac=aa:bb:cc") == "Home")
+        #expect(SupportSummaryFormatter.Redaction.ssid(fromNetworkID: "ssid:Cafe") == "Cafe")
+        #expect(SupportSummaryFormatter.Redaction.ssid(fromNetworkID: "gw:192.168.1.1") == nil)
+        #expect(SupportSummaryFormatter.Redaction.scrub("on Cafe Wi-Fi via Comcast", secrets: secrets) == "on [redacted] via Comcast")
     }
 }

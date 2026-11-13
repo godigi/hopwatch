@@ -70,10 +70,18 @@ struct AlertDefinition: Identifiable, Sendable {
     /// condition that comes and goes.
     let oncePerNetwork: Bool
 
-    /// True if this alert represents a total network loss or outage rather than
-    /// performance degradation (e.g. packet loss or jitter).
-    var isOutage: Bool {
-        id == "connection-lost" || rules.contains("P1") || rules.contains("P2") || rules.contains("N1") || rules.contains("N1b") || rules.contains("WF-1") || rules.contains("WJ-1") || rules.contains("DH-3")
+    /// The rules that mean the connection is gone, not merely worse. Judged per
+    /// rule, never per definition: one definition can listen for an outage rule
+    /// and a warning (`dns-failing` listens for D1, a warn), and "Complete
+    /// outages only" must not let the warning through because of what else
+    /// the same alert could have fired for.
+    static let outageRules: Set<String> = ["P1", "P2", "N1", "N1b", "WF-1", "WJ-1", "DH-3"]
+
+    /// True if what fired this time is a total network loss or outage rather
+    /// than performance degradation (packet loss, jitter, a slow lookup).
+    /// `firing` is the rules the CLI actually reported on this observation.
+    func isOutage(firing: Set<String>) -> Bool {
+        id == "connection-lost" || !firing.isDisjoint(with: Self.outageRules)
     }
 
     /// One mechanism-only sentence for Settings: which category of thing
@@ -147,7 +155,10 @@ struct AlertDefinition: Identifiable, Sendable {
 
         AlertDefinition(
             id: "dns-failing", title: "Websites aren't loading",
-            rules: ["P1", "D1", "CONN-1", "D3", "D4", "V6-2", "SOCK-1"],
+            // P1 (DNS and internet both down) is "No internet connection", which
+            // `connection-lost` already raises: listing it here too raised two
+            // alerts and two notifications for one fault.
+            rules: ["D1", "CONN-1", "D3", "D4", "V6-2", "SOCK-1"],
             dwell: 30, cooldown: 1800, resolves: true, scanOnly: false,
             lossLeg: nil, oncePerNetwork: false,
             caption: "Confirms for 30 seconds before alerting, then waits 30 minutes before repeating.",

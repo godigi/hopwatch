@@ -493,8 +493,8 @@ public enum PlainEnglishTranslator {
         ),
         "CONN-1": PlainExplanation(
             title: "Some Connections Failing",
-            explanation: "Certain new network connections are being blocked or refused by destination servers or firewalls.",
-            action: "Check firewall software or try restarting your network connection."
+            explanation: "New connections from this Mac are being refused or dropped, while pings to your router and the internet come back clean.",
+            action: "If the report names an app, quit it and run the check again. Otherwise restart your router, which empties its list of open connections."
         ),
         "HOG-1": PlainExplanation(
             title: "App Consuming Heavy Bandwidth (Latency Elevated)",

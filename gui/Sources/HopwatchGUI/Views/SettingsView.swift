@@ -780,6 +780,25 @@ struct SettingsView: View {
         case system = "System"
 
         var id: String { rawValue }
+
+        /// Which filter an alert belongs to, by id. Explicit rather than
+        /// guessed from substrings of the id: that guess left
+        /// "internet-degraded" in no category at all and put "ip-conflict" in
+        /// two. An id this build has no entry for appears only under All.
+        static func of(alertID: String) -> AlertCategory? {
+            switch alertID {
+            case "connection-lost", "vpn-dropped":
+                return .connectivity
+            case "wifi-unstable", "internet-degraded", "slower-than-usual":
+                return .performance
+            case "dns-failing", "captive-portal", "public-ip-changed", "different-network", "double-nat":
+                return .routing
+            case "clock-drift", "ip-conflict", "lease-expiring", "browser-desync":
+                return .system
+            default:
+                return nil
+            }
+        }
     }
 
     private var alertCatalogCard: some View {
@@ -828,17 +847,8 @@ struct SettingsView: View {
 
     private var filteredAlerts: [AlertDefinition] {
         AlertDefinition.all.filter { def in
-            let matchesCategory: Bool = switch selectedAlertCategory {
-            case .all: true
-            case .connectivity:
-                def.id.contains("loss") || def.id.contains("lost") || def.id.contains("vpn")
-            case .performance:
-                def.id.contains("latency") || def.id.contains("wifi") || def.id.contains("slower")
-            case .routing:
-                def.id.contains("dns") || def.id.contains("portal") || def.id.contains("ip") || def.id.contains("network") || def.id.contains("nat")
-            case .system:
-                def.id.contains("browser") || def.id.contains("clock") || def.id.contains("lease") || def.id.contains("conflict")
-            }
+            let matchesCategory: Bool = selectedAlertCategory == .all
+                || AlertCategory.of(alertID: def.id) == selectedAlertCategory
 
             guard matchesCategory else { return false }
             if alertSearchText.trimmingCharacters(in: .whitespaces).isEmpty { return true }
@@ -1189,8 +1199,8 @@ struct SettingsView: View {
                     )
 
                     SettingsToggleRow(
-                        title: "Automatically download and install updates in background",
-                        description: "Pre-caches updates quietly so restarting Hopwatch is instantaneous.",
+                        title: "Automatically download updates in the background",
+                        description: "Downloads a new version quietly so installing it is instant. Installing is still your choice.",
                         isOn: $appSettings.autoDownloadAndInstallUpdates
                     )
                 }

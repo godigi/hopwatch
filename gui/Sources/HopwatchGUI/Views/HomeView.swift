@@ -743,21 +743,21 @@ struct HomeView: View {
         let isFilteredGateway = coordinator.lossFiltering.gatewayLeg || lossFiltering.gatewayLeg
         let isFilteredInternet = coordinator.lossFiltering.internetLeg || lossFiltering.internetLeg
 
+        // The cutoffs in this table are the CLI's (lib/thresholds.sh, mirrored in
+        // `SuitabilityEngine.Cutoff` and `HopAttributionResolver.weakWifiSignalDBm`):
+        // a row never turns amber or red over a number the CLI does not call a
+        // finding. Where the CLI has no verdict at all (latency, noise, absolute
+        // speed) the row shows the value with a neutral badge.
         // 1. Jitter (Matching user mockup)
         let (jitterMeasured, jitterBadge, jitterIsWarning, jitterIsGood): (String, DashboardCheckTable.GradeBadge, Bool, Bool) = {
             guard let j = measuredJitter else {
                 return ("Measuring…", .init(label: "Measuring", tone: .neutral), false, false)
             }
-            let b: DashboardCheckTable.GradeBadge = {
-                if j >= 20 {
-                    return .init(label: "Unstable", tone: .critical)
-                } else if j >= 10 {
-                    return .init(label: "Degraded", tone: .warn)
-                } else {
-                    return .init(label: "Good", tone: .good)
-                }
-            }()
-            return ("\(Int(round(j))) ms", b, j >= 10, j < 10)
+            let overCutoff = j >= SuitabilityEngine.Cutoff.jitterWarnMs
+            let b: DashboardCheckTable.GradeBadge = overCutoff
+                ? .init(label: "Degraded", tone: .warn)
+                : .init(label: "Good", tone: .good)
+            return ("\(Int(round(j))) ms", b, overCutoff, !overCutoff)
         }()
         rows.append(.init(
             id: "jitter",
@@ -777,9 +777,9 @@ struct HomeView: View {
                 return .init(label: "Declined by router", tone: .neutral)
             } else if isRoamBlip {
                 return .init(label: "Roamed", tone: .good)
-            } else if gwLoss >= 10.0 {
+            } else if gwLoss >= SuitabilityEngine.Cutoff.lossCritPct {
                 return .init(label: "Unstable", tone: .critical)
-            } else if gwLoss >= 3.0 {
+            } else if gwLoss >= SuitabilityEngine.Cutoff.lossWarnPct {
                 return .init(label: "Degraded", tone: .warn)
             } else {
                 return .init(label: "Good", tone: .good)
@@ -787,13 +787,13 @@ struct HomeView: View {
         }()
         rows.append(.init(
             id: "gw-loss",
-            icon: isFilteredGateway ? "slash.circle" : ((!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network"),
+            icon: isFilteredGateway ? "slash.circle" : ((!isRoamBlip && gwLoss >= SuitabilityEngine.Cutoff.lossWarnPct) ? "exclamationmark.triangle.fill" : "network"),
             label: "Packet loss to router",
             measured: isFilteredGateway ? "Blocked" : LossFormatter.formatPct(gwLoss),
             subvalue: nil,
             usual: "0%",
             badge: gwLossBadge,
-            isWarning: !isFilteredGateway && !isRoamBlip && gwLoss >= 3.0,
+            isWarning: !isFilteredGateway && !isRoamBlip && gwLoss >= SuitabilityEngine.Cutoff.lossWarnPct,
             isGood: isFilteredGateway || isRoamBlip || gwLoss < 1.0
         ))
 
@@ -810,12 +810,17 @@ struct HomeView: View {
             .map { "\(Int(round($0))) dB" } ?? "—"
 
         if isConnectedToWiFi {
+            // One verdict drives the badge, the icon and the colour. "Weak" is
+            // exactly where the CLI's W1 fires (below -75 dBm) and it is a
+            // warning there, so it is never red; the band above it ("Fair") is
+            // not a finding and is neither amber nor green.
+            let weakCutoff = HopAttributionResolver.weakWifiSignalDBm
             let signalBadge: DashboardCheckTable.GradeBadge = {
                 guard let r = rssi else { return .init(label: "Good", tone: .good) }
                 if r >= -55 { return .init(label: "Excellent", tone: .good) }
-                if r >= -65 { return .init(label: "Good", tone: .good) }
-                if r >= -75 { return .init(label: "Degraded", tone: .warn) }
-                return .init(label: "Weak", tone: .critical)
+                if r >= -68 { return .init(label: "Good", tone: .good) }
+                if r >= weakCutoff { return .init(label: "Fair", tone: .neutral) }
+                return .init(label: "Weak", tone: .warn)
             }()
             rows.append(.init(
                 id: "wifi-signal",
@@ -825,16 +830,18 @@ struct HomeView: View {
                 subvalue: nil,
                 usual: rssiUsual,
                 badge: signalBadge,
-                isWarning: rssi != nil && rssi! < -70,
-                isGood: rssi != nil && rssi! >= -65
+                isWarning: rssi != nil && rssi! < weakCutoff,
+                isGood: rssi != nil && rssi! >= -68
             ))
         }
 
         // 5. Noise (Matching user mockup)
         if isConnectedToWiFi, let n = noise {
+            // The CLI judges interference through SNR (W2), not noise alone, so
+            // an elevated noise floor is shown but never raised as a warning.
             let noiseBadge = DashboardCheckTable.GradeBadge(
                 label: n <= -85 ? "Good" : "Elevated",
-                tone: n <= -85 ? .good : .warn
+                tone: n <= -85 ? .good : .neutral
             )
             rows.append(.init(
                 id: "wifi-noise",
@@ -844,18 +851,18 @@ struct HomeView: View {
                 subvalue: nil,
                 usual: "—",
                 badge: noiseBadge,
-                isWarning: n > -85,
+                isWarning: false,
                 isGood: n <= -85
             ))
         }
 
         // 6. SNR (Matching user mockup)
         if isConnectedToWiFi, let s = snr {
-            let snrBadge: DashboardCheckTable.GradeBadge = {
-                if s >= 25 { return .init(label: "Good", tone: .good) }
-                if s >= 15 { return .init(label: "Low", tone: .warn) }
-                return .init(label: "Poor", tone: .critical)
-            }()
+            // W2 fires strictly below the CLI's SNR cutoff and is a warning.
+            let snrIsLow = s < SuitabilityEngine.Cutoff.snrLowDb
+            let snrBadge: DashboardCheckTable.GradeBadge = snrIsLow
+                ? .init(label: "Low", tone: .warn)
+                : .init(label: "Good", tone: .good)
             rows.append(.init(
                 id: "wifi-snr",
                 icon: "chart.bar.fill",
@@ -864,8 +871,8 @@ struct HomeView: View {
                 subvalue: nil,
                 usual: snrUsual,
                 badge: snrBadge,
-                isWarning: s < 20,
-                isGood: s >= 20
+                isWarning: snrIsLow,
+                isGood: !snrIsLow
             ))
         }
 
@@ -875,9 +882,9 @@ struct HomeView: View {
             if isFilteredGateway {
                 return .init(label: "Blocked", tone: .neutral)
             }
-            guard let r = gwRtt else { return .init(label: "—", tone: .neutral) }
-            if r > 50 { return .init(label: "Slow", tone: .warn) }
-            return .init(label: "Good", tone: .good)
+            guard gwRtt != nil else { return .init(label: "—", tone: .neutral) }
+            // The CLI has no latency-only rule: the value is shown, not graded.
+            return .init(label: "Measured", tone: .neutral)
         }()
         rows.append(.init(
             id: "router",
@@ -887,8 +894,8 @@ struct HomeView: View {
             subvalue: nil,
             usual: gwUsual,
             badge: gwPingBadge,
-            isWarning: !isFilteredGateway && gwRtt != nil && gwRtt! > 50,
-            isGood: !isFilteredGateway && gwRtt != nil && gwRtt! <= 50
+            isWarning: false,
+            isGood: !isFilteredGateway && gwRtt != nil
         ))
 
         // 8. Internet Ping
@@ -897,20 +904,20 @@ struct HomeView: View {
             if isFilteredInternet {
                 return .init(label: "TCP ok", tone: .good)
             }
-            guard let r = inetRtt else { return .init(label: "—", tone: .neutral) }
-            if r > 120 { return .init(label: "Elevated", tone: .warn) }
-            return .init(label: "Good", tone: .good)
+            guard inetRtt != nil else { return .init(label: "—", tone: .neutral) }
+            // The CLI has no latency-only rule: the value is shown, not graded.
+            return .init(label: "Measured", tone: .neutral)
         }()
         rows.append(.init(
             id: "internet",
-            icon: (!isFilteredInternet && inetRtt != nil && inetRtt! > 120) ? "exclamationmark.triangle.fill" : "globe",
+            icon: "globe",
             label: "Internet latency",
             measured: isFilteredInternet ? "TCP ok" : (inetRtt != nil ? "\(Int(round(inetRtt!))) ms" : "—"),
             subvalue: nil,
             usual: inetUsual,
             badge: inetPingBadge,
-            isWarning: !isFilteredInternet && inetRtt != nil && inetRtt! > 120,
-            isGood: isFilteredInternet || (inetRtt != nil && inetRtt! <= 120)
+            isWarning: false,
+            isGood: isFilteredInternet || inetRtt != nil
         ))
 
         // 9. Internet packet loss
@@ -919,20 +926,20 @@ struct HomeView: View {
             if isFilteredInternet {
                 return .init(label: "Filtered", tone: .neutral)
             }
-            if loss1 >= 10.0 { return .init(label: "Unstable", tone: .critical) }
-            if loss1 >= 3.0 { return .init(label: "Degraded", tone: .warn) }
-            if loss1 > 0 { return .init(label: "Minor", tone: .warn) }
+            if loss1 >= SuitabilityEngine.Cutoff.lossCritPct { return .init(label: "Unstable", tone: .critical) }
+            if loss1 >= SuitabilityEngine.Cutoff.lossWarnPct { return .init(label: "Degraded", tone: .warn) }
+            if loss1 > 0 { return .init(label: "Minor", tone: .neutral) }
             return .init(label: "Good", tone: .good)
         }()
         rows.append(.init(
             id: "loss",
-            icon: (!isFilteredInternet && loss1 >= 3.0) ? "exclamationmark.triangle.fill" : "checkmark",
+            icon: (!isFilteredInternet && loss1 >= SuitabilityEngine.Cutoff.lossWarnPct) ? "exclamationmark.triangle.fill" : "checkmark",
             label: "Internet packet loss",
             measured: lossText,
             subvalue: nil,
             usual: "0%",
             badge: lossBadge,
-            isWarning: !isFilteredInternet && loss1 >= 3.0,
+            isWarning: !isFilteredInternet && loss1 >= SuitabilityEngine.Cutoff.lossWarnPct,
             isGood: isFilteredInternet || loss1 < 1.0
         ))
 
@@ -943,21 +950,26 @@ struct HomeView: View {
         rows.append(DashboardCheckEvidence.bufferbloat(snapshot: snap))
 
         // 12. Packet size (MTU)
-        let mtu = snap?.mtu.effective ?? snap?.mtu.pathSize ?? 0
+        // M1 fires strictly below the CLI's standard MTU. An MTU that was not
+        // measured (a quick check) is "not measured", never "reduced".
+        let mtuValue = snap?.mtu.effective ?? snap?.mtu.pathSize
+        let mtuMeasured = (mtuValue ?? 0) > 0
+        let mtu = mtuValue ?? 0
+        let mtuReduced = mtuMeasured && mtu < SuitabilityEngine.Cutoff.mtuStandard
         let mtuBadge = DashboardCheckTable.GradeBadge(
-            label: mtu >= 1400 ? "Standard" : "Reduced",
-            tone: mtu >= 1400 ? .good : .warn
+            label: !mtuMeasured ? "Not measured" : (mtuReduced ? "Reduced" : "Standard"),
+            tone: !mtuMeasured ? .neutral : (mtuReduced ? .warn : .good)
         )
         rows.append(.init(
             id: "mtu",
-            icon: mtu >= 1400 ? "checkmark" : "exclamationmark.triangle.fill",
+            icon: mtuReduced ? "exclamationmark.triangle.fill" : "checkmark",
             label: "Packet size (MTU)",
-            measured: "\(mtu) bytes",
+            measured: mtuMeasured ? "\(mtu) bytes" : "—",
             subvalue: nil,
             usual: "—",
             badge: mtuBadge,
-            isWarning: mtu < 1400,
-            isGood: mtu >= 1400
+            isWarning: mtuReduced,
+            isGood: mtuMeasured && !mtuReduced
         ))
 
         // 13. IPv6
@@ -997,7 +1009,9 @@ struct HomeView: View {
             guard let d = speedDown else { return .init(label: "Skipped", tone: .neutral) }
             if d >= 100 { return .init(label: "Fast", tone: .good) }
             if d >= 25 { return .init(label: "Good", tone: .good) }
-            return .init(label: "Slow", tone: .warn)
+            // The CLI judges speed against this network's own history (BL-1),
+            // not an absolute floor, so a slow figure is labelled, not warned.
+            return .init(label: "Slow", tone: .neutral)
         }()
         rows.append(.init(
             id: "speed",
@@ -1239,8 +1253,12 @@ struct HomeView: View {
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct
             ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
-        if let inetLoss, inetLoss <= 1.0 && loss < 20.0 {
-            // Downstream internet is clean; isolated router drop is ICMP rate limiting
+        // A confirmed gateway finding (G1-G3) is the verdict, and the measured
+        // loss is what it is about: never rewritten to "0%" under it. Without
+        // one, an isolated router drop over a clean internet leg is ICMP rate
+        // limiting, and the monitor has not called it a fault.
+        let gatewayRuleFiring = ["G1", "G2", "G3"].contains { coordinator.activeFiredRules.contains($0) }
+        if !gatewayRuleFiring, let inetLoss, inetLoss <= 1.0 && loss < 20.0 {
             return "0%"
         }
         return LossFormatter.formatPct(loss)
@@ -1537,8 +1555,15 @@ struct HomeView: View {
 
     private var dhcpRemainingText: String {
         if let secs = currentRunResult?.snapshot.dhcp.timeRemainingS {
+            if secs <= 0 { return "Lease expired" }
+            // Minutes under an hour: DH-1 fires at 600 s, where whole
+            // hours would read "0 hours remaining".
+            if secs < 3600 {
+                let minutes = max(1, secs / 60)
+                return "\(minutes) \(minutes == 1 ? "minute" : "minutes") remaining"
+            }
             let hours = secs / 3600
-            return "\(hours) hours remaining"
+            return "\(hours) \(hours == 1 ? "hour" : "hours") remaining"
         }
         return "Not measured"
     }
@@ -1652,13 +1677,9 @@ struct HomeView: View {
     }
 
     private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
-        for ruleID in alert.rules {
-            let rule = coordinator.rulesCatalog.catalog?[ruleID]
-            if rule?.fixTarget == "your_router" || rule?.category == "router" || ruleID.hasPrefix("G") || ruleID.hasPrefix("B") {
-                return true
-            }
+        alert.rules.contains {
+            HopAttributionResolver.isRouterRule($0, catalog: coordinator.rulesCatalog.catalog)
         }
-        return false
     }
 
     private var isNetworkOwned: Bool {
