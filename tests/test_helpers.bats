@@ -198,6 +198,28 @@ mtu|12.50' NETDIAG_RUN_ELAPSED_S=42.0 NETDIAG_QUICK=0 NETDIAG_NO_SPEED=1 $(budge
   [ "$(printf '%s' "$output" | jq_get timings.over_budget)" = "true" ]
 }
 
+# The --expert Timing line printed "budget: 30 s" (an inline `8 || 30`) while
+# the JSON for the same run judged it against 35 or 120. Both now come from
+# lib/thresholds.sh, and this pins that they pick the same one at every depth.
+@test "the expert Timing budget is the one emit_json judges over_budget against" {
+  local combo mode quick nospeed explicit from_bash from_json
+  for combo in "full 0 0 0" "quick 1 0 0" "quick 1 0 1" "mtu-only 0 0 0" \
+               "speed-only 0 0 0" "full 0 1 0"; do
+    read -r mode quick nospeed explicit <<<"$combo"
+    from_bash="$(bash -c '
+      JSON_MODE=0 QUIET=0 EXPERT=0 REDACT=0 LOG=/dev/null
+      . "$1/lib/thresholds.sh"; . "$1/lib/common.sh"; . "$1/lib/globals.sh"; . "$1/lib/output.sh"
+      RUN_MODE="$2" QUICK="$3" NO_SPEED="$4" SPEED_EXPLICIT="$5"
+      run_budget_s' _ "$REPO" "$mode" "$quick" "$nospeed" "$explicit")"
+    # shellcheck disable=SC2046
+    run emit NETDIAG_RUN_MODE="$mode" NETDIAG_RUN_ELAPSED_S=1 NETDIAG_QUICK="$quick" \
+      NETDIAG_NO_SPEED="$nospeed" NETDIAG_SPEED_EXPLICIT="$explicit" $(budgets)
+    from_json="$(printf '%s' "$output" | jq_get timings.budget_s)"
+    [ "$(awk -v a="$from_bash" -v b="$from_json" 'BEGIN{print (a+0==b+0)}')" = "1" ] \
+      || { echo "combo '$combo': expert says $from_bash, json says $from_json"; return 1; }
+  done
+}
+
 @test "emit_json: a focused run that never runs the speed test gets the no-speed budget" {
   # shellcheck disable=SC2046
   run emit NETDIAG_RUN_MODE=mtu-only NETDIAG_RUN_ELAPSED_S=10 $(budgets)
@@ -874,5 +896,33 @@ import json, sys
 d = json.load(sys.stdin)
 assert d.get('changes', []) == [], f'Expected empty changes when paused, got {d.get(\"changes\")}'
 assert d['status']['paused'] is True
+"
+}
+
+# NETDIAG_TRAFFIC_TOP_JSON arrives as someone else's JSON. Python's parser
+# accepts NaN and Infinity and its serialiser writes them straight back out,
+# which jq and Foundation reject — so one bad token in a talker row would
+# have made the whole document unparseable.
+@test "emit_json: NaN or Infinity in the traffic talker list degrades to null, not invalid JSON" {
+  local bad
+  for bad in '[{"name":"x","down_mbps":NaN}]' '[{"name":"x","up_mbps":Infinity}]' '[{"name":"x","up_mbps":-Infinity}]'; do
+    run emit NETDIAG_TRAFFIC_MEASURED=1 "NETDIAG_TRAFFIC_TOP_JSON=$bad"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | python3 -c "
+import json, sys
+def refuse(tok): raise ValueError(tok)
+d = json.loads(sys.stdin.read(), parse_constant=refuse)
+assert d['traffic']['top_processes'] is None, d['traffic']
+" || { echo "$bad: $output"; return 1; }
+  done
+}
+
+@test "emit_json: a well-formed traffic talker list is still carried through" {
+  run emit NETDIAG_TRAFFIC_MEASURED=1 'NETDIAG_TRAFFIC_TOP_JSON=[{"name":"x","down_mbps":1.5}]'
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['traffic']['top_processes'] == [{'name': 'x', 'down_mbps': 1.5}], d['traffic']
 "
 }

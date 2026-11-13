@@ -187,10 +187,83 @@ def _drop_under_redact(record: dict) -> None:
             cur[path[-1]] = empty
 
 
+# Name suffixes that only resolve on someone's own network. A TARGET under
+# one of these ("nas.smith-family.local") names a household's device, which
+# is as identifying as the SSID. A public name such as github.com is not:
+# anyone reading the report can already see it, and masking it would
+# delete the one clue about which leg was measured.
+_PRIVATE_SUFFIXES = (
+    ".local", ".lan", ".home", ".home.arpa", ".internal",
+    ".localdomain", ".corp", ".intranet",
+)
+
+
+def _private_target(value) -> str | None:
+    """The positional TARGET if it names something private, else None.
+
+    A single-label name ("nas", "printer") only ever resolves through the
+    local search domain, so it is private by construction. An IP literal is
+    left alone here: a public one is masked by the address sweep and an
+    RFC1918 one is kept on purpose, the same rule as every other address.
+    """
+    if not isinstance(value, str):
+        return None
+    name = value.strip().rstrip(".")
+    if len(name) < 3:
+        return None
+    try:
+        ipaddress.ip_address(name.strip("[]"))
+        return None
+    except ValueError:
+        pass
+    lowered = name.lower()
+    if "." not in lowered or lowered.endswith(_PRIVATE_SUFFIXES):
+        return name
+    return None
+
+
+def private_targets_in(record: dict) -> list[str]:
+    """Private hostnames the user asked netdiag to probe, longest first."""
+    found: set[str] = set()
+    for path in ("netdiag_extras.target", "netdiag_extras.target_traceroute.target"):
+        t = _private_target(get_nested(record, path))
+        if t:
+            found.add(t)
+    return sorted(found, key=len, reverse=True)
+
+
+def scrub_hostnames(node, names: list[str]):
+    """Mask a hostname wherever it stands as a whole name, case-insensitively.
+
+    Not the substring replace `scrub` uses. A single-label target such as
+    "nas" is a perfectly ordinary three letters, and replacing it inside
+    "Nasdaq" or "national" would corrupt prose rather than protect anyone.
+    The name has to be bounded by something that cannot continue a hostname.
+    A longer name that merely *begins* with the target ("nas.example.com"
+    for the target "nas") is masked too: over-masking is the safe side.
+    """
+    if not names:
+        return node
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(n) for n in names) +
+        r")(?![A-Za-z0-9_-])", re.IGNORECASE)
+
+    def walk(n):
+        if isinstance(n, dict):
+            return {k: walk(v) for k, v in n.items()}
+        if isinstance(n, list):
+            return [walk(v) for v in n]
+        if isinstance(n, str):
+            return pattern.sub(REDACTED, n)
+        return n
+    return walk(node)
+
+
 def redact(record: dict) -> dict:
     # Secrets are read before the drops: the watcher's program path has to
     # be known to be scrubbed out of prose even though its own field goes.
     out = scrub(record, secrets_in(record))
+    out = scrub_hostnames(out, private_targets_in(record))
     _drop_under_redact(out)
     return out
 

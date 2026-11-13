@@ -339,3 +339,95 @@ JSON
   # Masked whole, not half-masked with ':7:8' left behind.
   [[ "$output" != *":7:8"* ]] || { echo "$output"; return 1; }
 }
+
+# ── a user-supplied TARGET names a device on someone's own network ───────
+
+# Add a private-looking TARGET to the fixture run, the way `netdiag TARGET`
+# records it: in netdiag_extras, in the DNS rows and in diagnosis prose.
+with_target() {
+  python3 - "$RUN" "$1" <<'PY'
+import json, sys
+p, target = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
+d["netdiag_extras"] = {"target": target,
+                       "target_ping": {"loss_pct": 0.0, "rtt_avg_ms": 3.0},
+                       "target_traceroute": {"target": target, "hops": []}}
+d["dns"].append({"resolver": "192.168.15.1", "name": target, "ok": True})
+d["diagnosis"].append({"severity": "info", "rule": "T-1",
+                       "summary": f"Could not reach {target} on port 443."})
+json.dump(d, open(p, "w"))
+PY
+}
+
+@test "a .local TARGET is masked in the text, the DNS row and the prose" {
+  with_target "nas.smith-family.local"
+  run share
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"smith-family"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"nas.smith"* ]] || { echo "$output"; return 1; }
+}
+
+@test "a .local TARGET is masked in --json too, in every field it appears" {
+  with_target "nas.smith-family.local"
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"smith-family"* ]] || { echo "$output"; return 1; }
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['netdiag_extras']['target'] == '[redacted]', d['netdiag_extras']
+assert d['netdiag_extras']['target_traceroute']['target'] == '[redacted]'
+assert d['dns'][-1]['name'] == '[redacted]', d['dns'][-1]
+"
+}
+
+@test "every private suffix is masked" {
+  local host
+  for host in printer.lan nas.home router.home.arpa db.internal pc.localdomain wiki.corp intra.intranet; do
+    cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z","dns":[],"diagnosis":[]}
+JSON
+    with_target "$host"
+    run share
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"$host"* ]] || { echo "$host leaked: $output"; return 1; }
+  done
+}
+
+@test "a single-label TARGET is masked, but only as a whole word" {
+  cat > "$RUN" <<'JSON'
+{"timestamp":"2026-08-25T12:00:00Z","dns":[],
+ "diagnosis":[{"severity":"info","rule":"X","summary":"National Nasdaq feed unreachable."}]}
+JSON
+  with_target "nas"
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['netdiag_extras']['target'] == '[redacted]'
+texts = [x['summary'] for x in d['diagnosis']]
+assert 'National Nasdaq feed unreachable.' in texts, texts
+assert 'Could not reach [redacted] on port 443.' in texts, texts
+"
+}
+
+@test "a public TARGET is left alone: it identifies nobody" {
+  with_target "github.com"
+  run share
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"github.com"* ]] || { echo "$output"; return 1; }
+}
+
+@test "a TARGET given as an IP literal follows the address rules, not the hostname rules" {
+  with_target "198.51.100.9"
+  run share
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"198.51.100.9"* ]] || { echo "$output"; return 1; }
+  with_target "192.168.15.1"
+  run python3 "$REPO/helpers/share.py" --json < "$RUN"
+  printf '%s' "$output" | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['netdiag_extras']['target'] == '192.168.15.1'
+"
+}
