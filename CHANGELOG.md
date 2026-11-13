@@ -8,6 +8,18 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Fixed
+- **`--watch` ran no checks**: it was dispatched before `lib/common.sh` was loaded, so every iteration failed with `with_timeout: command not found` (exit 127).
+- **`reconnect-wifi` power-cycled `en0` on every Mac**, because the `--repair` path never loaded the Wi-Fi device lookup; Macs whose Wi-Fi is `en1` (iMac, Mac mini, Studio) now get the right port, from the button and from the automatic reconnect.
+- **`curl ... | bash -s -- --app` looped forever** reinstalling the app.
+- **Arrival check loop**: on a network keyed by a private gateway IP the app re-ran the link-saturating full check back to back. The state is now kept in memory for the connection (never persisted across networks).
+- **Support summary leak**: "Copy for support / front desk" now masks SSID, IPs, BSSID, gateway MAC and city, as its caption says.
+- **History**: `--history`, `--show` and `--share` no longer crash, or silently drop a run, when a gateway-keyed network bridges onto an SSID-keyed one that bridges onto a MAC-keyed one. `--summary` no longer aborts on a timestamp without a zone and now reads the archive file. `--show` reports measured values, not substituted policy figures.
+- **Monitor**: refresh signals mid-cycle are honoured; leaving a network clears its open fault in the event journal; a trapped signal no longer causes a false TCP failure; WJ-1 and auto-reconnect ignore wired drops; N1c is reachable.
+- **Wi-Fi**: a full-tunnel VPN no longer hides the Wi-Fi radio; an SSID containing `: ` is kept whole; a ULA-only IPv6 network is not reported as broken IPv6; unprivileged `mtr` now produces a report (`-c 20 -i 1`).
+- **App verdicts now follow the CLI**: menu-bar dot, suitability, Home/Live tiles and stability use the CLI's cutoffs; hop attribution tables match the rules catalog; "Complete outages only" is decided by the rule that fired; the router-admin button follows the catalog; the update download honours its setting.
+- Housekeeping: `--expert` Timing shows the budget the JSON judges against; `prune_logs` no longer deletes launchd agent logs; `collect_parallel` redaction branch repaired; one shellcheck warning that kept CI red.
+
 ## [1.23.1] - 2026-11-07
 
 ### Fixed
