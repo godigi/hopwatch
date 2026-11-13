@@ -67,9 +67,20 @@ enum EffectiveLoss {
         let gwLoss: Double? = filtering.gatewayLeg ? nil : gatewayLoss
 
         var candidateGW = gwLoss
-        if hasRecentRoam, let gw = candidateGW, gw < 10.0 {
-            // Handover blip: suppress attributing to persistent connection loss if internet is intact
-            candidateGW = inetLoss ?? 0.0
+        // Handover blip: suppress attributing to persistent connection loss
+        // if the internet leg is intact. Only when that leg was actually
+        // *measured*: with `inetLoss == nil` there is no evidence the link
+        // is intact, and reading the gap as 0% (the earlier `?? 0.0`)
+        // turned "unmeasured" into "no loss" and erased the gateway figure.
+        //
+        // The 10 % / 2 % cutoffs in this function are the GUI's own, not the
+        // CLI's: the CLI publishes the verdict (rules L2 / G3, severity) but
+        // not a single blended percentage, so the headline and suitability
+        // tiles still depend on these until docs/design/
+        // 2026-10-06-suitability-out-of-swift-plan.md moves that blend into
+        // lib/. Known design debt, deliberately left unchanged here.
+        if hasRecentRoam, let gw = candidateGW, gw < 10.0, let inet = inetLoss {
+            candidateGW = inet
         }
 
         if let inetLoss, let candidateGW {

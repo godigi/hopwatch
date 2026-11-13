@@ -208,20 +208,32 @@ import Testing
         #expect(HealthResolver.resolve(fallbackInputs) == .warning)
     }
 
-    @Test func monitorSampleHealthDetectsElevatedLoss() {
+    @Test func monitorSampleHealthFollowsTheCLISeverityNotRawLoss() {
         var sample = MonitorSample()
         sample.link.up = true
         sample.status.measurement = "measured"
         sample.status.severity = "ok"
 
-        // 1. Elevated internet loss triggers warning
+        // The GUI holds no thresholds: whatever the raw loss figures say,
+        // `status.severity == "ok"` is healthy (the CLI already applied
+        // its cutoffs and its ICMP-filtering exemptions).
         sample.gateway.lossPct = 0.0
         sample.internet.lossPct = 3.0
-        #expect(sample.health == .warning)
+        #expect(sample.health == .healthy)
 
-        // 2. Isolated router ping loss with clean internet stays healthy (harmless ICMP rate limiting)
-        sample.gateway.lossPct = 3.0
+        sample.gateway.lossPct = 25.0
         sample.internet.lossPct = 0.0
         #expect(sample.health == .healthy)
+
+        // An unmeasured figure is not a loss either.
+        sample.gateway.lossPct = nil
+        sample.internet.lossPct = nil
+        #expect(sample.health == .healthy)
+
+        // The CLI's own warn / critical verdicts are what move the dot.
+        sample.status.severity = "warn"
+        #expect(sample.health == .warning)
+        sample.status.severity = "critical"
+        #expect(sample.health == .critical)
     }
 }

@@ -179,6 +179,13 @@ final class HopwatchCoordinator {
     private var pendingArrivalNetworkID: String?
     private var pendingArrivalDepth: ArrivalDepth?
     private var pendingArrivalDecline: DeclineReason?
+    /// Arrival state for networks known only by a private/link-local
+    /// gateway IP (`gw:192.168.1.1`). Never persisted — see
+    /// `setArrivalState` — and emptied at every connection boundary
+    /// (`invalidateCurrentConnection`), so the verdict for "the network
+    /// behind 192.168.1.1" cannot leak onto a different one that shares the
+    /// address.
+    private var sessionArrivalStates: [String: ArrivalState] = [:]
     private var heartbeatSeedMinSeq: Int = 0
     /// The severity seen on the previous sample, used by `handleSample` to
     /// detect the ok/info → warn/critical edge that auto-starts an
@@ -772,7 +779,11 @@ final class HopwatchCoordinator {
         let isPortalConfirmed = sample.publicInfo.captivePortal == true ||
             sample.status.rules.contains("CP-1") ||
             isSystemCaptiveActive()
-        let internetHealthy = (sample.internet.lossPct ?? 100) < 50
+        // Evidence the internet is reachable: a reply was measured, or the
+        // public lookup / a TCP probe got through. A reply is enough; this
+        // is no verdict on loss, so no loss cutoff of this app's own (it
+        // used to be "< 50 %") belongs here.
+        let internetHealthy = sample.internet.rttAvgMs != nil
             || sample.publicInfo.ip != nil
             || sample.tcp.anyOk == true
         if isPortalConfirmed {
@@ -928,8 +939,8 @@ final class HopwatchCoordinator {
         }()
 
         let canonical = history.canonicalID(targetID)
-        let state = Defaults.arrivalStates[targetID]
-            ?? (NetworkIdentity.isPrivateOrLocalGateway(canonical) ? nil : Defaults.arrivalStates[canonical])
+        let state = recordedArrivalState(for: targetID)
+            ?? recordedArrivalState(for: canonical)
             ?? .unchecked
         // Assigned only on a real change. Under `@Observable` a write
         // invalidates every observer whether or not the value differs, and
@@ -990,7 +1001,19 @@ final class HopwatchCoordinator {
     private func attemptArrival(id: String, depth: ArrivalDepth, reason: String,
                                 declineWith: DeclineReason? = nil) {
         let now = Date()
+        // Marked *before* the scan starts, not after: `launch` reads
+        // `isArrivalCheck` once, synchronously, to decide whether this scan
+        // reseeds the heartbeat around itself. Setting the marker only once
+        // `runScan` had returned meant that read was always false, so the
+        // reseed at the end of an arrival check never ran. Restored if the
+        // scan is declined, so a busy decline leaves the in-flight check's
+        // own marker (if any) exactly as it was.
+        let previousPending = (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline)
+        pendingArrivalNetworkID = id
+        pendingArrivalDepth = depth
+        pendingArrivalDecline = declineWith
         guard runScan(depth: depth.runnerDepth, reason: reason) else {
+            (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline) = previousPending
             arrivalAttempts += 1
             // 30 s doubling, capped at five minutes. In memory only.
             let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
@@ -1005,11 +1028,6 @@ final class HopwatchCoordinator {
         // `.checking` while it runs, so Home shows progress rather than a
         // stale report. The scan's completion writes the terminal state.
         setArrivalState(.checking(depth: depth, startedAt: now), for: id)
-        pendingArrivalNetworkID = id
-        pendingArrivalDepth = depth
-        pendingArrivalDecline = declineWith
-        heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
-        heartbeat.reset()
     }
 
     /// Stand in for the arrival state the monitor would have established,
@@ -1280,12 +1298,34 @@ final class HopwatchCoordinator {
     /// observable mirror, so the two cannot disagree.
     /// Private/local gateway IPs (RFC 1918) are strictly rejected so they
     /// cannot poison other networks sharing common gateway subnets (e.g. 192.168.1.1).
+    ///
+    /// Those weak keys are never *persisted* — the store would let one
+    /// network's verdict suppress an unrelated one that happens to share
+    /// 192.168.1.1. They are still *remembered for this connection*, in
+    /// `sessionArrivalStates`. Dropping the write outright (the previous
+    /// behaviour) left every such network `.unchecked` forever: the full
+    /// check ran, its terminal state vanished, and the very next monitor
+    /// sample started another one — back-to-back, link-saturating, with the
+    /// arrival card stuck on "Starting a check".
     private func setArrivalState(_ state: ArrivalState, for id: String) {
-        guard !NetworkIdentity.isPrivateOrLocalGateway(id) else { return }
-        var all = Defaults.arrivalStates
-        all[id] = state
-        Defaults.arrivalStates = all
+        if NetworkIdentity.isPrivateOrLocalGateway(id) {
+            sessionArrivalStates[id] = state
+        } else {
+            var all = Defaults.arrivalStates
+            all[id] = state
+            Defaults.arrivalStates = all
+        }
         if id == arrivalNetworkID { arrivalState = state }
+    }
+
+    /// One key's recorded arrival state: the persisted store for a
+    /// trustworthy identity, the in-memory per-connection map for a weak
+    /// (private gateway IP) one.
+    private func recordedArrivalState(for key: String) -> ArrivalState? {
+        if NetworkIdentity.isPrivateOrLocalGateway(key) {
+            return sessionArrivalStates[key]
+        }
+        return Defaults.arrivalStates[key]
     }
 
     /// Write the terminal arrival state for a scan that has just landed.
@@ -1433,11 +1473,38 @@ final class HopwatchCoordinator {
     /// declined, and record it as this network's arrival check.
     func runDeclinedFullCheck() {
         guard let id = arrivalNetworkID else { return }
-        guard runScan(depth: .full, reason: "you asked for the full check anyway") else { return }
-        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
+        // Marked before the scan starts for the reason given in
+        // `attemptArrival`; restored if the scan is declined.
+        let previousPending = (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline)
         pendingArrivalNetworkID = id
         pendingArrivalDepth = .full
         pendingArrivalDecline = nil
+        guard runScan(depth: .full, reason: "you asked for the full check anyway") else {
+            (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline) = previousPending
+            return
+        }
+        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
+    }
+
+    /// The monitor's packet-loss rules (`lib/monitor.sh`): router loss G3,
+    /// and internet loss L1 / L2.
+    private static let lossRuleIDs: Set<String> = ["G3", "L1", "L2"]
+
+    /// "Signal Restored" text when the reading moved out of the CLI signal
+    /// scale's weakest band into one the CLI tones good/ok, else `nil`.
+    /// Bands come from `signalScale` (`netdiag --signal-scale`), so this
+    /// app states no dBm boundary and no "Excellent" of its own; with no
+    /// scale loaded there is simply no such resolution.
+    private func signalRestoredMessage(from prev: MonitorSample, to sample: MonitorSample) -> String? {
+        guard let scale = signalScale.scale, scale.bands.count >= 2,
+              let prevRssi = prev.wifi?.rssi, let currRssi = sample.wifi?.rssi,
+              let prevIndex = scale.bandIndex(forRSSI: prevRssi),
+              let currIndex = scale.bandIndex(forRSSI: currRssi),
+              prevIndex == scale.bands.count - 1, currIndex < prevIndex,
+              let label = scale.bands[currIndex].label,
+              let tone = scale.bands[currIndex].tone, tone == "good" || tone == "ok"
+        else { return nil }
+        return "Wi-Fi signal improved from \(prevRssi) dBm to \(currRssi) dBm (\(label))."
     }
 
     /// Auto-start a short, fast-cadence "investigation" burst the moment
@@ -1454,8 +1521,11 @@ final class HopwatchCoordinator {
         // If an active resolution exists, verify it remains valid under the new sample.
         // If packet loss has returned or new alerts/faults appeared, dismiss it immediately.
         if activeResolution != nil {
-            let hasLoss = (sample.gateway.lossPct ?? 0) >= 3.0 || (sample.internet.lossPct ?? 0) >= 3.0
-            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty || hasLoss {
+            // The CLI's severity already says whether loss has returned
+            // (G3 / L1 / L2 are rules in `status.rules`); a figure read
+            // against a cutoff of this app's own would dismiss a resolution
+            // over a sample the CLI calls healthy.
+            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty {
                 dismissActiveResolution()
             }
         }
@@ -1490,22 +1560,24 @@ final class HopwatchCoordinator {
                 )
             }
             // Case 3: Wi-Fi Signal Restored
-            else if let prevRssi = prev.wifi?.rssi, prevRssi <= -75,
-                    let currRssi = sample.wifi?.rssi, currRssi >= -65 {
+            else if let restored = signalRestoredMessage(from: prev, to: sample) {
                 recordResolution(
                     title: "Signal Restored",
-                    message: "Wi-Fi signal jumped from \(prevRssi) dBm to \(currRssi) dBm (Excellent).",
+                    message: restored,
                     icon: "wifi"
                 )
             }
-            // Case 4: Network Packet Loss Stabilized
-            else if (prev.gateway.lossPct ?? 0) >= 3.0 || (prev.internet.lossPct ?? 0) >= 3.0,
-                    (sample.gateway.lossPct ?? 0) < 1.0 && (sample.internet.lossPct ?? 0) < 1.0 {
+            // Case 4: Network Packet Loss Stabilized — the CLI had a loss
+            // rule firing on the earlier sample and has none now (this
+            // sample is severity "ok" with no active alerts, per the guard
+            // above). No percentage is asserted: the earlier "0% loss" was a
+            // claim about a figure that may not have been measured.
+            else if !Set(prev.status.rules).isDisjoint(with: Self.lossRuleIDs) {
                 let ping = sample.internet.rttAvgMs ?? sample.gateway.rttAvgMs
                 let pingText = ping.map { "\(Int($0.rounded())) ms ping" } ?? "low latency"
                 recordResolution(
                     title: "Network Stabilized",
-                    message: "Packet loss resolved (0% loss, \(pingText)).",
+                    message: "Packet loss cleared (\(pingText)).",
                     icon: "checkmark.circle.fill"
                 )
             }
@@ -1602,6 +1674,9 @@ final class HopwatchCoordinator {
             cancelScan()
             clearPendingArrival()
         }
+        // A connection boundary: a gateway-IP key may now name a different
+        // network, so nothing remembered about the old one applies.
+        sessionArrivalStates.removeAll()
         if sample == nil {
             lastNetworkID = nil
         }
@@ -1917,7 +1992,7 @@ final class HopwatchCoordinator {
         if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
             return false
         }
-        let internetHealthy = (liveSample?.internet.lossPct ?? monitor.latest?.internet.lossPct ?? 100) < 50
+        let internetHealthy = (liveSample?.internet.rttAvgMs ?? monitor.latest?.internet.rttAvgMs) != nil
             || liveSample?.publicInfo.ip != nil || monitor.latest?.publicInfo.ip != nil
             || liveSample?.tcp.anyOk == true || monitor.latest?.tcp.anyOk == true
         if internetHealthy && (liveSample?.internet.rttAvgMs != nil || monitor.latest?.internet.rttAvgMs != nil || liveSample?.tcp.anyOk == true) {
