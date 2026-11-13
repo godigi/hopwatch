@@ -900,6 +900,16 @@ json.dump(doc["run"], sys.stdout)' 2>/dev/null \
   exit 0
 fi
 if [ "$WATCH" -eq 1 ]; then
+  # watch_run runs each iteration through with_timeout, which lives in
+  # lib/common.sh. Without it every iteration died with "command not found"
+  # (exit 127) and the loop reported "iteration failed" forever. The loop
+  # itself writes nothing to a log, so LOG goes to /dev/null as in the
+  # --repair and --monitor branches.
+  LOG=/dev/null
+  # shellcheck source=lib/thresholds.sh
+  . "$LIB_DIR/thresholds.sh"
+  # shellcheck source=lib/common.sh
+  . "$LIB_DIR/common.sh"
   # shellcheck source=lib/watch.sh
   . "$LIB_DIR/watch.sh"
   watch_run

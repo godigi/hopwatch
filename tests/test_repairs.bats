@@ -63,9 +63,17 @@ SH
 #!/bin/sh
 printf 'networksetup %s\n' "$*" >>"$CALLS"
 if [ "$1" = "-listallhardwareports" ]; then
-  cat <<'EOF'
+  # A Mac with built-in Ethernet has its Wi-Fi on en1, not en0. The test
+  # picks the device with $STATE/wifi-device; the default is en0.
+  dev=en0
+  [ -f "$STATE/wifi-device" ] && dev="$(cat "$STATE/wifi-device")"
+  cat <<EOF
+Hardware Port: Ethernet
+Device: en9
+Ethernet Address: 00:11:22:33:44:99
+
 Hardware Port: Wi-Fi
-Device: en0
+Device: $dev
 Ethernet Address: 00:11:22:33:44:55
 EOF
   exit 0
@@ -106,8 +114,14 @@ SH
   chmod +x "$STUBS/osascript" "$STUBS/open" "$STUBS/lsappinfo" "$STUBS/networksetup" "$STUBS/ifconfig"
 }
 
+# `networksetup -listallhardwareports` is a read-only lookup of which device
+# is the Wi-Fi radio, made even on a dry run so the printed commands name the
+# real device. It changes nothing, so it does not count as "a system program
+# was called".
 no_calls() {
-  [ ! -s "$CALLS" ] || { echo "a system program was called:"; cat "$CALLS"; return 1; }
+  local made
+  made="$(grep -vFx 'networksetup -listallhardwareports' "$CALLS" 2>/dev/null || true)"
+  [ -z "$made" ] || { echo "a system program was called:"; printf '%s\n' "$made"; return 1; }
 }
 
 # ── --repair: dry run ────────────────────────────────────────────────────
@@ -141,6 +155,24 @@ no_calls() {
   [[ "$output" == *"networksetup -setairportpower en0 off"* ]]
   [[ "$output" == *"networksetup -setairportpower en0 on"* ]]
   no_calls
+}
+
+@test "reconnect-wifi targets the Wi-Fi device, not a hard-coded en0" {
+  printf 'en1\n' >"$STATE/wifi-device"
+  run "$NETDIAG" --repair=reconnect-wifi --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"networksetup -setairportpower en1 off"* ]]
+  [[ "$output" == *"networksetup -setairportpower en1 on"* ]]
+  [[ "$output" != *"en0"* ]]
+  no_calls
+}
+
+@test "a real reconnect-wifi on a Mac whose Wi-Fi is en1 toggles en1 and never en0" {
+  printf 'en1\n' >"$STATE/wifi-device"
+  REPAIR_WIFI_SETTLE_S=0 REPAIR_WIFI_REJOIN_WAIT_S=1 run "$NETDIAG" --repair=reconnect-wifi
+  grep -Fx 'networksetup -setairportpower en1 off' "$CALLS"
+  grep -Fx 'networksetup -setairportpower en1 on' "$CALLS"
+  ! grep -F 'setairportpower en0' "$CALLS"
 }
 
 @test "the sign-in page is the page both captive-portal probes fetch, defined once" {

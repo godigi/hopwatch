@@ -132,7 +132,12 @@ hdr() {
       progress_clear
       ;;
     *)
-      progress_spin_start "$*"
+      # Not under --expert: there every section body is printed to stdout as
+      # it finishes, on the same terminal, so a spinner repainting its caption
+      # on stderr every 100 ms lands in front of each printed line, and the
+      # last one (the Timing section) was never stopped before the report
+      # footer. The scrolling output is already the activity indicator.
+      [ "${EXPERT:-0}" -eq 1 ] || progress_spin_start "$*"
       ;;
   esac
   say ""
@@ -940,6 +945,7 @@ CAPTIVE_CANARY_MARKER='<TITLE>Success</TITLE>'
 # the sign-in page (lib/repairs.sh) must open the very page detection used.
 # shellcheck disable=SC2034 # read by lib/public.sh, lib/monitor.sh and lib/repairs.sh
 CAPTIVE_CANARY_URL='http://captive.apple.com/hotspot-detect.html'
+# shellcheck disable=SC2034 # read by lib/public.sh and lib/monitor.sh
 CAPTIVE_CANARY_HOST='captive.apple.com'
 captive_portal_classify() {
   local http_status="${1:-}" body="${2:-}"
@@ -1432,9 +1438,13 @@ collect_parallel() {
     vars="$PAR_TMP/$name.vars"
     if [ -s "$out" ]; then
       if _should_print_stdout; then
-        if [ "${OPT_REDACT:-0}" -eq 1 ]; then
+        if [ "${REDACT:-0}" -eq 1 ]; then
+          # The flag is REDACT (bin/hopwatch); this branch used to test
+          # OPT_REDACT, which nothing sets, so it was never taken. Newline
+          # per line: _redact_line prints none, and without it the whole
+          # section body came out as one concatenated line.
           while IFS= read -r line || [ -n "$line" ]; do
-            _redact_line "$line"
+            printf '%s\n' "$(_redact_line "$line")"
           done < "$out"
         else
           cat "$out"

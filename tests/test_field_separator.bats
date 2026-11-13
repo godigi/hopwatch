@@ -54,6 +54,29 @@ setup() {
   [ "$sec" = "WPA2 Personal" ]
 }
 
+# An SSID is up to 32 arbitrary bytes, a colon and a space among them. The
+# parser split the line on ": " and kept only the second piece, so
+# "Cafe: Free WiFi" became "Cafe" and two different networks shared a name,
+# and so a history bucket.
+@test "ipconfig summary: an SSID containing ': ' is kept whole" {
+  summary="    SSID : Cafe: Free WiFi
+    BSSID : aa:bb:cc:dd:ee:ff
+    Security : WPA2 Personal"
+  IFS="$WIFI_FS" read -r ssid bssid sec <<<"$(wifi_parse_ipconfig_summary "$summary")"
+  [ "$ssid" = "Cafe: Free WiFi" ] || { echo "got '$ssid'"; return 1; }
+  [ "$bssid" = "aa:bb:cc:dd:ee:ff" ]
+  [ "$sec" = "WPA2 Personal" ]
+}
+
+@test "wdutil scrape: an SSID containing ': ' is kept whole" {
+  raw="    RSSI : -61 dBm
+    SSID : Office: Guest 5G
+    BSSID : aa:bb:cc:dd:ee:ff"
+  IFS="$WIFI_FS" read -r rssi noise chan tx phy ssid bssid <<<"$(wifi_parse_wdutil "$raw")"
+  [ "$ssid" = "Office: Guest 5G" ] || { echo "got '$ssid'"; return 1; }
+  [ "$bssid" = "aa:bb:cc:dd:ee:ff" ]
+}
+
 @test "wdutil scrape: missing tx rate leaves PHY and SSID in their own slots" {
   raw="    RSSI : -61 dBm
     Noise : -92 dBm

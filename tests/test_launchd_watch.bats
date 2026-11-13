@@ -117,3 +117,21 @@ _watch_with_child_exit() {
   _watch_with_child_exit 3
   [[ "$WATCH_OUT" == *"iteration failed (exit 3)"* ]] || { echo "$WATCH_OUT"; return 1; }
 }
+
+# The helper above sources common.sh itself, which is exactly why it never
+# noticed that the real `--watch` entry point did not: watch_run calls
+# with_timeout (lib/common.sh), and bin/hopwatch dispatched to it before
+# sourcing that file, so every iteration died with "command not found" and
+# the loop printed "iteration failed (exit 127)" forever.
+@test "--watch: the real entry point can actually run an iteration" {
+  local out="$BATS_TEST_TMPDIR/watch-real.out"
+  "$REPO/bin/hopwatch" --watch=1 >"$out" 2>&1 &
+  local pid=$!
+  sleep 4
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  local text; text="$(cat "$out")"
+  [[ "$text" == *"iter 1"* ]] || { echo "$text"; return 1; }
+  [[ "$text" != *"command not found"* ]] || { echo "$text"; return 1; }
+  [[ "$text" != *"exit 127"* ]] || { echo "$text"; return 1; }
+}
