@@ -21,20 +21,38 @@ wifi_run() {
   # -getairportnetwork, which is broken on some macOS versions and falsely
   # reports "not associated").
   if [ -n "$INTERFACE" ]; then
-    local hw_port
-    hw_port="$(wifi_hw_port_for_device "$INTERFACE")"
+    local hw_port wifi_dev="$INTERFACE"
+    hw_port="$(wifi_hw_port_for_device "$wifi_dev")"
+    # A full-tunnel VPN owns the default route, so INTERFACE is utunN, which
+    # networksetup never lists as a hardware port. The radio underneath is
+    # still the link the user is on: look it up instead of declaring the Mac
+    # "wired" and skipping SSID, signal, the neighbourhood scan and roam
+    # history for as long as the VPN is up. Only a tunnel is looked through,
+    # and only to a Wi-Fi device that is actually up.
+    if [ -z "$hw_port" ]; then
+      case "$INTERFACE" in
+        utun*|ipsec*|ppp*|tun*|tap*|gpd*|wg*)
+          local phys_dev
+          phys_dev="$(wifi_primary_device)"
+          if [ -n "$phys_dev" ] && ifconfig "$phys_dev" 2>/dev/null | grep -q 'status: active'; then
+            wifi_dev="$phys_dev"
+            hw_port="$(wifi_hw_port_for_device "$wifi_dev")"
+          fi
+          ;;
+      esac
+    fi
     if wifi_port_is_wireless "$hw_port"; then
       IS_WIFI=1
       # Pull SSID from ipconfig getsummary (works without sudo on modern macOS).
       local summary ssid bssid sec
-      summary="$(ipconfig getsummary "$INTERFACE" 2>/dev/null)"
+      summary="$(ipconfig getsummary "$wifi_dev" 2>/dev/null)"
       {
         IFS="$WIFI_FS" read -r ssid bssid sec
       } <<<"$(wifi_parse_ipconfig_summary "$summary")"
       WIFI_SSID="$ssid"
       WIFI_BSSID="$bssid"
       WIFI_SEC="$sec"
-      ok "SSID: ${WIFI_SSID:-?}  (interface $INTERFACE)"
+      ok "SSID: ${WIFI_SSID:-?}  (interface $wifi_dev)"
       [ -n "$WIFI_BSSID" ] && info "BSSID: $WIFI_BSSID"
       [ -n "$WIFI_SEC" ]   && info "Security: $WIFI_SEC"
     fi

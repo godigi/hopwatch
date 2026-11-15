@@ -39,7 +39,12 @@ struct SignalScale: Decodable, Sendable {
     /// `min_dbm` the reading is `>=`". `nil` when `bands` hasn't loaded
     /// yet; never a Swift-authored fallback label.
     func band(forRSSI rssi: Int) -> Band? {
-        bands.first { band in
+        bandIndex(forRSSI: rssi).map { bands[$0] }
+    }
+
+    /// Position of `band(forRSSI:)` in `bands` (0 = strongest).
+    func bandIndex(forRSSI rssi: Int) -> Int? {
+        bands.firstIndex { band in
             guard let minDBm = band.minDBm else { return true }
             return rssi >= minDBm
         }
@@ -64,19 +69,27 @@ struct SignalScale: Decodable, Sendable {
         return (label, dbmText, band.tint)
     }
 
-    /// Human-friendly physical distance / proximity guidance derived from RSSI.
-    /// Distinguishes physical distance/position from wireless link latency/interference.
-    static func distanceGuidance(forRSSI rssi: Int?) -> String? {
-        guard let rssi else { return nil }
-        if rssi >= -50 {
-            return "Near router"
-        } else if rssi >= -67 {
-            return "Good range"
-        } else if rssi >= -75 {
-            return "Medium range"
-        } else {
-            return "Too far from router"
-        }
+    /// Human-friendly proximity phrase for a reading, read off the CLI's
+    /// own band walk — never off a dBm number of this app's own.
+    ///
+    /// The previous version hard-coded -50 / -67 / -75 dBm here, which
+    /// contradicted the header above (and disagreed with the CLI's -55 /
+    /// -70 / -75, so the phrase and the band word shown beside it could
+    /// name different bands for the same reading). Now the band the CLI
+    /// puts the reading in decides it: strongest band is "Near router", the
+    /// open-ended bottom band is "Too far from router", and the ones
+    /// between are "Good range" then "Medium range".
+    ///
+    /// `nil` without a loaded `scale`, like `band(forRSSI:)` — callers
+    /// already treat that as "show the raw dBm and the band word instead",
+    /// and there is no Swift-authored fallback phrase. Pass
+    /// `coordinator.signalScale.scale`.
+    static func distanceGuidance(forRSSI rssi: Int?, scale: SignalScale? = nil) -> String? {
+        guard let rssi, let scale, scale.bands.count >= 2,
+              let index = scale.bandIndex(forRSSI: rssi) else { return nil }
+        if index == 0 { return "Near router" }
+        if index == scale.bands.count - 1 { return "Too far from router" }
+        return index == 1 ? "Good range" : "Medium range"
     }
 }
 

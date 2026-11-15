@@ -532,7 +532,8 @@ All of the below are implemented and can fire.
 
 ### MT1 — First lossy hop identified
 
-- Trigger: a hop in the `mtr -r -c 60 -i 0.2` report (or the per-hop
+- Trigger: a hop in the mtr report (`-c 60 -i 0.2` as root, `-c 20 -i 1`
+  otherwise; see `THRESH_MTR_*`) (or the per-hop
   fallback) shows > 2% loss while the immediately previous hop had ≤ 2%.
 - Severity: `warn`.
 - Evidence: hop number and IP, the loss% on that hop and the previous one.

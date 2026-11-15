@@ -249,4 +249,82 @@ import Testing
         #expect(removedIDs.contains("netdiag.internet-degraded.resolved"))
         #expect(!notifMgr.announcedResolutions.contains("internet-degraded"))
     }
+
+    @Test func outageScopeIsJudgedPerRuleNotPerDefinition() {
+        // dns-failing listens for D1 and CONN-1, which are warnings: the
+        // "Complete outages only" scope must not let them through just
+        // because the same definition could also have fired for an outage.
+        let dns = AlertDefinition.byID("dns-failing")!
+        #expect(!dns.isOutage(firing: ["D1"]))
+        #expect(!dns.isOutage(firing: ["CONN-1"]))
+        #expect(dns.isOutage(firing: ["P1"]))
+        #expect(AlertDefinition.byID("connection-lost")!.isOutage(firing: ["N1"]))
+        #expect(!AlertDefinition.byID("wifi-unstable")!.isOutage(firing: ["G3"]))
+        #expect(!AlertDefinition.byID("internet-degraded")!.isOutage(firing: ["L2"]))
+    }
+
+    @Test @MainActor func p1RaisesOneAlertNotTwo() {
+        let engine = AlertEngine(notificationManager: NotificationManager())
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        engine.now = { clock }
+
+        var sample = MonitorSample()
+        sample.link.up = true
+        sample.status.rules = ["P1"]
+        engine.evaluate(sample: sample)
+        clock = clock.addingTimeInterval(40)
+        engine.evaluate(sample: sample)
+
+        #expect(engine.active["connection-lost"] != nil)
+        #expect(engine.active["dns-failing"] == nil)
+    }
+
+    @Test @MainActor func scanOnlyAlertsAreNotSwallowedByPausedMonitoringOrNetworkGrace() {
+        let engine = AlertEngine(notificationManager: NotificationManager())
+        engine.monitoringPaused = true
+        engine.inNetworkGracePeriod = { true }
+
+        var run = RunSnapshot()
+        run.network.id = "test-net"
+        var diag = RunSnapshot.Diagnosis()
+        diag.rule = "NT-1"
+        diag.summary = "Your Mac's clock is wrong"
+        diag.severity = "warn"
+        run.diagnosis = [diag]
+
+        engine.evaluate(run: run)
+        #expect(engine.active["clock-drift"] != nil)
+    }
+
+    @Test @MainActor func differentNetworkBannerSurvivesOneUnreadableGatewayMAC() {
+        let engine = AlertEngine(notificationManager: NotificationManager())
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        engine.now = { clock }
+
+        func sample(mac: String?) -> MonitorSample {
+            var s = MonitorSample()
+            s.link.up = true
+            s.link.type = "wifi"
+            s.link.ssid = "HomeNet"
+            s.link.gatewayMAC = mac
+            s.network.id = "ssid:HomeNet"
+            return s
+        }
+
+        engine.evaluate(sample: sample(mac: "aa:aa:aa:aa:aa:01"))
+        engine.evaluate(sample: sample(mac: "bb:bb:bb:bb:bb:02"))
+        clock = clock.addingTimeInterval(40)
+        engine.evaluate(sample: sample(mac: "bb:bb:bb:bb:bb:02"))
+        #expect(engine.active["different-network"] != nil)
+
+        // One cycle where the MAC could not be read must not take the banner
+        // away: once-per-network would never raise it again.
+        clock = clock.addingTimeInterval(5)
+        engine.evaluate(sample: sample(mac: nil))
+        #expect(engine.active["different-network"] != nil)
+
+        clock = clock.addingTimeInterval(5)
+        engine.evaluate(sample: sample(mac: "bb:bb:bb:bb:bb:02"))
+        #expect(engine.active["different-network"] != nil)
+    }
 }

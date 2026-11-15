@@ -99,7 +99,15 @@ final class UpdateChecker {
                         if manual {
                             self.onPresentUpdateModal?(release)
                         }
-                        if !self.isDownloading && !self.isPreloaded {
+                        // Pre-caching spends the user's bandwidth (and, on a
+                        // hotspot, their data allowance), so it is opt-in:
+                        // with the setting off a check only *finds* the
+                        // update. `installUpdate()` downloads on demand when
+                        // nothing was preloaded, so nothing else depends on
+                        // this having run. Installing stays behind the
+                        // button either way.
+                        if Defaults.autoDownloadAndInstallUpdates
+                            && !self.isDownloading && !self.isPreloaded {
                             self.startBackgroundPreload(for: release)
                         }
                     } else {

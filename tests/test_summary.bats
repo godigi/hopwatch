@@ -397,3 +397,55 @@ summarise_judged() {
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"2 runs"* ]] || { echo "$output"; return 1; }
 }
+
+# A zoneless timestamp used to be parsed as a naive datetime and compared
+# with the aware cutoff, which raises TypeError and aborted the whole
+# summary on one hand-edited line.
+@test "a record with a zoneless timestamp does not abort the summary" {
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" '"gateway":{"rtt_avg_ms":5.0}'
+  rec "$(date -u '+%Y-%m-%dT%H:%M:%S')" "wifi:mac=aa:bb:cc:dd:ee:ff" '"gateway":{"rtt_avg_ms":7.0}'
+  run summarise
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 runs"* ]] || { echo "$output"; return 1; }
+}
+
+@test "a zoneless timestamp is read as UTC, so it still honours the window" {
+  # Two hours old in UTC. A 1h window must exclude it, a 3h window keep it.
+  old="$(date -u -d '2 hours ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -u -v-2H '+%Y-%m-%dT%H:%M:%S')"
+  rec "$old" "wifi:mac=aa:bb:cc:dd:ee:ff" '"gateway":{"rtt_avg_ms":5.0}'
+  run summarise 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No runs in the last 1h"* ]] || { echo "$output"; return 1; }
+  run summarise 3
+  [[ "$output" == *"1 run"* ]] || { echo "$output"; return 1; }
+}
+
+# prune_history moves the oldest records into the -archive sibling. A window
+# that reaches back past the live file's retention is only whole if --summary
+# reads the archive too, as --history does.
+@test "--summary reads the -archive.jsonl sibling by default" {
+  archive="${STORE%.jsonl}-archive.jsonl"
+  printf '{"timestamp":"%s","network":{"id":"wifi:mac=aa:bb:cc:dd:ee:ff"},"gateway":{"rtt_avg_ms":9.0}}\n' \
+    "$(now_ts)" > "$archive"
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" '"gateway":{"rtt_avg_ms":5.0}'
+  run summarise
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 runs"* ]] || { echo "$output"; return 1; }
+}
+
+@test "--summary with no archive file behaves as before" {
+  rec "$(now_ts)" "wifi:mac=aa:bb:cc:dd:ee:ff" '"gateway":{"rtt_avg_ms":5.0}'
+  run summarise
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 run"* ]] || { echo "$output"; return 1; }
+}
+
+@test "--summary does not double-count a record present in both files" {
+  archive="${STORE%.jsonl}-archive.jsonl"
+  ts="$(now_ts)"
+  line="{\"timestamp\":\"$ts\",\"network\":{\"id\":\"wifi:mac=aa:bb:cc:dd:ee:ff\"},\"gateway\":{\"rtt_avg_ms\":5.0}}"
+  printf '%s\n' "$line" > "$archive"
+  printf '%s\n' "$line" > "$STORE"
+  run summarise
+  [[ "$output" == *"1 run "* || "$output" == *"(1 run"* ]] || { echo "$output"; return 1; }
+}

@@ -67,7 +67,12 @@ while [ $# -gt 0 ]; do
       if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/install-app.sh" ]; then
         exec "$SELF_DIR/install-app.sh"
       else
-        exec curl -fsSL "https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh" | bash
+        # Not `exec curl ... | bash`: in a pipeline `exec` replaces only the
+        # left-hand subshell, so the script carried on, never shifted --app
+        # off the argument list, and ran this branch again, downloading and
+        # reinstalling the app until it was killed. Run the installer, then stop.
+        curl -fsSL "https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh" | bash
+        exit 0
       fi
       ;;
     --prefix)

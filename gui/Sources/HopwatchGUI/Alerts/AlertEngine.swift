@@ -229,10 +229,18 @@ final class AlertEngine {
         // every one of them — clock drift, IP conflict, double NAT, lease
         // expiry, slower-than-usual — on exactly the path that raises them.
         if scanInProgress && !def.scanOnly { return "a check is running" }
-        if monitoringPaused { return "monitoring paused" }
-        // DHCP, DNS and the default route land a beat apart after a switch.
-        // Probes in the first seconds measure a half-configured stack.
-        if inNetworkGracePeriod() { return "network just changed" }
+        // The two suppressors below are about the *live* stream: a paused
+        // monitor sends no samples, and the first seconds after a switch
+        // measure a half-configured stack. A scan-only alert is judged from a
+        // finished run, not from a sample, so neither applies to it: with
+        // monitoring switched off, "Run full check" finding a clock drift or
+        // an IP conflict must still tell the user.
+        if !def.scanOnly {
+            if monitoringPaused { return "monitoring paused" }
+            // DHCP, DNS and the default route land a beat apart after a switch.
+            // Probes in the first seconds measure a half-configured stack.
+            if inNetworkGracePeriod() { return "network just changed" }
+        }
         // TCP-1 / ICMP-1: real connections work, only ping is being dropped.
         // Hotel and corporate networks block ICMP wholesale, and without this
         // a loss alert there fires constantly and is never once correct. Only
@@ -344,7 +352,13 @@ final class AlertEngine {
                     pendingTransition.removeValue(forKey: def.id)
                     return false
                 }
-                return mac != nil
+                // An unreadable MAC is not "the change is over". For a banner
+                // already up it must keep holding: returning false here
+                // removes the alert from `active`, and once-per-network then
+                // refuses to raise it again when the MAC is next read, so one
+                // bad sample would take the banner away for good. Before it
+                // is up, it only restarts the dwell clock.
+                return mac != nil || active[def.id] != nil
             }
             // A different Wi-Fi name altogether: not this router swapping
             // under that name, and the MAC we remember is for another one.
@@ -395,7 +409,8 @@ final class AlertEngine {
             alert.body = summary
             alert.bodyState = .enriched
             active[id] = alert
-            deliver(id: id, title: alert.title, body: summary, isOutage: def.isOutage, replacing: true)
+            deliver(id: id, title: alert.title, body: summary,
+                    isOutage: def.isOutage(firing: alert.rules), replacing: true)
         }
 
         // A scan has landed, so no alert is still waiting on it. Whatever
@@ -556,7 +571,7 @@ final class AlertEngine {
             if let last = lastNotifiedAt[def.id], now.timeIntervalSince(last) < def.cooldown { return }
             lastNotifiedAt[def.id] = now
             deliver(id: def.id, title: def.title, body: bodyOverride ?? def.interimBody,
-                    isOutage: def.isOutage, replacing: false, isEvent: true)
+                    isOutage: def.isOutage(firing: firingRules), replacing: false, isEvent: true)
             log.info("event: \(def.id, privacy: .public)")
             _ = def.scanOnly ? false : (onAlertFired?(def, firingRules) ?? false)
             return
@@ -595,7 +610,8 @@ final class AlertEngine {
                                      bodyState: initialBodyState(def, bodyOverride: bodyOverride),
                                      rules: firingRules)
         lastNotifiedAt[def.id] = now
-        deliver(id: def.id, title: def.title, body: body, isOutage: def.isOutage, replacing: false)
+        deliver(id: def.id, title: def.title, body: body,
+                isOutage: def.isOutage(firing: firingRules), replacing: false)
         log.info("alert fired: \(def.id, privacy: .public)")
 
         // Only live alerts trigger a scan. A scan-only alert was produced

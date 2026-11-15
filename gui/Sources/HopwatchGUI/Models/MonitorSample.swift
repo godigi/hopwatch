@@ -405,22 +405,16 @@ struct MonitorSample: Decodable, Sendable {
         case "critical": return .critical
         case "warn":     return .warning
         default:
+            // The CLI's verdict, nothing else. `status.severity` is already
+            // the monitor's judgement of every figure in this sample against
+            // lib/thresholds.sh — including the ICMP-filtering and
+            // router-rate-limiting exemptions — so re-deriving "elevated
+            // loss" here from raw `loss_pct` with a cutoff of the GUI's own
+            // painted the menu-bar dot amber over a card the CLI had already
+            // called healthy. A figure that was not measured (`nil`) is
+            // likewise not evidence of anything, and is never read as 0 or
+            // as a loss.
             if status.degraded { return .warning }
-            let filtering = EffectiveLoss.filtering(sample: self)
-            let inetLoss = internet.lossPct ?? 0
-            let gwLoss = gateway.lossPct ?? 0
-            // Downstream validation: if internet is healthy (<= 1.0%), isolated router loss
-            // (< 20%) or complete gateway ICMP filtering (TCP-1 / icmp_filtered) is control-plane
-            // rate limiting or filtering by policy and does not degrade user traffic.
-            let loss: Double
-            if filtering.gatewayLeg && inetLoss <= 1.0 {
-                loss = inetLoss
-            } else if inetLoss <= 1.0 && gwLoss < 20.0 {
-                loss = inetLoss
-            } else {
-                loss = max(inetLoss, gwLoss)
-            }
-            if loss > 2.0 { return .warning }
             return .healthy
         }
     }

@@ -9,7 +9,7 @@ enum PowerSourceHelper {
     static var isOnBattery: Bool {
         #if os(macOS)
         let snapshot = IOPSCopyPowerSourcesInfo().takeRetainedValue()
-        let type = (IOPSGetProvidingPowerSourceType(snapshot).takeRetainedValue() as CFString) as String
+        let type = (IOPSGetProvidingPowerSourceType(snapshot).takeUnretainedValue() as CFString) as String
         return type == kIOPMBatteryPowerKey || type == "Battery Power"
         #else
         return false
@@ -25,7 +25,7 @@ enum PowerSourceHelper {
     static var batteryPercentage: Int? {
         #if os(macOS)
         let snapshot = IOPSCopyPowerSourcesInfo().takeRetainedValue()
-        let type = (IOPSGetProvidingPowerSourceType(snapshot).takeRetainedValue() as CFString) as String
+        let type = (IOPSGetProvidingPowerSourceType(snapshot).takeUnretainedValue() as CFString) as String
         guard type == kIOPMBatteryPowerKey || type == "Battery Power" else { return nil }
         let sources = IOPSCopyPowerSourcesList(snapshot).takeRetainedValue() as NSArray
         for source in sources {

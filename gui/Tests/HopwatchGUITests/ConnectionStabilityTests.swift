@@ -5,50 +5,37 @@ import Testing
 @Suite struct ConnectionStabilityTests {
 
     @Test func stabilityThresholds() {
-        // Optimal: RTT <= 75, Jitter <= 15, Loss <= 1.0%
+        // Optimal: nothing over the CLI's cutoffs
         let opt = ConnectionStability.evaluate(rtt: 55.0, jitter: 9.0, loss: 0.0)
         #expect(opt.level == .optimal)
         #expect(opt.label == "Optimal")
         #expect(opt.icon == "checkmark.circle.fill")
 
-        // 1.0% loss remains Optimal (statistical noise, clean connection)
-        let opt1Pct = ConnectionStability.evaluate(rtt: 55.0, jitter: 9.0, loss: 1.0)
-        #expect(opt1Pct.level == .optimal)
-        #expect(opt1Pct.label == "Optimal")
+        // Small loss and moderate jitter are not findings: still Optimal
+        let smallLoss = ConnectionStability.evaluate(rtt: 55.0, jitter: 18.0, loss: 5.0)
+        #expect(smallLoss.level == .optimal)
 
-        // Elevated Ping: RTT between 75 and 150 with clean jitter/loss
-        let varRtt = ConnectionStability.evaluate(rtt: 90.0, jitter: 5.0, loss: 0.0)
-        #expect(varRtt.level == .variable)
-        #expect(varRtt.label == "Elevated Ping")
+        // Latency alone is never rated: the CLI has no latency-only rule
+        let highRtt = ConnectionStability.evaluate(rtt: 160.0, jitter: 5.0, loss: 0.0)
+        #expect(highRtt.level == .optimal)
 
-        // Moderate Jitter: Jitter between 15 and 25
-        let modJitter = ConnectionStability.evaluate(rtt: 40.0, jitter: 18.0, loss: 0.0)
-        #expect(modJitter.level == .variable)
-        #expect(modJitter.label == "Variable")
-
-        // High Jitter: Jitter between 25 and 50
+        // High Jitter at the CLI's jitter cutoff (30 ms), and never red for it
         let highJitter = ConnectionStability.evaluate(rtt: 25.0, jitter: 35.0, loss: 0.0)
         #expect(highJitter.level == .variable)
         #expect(highJitter.label == "High Jitter")
+        let hugeJitter = ConnectionStability.evaluate(rtt: 20.0, jitter: 55.0, loss: 0.0)
+        #expect(hugeJitter.level == .variable)
 
-        // Minor Loss: Loss between 1.0% and 4.0%
-        let minorLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 2.5)
-        #expect(minorLoss.level == .variable)
-        #expect(minorLoss.label == "Minor Loss")
+        // Packet loss at the CLI's warn cutoff (10%)
+        let packetLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 10.0)
+        #expect(packetLoss.level == .variable)
+        #expect(packetLoss.label == "Packet Loss")
 
-        // Unstable: Loss > 4%
-        let unstLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 5.0)
+        // Unstable at the CLI's critical cutoff (20%)
+        let unstLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 20.0)
         #expect(unstLoss.level == .unstable)
         #expect(unstLoss.label == "Unstable")
         #expect(unstLoss.icon == "exclamationmark.triangle.fill")
-
-        // Unstable: Jitter > 50ms
-        let unstJitter = ConnectionStability.evaluate(rtt: 20.0, jitter: 55.0, loss: 0.0)
-        #expect(unstJitter.level == .unstable)
-
-        // Unstable: RTT > 150ms
-        let unstRtt = ConnectionStability.evaluate(rtt: 160.0, jitter: 5.0, loss: 0.0)
-        #expect(unstRtt.level == .unstable)
     }
 
     @Test func movingJitterCalculation() {

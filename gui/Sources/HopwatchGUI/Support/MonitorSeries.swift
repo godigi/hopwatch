@@ -230,16 +230,17 @@ struct ConnectionStability: Sendable, Equatable {
         icon: "wifi.slash"
     )
 
-    /// Evaluates stability index combining realistic internet thresholds (Option A)
-    /// and decoupling link stability from baseline distance latency (Option B):
-    /// - Optimal (green): Loss <= 1.0%, Jitter <= 15ms, RTT <= 75ms (flawless, rock-solid stability)
-    /// - Variable (yellow):
-    ///   * Jitter 15–50ms (labelled "High Jitter" if > 25ms, "Variable" if 15–25ms)
-    ///   * Loss > 1.0% and <= 4.0% (minor loss)
-    ///   * RTT > 75ms and <= 150ms (labelled "Elevated Ping" when jitter is steady)
-    /// - Unstable (red): Packet loss > 4.0%, Jitter > 50ms, or RTT > 150ms
+    /// Rates the connection from RTT, jitter and packet loss with the CLI's
+    /// own cutoffs (`SuitabilityEngine.Cutoff`, mirroring lib/thresholds.sh),
+    /// never stricter: a rating that turns amber or red over numbers the CLI
+    /// does not call a finding is a contradiction, not extra caution.
+    /// - Unstable (red): packet loss at the CLI's critical cutoff (20%)
+    /// - Variable (yellow): packet loss at the warn cutoff (10%) or jitter at
+    ///   the jitter cutoff (30 ms)
+    /// - Optimal (green): everything else. The CLI has no latency-only rule,
+    ///   so a high RTT is not rated here; RTT only gates "measured at all".
     static func evaluate(rtt: Double?, jitter: Double?, loss: Double?) -> ConnectionStability {
-        guard let rtt else {
+        guard rtt != nil else {
             return ConnectionStability(
                 level: .variable,
                 label: "Unknown",
@@ -251,29 +252,22 @@ struct ConnectionStability: Sendable, Equatable {
         let l = loss ?? 0.0
         let j = jitter ?? 0.0
 
-        if l > 4.0 || j > 50.0 || rtt > 150.0 {
-            let label = l > 4.0 ? "Unstable" : (j > 50.0 ? "High Jitter" : "Unstable")
+        if l >= SuitabilityEngine.Cutoff.lossCritPct {
             return ConnectionStability(
                 level: .unstable,
-                label: label,
+                label: "Unstable",
                 description: "Expect dropouts, buffering, and call audio glitching",
                 icon: "exclamationmark.triangle.fill"
             )
-        } else if j > 15.0 || l > 1.0 || rtt > 75.0 {
+        } else if j >= SuitabilityEngine.Cutoff.jitterWarnMs || l >= SuitabilityEngine.Cutoff.lossWarnPct {
             let label: String
             let desc: String
-            if j > 25.0 {
+            if l >= SuitabilityEngine.Cutoff.lossWarnPct {
+                label = "Packet Loss"
+                desc = "Packet loss (\(String(format: "%.1f%%", l))); may cause retransmissions and audio dropouts"
+            } else {
                 label = "High Jitter"
                 desc = "Noticeable jitter variance (±\(Int(round(j)))ms); potential micro-stutter in competitive gaming or calls"
-            } else if j > 15.0 {
-                label = "Variable"
-                desc = "Moderate jitter variance (±\(Int(round(j)))ms); acceptable for streaming and general browsing"
-            } else if l > 1.0 {
-                label = "Minor Loss"
-                desc = "Slight packet loss (\(String(format: "%.1f%%", l))); may cause occasional retransmissions"
-            } else {
-                label = "Elevated Ping"
-                desc = "Steady connection with elevated ping (\(Int(round(rtt)))ms); clean link with zero loss"
             }
 
             return ConnectionStability(

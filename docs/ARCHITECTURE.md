@@ -32,7 +32,7 @@ lib/tcp_reach.sh             # TCP/443 reach panel (parallel-safe)
 lib/ntp.sh                   # sntp drift check (parallel-safe)
 lib/speedtest.sh             # Ookla / speedtest-cli
 lib/traceroute.sh            # traceroute to 1.1.1.1 + optional TARGET
-lib/mtr.sh                   # mtr -j -c 60 as the user (sudo -n only if opted in) OR parallel per-hop fallback
+lib/mtr.sh                   # mtr -j as the user (-c 20 -i 1; root-only -c 60 -i 0.2 via opt-in sudo -n) OR parallel per-hop fallback
 lib/wan.sh                   # NAT/WAN topology: dual-WAN, double-NAT, UPnP/NAT-PMP
 lib/thresholds.sh            # every numeric cutoff a rule fires on (sourced first)
 lib/diagnosis.sh             # rule set → DIAG[] + DIAG_SEV[] → sorted printout

@@ -354,4 +354,63 @@ import Testing
         #expect(!result.reassurance.contains("signal is weak (-45 dBm)"))
         #expect(result.reassurance.contains("dropping packets"))
     }
+
+    @Test func ruleTablesFollowTheCatalogSeverityAndCategory() {
+        // DI-2 (duplicate IP on the LAN) is critical and local: never an ISP warning.
+        let di2 = HopAttributionResolver.resolve(rules: ["DI-2"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0, gatewayLoss: 0.0, inetRTT: 20.0, inetLoss: 0.0)
+        #expect(di2.routerHealth == .critical)
+        #expect(di2.ispHealth == .healthy)
+        #expect(di2.culprit == .router)
+        #expect(di2.badgeTitle == "Culprit: Duplicate IP")
+
+        // D1 (flaky resolver) is a warning, not a critical on the internet hop.
+        let d1 = HopAttributionResolver.resolve(rules: ["D1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0, gatewayLoss: 0.0, inetRTT: 20.0, inetLoss: 0.0)
+        #expect(d1.ispHealth == .warning)
+
+        // WD-1 (flapping) is a warning and ETH-2 (half duplex) is critical.
+        let wd1 = HopAttributionResolver.resolve(rules: ["WD-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0, gatewayLoss: 0.0)
+        #expect(wd1.wifiHealth == .warning)
+        let eth2 = HopAttributionResolver.resolve(rules: ["ETH-2"], isWifi: false, gatewayRTT: 2.0, gatewayLoss: 0.0)
+        #expect(eth2.routerHealth == .critical)
+
+        // Info-only rules are notes, not faults: nothing escalates.
+        for info in ["EDNS-1", "LAN-1", "DH-2", "SP-1"] {
+            let r = HopAttributionResolver.resolve(rules: [info], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0, gatewayLoss: 0.0, inetRTT: 20.0, inetLoss: 0.0)
+            #expect(r.macHealth == .healthy && r.wifiHealth == .healthy && r.routerHealth == .healthy && r.ispHealth == .healthy, "\(info) must not escalate any hop")
+            #expect(r.culprit == .none)
+        }
+
+        // CONN-1's wording is the catalog's, not an invented cause.
+        let conn = HopAttributionResolver.resolve(rules: ["CONN-1"], isWifi: true, wifiRSSI: -50, gatewayRTT: 2.0, gatewayLoss: 0.0, inetRTT: 20.0, inetLoss: 0.0)
+        #expect(conn.culprit == .mac)
+        #expect(conn.reassurance.contains("refused or dropped"))
+        #expect(!conn.reassurance.contains("connection table"))
+    }
+
+    @Test func weakSignalCutoffIsStrictlyBelowTheCLIThreshold() {
+        #expect(HopAttributionResolver.weakWifiSignalDBm == -75)
+        #expect(HopAttributionResolver.resolve(rules: [], isWifi: true, wifiRSSI: -75).wifiHealth == .healthy)
+        #expect(HopAttributionResolver.resolve(rules: [], isWifi: true, wifiRSSI: -76).wifiHealth == .warning)
+    }
+
+    @Test func routerAdminButtonFollowsTheCatalogNotTheRuleIDPrefix() throws {
+        let json = #"""
+        {"schema": 6, "rules": [
+          {"id": "G3", "category": "router", "fix_target": "you"},
+          {"id": "B1", "category": "load", "fix_target": "your_router"},
+          {"id": "B2", "category": "load", "fix_target": "your_isp"},
+          {"id": "BR-1", "category": "internet", "fix_target": "you"},
+          {"id": "BL-1", "category": "baseline", "fix_target": "you"}
+        ]}
+        """#
+        let catalog = try JSONDecoder().decode(RulesCatalog.self, from: Data(json.utf8))
+        #expect(HopAttributionResolver.isRouterRule("G3", catalog: catalog))
+        #expect(HopAttributionResolver.isRouterRule("B1", catalog: catalog))
+        #expect(!HopAttributionResolver.isRouterRule("B2", catalog: catalog))
+        #expect(!HopAttributionResolver.isRouterRule("BR-1", catalog: catalog))
+        #expect(!HopAttributionResolver.isRouterRule("BL-1", catalog: catalog))
+        // No catalog yet: only the gateway rules are assumed.
+        #expect(HopAttributionResolver.isRouterRule("G2", catalog: nil))
+        #expect(!HopAttributionResolver.isRouterRule("BR-1", catalog: nil))
+    }
 }

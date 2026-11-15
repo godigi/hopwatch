@@ -59,10 +59,12 @@ import Testing
         #expect(streaming.status == "4K ready")
         #expect(streaming.metric == "120 Mbps ↓")
 
-        // In contrast, gaming under 350ms ping should be flagged as severe lag
+        // Gaming is judged on loss and jitter, as the CLI does: it has no
+        // latency-only rule, so 350 ms alone is not a finding. The 40 ms
+        // jitter here is what makes the tile degraded.
         let gaming = SuitabilityEngine.evaluateGaming(inputs)
-        #expect(gaming.verdict == .broken)
-        #expect(gaming.status == "Severe lag")
+        #expect(gaming.verdict == .degraded)
+        #expect(gaming.status == "Lag spikes")
     }
 
     @Test func streamingDegradesOnLowBandwidthOrExtremeLoss() {
@@ -99,24 +101,42 @@ import Testing
         #expect(callsGood.verdict == .good)
         #expect(callsGood.status == "Clear audio")
 
-        // Now introduce 3% packet loss (audio cutouts likely)
+        // Loss below the CLI's warn cutoff (10%) is not a finding
+        let inputsMinor = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 3.0,
+            effectiveLoss: 5.0
+        )
+        #expect(SuitabilityEngine.evaluateCalls(inputsMinor).verdict == .good)
+
+        // At the warn cutoff (10%) audio cutouts are likely
         let inputsLoss = SuitabilityEngine.Inputs(
             monitorSample: sample,
             isLinkUp: true,
             currentJitter: 3.0,
-            effectiveLoss: 3.0
+            effectiveLoss: 10.0
         )
 
         let callsLoss = SuitabilityEngine.evaluateCalls(inputsLoss)
         #expect(callsLoss.verdict == .degraded)
         #expect(callsLoss.status == "May cut out")
 
-        // Now severe packet loss 8%
+        // 12% is still the CLI's warn band (L2), not broken; broken starts at 20%
+        let inputsTwelve = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            isLinkUp: true,
+            currentJitter: 3.0,
+            effectiveLoss: 12.0
+        )
+        #expect(SuitabilityEngine.evaluateCalls(inputsTwelve).verdict == .degraded)
+
+        // Severe packet loss, the CLI's critical cutoff
         let inputsSevere = SuitabilityEngine.Inputs(
             monitorSample: sample,
             isLinkUp: true,
             currentJitter: 3.0,
-            effectiveLoss: 8.0
+            effectiveLoss: 20.0
         )
 
         let callsSevere = SuitabilityEngine.evaluateCalls(inputsSevere)
@@ -139,7 +159,7 @@ import Testing
         #expect(callsJitter.verdict == .degraded)
         #expect(callsJitter.status == "Audio stutter")
 
-        // Severe jitter (55ms jitter) -> Severe stutter
+        // Jitter alone never breaks a call: the CLI has no broken-by-jitter rule
         let inputsSevereJitter = SuitabilityEngine.Inputs(
             monitorSample: sampleJitter,
             isLinkUp: true,
@@ -147,12 +167,22 @@ import Testing
             effectiveLoss: 0.0
         )
         let callsSevereJitter = SuitabilityEngine.evaluateCalls(inputsSevereJitter)
-        #expect(callsSevereJitter.verdict == .broken)
-        #expect(callsSevereJitter.status == "Severe stutter")
+        #expect(callsSevereJitter.verdict == .degraded)
+        #expect(callsSevereJitter.status == "Audio stutter")
 
-        // High latency (280ms ping, 0% loss, 3ms jitter) -> Audio delay
+        // Just under the CLI's jitter cutoff (30 ms) is fine
+        let inputsUnderJitter = SuitabilityEngine.Inputs(
+            monitorSample: sampleJitter,
+            isLinkUp: true,
+            currentJitter: 29.0,
+            effectiveLoss: 0.0
+        )
+        #expect(SuitabilityEngine.evaluateCalls(inputsUnderJitter).verdict == .good)
+
+        // Latency alone is not a finding: the CLI has no latency-only rule,
+        // so a 420 ms path with clean loss and jitter is not "Heavy delay".
         var sampleDelay = MonitorSample()
-        sampleDelay.internet = .init(lossPct: 0.0, rttAvgMs: 280.0, rttJitterMs: 3.0)
+        sampleDelay.internet = .init(lossPct: 0.0, rttAvgMs: 420.0, rttJitterMs: 3.0)
 
         let inputsDelay = SuitabilityEngine.Inputs(
             monitorSample: sampleDelay,
@@ -161,24 +191,8 @@ import Testing
             effectiveLoss: 0.0
         )
         let callsDelay = SuitabilityEngine.evaluateCalls(inputsDelay)
-        #expect(callsDelay.verdict == .degraded)
-        #expect(callsDelay.status == "Audio delay")
-        #expect(callsDelay.metric == "280 ms delay")
-
-        // Extreme latency (420ms ping) -> Heavy delay
-        var sampleHeavyDelay = MonitorSample()
-        sampleHeavyDelay.internet = .init(lossPct: 0.0, rttAvgMs: 420.0, rttJitterMs: 3.0)
-
-        let inputsHeavyDelay = SuitabilityEngine.Inputs(
-            monitorSample: sampleHeavyDelay,
-            isLinkUp: true,
-            currentJitter: 3.0,
-            effectiveLoss: 0.0
-        )
-        let callsHeavyDelay = SuitabilityEngine.evaluateCalls(inputsHeavyDelay)
-        #expect(callsHeavyDelay.verdict == .broken)
-        #expect(callsHeavyDelay.status == "Heavy delay")
-        #expect(callsHeavyDelay.metric == "420 ms delay")
+        #expect(callsDelay.verdict == .good)
+        #expect(callsDelay.status == "Clear audio")
 
         // Low upload bandwidth (0.7 Mbps) -> Video limited
         var sampleClean = MonitorSample()
@@ -243,53 +257,66 @@ import Testing
         #expect(gamingSmooth.status == "Smooth")
         #expect(gamingSmooth.metric == "50 ms · 4ms jit")
 
-        // Moderate latency 95ms
-        var sampleLag = MonitorSample()
-        sampleLag.internet = .init(lossPct: 0.0, rttAvgMs: 95.0, rttJitterMs: 4.0)
+        // 95 ms and even 150 ms with clean loss and jitter are not a finding:
+        // the CLI has no latency-only rule, so the tile must not be amber or
+        // red over a report that lists nothing.
+        for ms in [95.0, 150.0] {
+            var sampleLag = MonitorSample()
+            sampleLag.internet = .init(lossPct: 0.0, rttAvgMs: ms, rttJitterMs: 4.0)
+            let inputsLag = SuitabilityEngine.Inputs(
+                monitorSample: sampleLag,
+                isLinkUp: true,
+                currentJitter: 4.0,
+                effectiveLoss: 0.0
+            )
+            let gamingLag = SuitabilityEngine.evaluateGaming(inputsLag)
+            #expect(gamingLag.verdict == .good)
+            #expect(gamingLag.status == "Smooth")
+            #expect(gamingLag.metric == String(format: "%.0f ms · 4ms jit", ms))
+        }
 
-        let inputsLag = SuitabilityEngine.Inputs(
-            monitorSample: sampleLag,
+        // Packet loss degrades to rubberbanding at the CLI's warn cutoff and
+        // surfaces loss in the metric; 5% is not a finding.
+        var sampleMinor = MonitorSample()
+        sampleMinor.internet = .init(lossPct: 5.0, rttAvgMs: 25.0, rttJitterMs: 2.0)
+        let inputsMinor = SuitabilityEngine.Inputs(
+            monitorSample: sampleMinor,
             isLinkUp: true,
-            currentJitter: 4.0,
-            effectiveLoss: 0.0
+            currentJitter: 2.0,
+            effectiveLoss: 5.0
         )
+        #expect(SuitabilityEngine.evaluateGaming(inputsMinor).verdict == .good)
 
-        let gamingLag = SuitabilityEngine.evaluateGaming(inputsLag)
-        #expect(gamingLag.verdict == .degraded)
-        #expect(gamingLag.status == "Noticeable delay")
-        #expect(gamingLag.metric == "95 ms · 4ms jit")
-
-        // Packet loss degrades to rubberbanding and surfaces loss in metric
         var sampleLoss = MonitorSample()
-        sampleLoss.internet = .init(lossPct: 3.0, rttAvgMs: 25.0, rttJitterMs: 2.0)
+        sampleLoss.internet = .init(lossPct: 10.0, rttAvgMs: 25.0, rttJitterMs: 2.0)
 
         let inputsLoss = SuitabilityEngine.Inputs(
             monitorSample: sampleLoss,
             isLinkUp: true,
             currentJitter: 2.0,
-            effectiveLoss: 3.0
+            effectiveLoss: 10.0
         )
 
         let gamingLoss = SuitabilityEngine.evaluateGaming(inputsLoss)
         #expect(gamingLoss.verdict == .degraded)
         #expect(gamingLoss.status == "May rubberband")
-        #expect(gamingLoss.metric == "25 ms · 3% loss")
+        #expect(gamingLoss.metric == "25 ms · 10% loss")
 
-        // Jitter spikes
+        // Jitter spikes at the CLI's jitter cutoff
         var sampleJitter = MonitorSample()
-        sampleJitter.internet = .init(lossPct: 0.0, rttAvgMs: 30.0, rttJitterMs: 25.0)
+        sampleJitter.internet = .init(lossPct: 0.0, rttAvgMs: 30.0, rttJitterMs: 35.0)
 
         let inputsJitter = SuitabilityEngine.Inputs(
             monitorSample: sampleJitter,
             isLinkUp: true,
-            currentJitter: 25.0,
+            currentJitter: 35.0,
             effectiveLoss: 0.0
         )
 
         let gamingJitter = SuitabilityEngine.evaluateGaming(inputsJitter)
         #expect(gamingJitter.verdict == .degraded)
         #expect(gamingJitter.status == "Lag spikes")
-        #expect(gamingJitter.metric == "30 ms · 25ms jit")
+        #expect(gamingJitter.metric == "30 ms · 35ms jit")
     }
 
     @Test func vpnDetectsDoubleNatAndMTUClamping() {
@@ -322,6 +349,11 @@ import Testing
         let vpnClamped = SuitabilityEngine.evaluateVPN(inputsClamped)
         #expect(vpnClamped.verdict == .degraded)
         #expect(vpnClamped.status == "MTU clamped")
+
+        // The CLI's M1 fires below 1400 bytes, so 1390 is clamped too
+        let vpnSlightlyClamped = SuitabilityEngine.evaluateVPN(.init(isLinkUp: true, isDoubleNat: false, mtu: 1390, vpnActive: false))
+        #expect(vpnSlightlyClamped.verdict == .degraded)
+        #expect(SuitabilityEngine.evaluateVPN(.init(isLinkUp: true, isDoubleNat: false, mtu: 1400, vpnActive: false)).verdict == .good)
     }
 
     @Test func offlineLinkFailsAllActivities() {
@@ -359,9 +391,11 @@ import Testing
             effectiveLoss: 4.0
         )
 
+        // 4% loss and 56 ms jitter: jitter is over the CLI's cutoff, loss is not,
+        // and nothing is at the critical cutoff, so this is a warning.
         #expect(degraded != nil)
-        #expect(degraded?.headline == "Unstable for calls & gaming")
-        #expect(degraded?.isCritical == true)
+        #expect(degraded?.headline == "Calls & gaming may lag")
+        #expect(degraded?.isCritical == false)
         #expect(degraded?.affectedActivities == ["Calls", "Gaming"])
         #expect(degraded?.subtitle.contains("4% packet loss") == true)
         #expect(degraded?.subtitle.contains("56ms jitter") == true)
@@ -394,13 +428,13 @@ import Testing
         )
 
         #expect(degraded != nil)
-        #expect(degraded?.headline == "Unstable for calls & gaming")
+        #expect(degraded?.headline == "Calls & gaming may lag")
         #expect(degraded?.subtitle.contains("10% internet packet loss") == true)
         #expect(degraded?.subtitle.contains("77ms Wi-Fi jitter") == true)
         #expect(degraded?.subtitle.contains("to router") == false)
     }
 
-    @Test func synthesizeDegradedExperienceHighPingForGaming() {
+    @Test func synthesizeDegradedExperienceHighPingAloneIsNotAFinding() {
         var sample = MonitorSample()
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
         sample.internet = .init(lossPct: 0.0, rttAvgMs: 220.0, rttJitterMs: 4.0)
@@ -423,10 +457,8 @@ import Testing
             effectiveLoss: 0.0
         )
 
-        #expect(degraded != nil)
-        #expect(degraded?.headline == "High lag for gaming")
-        #expect(degraded?.affectedActivities.contains("Gaming") == true)
-        #expect(degraded?.subtitle.contains("220 ms") == true)
+        // 220 ms with clean loss and jitter: the CLI has no latency-only rule
+        #expect(degraded == nil)
     }
 
     @Test func synthesizeDegradedExperienceHealthyWhenZeroLossAndLowPing() {
@@ -460,7 +492,7 @@ import Testing
         sample.dns = .init(ok: true, elapsedMs: 8)
         sample.tcp = .init(anyOk: true)
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
-        sample.internet = .init(lossPct: 2.0, rttAvgMs: 24.0, rttJitterMs: 2.0)
+        sample.internet = .init(lossPct: 12.0, rttAvgMs: 24.0, rttJitterMs: 2.0)
 
         let speed = RunSnapshot.Speedtest(downMbps: 150.0, upMbps: 50.0)
 
@@ -469,7 +501,7 @@ import Testing
             speedTest: speed,
             isLinkUp: true,
             currentJitter: 2.0,
-            effectiveLoss: 2.0
+            effectiveLoss: 12.0
         )
 
         let items = SuitabilityEngine.evaluateAll(inputs)
@@ -477,13 +509,14 @@ import Testing
             items: items,
             monitorSample: sample,
             currentJitter: 2.0,
-            effectiveLoss: 2.0
+            effectiveLoss: 12.0
         )
 
+        // 12% is the CLI's L2 band: calls and gaming are both degraded, not broken.
         #expect(degraded != nil)
-        #expect(degraded?.headline == "Rubberbanding in games")
-        #expect(degraded?.subtitle.contains("2% loss") == true)
-        #expect(degraded?.subtitle.contains("Web browsing & streaming fine") == true)
+        #expect(degraded?.headline == "Calls & gaming may lag")
+        #expect(degraded?.isCritical == false)
+        #expect(degraded?.subtitle.contains("12% packet loss") == true)
     }
 
     @Test func synthesizeDegradedExperienceLagSpikesForGaming() {
@@ -491,7 +524,7 @@ import Testing
         sample.dns = .init(ok: true, elapsedMs: 8)
         sample.tcp = .init(anyOk: true)
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
-        sample.internet = .init(lossPct: 0.0, rttAvgMs: 30.0, rttJitterMs: 22.0)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 30.0, rttJitterMs: 35.0)
 
         let speed = RunSnapshot.Speedtest(downMbps: 150.0, upMbps: 50.0)
 
@@ -499,7 +532,7 @@ import Testing
             monitorSample: sample,
             speedTest: speed,
             isLinkUp: true,
-            currentJitter: 22.0,
+            currentJitter: 35.0,
             effectiveLoss: 0.0
         )
 
@@ -507,14 +540,15 @@ import Testing
         let degraded = SuitabilityEngine.synthesizeDegradedExperience(
             items: items,
             monitorSample: sample,
-            currentJitter: 22.0,
+            currentJitter: 35.0,
             effectiveLoss: 0.0
         )
 
+        // 35 ms is over the CLI's jitter cutoff for calls and gaming alike.
         #expect(degraded != nil)
-        #expect(degraded?.headline == "Lag spikes in games")
-        #expect(degraded?.subtitle.contains("22ms jit") == true)
-        #expect(degraded?.subtitle.contains("Web browsing & streaming fine") == true)
+        #expect(degraded?.headline == "Calls & gaming may lag")
+        #expect(degraded?.subtitle.contains("35ms jitter") == true)
+        #expect(degraded?.subtitle.contains("4K streaming is fine") == true)
     }
 
     @Test func synthesizeDegradedExperienceVideoFreezeForCalls() {
@@ -550,11 +584,11 @@ import Testing
     }
 
     @Test func synthesizeDegradedExperienceModerateLossTriggersWarningNotCritical() {
-        // 6% Wi-Fi loss with 5ms jitter: should trigger warning ("Calls & gaming may lag", not critical "Unstable")
+        // 12% Wi-Fi loss with 5ms jitter: should trigger warning ("Calls & gaming may lag", not critical "Unstable")
         var sample = MonitorSample()
         sample.link = .init(up: true, type: "wifi")
-        sample.gateway = .init(lossPct: 6.0, rttAvgMs: 13.0, rttJitterMs: 5.0)
-        sample.internet = .init(lossPct: 4.0, rttAvgMs: 22.0, rttJitterMs: 5.0)
+        sample.gateway = .init(lossPct: 12.0, rttAvgMs: 13.0, rttJitterMs: 5.0)
+        sample.internet = .init(lossPct: 10.0, rttAvgMs: 22.0, rttJitterMs: 5.0)
 
         let speed = RunSnapshot.Speedtest(downMbps: 300.0, upMbps: 80.0)
 
@@ -563,7 +597,7 @@ import Testing
             speedTest: speed,
             isLinkUp: true,
             currentJitter: 5.0,
-            effectiveLoss: 6.0
+            effectiveLoss: 12.0
         )
 
         let items = SuitabilityEngine.evaluateAll(inputs)
@@ -571,13 +605,13 @@ import Testing
             items: items,
             monitorSample: sample,
             currentJitter: 5.0,
-            effectiveLoss: 6.0
+            effectiveLoss: 12.0
         )
 
         #expect(degraded != nil)
         #expect(degraded?.headline == "Calls & gaming may lag")
         #expect(degraded?.isCritical == false)
-        #expect(degraded?.subtitle.contains("6% packet loss") == true)
+        #expect(degraded?.subtitle.contains("12% packet loss") == true)
         #expect(degraded?.subtitle.contains("on Wi-Fi") == true)
     }
 
@@ -611,14 +645,14 @@ import Testing
         #expect(browsingConn.metric == "0% loss")
         #expect(browsingConn.ruleID == "CONN-1")
 
-        // 3. High packet loss (15%) -> Pages stall
+        // 3. Loss at the CLI's critical cutoff (20%) -> Pages stall
         var sampleLoss = MonitorSample()
-        sampleLoss.internet = .init(lossPct: 15.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
-        let inputsLoss = SuitabilityEngine.Inputs(monitorSample: sampleLoss, isLinkUp: true, effectiveLoss: 15.0)
+        sampleLoss.internet = .init(lossPct: 20.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        let inputsLoss = SuitabilityEngine.Inputs(monitorSample: sampleLoss, isLinkUp: true, effectiveLoss: 20.0)
         let browsingLoss = SuitabilityEngine.evaluateBrowsing(inputsLoss)
         #expect(browsingLoss.verdict == .broken)
         #expect(browsingLoss.status == "Pages stall")
-        #expect(browsingLoss.metric == "15% loss")
+        #expect(browsingLoss.metric == "20% loss")
 
         // 4. Slow DNS lookups (310ms) -> Slow lookups
         var sampleSlowDNS = MonitorSample()
@@ -629,14 +663,14 @@ import Testing
         #expect(browsingSlowDNS.status == "Slow lookups")
         #expect(browsingSlowDNS.metric == "310ms DNS")
 
-        // 5. Moderate packet loss (6%) -> Sluggish
+        // 5. Moderate packet loss (12%, the CLI's L2 band) -> Sluggish
         var sampleModLoss = MonitorSample()
-        sampleModLoss.internet = .init(lossPct: 6.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
-        let inputsModLoss = SuitabilityEngine.Inputs(monitorSample: sampleModLoss, isLinkUp: true, effectiveLoss: 6.0)
+        sampleModLoss.internet = .init(lossPct: 12.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        let inputsModLoss = SuitabilityEngine.Inputs(monitorSample: sampleModLoss, isLinkUp: true, effectiveLoss: 12.0)
         let browsingModLoss = SuitabilityEngine.evaluateBrowsing(inputsModLoss)
         #expect(browsingModLoss.verdict == .degraded)
         #expect(browsingModLoss.status == "Sluggish")
-        #expect(browsingModLoss.metric == "6% loss")
+        #expect(browsingModLoss.metric == "12% loss")
 
         // 6. Fast DNS (<60ms) -> Fast
         var sampleFast = MonitorSample()
@@ -697,27 +731,27 @@ import Testing
     @Test func synthesizeDegradedExperiencePacketLossForStreaming() {
         var sample = MonitorSample()
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 2.0, rttJitterMs: 1.0)
-        sample.internet = .init(lossPct: 16.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        sample.internet = .init(lossPct: 22.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
 
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: sample,
             isLinkUp: true,
-            effectiveLoss: 16.0
+            effectiveLoss: 22.0
         )
 
         _ = SuitabilityEngine.evaluateAll(inputs)
-        // With 16% loss, Calls and Gaming will also degrade if present.
+        // With 22% loss, Calls and Gaming will also degrade if present.
         // Test streaming in isolation to verify its headline synthesizer:
         let streamingItem = SuitabilityEngine.evaluateStreaming(inputs)
         let degraded = SuitabilityEngine.synthesizeDegradedExperience(
             items: [streamingItem],
             monitorSample: sample,
-            effectiveLoss: 16.0
+            effectiveLoss: 22.0
         )
 
         #expect(degraded != nil)
         #expect(degraded?.headline == "Severe packet loss buffering video")
-        #expect(degraded?.subtitle.contains("16% loss") == true)
+        #expect(degraded?.subtitle.contains("22% loss") == true)
     }
 
     @Test func isolatedRouterLossWithCleanInternetDoesNotDegradeCallsOrGaming() {
@@ -869,8 +903,15 @@ import Testing
         sample.gateway = .init(lossPct: 0.0, rttAvgMs: 12.0, rttJitterMs: 2.0)
         sample.internet = .init(lossPct: 0.3, rttAvgMs: 85.0, rttJitterMs: 6.0)
 
+        // Sub-1% loss is below every cutoff, so a finding has to come from a
+        // rule: AWDL-1 degrades gaming only, which is the one-activity case.
+        let catalog = try? JSONDecoder().decode(
+            RulesCatalog.self,
+            from: Data(#"{"schema":5,"rules":[{"id":"AWDL-1","impacts":{"gaming":"degraded"}}]}"#.utf8))
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: sample,
+            catalog: catalog,
+            firedRules: ["AWDL-1"],
             isLinkUp: true,
             currentJitter: 6.0,
             effectiveLoss: 0.3
@@ -900,14 +941,14 @@ import Testing
         let dualInputs = SuitabilityEngine.Inputs(
             monitorSample: sample,
             isLinkUp: true,
-            currentJitter: 26.0,
+            currentJitter: 36.0,
             effectiveLoss: 0.3
         )
         let dualItems = SuitabilityEngine.evaluateAll(dualInputs)
         let degradedDual = SuitabilityEngine.synthesizeDegradedExperience(
             items: dualItems,
             monitorSample: sample,
-            currentJitter: 26.0,
+            currentJitter: 36.0,
             effectiveLoss: 0.3
         )
         #expect(degradedDual != nil)
@@ -916,12 +957,14 @@ import Testing
 
     @Test func suitabilityItemConsequenceAndDegradedExplanation() {
         var sample = MonitorSample()
-        sample.internet = .init(lossPct: 6.0, rttAvgMs: 25.0, rttJitterMs: 24.0)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 25.0, rttJitterMs: 36.0)
+        // A slow (but answered) lookup is what degrades browsing here
+        sample.dns = .init(ok: true, resolver: "8.8.8.8", elapsedMs: 300.0)
         let inputs = SuitabilityEngine.Inputs(
             monitorSample: sample,
             isLinkUp: true,
-            currentJitter: 24.0,
-            effectiveLoss: 6.0
+            currentJitter: 36.0,
+            effectiveLoss: 0.0
         )
 
         let items = SuitabilityEngine.evaluateAll(inputs)
@@ -932,18 +975,18 @@ import Testing
 
         #expect(calls.verdict == .degraded)
         #expect(!calls.consequence.isEmpty)
-        #expect(calls.consequence.contains("audio") || calls.consequence.contains("dropouts"))
+        #expect(calls.consequence.contains("distortion"))
 
         #expect(gaming.verdict == .degraded)
         #expect(!gaming.consequence.isEmpty)
-        #expect(gaming.consequence.contains("Player desync") || gaming.consequence.contains("rollbacks"))
+        #expect(gaming.consequence.contains("lag"))
 
         #expect(streaming.verdict == .good)
         #expect(!streaming.consequence.isEmpty)
 
         #expect(browsing.verdict == .degraded)
         #expect(!browsing.consequence.isEmpty)
-        #expect(browsing.consequence.contains("Retransmissions") || browsing.consequence.contains("delay"))
+        #expect(browsing.consequence.contains("delay"))
     }
 
     @Test func settlingAndArrivalCheckSuppressWildOpinions() {
@@ -1003,12 +1046,79 @@ import Testing
 
     @Test func unmeasuredJitterDoesNotFabricateTwoMilliseconds() {
         var sample = MonitorSample()
-        sample.internet = .init(lossPct: 5.0, rttAvgMs: 18.0, rttJitterMs: nil)
-        let inputs = SuitabilityEngine.Inputs(monitorSample: sample, isLinkUp: true, currentJitter: nil, effectiveLoss: 5.0)
+        sample.internet = .init(lossPct: 12.0, rttAvgMs: 18.0, rttJitterMs: nil)
+        let inputs = SuitabilityEngine.Inputs(monitorSample: sample, isLinkUp: true, currentJitter: nil, effectiveLoss: 12.0)
         let calls = SuitabilityEngine.evaluateCalls(inputs)
         #expect(calls.verdict == .degraded)
-        #expect(calls.metric == "5% loss")
+        #expect(calls.metric == "12% loss")
+    }
+
+    @Test func lossBelowTheCLICutoffsIsNotAFindingForCallsOrGaming() {
+        // 5% loss, 20 ms: the CLI fires nothing, so no tile may be amber.
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 5.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        let inputs = SuitabilityEngine.Inputs(monitorSample: sample, isLinkUp: true, currentJitter: 2.0, effectiveLoss: 5.0)
+        #expect(SuitabilityEngine.evaluateCalls(inputs).verdict == .good)
+        #expect(SuitabilityEngine.evaluateGaming(inputs).verdict == .good)
+
+        // 12% is the CLI's warn band: degraded, never broken.
+        let twelve = SuitabilityEngine.Inputs(monitorSample: sample, isLinkUp: true, currentJitter: 2.0, effectiveLoss: 12.0)
+        #expect(SuitabilityEngine.evaluateCalls(twelve).verdict == .degraded)
+        #expect(SuitabilityEngine.evaluateStreaming(twelve).verdict != .broken)
+
+        // 150 ms with clean loss and jitter: no latency-only rule.
+        var slow = MonitorSample()
+        slow.internet = .init(lossPct: 0.0, rttAvgMs: 150.0, rttJitterMs: 2.0)
+        let slowInputs = SuitabilityEngine.Inputs(monitorSample: slow, isLinkUp: true, currentJitter: 2.0, effectiveLoss: 0.0)
+        #expect(SuitabilityEngine.evaluateGaming(slowInputs).verdict == .good)
+    }
+
+    @Test func routerLossIsNotRewrittenAwayWhileAGatewayRuleFires() {
+        // G3 is confirmed router loss with a clean internet leg. The headline
+        // must be built from the measured 15%, not from a rewritten 0%.
+        var sample = MonitorSample()
+        sample.link = .init(up: true, type: "wifi")
+        sample.gateway = .init(lossPct: 15.0, rttAvgMs: 3.0, rttJitterMs: 2.0)
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 20.0, rttJitterMs: 2.0)
+        sample.status.rules = ["G3"]
+        let catalog = try? JSONDecoder().decode(
+            RulesCatalog.self,
+            from: Data(#"{"schema":5,"rules":[{"id":"G3","impacts":{"calls":"degraded","gaming":"degraded"}}]}"#.utf8))
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample, catalog: catalog, firedRules: ["G3"],
+            isLinkUp: true, currentJitter: 2.0, effectiveLoss: 0.0)
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
+            items: items, monitorSample: sample, currentJitter: 2.0, effectiveLoss: 0.0)
+        #expect(degraded?.subtitle.contains("15% Wi-Fi packet loss") == true)
+    }
+
+    @Test func savedCLIRowsAreUsedWhenNothingLiveIsJudging() throws {
+        let json = #"""
+        [{"activity": "calls", "label": "Video & voice calls", "verdict": "degraded", "because": ["L2"]},
+         {"activity": "streaming", "label": "Streaming", "verdict": "good", "because": []},
+         {"activity": "gaming", "label": "Gaming", "verdict": "broken", "because": ["P2"]},
+         {"activity": "vpn", "label": "VPN", "verdict": "unmeasured", "because": [], "unmeasured_reason": "Skipped by --quick"}]
+        """#
+        let rows = try JSONDecoder().decode([RunSnapshot.SuitabilityRow].self, from: Data(json.utf8))
+        let inputs = SuitabilityEngine.Inputs(savedSuitability: rows)
+        let items = SuitabilityEngine.evaluateAll(inputs)
+
+        let calls = try #require(items.first { $0.id == "calls" })
+        #expect(calls.verdict == .degraded)
+        #expect(calls.metric == "From last check")
+        #expect(items.first { $0.id == "gaming" }?.verdict == .broken)
+        #expect(items.first { $0.id == "streaming" }?.verdict == .good)
+        let vpn = try #require(items.first { $0.id == "vpn" })
+        #expect(vpn.verdict == .unmeasured)
+        #expect(vpn.metric == "Skipped by --quick")
+        // The run carried no browsing row, so the Swift fallback applies.
+        #expect(items.first { $0.id == "browsing" }?.verdict == .unknown)
+
+        // A live sample outranks a stale run: the saved rows are ignored.
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 15.0, rttJitterMs: 2.0)
+        let live = SuitabilityEngine.Inputs(monitorSample: sample, savedSuitability: rows, isLinkUp: true, currentJitter: 2.0, effectiveLoss: 0.0)
+        #expect(SuitabilityEngine.evaluateAll(live).first { $0.id == "calls" }?.verdict == .good)
     }
 }
-
-

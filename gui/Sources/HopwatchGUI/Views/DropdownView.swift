@@ -742,7 +742,10 @@ struct DropdownView: View {
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct ?? 0
         if let loss = coordinator.liveSample?.gateway.lossPct, loss > 0 {
-            if inetLoss <= 1.0 && loss < 20.0 {
+            // Not while a gateway finding (G1-G3) is firing: the measured loss
+            // is what the finding is about and must stay visible.
+            let gatewayRuleFiring = ["G1", "G2", "G3"].contains { firedRules.contains($0) }
+            if !gatewayRuleFiring && inetLoss <= 1.0 && loss < 20.0 {
                 return routerGatewayIP ?? "default gateway"
             }
             return LossFormatter.formatPacketLoss(loss)
@@ -1219,13 +1222,9 @@ struct DropdownView: View {
     }
 
     private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
-        for ruleID in alert.rules {
-            let rule = coordinator.rulesCatalog.catalog?[ruleID]
-            if rule?.fixTarget == "your_router" || rule?.category == "router" || ruleID.hasPrefix("G") || ruleID.hasPrefix("B") {
-                return true
-            }
+        alert.rules.contains {
+            HopAttributionResolver.isRouterRule($0, catalog: coordinator.rulesCatalog.catalog)
         }
-        return false
     }
 
     private var publicIP: String? {

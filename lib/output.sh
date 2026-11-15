@@ -439,12 +439,19 @@ prune_logs() {
   local keep="$1" count
   [ "$keep" -gt 0 ] || return 0
   [ -d "$LOG_DIR" ] || return 0
-  count="$(find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f 2>/dev/null | wc -l | tr -d ' ')"
+  # Only the per-run logs, which are named by timestamp (STAMP in
+  # bin/hopwatch: YYYY-MM-DD-HHMMSS.log). A bare '*.log' also caught the
+  # launchd agents' own watcher.*.log and recorder.stderr.log in this same
+  # directory: a quiet stderr log is the oldest file here by construction,
+  # so it was the first one deleted, and the long-running recorder then wrote
+  # to an unlinked file for the rest of its life.
+  local run_log_glob='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*.log'
+  count="$(find "$LOG_DIR" -maxdepth 1 -name "$run_log_glob" -type f 2>/dev/null | wc -l | tr -d ' ')"
   is_numeric "$count" || return 0
   [ "$count" -gt "$keep" ] || return 0
   # Newest-first, drop everything past the cap. Filenames are generated
   # timestamps (no spaces), and -print0/xargs -0 keeps it safe regardless.
-  find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f -print0 2>/dev/null \
+  find "$LOG_DIR" -maxdepth 1 -name "$run_log_glob" -type f -print0 2>/dev/null \
     | xargs -0 ls -t 2>/dev/null \
     | tail -n "+$((keep + 1))" \
     | tr '\n' '\0' \
@@ -644,7 +651,7 @@ print(rid)
     printf '%s' "$TIMING_LINES" \
       | awk -F'|' '{printf "      %-16s %6.2f s\n", $1, $2}' \
       | log_pipe
-    info "total: ${_run_elapsed_frozen:-$(run_elapsed_s)} s (budget: $([ "$QUICK" -eq 1 ] && echo 8 || echo 30) s)"
+    info "total: ${_run_elapsed_frozen:-$(run_elapsed_s)} s (budget: $(run_budget_s) s)"
   fi
 
   if [ "$JSON_MODE" -eq 1 ]; then
@@ -675,4 +682,28 @@ print(rid)
   fi
   rm -rf "$json_tmp_dir"
   netdiag_tmp_forget "$json_tmp_dir"
+}
+
+# The run-time budget for the depth this run actually was, in seconds.
+#
+# This is the --expert Timing line's budget, and it has to be the same figure
+# helpers/emit_json.py (build_timings) judges `timings.over_budget` against,
+# or the same run reads "68 s (budget: 30 s)" on screen and over_budget:false
+# in the JSON. The old inline `8 || 30` predated the speed test being on by
+# default. The three figures live in lib/thresholds.sh; the selection below
+# mirrors emit_json.py's and must stay in step with it.
+run_budget_s() {
+  local mode="${RUN_MODE:-}" focused_without_speed=0
+  if [ "$QUICK" -eq 1 ] && [ "${SPEED_EXPLICIT:-0}" -ne 1 ]; then
+    printf '%s' "$THRESH_RUN_BUDGET_QUICK_S"; return 0
+  fi
+  case "$mode" in
+    speed-only) ;;
+    *-only)     focused_without_speed=1 ;;
+  esac
+  if [ "${NO_SPEED:-0}" -eq 1 ] || [ "$focused_without_speed" -eq 1 ]; then
+    printf '%s' "$THRESH_RUN_BUDGET_NO_SPEED_S"
+  else
+    printf '%s' "$THRESH_RUN_BUDGET_FULL_S"
+  fi
 }

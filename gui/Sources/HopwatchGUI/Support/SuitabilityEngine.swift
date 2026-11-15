@@ -4,6 +4,23 @@ import SwiftUI
 /// (Calls, Streaming, Gaming, VPN, Browsing) using live telemetry and saved diagnostics.
 enum SuitabilityEngine {
 
+    /// The CLI's own cutoffs, restated for the fallback that judges a live
+    /// sample when no rule has fired. The authority is lib/thresholds.sh:
+    /// `LOSS_WARN_PCT`, `LOSS_CRIT_PCT`, `THRESH_LATENCY_JITTER_WARN_MS`,
+    /// `THRESH_MTU_STANDARD`. The CLI projects an activity's verdict only
+    /// through rule impacts (`helpers/suitability.py`) and has no latency-only
+    /// rule, so a number below these is never "degraded" here either: an
+    /// amber tile over a report that lists no finding is the contradiction
+    /// this file used to produce.
+    enum Cutoff {
+        static let lossWarnPct = 10.0
+        static let lossCritPct = 20.0
+        static let jitterWarnMs = 30.0
+        static let mtuStandard = 1400
+        /// `THRESH_WIFI_SNR_LOW_DB`: W2 fires strictly below it.
+        static let snrLowDb = 20
+    }
+
     struct Item: Identifiable, Equatable {
         let id: String
         let title: String
@@ -197,12 +214,48 @@ enum SuitabilityEngine {
             ]
         }
         return [
-            evaluateCalls(inputs),
-            evaluateStreaming(inputs),
-            evaluateGaming(inputs),
-            evaluateVPN(inputs),
-            evaluateBrowsing(inputs)
+            saved("calls", "Calls", "video", inputs) ?? evaluateCalls(inputs),
+            saved("streaming", "Streaming", "play.rectangle", inputs) ?? evaluateStreaming(inputs),
+            saved("gaming", "Gaming", "gamecontroller", inputs) ?? evaluateGaming(inputs),
+            saved("vpn", "VPN / Remote", "shield", inputs) ?? evaluateVPN(inputs),
+            saved("browsing", "Browsing", "globe", inputs) ?? evaluateBrowsing(inputs)
         ]
+    }
+
+    /// The CLI's own verdict for `id`, shown as a tile when nothing live is
+    /// judging instead. With no monitor sample (monitoring off or paused)
+    /// the last run's `suitability` rows are the only evidence there is, and
+    /// they are the CLI's answer, so they are used as written rather than
+    /// re-derived. The metric line says they come from the last check: a
+    /// verdict about the past must not read as one about right now. While a
+    /// live sample exists, the live path judges, through the fired rules and
+    /// the catalog's `impacts`, which are the same projection.
+    private static func saved(_ id: String, _ title: String, _ icon: String, _ inputs: Inputs) -> Item? {
+        guard inputs.monitorSample == nil,
+              let row = inputs.savedSuitability?.first(where: { $0.activity == id }) else { return nil }
+        let tint: Color
+        switch row.verdict {
+        case .good:                 tint = Theme.ColorToken.green
+        case .degraded:             tint = Theme.ColorToken.amber
+        case .broken:               tint = Theme.ColorToken.red
+        case .unmeasured, .unknown: tint = Theme.ColorToken.muted
+        }
+        let metric: String
+        switch row.verdict {
+        case .unmeasured: metric = row.unmeasuredReason ?? "Not measured"
+        case .unknown:    metric = "Not measured"
+        default:          metric = "From last check"
+        }
+        // No `ruleID`: that marks a tile whose wording is a rule's own title,
+        // and the headline builder keys off it.
+        return Item(
+            id: id, title: title, icon: icon,
+            status: SuitabilityPanel.word(row.verdict),
+            metric: metric,
+            tint: tint,
+            verdict: row.verdict,
+            helpText: SuitabilityPanel.detail(row, catalog: inputs.catalog)
+        )
     }
 
     static func awaiting(_ id: String, _ title: String, _ icon: String, metric: String = "Not measured") -> Item {
@@ -239,24 +292,16 @@ enum SuitabilityEngine {
 
         let impacts = catalogImpacts(for: "calls", in: inputs)
 
-        // 1. Broken conditions: severe packet loss, severe jitter buffer underruns, extreme latency, or choked bandwidth
-        if impacts.contains("broken") || loss >= 8.0 || jitter >= 50.0 || ping >= 400.0 || (upMbps != nil && upMbps! < 0.4) {
+        // 1. Broken: a rule the CLI says breaks calls, loss at the CLI's critical cutoff, or choked upload
+        if impacts.contains("broken") || loss >= Cutoff.lossCritPct || (upMbps != nil && upMbps! < 0.4) {
             let status: String
             let metric: String
             let help: String
 
-            if loss >= 8.0 {
+            if loss >= Cutoff.lossCritPct {
                 status = "Frequent cutouts"
                 metric = lossAndJitterMetric
-                help = "High packet loss (≥8%) causing severe audio dropouts, choppy speech, and frozen video"
-            } else if jitter >= 50.0 {
-                status = "Severe stutter"
-                metric = lossAndJitterMetric
-                help = "Extreme jitter (≥50ms) causing jitter buffer overruns, severe robotic distortion, and audio stutter"
-            } else if ping >= 400.0 {
-                status = "Heavy delay"
-                metric = String(format: "%.0f ms delay", ping)
-                help = "Extreme round-trip latency (≥400ms) causing awkward delays and frequent accidental interruption"
+                help = "High packet loss (≥\(Int(Cutoff.lossCritPct))%) causing severe audio dropouts, choppy speech, and frozen video"
             } else if let up = upMbps, up < 0.4 {
                 status = "Low bandwidth"
                 metric = String(format: "%.1f Mbps ↑", up)
@@ -279,24 +324,20 @@ enum SuitabilityEngine {
             )
         }
 
-        // 2. Degraded conditions: audio cutouts from packet loss, jitter stutter, latency delay, or upload choke
-        if impacts.contains("degraded") || loss >= 3.0 || jitter >= 25.0 || ping >= 250.0 || (upMbps != nil && upMbps! < 1.0) || (downMbps != nil && downMbps! < 1.5) {
+        // 2. Degraded: a rule the CLI says degrades calls, loss or jitter at the CLI's cutoffs, or low bandwidth
+        if impacts.contains("degraded") || loss >= Cutoff.lossWarnPct || jitter >= Cutoff.jitterWarnMs || (upMbps != nil && upMbps! < 1.0) || (downMbps != nil && downMbps! < 1.5) {
             let status: String
             let metric: String
             let help: String
 
-            if loss >= 3.0 {
+            if loss >= Cutoff.lossWarnPct {
                 status = "May cut out"
                 metric = lossAndJitterMetric
-                help = "Elevated packet loss (≥3%) may cause words to drop, robotic audio, and momentary video stutter"
-            } else if jitter >= 25.0 {
+                help = "Elevated packet loss (≥\(Int(Cutoff.lossWarnPct))%) may cause words to drop, robotic audio, and momentary video stutter"
+            } else if jitter >= Cutoff.jitterWarnMs {
                 status = "Audio stutter"
                 metric = lossAndJitterMetric
-                help = "Elevated jitter (≥25ms) causing audio pitch warping, robotic voice, or micro-stutters"
-            } else if ping >= 250.0 {
-                status = "Audio delay"
-                metric = String(format: "%.0f ms delay", ping)
-                help = "Elevated latency (≥250ms) causing conversational delay and talk-over in two-way calls"
+                help = "Elevated jitter (≥\(Int(Cutoff.jitterWarnMs))ms) causing audio pitch warping, robotic voice, or micro-stutters"
             } else if let up = upMbps, up < 1.0 {
                 status = "Video limited"
                 metric = String(format: "%.1f Mbps ↑", up)
@@ -399,10 +440,10 @@ enum SuitabilityEngine {
         if let mbps = downMbps {
             let speedStr = mbps >= 10.0 ? String(format: "%.0f Mbps ↓", mbps) : String(format: "%.1f Mbps ↓", mbps)
 
-            if mbps < 2.5 || loss >= 15.0 {
-                let metric = loss >= 15.0 ? LossFormatter.formatLoss(loss) : speedStr
-                let help = loss >= 15.0
-                    ? "Severe packet loss (≥15%) causing video playback buffer starvation and frequent freezing"
+            if mbps < 2.5 || loss >= Cutoff.lossCritPct {
+                let metric = loss >= Cutoff.lossCritPct ? LossFormatter.formatLoss(loss) : speedStr
+                let help = loss >= Cutoff.lossCritPct
+                    ? "Severe packet loss (≥\(Int(Cutoff.lossCritPct))%) causing video playback buffer starvation and frequent freezing"
                     : "Insufficient download bandwidth (<2.5 Mbps) causing video to stall and buffer"
                 return Item(
                     id: "streaming",
@@ -414,10 +455,10 @@ enum SuitabilityEngine {
                     verdict: .broken,
                     helpText: help
                 )
-            } else if mbps < 8.0 || loss >= 8.0 {
-                let metric = loss >= 8.0 ? LossFormatter.formatLoss(loss) : speedStr
-                let help = loss >= 8.0
-                    ? "Packet loss (≥8%) causes throughput drops, forcing video players to downgrade to standard definition (SD)"
+            } else if mbps < 8.0 || loss >= Cutoff.lossWarnPct {
+                let metric = loss >= Cutoff.lossWarnPct ? LossFormatter.formatLoss(loss) : speedStr
+                let help = loss >= Cutoff.lossWarnPct
+                    ? "Packet loss (≥\(Int(Cutoff.lossWarnPct))%) causes throughput drops, forcing video players to downgrade to standard definition (SD)"
                     : "Limited download speed (<8.0 Mbps) restricts streaming to standard definition (SD)"
                 return Item(
                     id: "streaming",
@@ -459,7 +500,7 @@ enum SuitabilityEngine {
         let impacts = catalogImpacts(for: "streaming", in: inputs)
         let metric = loss > 0 ? LossFormatter.formatLoss(loss) : "Clean link"
 
-        if impacts.contains("broken") || loss >= 15.0 {
+        if impacts.contains("broken") || loss >= Cutoff.lossCritPct {
             return Item(
                 id: "streaming",
                 title: "Streaming",
@@ -472,8 +513,8 @@ enum SuitabilityEngine {
             )
         }
 
-        if impacts.contains("degraded") || loss >= 8.0 {
-            let streamMetric = loss >= 8.0 ? LossFormatter.formatLoss(loss) : "Route check"
+        if impacts.contains("degraded") || loss >= Cutoff.lossWarnPct {
+            let streamMetric = loss >= Cutoff.lossWarnPct ? LossFormatter.formatLoss(loss) : "Route check"
             return Item(
                 id: "streaming",
                 title: "Streaming",
@@ -557,19 +598,13 @@ enum SuitabilityEngine {
             metric = String(format: "%.0f ms", ping)
         }
 
-        // Broken conditions: constant rollbacks, extreme jitter desync, or unplayable ping
-        if impacts.contains("broken") || loss >= 8.0 || jitter >= 45.0 || ping >= 140.0 {
+        // Broken: a rule the CLI says breaks gaming, or loss at the CLI's critical cutoff
+        if impacts.contains("broken") || loss >= Cutoff.lossCritPct {
             let status: String
             let help: String
-            if loss >= 8.0 {
+            if loss >= Cutoff.lossCritPct {
                 status = "Rubberbanding"
-                help = "Severe packet loss (≥8%) causing constant rollbacks, desync, and hit registration failure"
-            } else if jitter >= 45.0 {
-                status = "Frequent spikes"
-                help = "Severe jitter causing frequent latency spikes, stuttering, and sync loss"
-            } else if ping >= 140.0 {
-                status = "Severe lag"
-                help = "High latency (>140ms) causing heavy delay and competitive disadvantage"
+                help = "Severe packet loss (≥\(Int(Cutoff.lossCritPct))%) causing constant rollbacks, desync, and hit registration failure"
             } else {
                 status = "Severe lag"
                 help = "Network conditions causing severe lag in online games"
@@ -586,19 +621,16 @@ enum SuitabilityEngine {
             )
         }
 
-        // Degraded conditions: noticeable rollbacks, latency spikes, or elevated ping
-        if impacts.contains("degraded") || loss >= 2.0 || jitter >= 20.0 || ping >= 80.0 {
+        // Degraded: a rule the CLI says degrades gaming, loss at the warn cutoff, or jitter over the CLI's cutoff
+        if impacts.contains("degraded") || loss >= Cutoff.lossWarnPct || jitter >= Cutoff.jitterWarnMs {
             let status: String
             let help: String
-            if loss >= 2.0 {
+            if loss >= Cutoff.lossWarnPct {
                 status = "May rubberband"
                 help = "Packet loss may cause rubberbanding, player warping, and dropped inputs"
-            } else if jitter >= 20.0 {
+            } else if jitter >= Cutoff.jitterWarnMs {
                 status = "Lag spikes"
                 help = "High jitter causes sudden latency spikes and micro-stutter"
-            } else if ping >= 80.0 {
-                status = "Noticeable delay"
-                help = "Elevated ping (≥80ms) causes slight delay between actions and server response"
             } else if ping < 35.0 && jitter < 10.0 && loss == 0.0 {
                 status = "Spike risk"
                 help = "Channel contention or route issues may cause occasional latency spikes despite low average ping"
@@ -665,7 +697,7 @@ enum SuitabilityEngine {
     }
 
     // MARK: - 4. VPN / Remote Access
-    /// Primary factors: Double NAT, MTU clamping (<1380 bytes), active tunnels.
+    /// Primary factors: Double NAT, MTU clamping (below the CLI's standard MTU), active tunnels.
     static func evaluateVPN(_ inputs: Inputs) -> Item {
         if !inputs.isLinkUp {
             return Item(
@@ -708,7 +740,7 @@ enum SuitabilityEngine {
             )
         }
 
-        if let mtu = inputs.mtu, mtu < 1380 {
+        if let mtu = inputs.mtu, mtu < Cutoff.mtuStandard {
             return Item(
                 id: "vpn",
                 title: "VPN / Remote",
@@ -717,7 +749,7 @@ enum SuitabilityEngine {
                 metric: "\(mtu) bytes",
                 tint: Theme.ColorToken.amber,
                 verdict: .degraded,
-                helpText: "Path MTU is clamped (<1380 bytes), which can cause tunnel packet drops"
+                helpText: "Path MTU is clamped (<\(Cutoff.mtuStandard) bytes), which can cause tunnel packet drops"
             )
         }
 
@@ -783,7 +815,6 @@ enum SuitabilityEngine {
         }
 
         let loss = inputs.resolvedLoss
-        let ping = inputs.monitorSample?.internet.rttAvgMs ?? 0.0
         // A failed lookup or connect in the sample is ONE probe, and it is
         // not this tile's to judge: the same fault looked like "DNS failing"
         // on one cycle and "Web blocked" on the next, depending on which
@@ -800,15 +831,15 @@ enum SuitabilityEngine {
         let impacts = catalogImpacts(for: "browsing", in: inputs)
 
         // 1. Broken conditions: extreme packet loss, or a rule the CLI says breaks browsing
-        if impacts.contains("broken") || loss >= 15.0 {
+        if impacts.contains("broken") || loss >= Cutoff.lossCritPct {
             let status: String
             let metric: String
             let help: String
 
-            if loss >= 15.0 {
+            if loss >= Cutoff.lossCritPct {
                 status = "Pages stall"
                 metric = LossFormatter.formatLoss(loss)
-                help = "Severe packet loss (≥15%) causes TCP connection stalls and failed web page rendering"
+                help = "Severe packet loss (≥\(Int(Cutoff.lossCritPct))%) causes TCP connection stalls and failed web page rendering"
             } else {
                 status = "Offline"
                 metric = "Unreachable"
@@ -828,17 +859,17 @@ enum SuitabilityEngine {
         }
 
         // 2. Degraded conditions: slow DNS lookups, elevated packet loss, high latency, or severely choked bandwidth
-        if impacts.contains("degraded") || (dnsElapsed != nil && dnsElapsed! >= 250.0) || loss >= 6.0 || ping >= 350.0 || (downMbps != nil && downMbps! < 1.0) {
+        if impacts.contains("degraded") || (dnsElapsed != nil && dnsElapsed! >= 250.0) || loss >= Cutoff.lossWarnPct || (downMbps != nil && downMbps! < 1.0) {
             let status: String
             let metric: String
             let help: String
 
             var ruleConsequence: String?
             var ruleID: String?
-            if loss >= 6.0 {
+            if loss >= Cutoff.lossWarnPct {
                 status = "Sluggish"
                 metric = LossFormatter.formatLoss(loss)
-                help = "Elevated packet loss (≥6%) causes TCP retransmissions and delayed web page rendering"
+                help = "Elevated packet loss (≥\(Int(Cutoff.lossWarnPct))%) causes TCP retransmissions and delayed web page rendering"
             } else if let rule = catalogRule(impacting: "browsing", in: inputs) {
                 // A confirmed finding (CONN-1, D1, ...): the CLI's own words.
                 // The metric is the ping figure on purpose — it is what makes
@@ -852,10 +883,6 @@ enum SuitabilityEngine {
                 status = "Slow lookups"
                 metric = String(format: "%.0fms DNS", dnsMs)
                 help = "DNS lookups are taking ≥250ms, causing a noticeable delay before websites start loading"
-            } else if ping >= 350.0 {
-                status = "Slow loads"
-                metric = String(format: "%.0f ms ping", ping)
-                help = "High round-trip latency (≥350ms) slows down TCP handshakes and interactive web apps"
             } else if let down = downMbps, down < 1.0 {
                 status = "Slow assets"
                 metric = String(format: "%.1f Mbps ↓", down)
@@ -948,11 +975,14 @@ enum SuitabilityEngine {
         let inetLoss = effectiveLoss ?? (filtering.internetLeg ? 0.0 : (monitorSample?.internet.lossPct ?? 0.0))
         // Downstream validation: if internet loss is clean (< 2.0%), isolated router loss (< 20%)
         // is control-plane rate limiting and does not indicate data-plane link drops.
-        let effectiveGWLoss = (inetLoss < 2.0 && gwLoss < 20.0) ? min(gwLoss, inetLoss) : gwLoss
+        // Never when the CLI has confirmed it: a firing gateway rule (G1, G2, G3) is the
+        // verdict, and the measured loss is what the finding is about.
+        let gatewayRuleFiring = !Set(monitorSample?.status.rules ?? []).isDisjoint(with: ["G1", "G2", "G3"])
+        let effectiveGWLoss = (!gatewayRuleFiring && inetLoss < 2.0 && gwLoss < 20.0) ? min(gwLoss, inetLoss) : gwLoss
         let loss = max(effectiveGWLoss, inetLoss)
         let jitter = currentJitter ?? monitorSample?.internet.rttJitterMs ?? 0.0
         let isWiFi = monitorSample?.link.isWiFi ?? false
-        let isRouterCulprit = (effectiveGWLoss >= 2.0) || (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0
+        let isRouterCulprit = (effectiveGWLoss >= Cutoff.lossWarnPct) || (monitorSample?.gateway.rttJitterMs ?? 0.0) >= Cutoff.jitterWarnMs
         let targetSuffix = isRouterCulprit ? (isWiFi ? " on Wi-Fi" : " to router") : ""
 
         var affected: [String] = []
@@ -968,7 +998,7 @@ enum SuitabilityEngine {
             headline = (callsBroken || gamingBroken) ? "Unstable for calls & gaming" : "Calls & gaming may lag"
             let streamNote = streaming?.verdict == .good ? " · 4K streaming is fine" : ""
             if loss > 0 && jitter >= 5.0 {
-                if inetLoss > 0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= 20.0 {
+                if inetLoss > 0 && gwLoss < 1.0 && (monitorSample?.gateway.rttJitterMs ?? 0.0) >= Cutoff.jitterWarnMs {
                     let jitLabel = isWiFi ? "Wi-Fi jitter" : "jitter to router"
                     subtitle = String(format: "%@ internet packet loss · %.0fms %@%@", LossFormatter.formatPct(inetLoss), jitter, jitLabel, streamNote)
                 } else if effectiveGWLoss > 0 && inetLoss < 1.0 {
@@ -991,26 +1021,19 @@ enum SuitabilityEngine {
                 subtitle = String(format: "%.0f ms ping · %.0fms jitter%@", ping, jitter, streamNote)
             }
         } else if callsBroken || callsDegraded {
-            let ping = monitorSample?.internet.rttAvgMs ?? 0.0
             if callsBroken {
-                if loss >= 8.0 {
+                if loss >= Cutoff.lossCritPct {
                     headline = "Frequent cutouts on calls"
-                } else if jitter >= 50.0 {
-                    headline = "Severe audio stutter on calls"
-                } else if ping >= 400.0 {
-                    headline = "Heavy delay on calls"
                 } else if calls?.status == "Low bandwidth" {
                     headline = "Calls failing from low bandwidth"
                 } else {
                     headline = "Frequent cutouts on calls"
                 }
             } else {
-                if loss >= 3.0 {
+                if loss >= Cutoff.lossWarnPct {
                     headline = "Voice & video calls may cut out"
-                } else if jitter >= 25.0 {
+                } else if jitter >= Cutoff.jitterWarnMs {
                     headline = "Audio stutter on calls"
-                } else if ping >= 250.0 {
-                    headline = "Audio delay on calls"
                 } else if calls?.status == "Video limited" {
                     headline = "Video may freeze on calls"
                 } else {
@@ -1019,24 +1042,17 @@ enum SuitabilityEngine {
             }
             subtitle = "\(calls?.metric ?? "")\(targetSuffix)" + fineSuffix([("Browsing", browsing), ("streaming", streaming)])
         } else if gamingBroken || gamingDegraded {
-            let ping = monitorSample?.internet.rttAvgMs ?? 0.0
             if gamingBroken {
-                if loss >= 8.0 {
+                if loss >= Cutoff.lossCritPct {
                     headline = "Severe rubberbanding in games"
-                } else if jitter >= 45.0 {
-                    headline = "Severe lag spikes in games"
-                } else if ping >= 140 {
-                    headline = "High lag for gaming"
                 } else {
                     headline = "Severe lag in games"
                 }
             } else {
-                if loss >= 2.0 {
+                if loss >= Cutoff.lossWarnPct {
                     headline = "Rubberbanding in games"
-                } else if jitter >= 20.0 {
+                } else if jitter >= Cutoff.jitterWarnMs {
                     headline = "Lag spikes in games"
-                } else if ping >= 80.0 {
-                    headline = "Delayed response in games"
                 } else {
                     headline = "Moderate lag in games"
                 }
@@ -1044,7 +1060,7 @@ enum SuitabilityEngine {
             subtitle = "\(gaming?.metric ?? "")" + fineSuffix([("Web browsing", browsing), ("streaming", streaming)])
         } else if streamingBroken || streamingDegraded {
             if streamingBroken {
-                if loss >= 15.0 {
+                if loss >= Cutoff.lossCritPct {
                     headline = "Severe packet loss buffering video"
                 } else if streaming?.metric.contains("Mbps") == true {
                     headline = "Video buffering from low bandwidth"
@@ -1052,7 +1068,7 @@ enum SuitabilityEngine {
                     headline = "Video streaming is buffering"
                 }
             } else {
-                if loss >= 8.0 {
+                if loss >= Cutoff.lossWarnPct {
                     headline = "Packet loss may buffer video"
                 } else if streaming?.status == "SD only" {
                     headline = "Streaming limited to standard definition"
@@ -1065,10 +1081,9 @@ enum SuitabilityEngine {
             // A lookup that failed took as long as its timeout, which says
             // nothing about how slow DNS is.
             let dnsElapsed = monitorSample?.dns.ok == false ? nil : monitorSample?.dns.elapsedMs
-            let ping = monitorSample?.internet.rttAvgMs ?? 0.0
 
             if browsingBroken {
-                if loss >= 15.0 {
+                if loss >= Cutoff.lossCritPct {
                     headline = "Web pages failing from packet loss"
                 } else {
                     headline = "Websites aren't loading"
@@ -1079,10 +1094,8 @@ enum SuitabilityEngine {
             } else {
                 if browsing?.status == "Slow lookups" || (dnsElapsed != nil && dnsElapsed! >= 250.0) {
                     headline = "Slow DNS delaying page loads"
-                } else if loss >= 6.0 {
+                } else if loss >= Cutoff.lossWarnPct {
                     headline = "Web browsing sluggish from packet loss"
-                } else if ping >= 350.0 {
-                    headline = "Web browsing delayed by high latency"
                 } else if browsing?.status == "Slow assets" {
                     headline = "Web pages loading slowly"
                 } else {

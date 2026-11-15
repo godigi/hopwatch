@@ -29,6 +29,11 @@ enum SupportSummaryFormatter {
         var technicalDetails: [String] = []
         var appVersion: String?
         var repoURL: String = "https://github.com/godigi/hopwatch"
+        /// Further identifying values the caller knows about (city, gateway
+        /// MAC, IPv6 address, a second spelling of the network name). The
+        /// name, client IP, BSSID and public IP above are always masked;
+        /// see `Redaction`.
+        var redactions: [String] = []
 
         init(
             networkName: String? = nil,
@@ -54,7 +59,8 @@ enum SupportSummaryFormatter {
             diagnosticFindings: [String] = [],
             technicalDetails: [String] = [],
             appVersion: String? = nil,
-            repoURL: String = "https://github.com/godigi/hopwatch"
+            repoURL: String = "https://github.com/godigi/hopwatch",
+            redactions: [String] = []
         ) {
             self.networkName = networkName
             self.gatewayIP = gatewayIP
@@ -80,6 +86,69 @@ enum SupportSummaryFormatter {
             self.technicalDetails = technicalDetails
             self.appVersion = appVersion
             self.repoURL = repoURL
+            self.redactions = redactions
+        }
+    }
+
+    // MARK: - Redaction
+
+    /// Masks the values `helpers/share.py`'s `_REDACT_PATHS` masks (public IP,
+    /// client IP, SSID, BSSID, IPv6 address, gateway MAC, city) plus the
+    /// network's label and the SSID inside its id, by substring, wherever
+    /// they appear in the finished text. ISP, ASN and country are kept: they
+    /// name a provider, which a reader needs. Pure, so it is unit-testable.
+    ///
+    /// The menu that offers "Copy for support / front desk" promises these
+    /// are masked, and the report interpolates them into prose as well as
+    /// into the telemetry lines, so the scrub runs over the whole text.
+    enum Redaction {
+        static let token = "[redacted]"
+
+        /// Strings that occupy an identity field without being an identity.
+        /// Masking one would blank a generic word wherever it appears.
+        private static let placeholders: Set<String> = [
+            "<redacted>", "[redacted]", "unknown", "unknown network", "",
+            "wifi (ssid hidden by macos)",
+            // Generic words a wired or unnamed network can carry as its label,
+            // which also appear in the report's own prose ("Wired Ethernet link").
+            "wired", "ethernet", "wired ethernet", "wi-fi", "wifi",
+        ]
+
+        /// Everything worth masking, longest first so an SSID that contains
+        /// a shorter secret is masked whole. Values under three characters
+        /// are dropped: replacing them would corrupt unrelated words.
+        static func secrets(from values: [String?]) -> [String] {
+            var found = Set<String>()
+            for case let raw? in values {
+                let v = raw.trimmingCharacters(in: .whitespaces)
+                guard v.count >= 3, !placeholders.contains(v.lowercased()) else { continue }
+                found.insert(v)
+            }
+            return found.sorted { $0.count > $1.count }
+        }
+
+        /// The SSID component of a network id: `wifi:ssid=Home,mac=…` or
+        /// `ssid:Home`. Nil when the id carries none.
+        static func ssid(fromNetworkID id: String?) -> String? {
+            guard let id else { return nil }
+            if let r = id.range(of: "ssid=") {
+                let rest = id[r.upperBound...]
+                let name = rest.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+                return name.isEmpty ? nil : name
+            }
+            if id.hasPrefix("ssid:") {
+                let name = String(id.dropFirst(5))
+                return name.isEmpty ? nil : name
+            }
+            return nil
+        }
+
+        static func scrub(_ text: String, secrets: [String]) -> String {
+            var out = text
+            for secret in secrets {
+                out = out.replacingOccurrences(of: secret, with: token)
+            }
+            return out
         }
     }
 
@@ -93,12 +162,15 @@ enum SupportSummaryFormatter {
         if isWired { return "Wired Ethernet link" }
         guard let rssi else { return "Wi-Fi signal unavailable / Wired" }
 
+        // "Weak" is exactly where the CLI's W1 fires (strictly below the
+        // cutoff), so the rating, the isolation bullets and the hop health
+        // agree about one signal.
         let rating: String
         if rssi >= -55 {
             rating = "Excellent"
         } else if rssi >= -68 {
             rating = "Good"
-        } else if rssi >= -78 {
+        } else if rssi >= HopAttributionResolver.weakWifiSignalDBm {
             rating = "Fair"
         } else {
             rating = "Weak"
@@ -173,14 +245,15 @@ enum SupportSummaryFormatter {
                 "Wi-Fi / Distance Ruled Out: Connected via direct wired Ethernet cable, completely ruling out wireless interference or room distance."
             )
         } else if let rssi {
-            if rssi > -75 && attribution.wifiHealth == .healthy {
+            let weakCutoff = HopAttributionResolver.weakWifiSignalDBm
+            if rssi >= weakCutoff && attribution.wifiHealth == .healthy {
                 wifiSignalSolid = true
                 let rating = rssi >= -55 ? "Excellent" : (rssi >= -68 ? "Good" : "Fair")
                 let snrPart = snr.map { ", SNR \($0) dB" } ?? ""
                 bullets.append(
-                    "Wi-Fi Signal / Distance Ruled Out: Wireless signal between this computer and the access point is \(rating) (\(rssi) dBm\(snrPart), well above the -75 dBm minimum threshold). Sitting closer to the router will not fix this because signal strength is already solid."
+                    "Wi-Fi Signal / Distance Ruled Out: Wireless signal between this computer and the access point is \(rating) (\(rssi) dBm\(snrPart), well above the \(weakCutoff) dBm minimum threshold). Sitting closer to the router will not fix this because signal strength is already solid."
                 )
-            } else if ruleSet.contains("WS-1") && rssi > -75 {
+            } else if ruleSet.contains("WS-1") && rssi >= weakCutoff {
                 wifiSignalSolid = false
                 bullets.append(
                     "Wi-Fi Radio Channel Congested: Signal strength is \(rssi) dBm, but the access point's wireless channel is crowded by neighboring networks (an access point configuration issue, not the laptop)."
@@ -189,7 +262,7 @@ enum SupportSummaryFormatter {
                 wifiSignalSolid = false
                 let snrPart = snr.map { ", SNR \($0) dB" } ?? ""
                 bullets.append(
-                    "Room Wi-Fi Coverage Issue: Wireless signal in this location is Weak (\(rssi) dBm\(snrPart), below the -75 dBm threshold needed for a stable connection). The access point is too far from this area or blocked by walls/floors."
+                    "Room Wi-Fi Coverage Issue: Wireless signal in this location is Weak (\(rssi) dBm\(snrPart), below the \(weakCutoff) dBm threshold needed for a stable connection). The access point is too far from this area or blocked by walls/floors."
                 )
             }
         } else {
@@ -320,7 +393,16 @@ enum SupportSummaryFormatter {
     }
 
     /// Formats the summary into an authoritative, clean human-readable text report.
+    /// Identifying values are masked here, at the one place every report is
+    /// assembled, so no caller can forget to (see `Redaction`).
     static func format(_ params: Parameters) -> String {
+        let secrets = Redaction.secrets(from: [
+            params.networkName, params.clientIP, params.bssid, params.publicIP,
+        ] + params.redactions.map { Optional($0) })
+        return Redaction.scrub(render(params), secrets: secrets)
+    }
+
+    private static func render(_ params: Parameters) -> String {
         var lines: [String] = []
         lines.append("Hopwatch Network Diagnostic Report")
         lines.append(String(repeating: "=", count: 34))
@@ -595,7 +677,7 @@ enum SupportSummaryFormatter {
                 problem = "High internet latency (\(Int(round(rtt))) ms)"
             } else if dnsFailed {
                 problem = "DNS queries are failing or timing out"
-            } else if let rssi = snapshot.wifi?.rssi, rssi < -78 {
+            } else if let rssi = snapshot.wifi?.rssi, rssi < HopAttributionResolver.weakWifiSignalDBm {
                 problem = "Weak Wi-Fi signal reception"
             } else {
                 problem = "Intermittent network degradation detected"
@@ -604,7 +686,7 @@ enum SupportSummaryFormatter {
 
         // Action fallback if still nil
         if action == nil {
-            if let rssi = snapshot.wifi?.rssi, rssi < -78 {
+            if let rssi = snapshot.wifi?.rssi, rssi < HopAttributionResolver.weakWifiSignalDBm {
                 action = !networkIsOwned
                     ? "Please check if you can move closer to the access point or switch to a closer network band."
                     : "Move closer to your router or reposition Wi-Fi antennas."
@@ -623,26 +705,22 @@ enum SupportSummaryFormatter {
             }
         }
 
-        // Local verification
-        let localVerification: String
+        // Root-cause isolation. Resolved before the device-status line, which
+        // follows the same attribution: a fault the resolver puts on this Mac
+        // (HOG-1, SOCK-1, NT-1, BR-1, CONN-1) must never read "idle and healthy".
+        let attribution = HopAttributionResolver.resolve(snapshot: snapshot)
         let hasHeavyLocalTraffic = ruleIDs.contains("TR-1")
             || ruleIDs.contains("HOG-1")
             || (snapshot.traffic?.downMbps ?? 0) > 25.0
             || (snapshot.traffic?.upMbps ?? 0) > 10.0
-        if isCaptive {
-            localVerification = "Wi-Fi link is connected; internet access blocked by captive portal"
-        } else if let tr = snapshot.traffic, let down = tr.downMbps, let up = tr.upMbps {
-            if hasHeavyLocalTraffic {
-                localVerification = "High local Mac bandwidth (\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up) detected during check"
-            } else {
-                localVerification = "Mac traffic is low (\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up); issue is upstream on network/router"
-            }
-        } else {
-            localVerification = "Local link is idle and healthy; issue is upstream on network/router"
-        }
+        let localVerification = deviceStatus(
+            isCaptive: isCaptive,
+            attribution: attribution,
+            hasHeavyLocalTraffic: hasHeavyLocalTraffic,
+            trafficDownMbps: snapshot.traffic?.downMbps,
+            trafficUpMbps: snapshot.traffic?.upMbps
+        )
 
-        // Root-cause isolation
-        let attribution = HopAttributionResolver.resolve(snapshot: snapshot)
         let isolation = buildIsolation(
             attribution: attribution,
             rssi: snapshot.wifi?.rssi,
@@ -692,8 +770,45 @@ enum SupportSummaryFormatter {
             vpnStatus: vpnStr,
             bufferbloat: bufferbloatStr,
             diagnosticFindings: findings,
-            technicalDetails: technicalDetails
+            technicalDetails: technicalDetails,
+            redactions: [
+                snapshot.wifi?.ssid,
+                snapshot.network.label,
+                Redaction.ssid(fromNetworkID: snapshot.network.id),
+                snapshot.publicInfo.city,
+                snapshot.interfaceInfo.gatewayMAC,
+                snapshot.ipv6.globalAddr,
+            ].compactMap { $0 }
         ))
+    }
+
+    /// The "Device Status" telemetry line. It follows the attribution, never a
+    /// fixed sentence: a fault the resolver puts on this Mac or on the Wi-Fi
+    /// link must not be reported as "idle and healthy, issue is upstream".
+    private static func deviceStatus(
+        isCaptive: Bool,
+        attribution: HopAttributionResolver.Result,
+        hasHeavyLocalTraffic: Bool,
+        trafficDownMbps: Double?,
+        trafficUpMbps: Double?
+    ) -> String {
+        if isCaptive {
+            return "Wi-Fi link is connected; internet access blocked by captive portal"
+        }
+        if attribution.culprit == .mac || attribution.macHealth != .healthy {
+            return "This Mac is part of the problem (\(attribution.headline)); the issue is not only upstream on the network"
+        }
+        if attribution.culprit == .wifi {
+            return "Wi-Fi link between this Mac and the access point is degraded (\(attribution.headline)); this Mac itself is healthy"
+        }
+        if let down = trafficDownMbps, let up = trafficUpMbps {
+            let rates = "\(String(format: "%.1f", down)) Mbps down / \(String(format: "%.1f", up)) Mbps up"
+            if hasHeavyLocalTraffic {
+                return "High local Mac bandwidth (\(rates)) detected during check"
+            }
+            return "Mac traffic is low (\(rates)); issue is upstream on network/router"
+        }
+        return "Local link is idle and healthy; issue is upstream on network/router"
     }
 
     private static func isRawKey(_ str: String) -> Bool {
@@ -925,14 +1040,21 @@ enum SupportSummaryFormatter {
             captivePortal: captivePortalStr
         )
 
+        let hasHeavyLocalTraffic = sampleRules.contains("TR-1") || sampleRules.contains("HOG-1")
+        let localVerification = deviceStatus(
+            isCaptive: isCaptive,
+            attribution: attribution,
+            hasHeavyLocalTraffic: hasHeavyLocalTraffic,
+            trafficDownMbps: nil,
+            trafficUpMbps: nil
+        )
+
         return format(Parameters(
             networkName: netName,
             gatewayIP: gwFormatted,
             signalQuality: signalStr,
             observedProblem: problem,
-            localVerification: isCaptive
-                ? "Wi-Fi link is connected; internet access blocked by captive portal"
-                : "Local link is idle and healthy; issue is upstream on network/router",
+            localVerification: localVerification,
             concreteAction: action,
             timestamp: sample.ts,
             userImpact: impact,
@@ -947,7 +1069,19 @@ enum SupportSummaryFormatter {
             dnsStatus: dnsStr,
             captivePortal: captivePortalStr,
             vpnStatus: vpnStr,
-            diagnosticFindings: findings
+            diagnosticFindings: findings,
+            redactions: [
+                fallbackNetworkName,
+                sample.link.ssid,
+                fallbackSnapshot?.wifi?.ssid,
+                sample.network.label,
+                fallbackSnapshot?.network.label,
+                Redaction.ssid(fromNetworkID: sample.network.id),
+                pubCity,
+                sample.link.gatewayMAC,
+                fallbackSnapshot?.interfaceInfo.gatewayMAC,
+                fallbackSnapshot?.ipv6.globalAddr,
+            ].compactMap { $0 }
         ))
     }
 }

@@ -151,7 +151,7 @@ struct SoftwareUpdateView: View {
     // MARK: - 3. Checkbox Option
 
     private var automaticUpdatesToggle: some View {
-        Toggle("Automatically download and install updates in the future", isOn: $autoInstallUpdates)
+        Toggle("Automatically download updates in the background", isOn: $autoInstallUpdates)
             .toggleStyle(.checkbox)
             .font(.system(size: 12))
             .foregroundStyle(Theme.ColorToken.ink)
