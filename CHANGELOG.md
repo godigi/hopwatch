@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-11-16
+
 ### Added
 - **Automated Live Condition Simulator & Multi-Tab Visual Screenshot Audit Harness (`VisualAuditMode`, `scripts/visual_audit.py`, `make visual-audit`)**:
   - Added a two-stage simulation suite driving real CLI telemetry + rule evaluation and an isolated GUI harness (`--visual-audit` / `--gallery-scenarios`) through 20 network degradation, recovery, pause, isolated gateway rate-limiting, rolling-window recovery, Wi-Fi TX collapse, auxiliary view, and continuous no-reset transition cycle scenarios.
@@ -416,8 +418,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.23.1...HEAD
-[1.23.1]: https://github.com/godigi/hopwatch/releases/tag/v1.23.1
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.24.0...HEAD
+[1.24.0]: https://github.com/godigi/hopwatch/releases/tag/v1.24.0
+[1.23.1]: https://github.com/godigi/hopwatch/commit/3b79c6c402610411cf75d24e4e4a4569bbe96fc8
 [1.23.0]: https://github.com/godigi/hopwatch/commit/88326623acff0545af1da67884f03f31ac328e27
 [1.22.0]: https://github.com/godigi/hopwatch/commit/b9538f93648739b5515d34eea0eb29e7b592a752
 [1.21.0]: https://github.com/godigi/hopwatch/commit/8af9b55d24ca875f223196ab4b69c9b07635b296
