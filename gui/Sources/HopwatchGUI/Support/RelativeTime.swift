@@ -9,7 +9,9 @@ import SwiftUI
 /// sound for the same reason `HistoryDocument.iso` gives: every caller is
 /// `@MainActor`.
 enum RelativeTime {
-    private static let formatter: RelativeDateTimeFormatter = {
+    private static let lock = NSLock()
+    // Guarded by `lock` for safe access from any isolation domain.
+    private nonisolated(unsafe) static let formatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter
@@ -21,6 +23,8 @@ enum RelativeTime {
         if elapsed < 1.0 {
             return "just now"
         }
+        lock.lock()
+        defer { lock.unlock() }
         return formatter.localizedString(for: date, relativeTo: now)
     }
 }

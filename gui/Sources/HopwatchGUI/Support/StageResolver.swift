@@ -134,6 +134,10 @@ enum StageResolver {
         /// Whether the in-flight scan is this network's arrival check.
         /// Meaningless when `isScanning` is false.
         let isArrivalCheck: Bool
+        /// True for quiet automatic background scans (`.alertTriggered`).
+        /// Keeps the active alert / live telemetry hero visible instead of
+        /// replacing the whole screen with "Running full check…".
+        let isBackgroundScan: Bool
         let monitoringEnabled: Bool
         let isPausedForAnyReason: Bool
         let pauseReason: String?
@@ -156,6 +160,7 @@ enum StageResolver {
         let degradedExperience: DegradedSnapshot?
         let settling: Bool
         init(isScanning: Bool, isArrivalCheck: Bool = false,
+             isBackgroundScan: Bool = false,
              monitoringEnabled: Bool,
              isPausedForAnyReason: Bool, pauseReason: String?,
              lastError: String?, monitorRunning: Bool,
@@ -167,6 +172,7 @@ enum StageResolver {
              settling: Bool = false) {
             self.isScanning = isScanning
             self.isArrivalCheck = isArrivalCheck
+            self.isBackgroundScan = isBackgroundScan
             self.monitoringEnabled = monitoringEnabled
             self.isPausedForAnyReason = isPausedForAnyReason
             self.pauseReason = pauseReason
@@ -183,6 +189,42 @@ enum StageResolver {
         }
     }
 
+    enum PillTone: Equatable, Sendable { case green, amber, red, blue, muted }
+    struct StatusPill: Equatable, Sendable { let text: String; let tone: PillTone }
+
+    /// Single source of truth for header status pills across DropdownView and MainWindow
+    /// so the pill never reads "Watching" green over a degraded/problem hero card.
+    static func statusPill(for stage: Stage) -> StatusPill {
+        switch stage {
+        case .testing, .arrived:
+            return StatusPill(text: "Checking", tone: .blue)
+        case .paused:
+            return StatusPill(text: "Paused", tone: .muted)
+        case .skewed:
+            return StatusPill(text: "Attention", tone: .amber)
+        case .noLink:
+            return StatusPill(text: "Problem", tone: .red)
+        case .notReporting:
+            return StatusPill(text: "Not reporting", tone: .amber)
+        case .checking:
+            return StatusPill(text: "Checking", tone: .muted)
+        case .alerted(let alert):
+            return alert.severityRank >= 3
+                ? StatusPill(text: "Problem", tone: .red)
+                : StatusPill(text: "Degraded", tone: .amber)
+        case .watching(.critical):
+            return StatusPill(text: "Problem", tone: .red)
+        case .watching(.warn):
+            return StatusPill(text: "Degraded", tone: .amber)
+        case .degraded(let deg):
+            return deg.isCritical
+                ? StatusPill(text: "Problem", tone: .red)
+                : StatusPill(text: "Degraded", tone: .amber)
+        case .resolved, .healthy:
+            return StatusPill(text: "Watching", tone: .green)
+        }
+    }
+
     /// The order of the guards is load-bearing and matches the precedence
     /// the dropdown has always had: a scan in progress, then a user pause,
     /// then a skewed CLI, then no link at all, then an already-active alert. An arrival check
@@ -193,7 +235,7 @@ enum StageResolver {
     /// `.watching` and `.healthy` — association and RSSI alone never earn a
     /// green all-clear.
     static func resolve(_ i: Inputs) -> Stage {
-        if i.isScanning { return i.isArrivalCheck ? .arrived : .testing }
+        if i.isScanning && !i.isBackgroundScan { return i.isArrivalCheck ? .arrived : .testing }
         if !i.monitoringEnabled { return .paused(nil) }
         if i.isPausedForAnyReason { return .paused(i.pauseReason) }
         if let error = i.lastError, !i.monitorRunning { return .skewed(error) }

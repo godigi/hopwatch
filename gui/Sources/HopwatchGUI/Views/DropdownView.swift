@@ -49,6 +49,8 @@ struct DropdownView: View {
             }
 
             VStack(spacing: 12) {
+                locationReminderBanner
+
                 statusHeroSection
 
                 connectionRouteSection
@@ -73,6 +75,13 @@ struct DropdownView: View {
         .background(Theme.ColorToken.dropdownBackground)
         .background(DropdownWindowAnchor())
         .contextMenu {
+            Button("Run Speed Test") {
+                coordinator.runSpeedTest(reason: "dropdown context menu")
+            }
+            .disabled(coordinator.isScanning)
+
+            Divider()
+
             Button("Copy Redacted Report") { copyShareableReport() }.disabled(!coordinator.supportsShare)
             Button("Copy for Support") { copySupportSummary() }
             Divider()
@@ -110,28 +119,56 @@ struct DropdownView: View {
         )
     }
 
-    private var statusPillText: String {
-        if coordinator.isScanning { return "Checking" }
-        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
-        // Not a "Watching" over a monitor that has stopped reporting.
-        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
-        if coordinator.liveSample == nil { return "Checking" }
-        if coordinator.liveSample?.status.severity == "critical" { return "Problem" }
-        if coordinator.liveSample?.status.severity == "warn" { return "Degraded" }
-        return "Watching"
+    private var statusPill: StageResolver.StatusPill {
+        StageResolver.statusPill(for: stage)
     }
 
-    private var statusPillColor: Color {
-        if coordinator.isScanning { return Theme.ColorToken.blue }
-        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
-        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
-        if coordinator.liveSample == nil { return Theme.ColorToken.muted }
-        if coordinator.liveSample?.status.severity == "critical" { return .red }
-        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amber }
-        return Theme.ColorToken.green
-    }
+    private var statusPillText: String { statusPill.text }
+
+    private var statusPillColor: Color { statusPill.tone.color }
 
     // MARK: - 2. Update Banner
+
+    @ViewBuilder
+    private var locationReminderBanner: some View {
+        if coordinator.linkIsWiFi && !coordinator.locationPermissions.isAuthorized && !appSettings.locationBannerDismissed {
+            HStack(spacing: 8) {
+                Image(systemName: "location.slash.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                Text("Enable Location Services for Wi-Fi names & radio details.")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button(coordinator.locationPermissions.isDeniedOrRestricted ? "Settings" : "Enable") {
+                    if coordinator.locationPermissions.isDeniedOrRestricted {
+                        coordinator.locationPermissions.openSystemSettings()
+                    } else {
+                        coordinator.locationPermissions.requestOrOpenSettings()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                Button {
+                    appSettings.locationBannerDismissed = true
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+            )
+        }
+    }
 
     @ViewBuilder
     private var updateBanner: some View {
@@ -227,44 +264,16 @@ struct DropdownView: View {
 
     // MARK: - 3. Status Hero Section
 
-    private var degradedExperience: StageResolver.DegradedSnapshot? {
-        SuitabilityEngine.synthesizeDegradedExperience(
-            items: suitabilityItems,
-            monitorSample: coordinator.liveSample,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering
-        )
+    private var stage: StageResolver.Stage {
+        coordinator.currentStage(monitoringEnabled: appSettings.monitoringEnabled)
     }
 
-    private var stage: StageResolver.Stage {
-        let degraded = degradedExperience
-        return StageResolver.resolve(.init(
-            isScanning: coordinator.isScanning,
-            isArrivalCheck: coordinator.isArrivalCheck,
-            monitoringEnabled: appSettings.monitoringEnabled,
-            isPausedForAnyReason: coordinator.monitor.isPausedForAnyReason,
-            pauseReason: coordinator.monitor.pauseReason,
-            lastError: coordinator.monitor.lastError,
-            monitorRunning: coordinator.monitor.isRunning,
-            activeAlert: coordinator.alerts.urgentActiveSorted.first.map {
-                StageResolver.AlertSnapshot(
-                    title: $0.title, body: $0.body,
-                    raisedAt: $0.raisedAt, rules: $0.rules,
-                    severityRank: $0.rules
-                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                    id: $0.id,
-                    isUrgent: $0.isUrgent)
-            },
-            severity: coordinator.liveSample?.status.severity ?? "ok",
-            linkUp: !linkDown,
-            sampleStale: coordinator.latestSampleIsStale,
-            // A sample that predates a stop or pause is not a measurement.
-            measurementState: coordinator.liveSample?.status.measurement ?? "unknown",
-            activeResolution: coordinator.activeResolution?.snapshot,
-            degradedExperience: degraded,
-            settling: coordinator.isSettling
-        ))
+    private var backgroundInvestigatingNote: String? {
+        guard coordinator.isBackgroundInvestigating else { return nil }
+        if let step = coordinator.activeScanProgressSubtitle {
+            return "Investigating issue: \(step)"
+        }
+        return "Investigating issue in background…"
     }
 
     @ViewBuilder
@@ -276,7 +285,8 @@ struct DropdownView: View {
                 iconTint: Theme.ColorToken.green,
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: "All good — watching",
-                subtitle: quietLine
+                subtitle: quietLine,
+                backgroundActivityText: backgroundInvestigatingNote
             )
         case .degraded(let deg):
             MenuStatusHeroView(
@@ -284,7 +294,8 @@ struct DropdownView: View {
                 iconTint: deg.isCritical ? .red : Theme.ColorToken.amber,
                 iconBackground: deg.isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash,
                 headline: deg.headline,
-                subtitle: deg.subtitle
+                subtitle: deg.subtitle,
+                backgroundActivityText: backgroundInvestigatingNote
             )
         case .resolved(let res):
             MenuStatusHeroView(
@@ -292,7 +303,8 @@ struct DropdownView: View {
                 iconTint: Theme.ColorToken.green,
                 iconBackground: Theme.ColorToken.greenWash,
                 headline: res.title,
-                subtitle: res.message
+                subtitle: res.message,
+                backgroundActivityText: backgroundInvestigatingNote
             )
         case .noLink:
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
@@ -397,7 +409,8 @@ struct DropdownView: View {
                 headline: isCritical ? "Connection is unstable" : "Connection needs attention",
                 subtitle: coordinator.headline.isEmpty
                     ? (isCritical ? "Confirming before notifying you…" : "Will alert if this keeps up.")
-                    : coordinator.headline
+                    : coordinator.headline,
+                backgroundActivityText: backgroundInvestigatingNote
             )
         case .alerted(let alert):
             let isCritical = alert.severityRank >= 3
@@ -422,6 +435,7 @@ struct DropdownView: View {
                 iconBackground: isCaptive ? Theme.ColorToken.amberWash : (isCritical ? Color.red.opacity(0.12) : Theme.ColorToken.amberWash),
                 headline: isCaptive ? (coordinator.wifiDisplayName.map { "Sign in to \($0)" } ?? "Sign in to Wi-Fi network") : alert.title,
                 subtitle: alertSubtitle,
+                backgroundActivityText: backgroundInvestigatingNote,
                 actionTitle: isCaptive ? "Open Sign-In Page" : (isRouter && routerAdminURL != nil ? "Open Router Admin Page" : nil),
                 onAction: isCaptive ? {
                     coordinator.openPortalPage()
@@ -453,7 +467,7 @@ struct DropdownView: View {
                 iconName: "circle.dashed",
                 iconTint: Theme.ColorToken.blue,
                 iconBackground: Theme.ColorToken.neutralWash,
-                headline: "Running full check…",
+                headline: coordinator.isSpeedTestOnly ? "Running speed test…" : "Running full check…",
                 subtitle: coordinator.activeScanProgressSubtitle ?? "Pinging route and checking services…",
                 isChecking: true
             )
@@ -584,12 +598,18 @@ struct DropdownView: View {
         return nil
     }
 
+    private var isMonitoringPaused: Bool {
+        !appSettings.monitoringEnabled || coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason)
+    }
+
     private var macDetailText: String {
         if linkDown {
             let offline = coordinator.liveSample?.link.offline ?? coordinator.monitor.latest?.link.offline
             // The CLI's caption for the reason, or the neutral one.
             return offline?.knownReasonLabel ?? NoLinkCopy.macDetail
         }
+        if isMonitoringPaused { return "Paused" }
+        if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         guard coordinator.liveSample != nil else { return "Checking…" }
         let isWiFi = coordinator.liveSample?.link.isWiFi ?? true
         guard isWiFi else {
@@ -621,6 +641,11 @@ struct DropdownView: View {
     private var isGatewayJitterDominant: Bool {
         let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? 0
         return gwJitter >= 20.0
+    }
+
+    private var isJitterWarning: Bool {
+        guard !linkDown, let j = currentJitter else { return false }
+        return j >= 30.0 || (isGatewayJitterDominant && j >= 20.0)
     }
 
     private var jitterLabel: String {
@@ -661,17 +686,20 @@ struct DropdownView: View {
             routerAdminAvailable: !linkDown && coordinator.routerAdminAvailable,
             jitterLabel: jitterLabel,
             jitterMs: linkDown ? nil : currentJitter,
-            jitterWarn: !linkDown && (currentJitter ?? 0) >= 30.0 || (isGatewayJitterDominant && (currentJitter ?? 0) >= 20.0),
+            jitterWarn: isJitterWarning,
             jitterDescription: jitterDescriptionText,
             linkDown: linkDown,
             vpnActive: vpnActive,
-            vpnKnown: coordinator.liveSample != nil,
+            vpnKnown: coordinator.liveSample != nil && !isMonitoringPaused && !coordinator.latestSampleIsStale,
+            vpnUnknownText: isMonitoringPaused ? "Paused" : (coordinator.latestSampleIsStale ? StaleSampleCopy.unknownValue : "VPN checking…"),
             vpnName: vpnName,
             vpnFreshness: coordinator.vpnFreshness,
             cadenceText: coordinator.latestSampleIsStale
                 ? "Not reporting"
                 : (coordinator.isScanning
-                   ? (coordinator.isArrivalCheck ? "Testing new network" : "Check in progress")
+                   ? (coordinator.isArrivalCheck
+                      ? "Testing new network"
+                      : (coordinator.isBackgroundInvestigating ? "Investigating issue" : "Check in progress"))
                    : (coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason) || !appSettings.monitoringEnabled
                       ? "Monitoring paused"
                       : (coordinator.monitor.isRunning
@@ -683,6 +711,7 @@ struct DropdownView: View {
     private var routerPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
         guard let sample = coordinator.liveSample else { return "—" }
+        if lossFiltering.filters(.gateway) { return "—" }
         guard let rtt = sample.gateway.rttAvgMs else {
             if let loss = sample.gateway.lossPct, loss >= 100 { return "no reply" }
             return "—"
@@ -704,7 +733,7 @@ struct DropdownView: View {
 
     private var internetPingText: String {
         if linkDown { return NoLinkCopy.unknownValue }
-        guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return "—" }
+        guard !coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason) else { return "—" }
         if PingReadout.internetShowsTCPOk(rtt: coordinator.liveSample?.internet.rttAvgMs,
                                           filtering: lossFiltering) { return "TCP ok" }
         guard let rtt = coordinator.liveSample?.internet.rttAvgMs else {
@@ -732,6 +761,7 @@ struct DropdownView: View {
 
     private var routerDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
+        if isMonitoringPaused { return "Paused" }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         guard coordinator.liveSample != nil else { return "Checking…" }
         if lossFiltering.filters(.gateway) {
@@ -740,12 +770,15 @@ struct DropdownView: View {
         if coordinator.hasRecentRoam && (coordinator.liveSample?.gateway.lossPct ?? 0) < 10.0 {
             return "Wi-Fi roamed"
         }
-        let inetLoss = coordinator.liveSample?.internet.lossPct ?? 0
+        let inetLoss = coordinator.liveSample?.internet.lossPct
         if let loss = coordinator.liveSample?.gateway.lossPct, loss > 0 {
-            if inetLoss <= 1.0 && loss < 20.0 {
+            if EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: loss, internetLoss: inetLoss, gatewayFiltered: lossFiltering.filters(.gateway)) {
                 return routerGatewayIP ?? "default gateway"
             }
-            return LossFormatter.formatPacketLoss(loss)
+            return EffectiveLoss.formatWindowDetail(
+                windowLoss: loss,
+                lastProbeLoss: coordinator.liveSample?.gateway.lastProbeLossPct
+            )
         }
         if routerWarn {
             let gwJitter = coordinator.liveSample?.gateway.rttJitterMs ?? 0
@@ -763,6 +796,7 @@ struct DropdownView: View {
 
     private var internetDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
+        if isMonitoringPaused { return "Paused" }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         guard coordinator.liveSample?.internet.lossPct != nil else {
             return coordinator.liveSample?.tcp.anyOk == true ? "Web reachable" : "Checking…"
@@ -777,10 +811,16 @@ struct DropdownView: View {
             return "Ping blocked"
         }
         if loss > 0 && jitter >= 30.0 {
+            if EffectiveLoss.isRecovering(windowLoss: loss, lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct) {
+                return "0% now · \(LossFormatter.formatPct(loss)) avg · \(Int(round(jitter)))ms jit"
+            }
             return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
         }
         if loss > 0 {
-            return LossFormatter.formatPacketLoss(loss)
+            return EffectiveLoss.formatWindowDetail(
+                windowLoss: loss,
+                lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct
+            )
         }
         if jitter >= 30.0 && !isGatewayJitterDominant {
             return String(format: "%.0f ms jitter", jitter)
@@ -792,7 +832,7 @@ struct DropdownView: View {
             if jitter >= 20.0 {
                 return String(format: "%.0f ms jitter", jitter)
             }
-            if let degHeadline = degradedExperience?.headline {
+            if let degHeadline = coordinator.currentDegradedExperience?.headline {
                 return degHeadline
             }
             return "Connection degraded"
@@ -812,8 +852,10 @@ struct DropdownView: View {
 
     private var jitterDescriptionText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        guard let j = currentJitter else { return "Checking…" }
-        if j >= 30.0 {
+        if isMonitoringPaused { return "Paused" }
+        if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
+        guard currentJitter != nil else { return "Checking…" }
+        if isJitterWarning {
             return "Uneven response times"
         }
         return "Stable response times"
@@ -837,25 +879,7 @@ struct DropdownView: View {
     }
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = coordinator.freshNetworkRunSnapshot
-        let inputs = SuitabilityEngine.Inputs(
-            monitorSample: coordinator.liveSample,
-            speedTest: coordinator.currentSuitabilitySpeed,
-            savedSuitability: snap?.suitability,
-            catalog: coordinator.rulesCatalog.catalog,
-            firedRules: Array(firedRules),
-            isLinkUp: coordinator.liveSample?.link.up ?? true,
-            isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize,
-            vpnActive: coordinator.liveSample?.vpn.active ?? snap?.vpn.active ?? false,
-            vpnName: coordinator.liveSample?.vpn.name ?? snap?.vpn.name,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering,
-            isSettling: coordinator.isSettling,
-            isArrivalCheck: coordinator.isArrivalCheck
-        )
-        return SuitabilityEngine.evaluateAll(inputs)
+        coordinator.currentSuitabilityItems
     }
 
     private var callsExperience: ExperienceGridView.ExperienceStatus {
@@ -892,7 +916,12 @@ struct DropdownView: View {
         MenuSpeedView(
             downMbps: speedValues.down,
             upMbps: speedValues.up,
-            meta: speedMetaText
+            meta: speedMetaText,
+            isScanning: coordinator.isScanning,
+            isSpeedTesting: coordinator.isSpeedTesting,
+            speedProgress: coordinator.progress.speed,
+            onRunSpeedTest: { coordinator.runSpeedTest(reason: "dropdown speed test") },
+            onCancelSpeedTest: { coordinator.cancelScan() }
         )
     }
 
@@ -1029,9 +1058,9 @@ struct DropdownView: View {
     }
 
     /// Which ping legs the live sample says are unmeasurable. Empty while
-    /// paused or scanning, when the cells show "—" rather than a reading.
+    /// manually paused (cells show "—"), while preserving last readings during scans.
     private var lossFiltering: EffectiveLoss.Filtering {
-        guard !coordinator.monitor.isPaused, !coordinator.isScanning else { return .none }
+        guard !coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason) else { return .none }
         return EffectiveLoss.filtering(sample: coordinator.liveSample)
     }
 

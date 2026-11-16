@@ -773,9 +773,9 @@ it would accumulate forever.
   "network": {"id": "wifi:mac=10:98:5f:…", "label": "…",
               "group_id": "mac:10:98:5f:…"},
   "vpn":     {"active": false, "type": null, "name": null},
-  "gateway": {"loss_pct": 0.0, "rtt_avg_ms": 4.1},
-  "internet": {"loss_pct": 0.0, "rtt_avg_ms": 11.8},
-  "wifi":    {"rssi": null, "noise": null, "snr": null, "channel": null},
+  "gateway": {"loss_pct": 0.0, "last_probe_loss_pct": 0.0, "rtt_avg_ms": 4.1},
+  "internet": {"loss_pct": 0.0, "loss_pct_alt": 0.0, "last_probe_loss_pct": 0.0, "rtt_avg_ms": 11.8},
+  "wifi":    {"rssi": null, "noise": null, "snr": null, "channel": null, "tx_rate": null},
   "dns":     {"ok": true, "resolver": "192.168.15.1", "elapsed_ms": 12,
               "local_fail": false, "local": null},
   "tcp":     {"any_ok": true, "targets": [{"host": "1.1.1.1", "port": 443,
@@ -830,7 +830,7 @@ Older events lack attribution; a later capture must not be used to fill them.
   change, or an unparseable probe — never silently carries readings
   across a discontinuity.
 - **A `link.up: false` sample carries no measurement.** `gateway.*`,
-  `internet.*`, `jitter_ms`, `dns.*`, `tcp.*`, `wifi.{rssi,noise,snr,channel}`
+  `internet.*`, `jitter_ms`, `dns.*`, `tcp.*`, `wifi.{rssi,noise,snr,channel,tx_rate}`
   and every `public.*` field (including `ok` and `captive_portal`) are `null`
   (`tcp.targets` is `[]`), and `status.measurement` is `link-down`. These
   fields used to repeat the last good cycle's readings until a probe next

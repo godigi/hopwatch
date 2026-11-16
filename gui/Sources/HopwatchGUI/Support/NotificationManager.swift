@@ -117,10 +117,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     ) {
         let identifier = response.notification.request.identifier
         let actionIdentifier = response.actionIdentifier
+        nonisolated(unsafe) let finish = completionHandler
         Task { @MainActor in
             self.onNotificationAction?(identifier, actionIdentifier)
             self.onNotificationResponse?()
-            completionHandler()
+            finish()
         }
     }
 
@@ -399,12 +400,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         return true
     }
 
-    /// Delivers a notification when a new version of Netdiag is available.
+    /// Delivers a notification when a new version of Hopwatch is available.
     @discardableResult
     func deliverUpdateNotification(version: String, shortNotes: String?) -> Bool {
-        guard notificationsEnabled else { return false }
+        guard notificationsEnabled, isAuthorized else { return false }
         let id = "netdiag.update.\(version)"
-        let title = "netdiag Update Available"
+        let title = "Hopwatch Update Available"
         let notesSnippet = (shortNotes != nil && !shortNotes!.isEmpty) ? " — \(shortNotes!)" : ""
         let body = "Version \(version) is available to install\(notesSnippet). Click to review."
 

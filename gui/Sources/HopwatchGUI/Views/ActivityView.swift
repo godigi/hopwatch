@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// What has happened on this Mac's networks, as episodes rather than
 /// transitions — the full history the dropdown's three-row timeline teases.
@@ -22,30 +23,27 @@ import SwiftUI
 struct ActivityView: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
 
-    /// Folded once per render, at the top of `body`, and passed down.
-    ///
-    /// `entries` and `days` used to be computed properties, and every read
-    /// of one re-ran `ActivityEntry.fold` over the store's 500 rows: five
-    /// folds and four `byDay` calls per `body`, counted with a probe —
-    /// `heading` alone read `entries` once and `days` twice, then
-    /// `days.isEmpty` and `ForEach(days)` each folded again. `coordinator`
-    /// is `@Observable`, so a monitor sample seconds apart invalidates this
-    /// view and pays all nine while the screen is open.
-    ///
-    /// Deliberately *not* `@State`: the fold is a pure function of
-    /// `eventLog.events`, and cached state would go stale the moment the
-    /// monitor recorded a transition. Recomputing once per render keeps the
-    /// observation-driven refresh exactly as it was.
     @State private var issuesOnly = false
+    @State private var currentNetworkOnly = false
+    @State private var searchQuery = ""
     @State private var expandedEntryIDs: Set<String> = []
+    @State private var showingClearConfirmation = false
+    @State private var exportToast: String? = nil
 
     var body: some View {
-        let allEntries = ActivityEntry.fold(coordinator.eventLog.events)
-        let filteredEntries = issuesOnly ? allEntries.filter(isIssue) : allEntries
+        let sourceEvents = currentNetworkOnly
+            ? coordinator.currentNetworkEvents(withinHours: nil)
+            : coordinator.eventLog.events
+        let allEntries = ActivityEntry.fold(sourceEvents)
+        let issueFiltered = issuesOnly ? allEntries.filter(isIssue) : allEntries
+        let filteredEntries = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? issueFiltered
+            : issueFiltered.filter { matchesSearch($0, query: searchQuery) }
+        let allDaysCount = days(of: allEntries).count
         let days = days(of: filteredEntries)
 
         return VStack(alignment: .leading, spacing: 0) {
-            summaryCard(allEntries: allEntries, daysCount: days.count)
+            summaryCard(allEntries: allEntries, daysCount: allDaysCount)
             Divider()
             List {
                 activeSection
@@ -73,6 +71,18 @@ struct ActivityView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Clear Activity History?",
+            isPresented: $showingClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All Activity", role: .destructive) {
+                coordinator.clearEventLog()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove all recorded event episodes and transition history.")
         }
     }
 
@@ -108,8 +118,137 @@ struct ActivityView: View {
                 .labelsHidden()
                 .frame(maxWidth: 240)
             }
+
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField("Search events, rules, IPs, or apps…", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                    if !searchQuery.isEmpty {
+                        Button {
+                            searchQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+
+                Picker("Scope", selection: $currentNetworkOnly) {
+                    Text("All Networks").tag(false)
+                    Text("Current Network").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+
+                Menu {
+                    Button {
+                        exportCSV()
+                    } label: {
+                        Label("Save as CSV (.csv)…", systemImage: "tablecells")
+                    }
+                    Button {
+                        copyMarkdown()
+                    } label: {
+                        Label("Copy as Markdown", systemImage: "doc.on.doc")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 11))
+                        Text("Export")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(allEntries.isEmpty)
+                .opacity(allEntries.isEmpty ? 0.45 : 1.0)
+
+                Button {
+                    showingClearConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .padding(5)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help("Clear activity history…")
+            }
+
+            if let toast = exportToast {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.ColorToken.green)
+                        .font(.system(size: 11))
+                    Text(toast)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Theme.ColorToken.nodeBackground)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(Theme.ColorToken.line, lineWidth: 1))
+            }
         }
         .padding(12)
+    }
+
+    private func exportCSV() {
+        let csv = coordinator.exportActivityCSV(currentNetworkOnly: currentNetworkOnly)
+        let name = "Hopwatch-Activity-\(Date().formatted(.iso8601.year().month().day())).csv"
+        let type = UTType.commaSeparatedText
+        DiagnosticReportSharing.saveFile(content: csv, defaultName: name, contentType: type)
+    }
+
+    private func copyMarkdown() {
+        let md = coordinator.exportActivityMarkdown(currentNetworkOnly: currentNetworkOnly)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(md, forType: .string)
+        withAnimation {
+            exportToast = "Activity copied as Markdown"
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation {
+                exportToast = nil
+            }
+        }
+    }
+
+    private func matchesSearch(_ entry: ActivityEntry, query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let haystacks: [String?] = [
+            entry.displaySummary,
+            entry.summary,
+            entry.ruleID,
+            entry.kind,
+            entry.detail,
+            entry.extraDetail,
+            entry.fromValue,
+            entry.toValue,
+            entry.trafficEvidence.map(\.name).joined(separator: " ")
+        ]
+        return haystacks.contains { text in
+            guard let text else { return false }
+            return text.localizedCaseInsensitiveContains(trimmed)
+        }
     }
 
     static func summaryTitle(activeCount: Int, issuesCount: Int, allCount: Int) -> String {
@@ -129,10 +268,12 @@ struct ActivityView: View {
         if allCount == 0 {
             return "Network transitions and disruptions will appear here as they are observed."
         }
+        let span = max(daysCount, 1)
+        let dayWord = span == 1 ? "day" : "days"
         if issuesCount == 0 {
-            return "No packet loss, latency spikes, or disruptions observed across \(max(daysCount, 1)) day(s)"
+            return "No packet loss, latency spikes, or disruptions observed across \(span) \(dayWord)"
         }
-        return "\(issuesCount) incident\(issuesCount == 1 ? "" : "s") · \(allCount) total event\(allCount == 1 ? "" : "s") over \(max(daysCount, 1)) day(s)"
+        return "\(issuesCount) incident\(issuesCount == 1 ? "" : "s") · \(allCount) total event\(allCount == 1 ? "" : "s") over \(span) \(dayWord)"
     }
 
     private func isIssue(_ entry: ActivityEntry) -> Bool {
@@ -179,53 +320,49 @@ struct ActivityView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: issuesOnly ? "checkmark.shield.fill" : "clock.arrow.circlepath")
-                .font(.system(size: 32))
-                .foregroundStyle(issuesOnly ? .green : .secondary)
-            Text(issuesOnly ? "No Disruptions Recorded" : "No Activity Recorded Yet")
-                .font(.headline)
-            Text(issuesOnly
-                 ? "Your connection has maintained uninterrupted stability with zero packet loss or latency alerts."
-                 : "Events and network transitions will appear here as monitoring detects them.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
+        let hasSearch = !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return ContentUnavailableView {
+            Label(hasSearch ? "No Matching Activity" : "No Activity Yet",
+                  systemImage: hasSearch ? "magnifyingglass" : "clock")
+        } description: {
+            Text(hasSearch
+                 ? "No events match your current search filter."
+                 : (issuesOnly
+                    ? "No connection issues have been recorded."
+                    : "Network transitions and alerts will appear here as they happen."))
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.vertical, 32)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     // MARK: - Day grouping
 
-    private struct Day: Identifiable {
-        let id: String
+    struct DayGroup: Identifiable {
+        let id: Date
         let label: String
         let entries: [ActivityEntry]
     }
 
-    /// One section per calendar day, newest first.
-    ///
-    /// The bucketing itself is `ActivityEntry.byDay`, next to the per-day
-    /// key `fold` groups on, so the two cannot disagree about which day a
-    /// row belongs to. This view only labels the result.
-    private func days(of entries: [ActivityEntry]) -> [Day] {
-        ActivityEntry.byDay(entries).map {
-            Day(id: "\($0.day.timeIntervalSince1970)", label: dayLabel($0.day),
-                entries: $0.entries)
+    private func days(of entries: [ActivityEntry]) -> [DayGroup] {
+        let calendar = Calendar.current
+        var grouped: [Date: [ActivityEntry]] = [:]
+        for entry in entries {
+            let startOfDay = calendar.startOfDay(for: entry.earliest)
+            grouped[startOfDay, default: []].append(entry)
+        }
+        return grouped.keys.sorted(by: >).map { day in
+            DayGroup(
+                id: day,
+                label: dayLabel(day),
+                entries: (grouped[day] ?? []).sorted { $0.earliest > $1.earliest }
+            )
         }
     }
 
-    @MainActor
     private static let relativeDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .full
-        f.timeStyle = .none
-        f.doesRelativeDateFormatting = true
-        return f
+        let df = DateFormatter()
+        df.timeStyle = .none
+        df.dateStyle = .medium
+        df.doesRelativeDateFormatting = true
+        return df
     }()
 
     private func dayLabel(_ day: Date) -> String {
@@ -275,4 +412,3 @@ struct ActivityRowContainer: View {
         }
     }
 }
-

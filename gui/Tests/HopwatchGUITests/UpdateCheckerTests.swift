@@ -123,7 +123,7 @@ struct UpdateCheckerTests {
         let sent = nm.deliverUpdateNotification(version: "1.2.1", shortNotes: "Fix latency jitter")
         #expect(sent == true)
         #expect(deliveredID == "netdiag.update.1.2.1")
-        #expect(deliveredTitle == "netdiag Update Available")
+        #expect(deliveredTitle == "Hopwatch Update Available")
         #expect(deliveredBody?.contains("1.2.1") == true)
         #expect(deliveredBody?.contains("Fix latency jitter") == true)
     }

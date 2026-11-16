@@ -61,23 +61,30 @@ final class RulesCatalogStore {
     /// resolved CLI's version actually changes.
     func ensureLoaded() {
         guard refreshTask == nil else { return }
-        refreshTask = Task { [weak self] in
+        Task { [weak self] in
             await self?.refresh()
-            guard let self else { return }
-            self.refreshTask = nil
         }
     }
 
     /// Re-probes the handshake and, if the version it reports differs from
     /// `loadedForVersion` (or nothing has loaded yet), fetches that
     /// version's catalog. Safe to call repeatedly: `CapabilityStore` itself
-    /// only re-probes when the resolved binary path changed, so most calls
-    /// here cost one already-cached actor round trip and nothing else.
-    /// Public so `SettingsView`'s "Re-check" — the one place in this app a
-    /// user explicitly asks "did the CLI change?" — can ask this store the
-    /// same question at the same moment, rather than waiting for some
-    /// other view to happen to call `ensureLoaded()` again.
+    /// only re-probes when the resolved binary path changed, and concurrent
+    /// callers coalesce onto the single in-flight `refreshTask`.
     func refresh() async {
+        if let existing = refreshTask {
+            await existing.value
+            return
+        }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.performRefresh()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
         guard await CapabilityStore.shared.supports(.rulesCatalog) else {
             catalog = nil
             loadedForVersion = nil

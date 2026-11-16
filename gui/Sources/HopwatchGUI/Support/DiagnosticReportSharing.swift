@@ -48,6 +48,7 @@ enum DiagnosticReportSharing {
     }
 
     /// Opens an NSSavePanel and saves text content to the selected destination.
+    @MainActor
     static func saveFile(
         content: String,
         defaultName: String,

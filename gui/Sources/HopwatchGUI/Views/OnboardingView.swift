@@ -39,12 +39,12 @@ struct OnboardingView: View {
             }
 
             step(number: 2,
-                 title: "Show real Wi-Fi network names",
+                 title: "Enable Location Services for Wi-Fi",
                  detail: coordinator.locationPermissions.isAuthorized
                      ? "Granted. Hopwatch can identify your Wi-Fi network and monitor connection health."
                      : (coordinator.locationPermissions.isDeniedOrRestricted
-                         ? "Recommended. Access is currently denied in System Settings. Click Open Settings to enable Location Services so Hopwatch can show real Wi-Fi network names and roaming events."
-                         : "Recommended. macOS hides Wi-Fi network names and disconnect details from apps unless you grant Location Services access. Hopwatch uses this solely to identify your Wi-Fi network."),
+                         ? "Required for Wi-Fi. Access is currently disabled in System Settings. Click Open Settings to enable Location Services so Hopwatch can show your Wi-Fi network name and radio diagnostics."
+                         : "Required for Wi-Fi. macOS hides Wi-Fi network names and radio details unless Location Services is enabled. Hopwatch uses this solely to identify your Wi-Fi network."),
                  done: coordinator.locationPermissions.isAuthorized,
                  action: coordinator.locationPermissions.isDeniedOrRestricted ? "Open Settings" : "Allow") {
                 if coordinator.locationPermissions.isDeniedOrRestricted {
@@ -77,8 +77,11 @@ struct OnboardingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
-                Button(coordinator.alerts.notificationsAuthorized
-                       ? "Get started" : "Continue without alerts") {
+                Button(!coordinator.alerts.notificationsAuthorized
+                       ? "Continue without alerts"
+                       : (!coordinator.locationPermissions.isAuthorized
+                           ? "Continue without Wi-Fi names"
+                           : "Get started")) {
                     appSettings.hasOnboarded = true
                     dismiss()
                 }

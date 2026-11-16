@@ -21,6 +21,9 @@ enum HopwatchError: LocalizedError {
     /// `needs` always comes from `CapabilityStore.requiredVersion` — see
     /// its doc comment for why that's the one place the number lives.
     case cliTooOld(found: String?, needs: String)
+    /// `bin/hopwatch` exited 3 because Bash 5+ was not found in Homebrew,
+    /// MacPorts, or PATH (macOS only ships Bash 3.2).
+    case bash5Required
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +35,11 @@ enum HopwatchError: LocalizedError {
         case .badJSON(let s):      return "hopwatch returned something unreadable: \(s)"
         case .cancelled:           return "Check cancelled."
         case .runNotFound:         return "That check is no longer in your history — it may have been pruned."
+        case .bash5Required:
+            return """
+                Hopwatch requires Bash 5 or newer (macOS ships Bash 3.2). \
+                Install it in Terminal with: brew install bash
+                """
         case .cliTooOld(let found, let needs):
             // Reachable only through a user override: the bundled copy
             // (BinaryLocator's first choice after the override itself) is
@@ -167,10 +175,9 @@ struct HopwatchRunner {
                          startedAt: started, finishedAt: Date())
     }
 
-    /// `netdiag --history`, decoded. The CLI intentionally exposes one
-    /// stable query shape; filters belong in the document consumer so the
-    /// command and the GUI cannot drift over unsupported flags.
-    static func history(limit: Int = 0) async throws -> HistoryDocument {
+    /// `netdiag --history`, returning both the raw UTF-8 JSON bytes and the
+    /// decoded document so callers can persist a fingerprint-validated cache.
+    static func historyRaw(limit: Int = 0) async throws -> (data: Data, document: HistoryDocument) {
         try await CapabilityStore.shared.requireSupport(for: .history)
         var args: [String] = []
         if limit > 0 { args.append("--history=\(limit)") } else { args.append("--history") }
@@ -181,11 +188,18 @@ struct HopwatchRunner {
             throw NetdiagError.badJSON(String(out.prefix(200)))
         }
         do {
-            return try JSONDecoder().decode(HistoryDocument.self, from: data)
+            return (data, try JSONDecoder().decode(HistoryDocument.self, from: data))
         } catch {
             runnerLog.error("HistoryDocument decode failed: \(error.localizedDescription, privacy: .public)")
             throw NetdiagError.badJSON(String(out.prefix(200)))
         }
+    }
+
+    /// `netdiag --history`, decoded. The CLI intentionally exposes one
+    /// stable query shape; filters belong in the document consumer so the
+    /// command and the GUI cannot drift over unsupported flags.
+    static func history(limit: Int = 0) async throws -> HistoryDocument {
+        try await historyRaw(limit: limit).document
     }
 
     /// What `hopwatch --repair=ID --json` prints.

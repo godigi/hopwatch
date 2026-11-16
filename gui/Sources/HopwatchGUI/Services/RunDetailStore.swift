@@ -27,6 +27,16 @@ final class RunDetailStore {
     private var order: [String] = []
     private var inFlight: [String: Task<RunDetail, Error>] = [:]
     private let capacity = 20
+    private let cacheDirectory: URL?
+    private let logDirectory: URL
+
+    init(
+        cacheDirectory: URL? = StoreDiskCache.defaultCacheDirectory(),
+        logDirectory: URL = StoreDiskCache.resolveLogDirectory()
+    ) {
+        self.cacheDirectory = cacheDirectory
+        self.logDirectory = logDirectory
+    }
 
     func cached(_ id: String) -> RunDetail? { cache[id] }
 
@@ -37,7 +47,13 @@ final class RunDetailStore {
         }
         // A view re-rendering mid-fetch, or a back-then-forward, must not
         // spawn a second bash for a record already on its way.
-        let task = inFlight[id] ?? Task { try await NetdiagRunner.show(id: id) }
+        let task = inFlight[id] ?? Task {
+            try await Self.fetchDetail(
+                id: id,
+                cacheDirectory: cacheDirectory,
+                logDirectory: logDirectory
+            )
+        }
         inFlight[id] = task
         loadingID = id
         defer {
@@ -53,6 +69,42 @@ final class RunDetailStore {
             lastError = error.localizedDescription
             throw error
         }
+    }
+
+    private static func fetchDetail(
+        id: String,
+        cacheDirectory: URL?,
+        logDirectory: URL
+    ) async throws -> RunDetail {
+        let fingerprint: String?
+        if case .modern(let caps) = await CapabilityStore.shared.current(),
+           caps.supports(CapabilityStore.Feature.show.rawValue) {
+            fingerprint = StoreDiskCache.currentFingerprint(
+                logDirectory: logDirectory,
+                cliVersion: caps.version,
+                binaryPath: BinaryLocator.resolve()
+            )
+        } else {
+            fingerprint = nil
+        }
+
+        if let fingerprint,
+           let cachedRaw = StoreDiskCache.readRunDetail(
+               id: id, in: cacheDirectory, expectedFingerprint: fingerprint
+           ),
+           let data = cachedRaw.data(using: .utf8),
+           var decoded = try? JSONDecoder().decode(RunDetail.self, from: data) {
+            decoded.rawJSON = cachedRaw
+            return decoded
+        }
+
+        let detail = try await NetdiagRunner.show(id: id)
+        if let fingerprint {
+            StoreDiskCache.writeRunDetail(
+                detail.rawJSON, id: id, fingerprint: fingerprint, in: cacheDirectory
+            )
+        }
+        return detail
     }
 
     private func store(_ detail: RunDetail, for id: String) {

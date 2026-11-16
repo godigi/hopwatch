@@ -12,6 +12,7 @@ struct ExpertPanel: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
     let run: RunResult
     @State private var showRawJSON = false
+    @State private var copiedRawJSON = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -129,9 +130,13 @@ struct ExpertPanel: View {
         if let alt = s.internetLatency.targetAlt {
             rows.append(("internet loss (\(alt))", v(s.internetLatency.lossPctAlt, "%", "%.1f")))
         }
+        let asnIsp = [s.publicInfo.asn, s.publicInfo.isp]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         rows += [
             ("public IP", s.publicInfo.ip ?? "null"),
-            ("ASN / ISP", "\(s.publicInfo.asn ?? "?") \(s.publicInfo.isp ?? "")"),
+            ("ASN / ISP", asnIsp.isEmpty ? "?" : asnIsp),
             ("country", "\(s.publicInfo.country ?? "?") (\(s.publicInfo.countryISO ?? "??"))"),
             ("path MTU", i(s.mtu.effective, "bytes")),
             ("bufferbloat Δ gateway", v(s.bufferbloat.gwDeltaMs, "ms")),
@@ -157,7 +162,8 @@ struct ExpertPanel: View {
             ]
         }
         if let d = s.dhcp.timeRemainingS {
-            rows.append(("DHCP lease remaining", "\(d / 60) min"))
+            let formatted = d < 60 ? "\(d) s" : "\(d / 60) min"
+            rows.append(("DHCP lease remaining", formatted))
         }
         if !s.duplicateIPs.isEmpty {
             rows.append(("duplicate IPs", s.duplicateIPs.joined(separator: ", ")))
@@ -261,12 +267,17 @@ struct ExpertPanel: View {
                 // support chat. "Copy report" on the card above is the
                 // redacted one, and the labels have to make that obvious
                 // because the consequence of picking wrong is published.
-                Button("Copy raw JSON (unredacted)") {
+                Button(copiedRawJSON ? "Copied" : "Copy raw JSON (unredacted)") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(run.rawJSON, forType: .string)
+                    copiedRawJSON = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        copiedRawJSON = false
+                    }
                 }
                 .buttonStyle(.link)
                 .font(.caption)
+                .foregroundStyle(copiedRawJSON ? Theme.ColorToken.green : .accentColor)
             }
         }
     }

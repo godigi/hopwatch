@@ -22,14 +22,21 @@ struct TrendsView: View {
     @State private var metricKey = "gateway_rtt_ms"
     @State private var window = HistoryWindow.all
     @State private var networkID: String?
+    @State private var selectedMetricDate: Date?
+    @State private var selectedIncidentDate: Date?
 
     private var store: HistoryStore { coordinator.history }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Historical Trends")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    purposeSubtitle
+                }
                 controls
-                purposeSubtitle
                 verdictCard
                 baselineDigest
                 Divider()
@@ -39,6 +46,9 @@ struct TrendsView: View {
                 coverageNote
             }
             .padding(16)
+        }
+        .onAppear {
+            if networkID == nil, let current = defaultNetworkID { networkID = current }
         }
         .task {
             if store.document.runs.isEmpty { await store.load() }
@@ -74,7 +84,7 @@ struct TrendsView: View {
     @ViewBuilder
     private var baselineDigest: some View {
         if let mem = selectedNetworkMemory {
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 digestTile(
                     icon: "arrow.up.arrow.down",
                     iconColor: .blue,
@@ -96,7 +106,7 @@ struct TrendsView: View {
                     iconColor: reliabilityColor(mem),
                     title: "Reliability",
                     value: reliabilityText(mem),
-                    subcaption: "\(mem.checkCount) checks · \(mem.incidentCount) issues"
+                    subcaption: "\(mem.checkCount) \(mem.checkCount == 1 ? "check" : "checks") · \(mem.incidentCount) \(mem.incidentCount == 1 ? "issue" : "issues")"
                 )
 
                 digestTile(
@@ -107,6 +117,7 @@ struct TrendsView: View {
                     subcaption: profileSubcaption(mem)
                 )
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -136,12 +147,13 @@ struct TrendsView: View {
             Text(value)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
             Text(subcaption)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -161,7 +173,7 @@ struct TrendsView: View {
 
     private func speedSubcaption(_ mem: NetworkMemory) -> String {
         if let peak = mem.peakDownMbps, let typ = mem.typicalDownMbps, peak > typ {
-            return String(format: "Peak: %.0f Mbps · %d tests", peak, mem.speedTestCount)
+            return String(format: "Peak: %.0f Mbps · %d %@", peak, mem.speedTestCount, mem.speedTestCount == 1 ? "test" : "tests")
         }
         if mem.speedTestCount > 0 {
             return "\(mem.speedTestCount) test\(mem.speedTestCount == 1 ? "" : "s") recorded"
@@ -193,16 +205,13 @@ struct TrendsView: View {
     }
 
     private func reliabilityText(_ mem: NetworkMemory) -> String {
-        if mem.isLearningBaseline {
-            if let pct = mem.reliabilityPercent {
-                return String(format: "%.0f%% (%@)", pct, mem.reliabilityGrade)
-            }
-            return "Learning"
-        }
         if let pct = mem.reliabilityPercent {
+            if mem.isLearningBaseline {
+                return String(format: "%.0f%% · %@", pct, mem.reliabilityGrade)
+            }
             return String(format: "%.0f%% (%@)", pct, mem.reliabilityGrade)
         }
-        return "—"
+        return mem.isLearningBaseline ? "Learning" : "—"
     }
 
     private func reliabilityColor(_ mem: NetworkMemory) -> Color {
@@ -289,7 +298,7 @@ struct TrendsView: View {
                         Text(summary)
                             .font(.callout.weight(.medium))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("Judged by netdiag, not the app")
+                        Text("Judged by hopwatch, not the app")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
@@ -494,6 +503,15 @@ struct TrendsView: View {
                     }
                     return Clamp.forValues(points.map(\.1), p90: stat?.p90)
                 }()
+                let hoveredPrimary: (Date, Double)? = selectedMetricDate.flatMap { sel in
+                    points.min(by: { abs($0.0.timeIntervalSince(sel)) < abs($1.0.timeIntervalSince(sel)) })
+                }
+                let hoveredCompanion: (Date, Double)? = (metricKey == "gateway_rtt_ms") ? selectedMetricDate.flatMap { sel in
+                    guard let best = inetPoints.min(by: { abs($0.0.timeIntervalSince(sel)) < abs($1.0.timeIntervalSince(sel)) }) else { return nil }
+                    if let hp = hoveredPrimary, abs(best.0.timeIntervalSince(hp.0)) > 300 { return nil }
+                    return best
+                } : nil
+
                 Chart {
                     // Drawn first, so the line and points sit on top of it.
                     if hasBand, let p10 = stat?.p10, let p90 = stat?.p90,
@@ -551,8 +569,31 @@ struct TrendsView: View {
                                 .foregroundStyle(.orange)
                         }
                     }
+
+                    if let hp = hoveredPrimary {
+                        let clampedY = clamp?.apply(hp.1) ?? hp.1
+                        RuleMark(x: .value("Selected", hp.0))
+                            .foregroundStyle(Color.secondary.opacity(0.45))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                                metricHoverCallout(
+                                    date: hp.0,
+                                    primaryLabel: metricKey == "gateway_rtt_ms" ? "Router" : (descriptor?.label ?? "Value"),
+                                    primaryValue: hp.1,
+                                    primaryClamped: clamp?.exceeds(hp.1) == true,
+                                    companionValue: hoveredCompanion?.1,
+                                    unit: descriptor?.unit
+                                )
+                            }
+                        PointMark(x: .value("When", hp.0),
+                                  y: .value(descriptor?.label ?? "", clampedY))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .symbolSize(42)
+                    }
                 }
                 .chartYDomain(clamp.map { 0...$0.upper })
+                .chartPlotStyle { $0.clipped() }
+                .chartXSelection(value: $selectedMetricDate)
                 .chartYAxis { AxisMarks(position: .leading) { plainCountLabel($0) } }
                 .frame(height: 220)
 
@@ -595,6 +636,17 @@ struct TrendsView: View {
                 Text(sampleLabel(speedRuns.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.blue.opacity(0.75)).frame(width: 10, height: 4)
+                        Text("Download").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.teal.opacity(0.6)).frame(width: 10, height: 4)
+                        Text("Upload").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 6)
                 Spacer()
                 if coordinator.isSpeedTestOnly {
                     HStack(spacing: 4) {
@@ -644,46 +696,84 @@ struct TrendsView: View {
                     }
                 }()
 
+                let barScaleMax = max(referencePeak, windowMaxDown, 1.0)
+
                 VStack(spacing: 8) {
                     ForEach(displayedRuns) { run in
                         let down = run.metrics["speed_down_mbps"] ?? run.metrics["speedtest.down_mbps"] ?? 0
                         let up = run.metrics["speed_up_mbps"] ?? run.metrics["speedtest.up_mbps"]
                         let isPeak = (run.id == peakRunID)
+                        let downFraction = min(max(down / barScaleMax, 0.04), 1.0)
+                        let upFraction = up.map { min(max($0 / barScaleMax, 0.03), 1.0) }
 
-                        HStack(alignment: .center, spacing: 10) {
-                            Image(systemName: "arrow.up.arrow.down.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(isPeak ? .blue : .secondary)
+                        Button {
+                            if let runID = run.runID {
+                                coordinator.requestedDestination = .run(
+                                    RunRoute(runID: runID, networkID: run.networkID.isEmpty ? (networkID ?? "") : run.networkID)
+                                )
+                            }
+                        } label: {
+                            HStack(alignment: .center, spacing: 10) {
+                                Image(systemName: "arrow.up.arrow.down.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(isPeak ? .blue : .secondary)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(up != nil ? String(format: "%.1f Down / %.1f Up Mbps", down, up!) : String(format: "%.1f Mbps Down", down))
-                                        .font(.subheadline.weight(.semibold))
-                                    if isPeak {
-                                        Text("Peak")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundStyle(.blue)
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1)
-                                            .background(Color.blue.opacity(0.12), in: Capsule())
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(spacing: 6) {
+                                        Text(up != nil ? String(format: "%.1f Down / %.1f Up Mbps", down, up!) : String(format: "%.1f Mbps Down", down))
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        if isPeak {
+                                            Text("Peak")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundStyle(.blue)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(Color.blue.opacity(0.12), in: Capsule())
+                                        }
+                                        Spacer()
+                                        if let rtt = run.metrics["gateway_rtt_ms"] {
+                                            Text(String(format: "%.1f ms ping", rtt))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if run.runID != nil {
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(.tertiary)
+                                        }
                                     }
+
+                                    // Relative throughput bars (Download + Upload)
+                                    GeometryReader { geo in
+                                        let width = max(geo.size.width, 1)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .fill(Color.blue.opacity(isPeak ? 0.85 : 0.65))
+                                                .frame(width: width * downFraction, height: 4)
+                                            if let upFraction {
+                                                RoundedRectangle(cornerRadius: 2)
+                                                    .fill(Color.teal.opacity(0.6))
+                                                    .frame(width: width * upFraction, height: 3)
+                                            }
+                                        }
+                                    }
+                                    .frame(height: up != nil ? 9 : 4)
+
+                                    Text(run.date.formatted(date: .abbreviated, time: .shortened) + (run.runMode.flatMap { " · \($0)" } ?? ""))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
-                                Text(run.date.formatted(date: .abbreviated, time: .shortened) + (run.runMode.flatMap { " · \($0)" } ?? ""))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            if let rtt = run.metrics["gateway_rtt_ms"] {
-                                Text(String(format: "%.1f ms ping", rtt))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.secondary.opacity(0.04))
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.secondary.opacity(0.04))
-                        )
+                        .buttonStyle(.plain)
+                        .disabled(run.runID == nil)
                     }
                 }
             }
@@ -889,16 +979,31 @@ struct TrendsView: View {
                     .padding(14)
                     .cardStyle()
             } else {
-                Chart(buckets, id: \.key) { bucket in
-                    ForEach(["critical", "warn", "ok"], id: \.self) { severity in
-                        BarMark(x: .value("Day", bucket.day, unit: .day),
-                                y: .value("Checks", bucket.counts[severity] ?? 0))
-                            .foregroundStyle(by: .value("Result", severity))
+                let hoveredBucket: DayBucket? = selectedIncidentDate.flatMap { sel in
+                    buckets.min(by: { abs($0.day.timeIntervalSince(sel)) < abs($1.day.timeIntervalSince(sel)) })
+                }
+
+                Chart {
+                    ForEach(buckets, id: \.key) { bucket in
+                        ForEach(["critical", "warn", "ok"], id: \.self) { severity in
+                            BarMark(x: .value("Day", bucket.day, unit: .day),
+                                    y: .value("Checks", bucket.counts[severity] ?? 0))
+                                .foregroundStyle(by: .value("Result", severity))
+                        }
+                    }
+                    if let hb = hoveredBucket {
+                        RuleMark(x: .value("Selected", hb.day, unit: .day))
+                            .foregroundStyle(Color.secondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .annotation(position: .top, spacing: 4, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                                incidentHoverCallout(bucket: hb)
+                            }
                     }
                 }
                 .chartForegroundStyleScale([
-                    "critical": Color.red, "warn": Color.yellow, "ok": Color.green,
+                    "critical": Color.red, "warn": Color.orange, "ok": Color.green,
                 ])
+                .chartXSelection(value: $selectedIncidentDate)
                 // Leading, matching the metric chart above — one chart
                 // reading from the left and the next from the right reads
                 // as two different apps stacked.
@@ -912,31 +1017,53 @@ struct TrendsView: View {
                         .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(problemRuns.prefix(4)) { run in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: run.severity == "critical" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(run.severity == "critical" ? Color.red : Color.orange)
-                                    .padding(.top, 2)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(run.date.formatted(date: .abbreviated, time: .shortened))
-                                            .font(.caption2.weight(.medium))
-                                        if !run.rules.isEmpty {
-                                            Text(run.rules.joined(separator: ", "))
-                                                .font(.system(.caption2, design: .monospaced))
+                            Button {
+                                if let runID = run.runID {
+                                    coordinator.requestedDestination = .run(
+                                        RunRoute(runID: runID, networkID: run.networkID.isEmpty ? (networkID ?? "") : run.networkID)
+                                    )
+                                }
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: run.severity == "critical" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(run.severity == "critical" ? Color.red : Color.orange)
+                                        .padding(.top, 2)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.primary)
+                                            ForEach(run.rules.prefix(3), id: \.self) { ruleID in
+                                                RuleChip(ruleID: ruleID)
+                                            }
+                                            if run.rules.count > 3 {
+                                                Text("+\(run.rules.count - 3)")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        if let cause = run.rootCause, !cause.isEmpty {
+                                            Text(cause)
+                                                .font(.caption2)
                                                 .foregroundStyle(.secondary)
+                                                .lineLimit(2)
                                         }
                                     }
-                                    if let cause = run.rootCause, !cause.isEmpty {
-                                        Text(cause)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
+                                    Spacer()
+                                    if run.runID != nil {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.top, 3)
                                     }
                                 }
+                                .padding(6)
+                                .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
                             }
-                            .padding(6)
-                            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                            .buttonStyle(.plain)
+                            .disabled(run.runID == nil)
                         }
                     }
                 }
@@ -970,6 +1097,91 @@ struct TrendsView: View {
         }
         return out.map { DayBucket(day: $0.key, counts: $0.value) }
             .sorted { $0.day < $1.day }
+    }
+
+    private func formatMetricValue(_ value: Double, unit: String?) -> String {
+        let suffix = (unit?.isEmpty == false) ? " \(unit!)" : ""
+        if value < 10 && value.truncatingRemainder(dividingBy: 1) != 0 {
+            return String(format: "%.1f%@", value, suffix)
+        }
+        return String(format: "%.0f%@", value, suffix)
+    }
+
+    private func metricHoverCallout(
+        date: Date,
+        primaryLabel: String,
+        primaryValue: Double,
+        primaryClamped: Bool,
+        companionValue: Double?,
+        unit: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(metricKey == "gateway_rtt_ms" ? Color.blue : Color.accentColor)
+                    .frame(width: 6, height: 6)
+                Text("\(primaryLabel): \(formatMetricValue(primaryValue, unit: unit))")
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+                if primaryClamped {
+                    Text("(outlier)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.orange)
+                }
+            }
+            if let companionValue {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.purple)
+                        .frame(width: 6, height: 6)
+                    Text("Internet: \(formatMetricValue(companionValue, unit: unit))")
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                }
+            }
+            Text(date.formatted(date: .abbreviated, time: .shortened))
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func incidentHoverCallout(bucket: DayBucket) -> some View {
+        let okCount = bucket.counts["ok"] ?? 0
+        let warnCount = bucket.counts["warn"] ?? 0
+        let critCount = bucket.counts["critical"] ?? 0
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(bucket.day.formatted(date: .abbreviated, time: .omitted))
+                .font(.caption2.weight(.semibold))
+            HStack(spacing: 8) {
+                if critCount > 0 {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.red).frame(width: 5, height: 5)
+                        Text("\(critCount) critical")
+                    }
+                }
+                if warnCount > 0 {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.orange).frame(width: 5, height: 5)
+                        Text("\(warnCount) warn")
+                    }
+                }
+                if okCount > 0 || (critCount == 0 && warnCount == 0) {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("\(okCount) ok")
+                    }
+                }
+            }
+            .font(.system(size: 9, weight: .medium))
+            .monospacedDigit()
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Coverage

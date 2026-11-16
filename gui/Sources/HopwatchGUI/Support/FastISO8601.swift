@@ -13,13 +13,14 @@ import Darwin
 /// unexpected or non-standard format, it safely falls back to a shared formatter.
 enum FastISO8601 {
 
-    private static let fallbackFormatter: ISO8601DateFormatter = {
+    // Both formatters are only ever read inside `fallbackParse` under `lock`.
+    private nonisolated(unsafe) static let fallbackFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private static let standardFormatter: ISO8601DateFormatter = {
+    private nonisolated(unsafe) static let standardFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f

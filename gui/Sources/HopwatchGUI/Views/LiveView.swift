@@ -29,9 +29,15 @@ struct LiveView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                purposeSubtitle
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Live Monitoring")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                    purposeSubtitle
+                }
                 stateBanner
                 currentValues
+                PingHeartbeatView()
                 let samples = samples
                 chart(title: "Internet round-trip",
                       titleHelpKey: "internet",
@@ -292,6 +298,7 @@ struct LiveView: View {
                 detail: lossDetail
             )
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func gaugeTile(
@@ -319,7 +326,7 @@ struct LiveView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -359,11 +366,11 @@ struct LiveView: View {
     private var routerTint: Color {
         if linkDown || routerIsFiltered { return .secondary }
         guard let ms = routerMs else {
-            return samples.isEmpty ? .secondary : .red
+            return samples.isEmpty ? .secondary : Theme.ColorToken.red
         }
-        if ms < 25 { return .green }
-        if ms < 60 { return .yellow }
-        return .red
+        if ms < 25 { return Theme.ColorToken.green }
+        if ms < 60 { return Theme.ColorToken.amber }
+        return Theme.ColorToken.red
     }
 
     private var routerDetail: String {
@@ -411,11 +418,11 @@ struct LiveView: View {
     private var internetTint: Color {
         if linkDown { return .secondary }
         guard let ms = internetMsValue else {
-            return samples.isEmpty ? .secondary : .red
+            return samples.isEmpty ? .secondary : Theme.ColorToken.red
         }
-        if ms < 40 { return .green }
-        if ms < 100 { return .yellow }
-        return .red
+        if ms < 40 { return Theme.ColorToken.green }
+        if ms < 100 { return Theme.ColorToken.amber }
+        return Theme.ColorToken.red
     }
 
     private var internetDetail: String {
@@ -452,21 +459,31 @@ struct LiveView: View {
     }
 
     private var latestLoss: String {
+        if linkDown { return "—" }
         guard let l = currentLossPct else { return "—" }
         return LossFormatter.formatPct(l)
     }
 
     private var lossTint: Color {
+        if linkDown { return .secondary }
         guard let l = currentLossPct else { return .secondary }
-        if l == 0 { return .green }
-        if l <= 2.0 { return .yellow }
-        return .red
+        if l == 0 { return Theme.ColorToken.green }
+        if l <= 2.0 { return Theme.ColorToken.amber }
+        return Theme.ColorToken.red
     }
 
     private var lossDetail: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        guard let l = currentLossPct else { return "Measuring" }
+        guard let l = currentLossPct else { return "Measuring…" }
         if l == 0 { return "0 drops" }
+        let lastProbe = EffectiveLoss.effectiveLastProbeLoss(
+            sample: coordinator.liveSample,
+            filtering: coordinator.lossFiltering,
+            hasRecentRoam: coordinator.hasRecentRoam
+        )
+        if EffectiveLoss.isRecovering(windowLoss: l, lastProbeLoss: lastProbe) {
+            return "0% now · \(LossFormatter.formatPct(l)) avg"
+        }
         if l < 1.0 { return "\(LossFormatter.formatPct(l)) loss" }
         if l <= 2.0 { return "Minor loss" }
         return "Frequent drops"
@@ -657,6 +674,9 @@ struct LiveChart: View {
     }
 
     var body: some View {
+        let maxVal = series.points.map(\.value).max() ?? 0
+        let yDomainUpper = max(unit == "%" ? 10.0 : 25.0, ceil(maxVal * 1.15))
+
         Chart {
             // Shaded rather than merely blank, because "the line stops
             // here" and "the value went off the top" look alike at a glance.
@@ -669,6 +689,17 @@ struct LiveChart: View {
             // where nothing was measured.
             ForEach(series.identifiedSegments) { segment in
                 ForEach(segment.points) { point in
+                    AreaMark(x: .value("Time", point.date),
+                             yStart: .value("Baseline", 0),
+                             yEnd: .value("Value", point.value),
+                             series: .value("segmentArea", segment.id.timeIntervalSinceReferenceDate))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.accentColor.opacity(0.18), Color.accentColor.opacity(0.01)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                     LineMark(x: .value("Time", point.date),
                              y: .value("Value", point.value),
                              series: .value("segment", segment.id.timeIntervalSinceReferenceDate))
@@ -702,13 +733,14 @@ struct LiveChart: View {
             } else if let hovered {
                 PointMark(x: .value("Time", hovered.date),
                           y: .value("Value", hovered.value))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.ColorToken.ink)
                     .symbolSize(40)
                     .annotation(position: .top, spacing: 4) {
                         HoverLabel(value: hovered.value, unit: unit, date: hovered.date)
                     }
             }
         }
+        .chartYScale(domain: 0...yDomainUpper)
         .chartYAxis { AxisMarks(position: .leading) }
         .chartXSelection(value: $selectedDate)
         .frame(height: 180)

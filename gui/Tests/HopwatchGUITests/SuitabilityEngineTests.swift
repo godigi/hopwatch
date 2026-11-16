@@ -1009,6 +1009,50 @@ import Testing
         #expect(calls.verdict == .degraded)
         #expect(calls.metric == "5% loss")
     }
+
+    @Test func defaultConsequenceReflectsGlitchRiskWithoutDropouts() {
+        let consequence = SuitabilityEngine.Item.defaultConsequence(id: "calls", verdict: .degraded, status: "Glitch risk")
+        #expect(consequence == "Occasional audio glitches")
+    }
+
+    @Test func gamingUnmeasuredPlaceholderMatchesSiblingAwaitingChips() {
+        let inputs = SuitabilityEngine.Inputs(monitorSample: nil, isLinkUp: true, currentJitter: nil, effectiveLoss: nil)
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        let gaming = items.first { $0.id == "gaming" }
+        let streaming = items.first { $0.id == "streaming" }
+
+        #expect(gaming?.status == "Checking…")
+        #expect(gaming?.status == streaming?.status)
+        #expect(gaming?.metric == "Not measured")
+        #expect(gaming?.metric == streaming?.metric)
+        #expect(gaming?.verdict == .unknown)
+        #expect(SuitabilityEngine.Item.defaultConsequence(id: "gaming", verdict: .unknown, status: "Checking…") == "Assessing game latency")
+    }
+
+    @Test func pausedItemsUsePausedConsequenceInsteadOfAssessing() {
+        let inputs = SuitabilityEngine.Inputs(monitorSample: nil, isLinkUp: true, isPaused: true)
+        let items = SuitabilityEngine.evaluateAll(inputs)
+        #expect(items.count == 5)
+        #expect(items.allSatisfy { $0.status == "Paused" && $0.consequence == "Resume monitoring to check" })
+    }
+
+    @Test func browsingW4RuleConsequenceIsCompact() throws {
+        let catalogJSON = #"{"schema":6,"rules":[{"id":"W4","title":"Wi-Fi transmit rate collapsed","severity":"warn","blurb":"Your Wi-Fi signal reads strong but the negotiated transmit rate has collapsed due to interference or multipath obstacles, severely limiting throughput.","impacts":{"browsing":"degraded"}}]}"#
+        let catalog = try JSONDecoder().decode(RulesCatalog.self, from: Data(catalogJSON.utf8))
+        var sample = MonitorSample()
+        sample.internet = .init(lossPct: 0.0, rttAvgMs: 34.0, rttJitterMs: 5.0)
+        let inputs = SuitabilityEngine.Inputs(
+            monitorSample: sample,
+            catalog: catalog,
+            firedRules: ["W4"],
+            isLinkUp: true,
+            effectiveLoss: 0.0
+        )
+        let browsing = SuitabilityEngine.evaluateBrowsing(inputs)
+        #expect(browsing.status == "Wi-Fi transmit rate collapsed")
+        #expect(browsing.consequence.count <= 54)
+        #expect(!browsing.consequence.hasSuffix("..."))
+    }
 }
 
 

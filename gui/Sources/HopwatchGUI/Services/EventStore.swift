@@ -102,6 +102,89 @@ final class EventStore {
         NetworkEvent.within(events, hours: hours, now: now)
     }
 
+    /// Clears all durable recorded network events from memory and disk.
+    func clear() {
+        events = []
+        save()
+    }
+
+    private static func csvEscape(_ string: String) -> String {
+        if string.contains(",") || string.contains("\"") || string.contains("\n") || string.contains("\r") {
+            let escaped = string.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\""
+        }
+        return string
+    }
+
+    private static func matchesNetwork(_ eventNetwork: String?, filter: String) -> Bool {
+        guard let net = eventNetwork else { return false }
+        if net == filter { return true }
+        if net == "ssid:\(filter)" || filter == "ssid:\(net)" { return true }
+        return false
+    }
+
+    /// Exports recorded events as standard RFC4180 CSV for IT ticket attachments or spreadsheet analysis.
+    func exportCSV(network: String? = nil) -> String {
+        let list = network != nil ? events.filter { Self.matchesNetwork($0.network, filter: network!) } : events
+        return Self.exportCSV(from: list)
+    }
+
+    /// Exports recorded events as formatted Markdown for email support threads or ticket notes.
+    func exportMarkdown(network: String? = nil) -> String {
+        let list = network != nil ? events.filter { Self.matchesNetwork($0.network, filter: network!) } : events
+        return Self.exportMarkdown(from: list, network: network)
+    }
+
+    static func exportCSV(from list: [NetworkEvent]) -> String {
+        var lines: [String] = ["Timestamp,Kind,RuleID,Network,Summary,Detail,From,To,Evidence"]
+        let isoFormatter = ISO8601DateFormatter()
+        for event in list {
+            let ts = isoFormatter.string(from: event.date)
+            let kind = Self.csvEscape(event.kind)
+            let ruleID = Self.csvEscape(event.ruleID ?? "")
+            let net = Self.csvEscape(event.network ?? "")
+            let summary = Self.csvEscape(event.summary)
+            let detail = Self.csvEscape(event.extraDetail ?? "")
+            let fromVal = Self.csvEscape(event.fromValue ?? "")
+            let toVal = Self.csvEscape(event.toValue ?? "")
+            let evidenceStr: String = {
+                if let ev = event.evidence {
+                    let rate = ev.rateMbps.map { String(format: " (%.1f Mbps)", $0) } ?? ""
+                    return Self.csvEscape("\(ev.name)\(rate)")
+                }
+                return ""
+            }()
+            lines.append("\(ts),\(kind),\(ruleID),\(net),\(summary),\(detail),\(fromVal),\(toVal),\(evidenceStr)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func exportMarkdown(from list: [NetworkEvent], network: String? = nil) -> String {
+        var md = "# Hopwatch Network Activity History\n\n"
+        if let network {
+            md += "**Network:** \(network)\n\n"
+        }
+        md += "| Timestamp | Event | Rule | Network | Details |\n"
+        md += "| :--- | :--- | :--- | :--- | :--- |\n"
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        for event in list {
+            let ts = formatter.string(from: event.date)
+            let summary = event.summary.replacingOccurrences(of: "|", with: "\\|")
+            let rule = event.ruleID ?? "—"
+            let net = (event.network ?? "—").replacingOccurrences(of: "|", with: "\\|")
+            var detail = (event.extraDetail ?? "").replacingOccurrences(of: "|", with: "\\|")
+            if let ev = event.evidence {
+                let rate = ev.rateMbps.map { String(format: " (%.1f Mbps)", $0) } ?? ""
+                detail += (detail.isEmpty ? "" : " · ") + "Hog: \(ev.name)\(rate)"
+            }
+            if detail.isEmpty { detail = "—" }
+            md += "| \(ts) | \(summary) | \(rule) | \(net) | \(detail) |\n"
+        }
+        return md
+    }
+
     /// Rewrites rule events stored before the CLI learned to phrase them
     /// from the rules catalog, so an upgrade doesn't leave "Issue G2
     /// cleared" sitting in the timeline forever. `title` resolves a rule

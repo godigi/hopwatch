@@ -104,6 +104,15 @@ enum Theme {
                 : NSColor.white
         }))
 
+        /// Explicit opaque backdrop for NavigationSplitView detail panes so
+        /// translucent `cardBackground` layers remain legible across light/dark modes
+        /// and offscreen snapshots.
+        static let detailBackground = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.11, alpha: 1.0)
+                : NSColor.white
+        }))
+
         static let blue = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor.systemBlue
@@ -252,6 +261,28 @@ extension Health {
         // light and dark menu bars.
         case .paused:   return .secondaryLabelColor
         case .checking: return .systemBlue
+        }
+    }
+}
+
+extension StageResolver.PillTone {
+    var color: Color {
+        switch self {
+        case .green: return Theme.ColorToken.green
+        case .amber: return Theme.ColorToken.amber
+        case .red:   return .red
+        case .blue:  return Theme.ColorToken.blue
+        case .muted: return Theme.ColorToken.muted
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .green: return Theme.ColorToken.greenWash
+        case .amber: return Theme.ColorToken.amberWash
+        case .red:   return Theme.ColorToken.redWash
+        case .blue:  return Theme.ColorToken.blueWash
+        case .muted: return Theme.ColorToken.neutralWash
         }
     }
 }

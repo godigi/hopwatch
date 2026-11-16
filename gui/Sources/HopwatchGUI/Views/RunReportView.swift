@@ -54,6 +54,7 @@ struct RunReportView: View {
     @State private var didCopy = false
     @State private var didCopySupport = false
     @State private var homeDetailsExpanded = false
+    @State private var showRawJSONSheet = false
 
     private var liveRSSI: Int? {
         if coordinator.locationPermissions.isAuthorized,
@@ -83,6 +84,14 @@ struct RunReportView: View {
                 details
             }
         }
+        .sheet(isPresented: $showRawJSONSheet) {
+            RawJSONViewerSheet(
+                rawJSON: rawJSON,
+                title: snapshot.timestamp.map { "Run Report Raw JSON (\($0))" } ?? "Run Report Raw JSON",
+                defaultFileName: DiagnosticReportSharing.defaultFileName(extension: "json", timestamp: snapshot.timestamp),
+                isPresented: $showRawJSONSheet
+            )
+        }
     }
 
     private var hopAttribution: some View {
@@ -110,6 +119,8 @@ struct RunReportView: View {
             diagnoses
         }
         .contextMenu {
+            Button("View Raw JSON") { showRawJSONSheet = true }.disabled(rawJSON == nil)
+            Divider()
             Button("Copy Redacted Report") { copyShareableReport() }.disabled(!coordinator.supportsShare)
             Button("Copy for Support / Front Desk") { copySupportSummary() }
             Divider()
@@ -167,6 +178,11 @@ struct RunReportView: View {
     private var copyRow: some View {
         HStack(spacing: 8) {
             Menu {
+                Button("View Raw JSON") {
+                    showRawJSONSheet = true
+                }
+                .disabled(rawJSON == nil)
+                Divider()
                 Button("Copy Redacted Report") {
                     copyShareableReport()
                 }
@@ -751,8 +767,8 @@ struct RunReportView: View {
     private static func trafficValue(_ t: RunSnapshot.Traffic) -> String {
         let down = t.downMbps ?? 0, up = t.upMbps ?? 0
         let rate = up > down
-            ? String(format: "%g Mb/s up", up)
-            : String(format: "%g Mb/s down", down)
+            ? String(format: "%g Mbps up", up)
+            : String(format: "%g Mbps down", down)
         guard let top = t.topProcesses.first, !top.name.isEmpty else { return rate }
         return "\(rate) · \(top.name)"
     }
@@ -834,14 +850,15 @@ struct RunReportView: View {
         if snapshot.ipv6.only { return "n/a — no IPv4 on this network" }
         let primary = snapshot.internetLatency.lossPct
         let alt = snapshot.internetLatency.lossPctAlt
-        guard primary != nil || alt != nil else { return absentReason }
-        func pct(_ v: Double?) -> String { v.map { LossFormatter.formatPct($0) } ?? "?" }
-        let text = "\(pct(primary)) / \(pct(alt)) to two targets"
-        // "clean" is not a verdict about the network, it is the reading:
-        // both probes came back whole. Mirrors lib/headline.sh's own
-        // suffix on the same row.
-        if primary == 0, alt == 0 { return "\(text) · clean" }
-        return text
+        if let primary, let alt {
+            let text = "\(LossFormatter.formatPct(primary)) / \(LossFormatter.formatPct(alt)) to two targets"
+            return (primary == 0 && alt == 0) ? "\(text) · clean" : text
+        }
+        if let single = primary ?? alt {
+            let text = LossFormatter.formatPct(single)
+            return single == 0 ? "\(text) · clean" : text
+        }
+        return absentReason
     }
 
     /// Both legs, not just the gateway's. The row's tint already comes
@@ -863,7 +880,7 @@ struct RunReportView: View {
         // measured.
         guard let speed = snapshot.speedtest else { return absentReason }
         let parts = [speed.downMbps.map { String(format: "%.0f Mbps down", $0) },
-                     speed.upMbps.map { String(format: "%.0f up", $0) }].compactMap { $0 }
+                     speed.upMbps.map { String(format: "%.0f Mbps up", $0) }].compactMap { $0 }
         return parts.isEmpty ? absentReason : parts.joined(separator: " · ")
     }
 

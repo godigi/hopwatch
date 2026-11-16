@@ -370,7 +370,7 @@ RULES: list[dict[str, object]] = [
         "title": "Wi-Fi transmit rate collapsed",
         "category": "wifi",
         "severity": "warn",
-        "scope": "scan",
+        "scope": "both",
         "blurb": (
             "Your Wi-Fi signal reads strong but the negotiated transmit "
             "rate has collapsed due to interference or multipath obstacles, "
@@ -693,7 +693,7 @@ RULES: list[dict[str, object]] = [
         "scope": "both",
         "blurb": (
             "Some traffic is being lost on the way out to the internet "
-            "even though the router itself is clean — enough to cause "
+            "while your router isn't dropping packets — enough to cause "
             "an occasional stutter or stall, but not enough to break the "
             "connection outright. It's often tied to time-of-day "
             "congestion on the ISP's local segment, so it's worth "
@@ -1857,9 +1857,8 @@ RULES: list[dict[str, object]] = [
             "the login or terms page hotel, airport, and coffee-shop WiFi "
             "often require before real internet access works. Open a "
             "browser and complete the portal; nothing else will work "
-            "until it's accepted. Critical when nothing is getting "
-            "through, a warning when traffic still flows and the portal "
-            "is only waiting to cut it off."
+            "until it's accepted. Some traffic may still appear to flow "
+            "until you sign in or accept the portal terms."
         ),
         "doc": "DIAGNOSIS-RULES.md#cp-1--captive-portal-blocking-real-access",
         "impacts": {"calls": "broken", "streaming": "broken", "gaming": "broken",

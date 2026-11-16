@@ -8,7 +8,14 @@ import os
 ///
 /// Everything stateful in this app is reachable from here, which keeps the
 /// interesting question — *what causes what* — answerable by reading one
-/// file rather than by tracing five observers.
+/// type rather than by tracing five observers. Feature-specific methods are
+/// organized across `HopwatchCoordinator+*.swift` extensions:
+/// - `+Hydration.swift` — cold-launch hydration, live SSID adoption, report scoping
+/// - `+Arrival.swift` — new-network arrival policy & state machine
+/// - `+Scans.swift` — scan execution, cancellation, network events, resolutions
+/// - `+Repairs.swift` — repairs, auto-reconnect, captive portal & custom DNS
+/// - `+Telemetry.swift` — freshness, suitability, stage/health/headline, sharing
+/// - `+GalleryFixtures.swift` — visual-audit and `--verify` state fixtures
 @MainActor
 @Observable
 final class HopwatchCoordinator {
@@ -20,52 +27,27 @@ final class HopwatchCoordinator {
     let notifications = NotificationManager()
     let alerts = AlertEngine()
     let watcher = WatcherControl()
-    /// The CLI's rules catalog — see that store's header for why it's
-    /// `@Observable` rather than an actor like `CapabilityStore`. Every
-    /// `RuleChip` and every category-driven report row reads
-    /// `rulesCatalog.catalog` directly rather than awaiting anything.
     let rulesCatalog = RulesCatalogStore()
-    /// Whether the CLI in use advertises `share` in its capabilities
-    /// handshake. The share buttons read this; it starts true so they are
-    /// not greyed out for the moment before the first probe lands (and
-    /// `NetdiagRunner.share` re-checks regardless).
     private(set) var supportsShare = true
 
     func refreshShareSupport() async {
         supportsShare = await CapabilityStore.shared.supports(.share)
     }
-    /// The CLI's Wi-Fi signal scale — see that store's header. Same
-    /// synchronous-read shape as `rulesCatalog`: the Wi-Fi cell on Home and
-    /// in the dropdown reads `signalScale.scale` directly from a view body.
+
     let signalScale = SignalScaleStore()
-    /// The observable face of `Defaults` — see `AppSettings`'s header.
-    /// Owned here so one instance is shared by every view via the
-    /// environment, instead of each view reading `Defaults` for itself.
     let appSettings = AppSettings()
-    /// Automated update checker against GitHub releases.
     let updateChecker = UpdateChecker()
-    /// Live 1-second ping heartbeat monitor and cardiogram stream.
     let heartbeat = PingHeartbeat()
-    /// Callback to open the native software update modal.
     var onOpenSoftwareUpdate: (() -> Void)?
-    /// macOS Location Services permission manager.
     let locationPermissions = LocationPermissionStore()
-    /// The run in flight, phase by phase. Reset at the start of every run
-    /// and fed from the child's fd-3 stream as it arrives.
     let progress = ScanProgress()
-    /// Durable history of CLI-reported changes (monitor `changes` entries
-    /// and fired alerts) — the dropdown's timeline and its
-    /// time-since-last-change headline both read this. Named `eventLog`
-    /// rather than `events` because that name is already `events:
-    /// NetworkEventWatcher` above, a different thing (CoreWLAN/NWPath
-    /// notifications, not stored history).
     let eventLog: EventStore
 
     /// How a repair is actually run. The default shells out to
     /// `hopwatch --repair=…`; tests inject a recorder, because the real one
     /// power-cycles this Mac's Wi-Fi.
     typealias RepairRunner = @Sendable (_ id: String, _ params: [String: String]) async throws -> NetdiagRunner.RepairResult
-    private let repairRunner: RepairRunner
+    let repairRunner: RepairRunner
 
     init(repairRunner: @escaping RepairRunner = { id, params in
              try await NetdiagRunner.repair(id: id, params: params)
@@ -79,41 +61,21 @@ final class HopwatchCoordinator {
     }
 
     private var updateCheckTask: Task<Void, Never>?
-    /// The Wi-Fi network this Mac was last seen joined to, as a readable
-    /// name — what a "rejoin" would target. Tied to the network identity:
-    /// cleared when `reconcileNetworkIdentity` sees a different network, so
-    /// a network whose name macOS hides is never answered with the previous
-    /// network's name.
-    private(set) var lastAssociatedSSID: String?
-    /// The last known public info (IP, ISP, country flag) seen on the current network.
-    /// Retained across transient monitor sample probe failures on the same connection so
-    /// flags and IP displays do not flicker during packet loss or curl timeouts.
-    private(set) var lastKnownPublicInfo: MonitorSample.PublicInfo?
-    private(set) var latestRun: RunResult?
-    /// Home's fallback for a session that has not run a scan yet.
-    /// See `reportSource` for why this is a separate property rather than
-    /// a second way to set `latestRun`, and `hydrateFromHistoryIfNeeded`
-    /// for how it gets populated.
-    private(set) var hydratedReport: RunDetail? {
+    var lastAssociatedSSID: String?
+    var lastKnownPublicInfo: MonitorSample.PublicInfo?
+    var latestRun: RunResult?
+    var hydratedReport: RunDetail? {
         didSet {
             cachedHydratedRunResult = hydratedReport?.asRunResult
         }
     }
-    private var cachedHydratedRunResult: RunResult?
-    /// Live SSID read from CoreWLAN — the GUI's own source, not the CLI's.
-    /// The bundled CLI reads the SSID via `ipconfig getsummary`, but TCC
-    /// attributes that call to `/usr/sbin/ipconfig` rather than this .app,
-    /// so a Location Services grant to netdiag unredacts the GUI's own
-    /// CoreWLAN `ssid()` call but leaves the CLI's reading empty/redacted.
-    /// Without this, a user who has granted Location sees "WiFi (SSID
-    /// hidden by macOS)" in the dropdown even though the permission is
-    /// live. Refreshed once per monitor sample (see `handleSample`) so a
-    /// view body never pays for the CoreWLAN syscall.
-    private(set) var liveSSID: String?
-    private(set) var isScanning = false
-    private(set) var activeScanDepth: NetdiagRunner.Depth?
-    private(set) var scanStartedAt: Date?
-    private(set) var lastRunError: String?
+    var cachedHydratedRunResult: RunResult?
+    var liveSSID: String?
+    var isTestingLiveSSID = false
+    var isScanning = false
+    var activeScanDepth: NetdiagRunner.Depth?
+    var scanStartedAt: Date?
+    var lastRunError: String?
 
     var isSpeedTestOnly: Bool {
         isScanning && activeScanDepth == .speedOnly
@@ -122,70 +84,47 @@ final class HopwatchCoordinator {
     var isSpeedTesting: Bool {
         isSpeedTestOnly || progress.isSpeedTesting
     }
-    /// The last `--speed-only` result, kept apart from `latestRun`. A speed
-    /// test measures one thing and diagnoses nothing, so letting it become
-    /// the current report would replace a full diagnosis with a card that
-    /// has no verdict on it — Part B of the spec, in the app's own terms.
-    ///
-    /// Keyed by the network it was measured on (`latestSpeedTestNetwork`)
-    /// and read through `currentSpeedTest`, never directly: a throughput
-    /// figure belongs to one network, and carrying the home fibre's 480/40
-    /// into a café is how the Streaming tile came to read "4K ready" there.
-    private(set) var latestSpeedTest: RunSnapshot.Speedtest?
-    private(set) var latestSpeedTestAt: Date?
-    private(set) var latestSpeedTestNetwork: String?
-    /// A section (or a stored run) another surface has asked the main
-    /// window to show. Consumed by `MainWindow`, which may not exist yet at
-    /// the moment of asking — see `consumeRequestedDestination()`.
-    var requestedDestination: MainDestination?
-    /// Set while a scan started *by an alert* is in flight. The loop guard:
-    /// a scan started this way must never start another. Without it, a
-    /// scan's own bufferbloat and speed phases can raise the very alert
-    /// that triggers the next scan, forever.
-    private(set) var scanWasAlertTriggered = false
 
-    private var scanTask: Task<Void, Never>?
-    private var lastNetworkID: String?
-    /// Whether cold-launch hydration has run against an *identified*
-    /// network. Hydration is scoped to the network we are on, and `start()`
-    /// kicks it off before the monitor has produced a sample — so the first
-    /// attempt normally has no network to scope to and does nothing. This
-    /// latches on the first attempt that had one, so `handleSample` can
-    /// retry until the network is known without spawning a task on every
-    /// sample forever afterwards.
-    private var didHydrateForNetwork = false
-    /// The current network's arrival state, mirrored into observable
-    /// storage so the arrival card re-renders when it changes. `Defaults`
-    /// is the source of truth; this is the copy SwiftUI can see.
-    private(set) var arrivalState: ArrivalState = .unchecked
-    /// The canonical id `arrivalState` describes. Views read this to name
-    /// the network on the arrival card.
-    private(set) var arrivalNetworkID: String?
-    /// What the app will do next about an unchecked network — see
-    /// `arrivalIntent(now:)` for why "unchecked" alone is not enough for
-    /// the card to render honestly.
-    private(set) var arrivalIntent: ArrivalCopy.Intent = .starting
-    /// Consecutive declined arrival attempts for the current network, held
-    /// in memory only: a backoff that survived relaunch would punish a
-    /// user for quitting the app. Reset when the network changes or an
-    /// attempt starts.
-    private(set) var routerAdminAvailable = false
-    private var lastProbedRouterIP: String?
-    private var arrivalAttempts = 0
-    private var nextArrivalAttemptAt: Date?
-    /// Carried from `attemptArrival` to the scan's completion, which is
-    /// where the terminal arrival state is written. Nil when the in-flight
-    /// scan is not an arrival check.
-    private var pendingArrivalNetworkID: String?
-    private var pendingArrivalDepth: ArrivalDepth?
-    private var pendingArrivalDecline: DeclineReason?
-    private var heartbeatSeedMinSeq: Int = 0
-    /// The severity seen on the previous sample, used by `handleSample` to
-    /// detect the ok/info → warn/critical edge that auto-starts an
-    /// investigation burst. Stored on the coordinator rather than read back
-    /// from the monitor so the transition is exact even when a burst
-    /// restart resets the monitor's own sample window.
-    private var lastSeverity: String = "ok"
+    var latestSpeedTest: RunSnapshot.Speedtest?
+    var latestSpeedTestAt: Date?
+    var latestSpeedTestNetwork: String?
+    var requestedDestination: MainDestination?
+    var scanWasAlertTriggered = false
+    var preScanSample: MonitorSample?
+    var lastAlertTriggeredScanAt: Date?
+    var healthyRecoverySince: Date?
+    private static let alertTriggeredScanCooldown: TimeInterval = 600
+
+    /// True while a quiet, alert-triggered diagnostic scan is running in the background.
+    var isBackgroundInvestigating: Bool {
+        isScanning && activeScanDepth == .alertTriggered && scanWasAlertTriggered
+    }
+
+    func isAlertTriggeredScanInCooldown(at now: Date? = nil) -> Bool {
+        guard let lastScan = lastAlertTriggeredScanAt else { return false }
+        let clockNow = now ?? alerts.now()
+        return clockNow.timeIntervalSince(lastScan) < Self.alertTriggeredScanCooldown
+    }
+
+    var canStartAlertTriggeredScanForTesting: Bool {
+        Defaults.scanOnAlert && !scanWasAlertTriggered && !isScanning && !isAlertTriggeredScanInCooldown()
+    }
+
+    var scanTask: Task<Void, Never>?
+    var lastNetworkID: String?
+    var didHydrateForNetwork = false
+    var arrivalState: ArrivalState = .unchecked
+    var arrivalNetworkID: String?
+    var arrivalIntent: ArrivalCopy.Intent = .starting
+    var routerAdminAvailable = false
+    var lastProbedRouterIP: String?
+    var arrivalAttempts = 0
+    var nextArrivalAttemptAt: Date?
+    var pendingArrivalNetworkID: String?
+    var pendingArrivalDepth: ArrivalDepth?
+    var pendingArrivalDecline: DeclineReason?
+    var heartbeatSeedMinSeq: Int = 0
+    var lastSeverity: String = "ok"
 
     // MARK: - Remediation Resolution Feedback (TASK-027)
 
@@ -215,13 +154,13 @@ final class HopwatchCoordinator {
         }
     }
 
-    private(set) var recentResolutions: [ResolutionEvent] = []
-    private var lastSample: MonitorSample?
+    var recentResolutions: [ResolutionEvent] = []
+    var lastSample: MonitorSample?
     private(set) var connectionGeneration = 0
-    private var connectionChangedAt: Date?
-    private var scanIdentity: (id: String, startedAt: Date, finishedAt: Date)?
-    private var lastUnhealthySample: MonitorSample?
-    private var previousActiveAlerts: [String: AlertEngine.ActiveAlert] = [:]
+    var connectionChangedAt: Date?
+    var scanIdentity: (id: String, startedAt: Date, finishedAt: Date)?
+    var lastUnhealthySample: MonitorSample?
+    var previousActiveAlerts: [String: AlertEngine.ActiveAlert] = [:]
 
     var activeResolution: ResolutionEvent? {
         recentResolutions.last(where: { $0.isCurrent })
@@ -249,14 +188,21 @@ final class HopwatchCoordinator {
         log.info("resolution recorded: \(title, privacy: .public) — \(message, privacy: .public)")
     }
 
-    private let log = Logger(subsystem: "com.godigi.hopwatch", category: "coordinator")
+    var repairOutcome: RepairOutcome?
+    var repairTask: Task<Void, Never>?
+    var staleEpoch = 0
+    var staleWatchTask: Task<Void, Never>?
+    var stalenessSuspended = false
+
+    let log = Logger(subsystem: "com.godigi.hopwatch", category: "coordinator")
+
+    func advanceConnectionGeneration() {
+        connectionGeneration += 1
+    }
 
     // MARK: - Lifecycle
 
     func start() {
-        // First, before anything reads a network id: a build that saw a
-        // sample before migrating would treat every already-seen network
-        // as unchecked and re-baseline the world.
         Defaults.migrateArrivalStatesIfNeeded()
         alerts.notificationManager = notifications
         notifications.notificationsEnabled = appSettings.notificationsEnabled
@@ -280,14 +226,7 @@ final class HopwatchCoordinator {
 
         events.start()
         observeWorkspace()
-        // Reap the monitor on quit. Without this the child is re-parented
-        // to launchd and goes on pinging the gateway every ten seconds
-        // after the app is gone — the exact misbehaviour that gets an
-        // always-on app uninstalled.
         NotificationCenter.default.addObserver(
-            // `queue: nil`: delivered synchronously on the posting thread
-            // (main, from applicationWillTerminate), so the flush below has
-            // finished before the process is allowed to exit.
             forName: .netdiagWillTerminate, object: nil, queue: nil
         ) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -307,19 +246,8 @@ final class HopwatchCoordinator {
             await history.load()
             await hydrateFromHistoryIfNeeded()
         }
-        // Its own task, not folded into the one above: the catalog gates
-        // on a *different* capability (`rulesCatalog`, not `history`) and
-        // has nothing to sequence after — chips and report rows render
-        // fine before it resolves, they just show the inert fallback until
-        // it does.
         rulesCatalog.ensureLoaded()
-        // Same shape, same reasoning as rulesCatalog.ensureLoaded() above:
-        // its own capability gate, nothing to sequence after.
         signalScale.ensureLoaded()
-        // Events stored before the CLI phrased rule changes from the
-        // catalog read "Issue G2 cleared". Rewrite them once the catalog
-        // is in hand so an upgrade doesn't leave rule IDs in a timeline
-        // whose whole point is plain language.
         Task { [weak self] in
             await self?.rulesCatalog.refresh()
             guard let self else { return }
@@ -327,22 +255,9 @@ final class HopwatchCoordinator {
                 self?.rulesCatalog.catalog?[ruleID]?.title
             }
         }
-        // Lets AlertEngine.activeSorted rank alerts by the CLI's own
-        // severity instead of raise order — read live off the catalog each
-        // call, so a rank asked for before the catalog resolves degrades to
-        // 0 (raised-time order) rather than needing a second wiring step
-        // once the fetch completes. `headline` below needs the identical
-        // ranking to pick the worst *firing* rule rather than the first one
-        // in evaluation order, so the rank itself lives in one method
-        // (`severityRank(forRuleID:)`) both this closure and `headline`
-        // call, instead of two copies of the same switch drifting apart.
         alerts.severityRank = { [weak self] ruleID in
             self?.severityRank(forRuleID: ruleID) ?? 0
         }
-        // The settled text of an alert whose scan never produced a sentence
-        // of its own: the catalog's blurb for the rule that fired, verbatim.
-        // Read live for the same reason as `severityRank` — an alert settled
-        // before the catalog loads is upgraded on the next sample.
         alerts.ruleText = { [weak self] ruleID in
             guard let blurb = self?.rulesCatalog.catalog?[ruleID]?.blurb, !blurb.isEmpty else { return nil }
             return blurb
@@ -354,7 +269,6 @@ final class HopwatchCoordinator {
         syncAlertPauseState()
         startStaleWatch()
 
-        // Wire update notification hook
         updateChecker.onUpdateFound = { [weak self] release in
             guard let self else { return }
             self.notifications.deliverUpdateNotification(
@@ -363,7 +277,6 @@ final class HopwatchCoordinator {
             )
         }
 
-        // Start recurring periodic background update checks
         startPeriodicUpdateChecks()
     }
 
@@ -379,12 +292,10 @@ final class HopwatchCoordinator {
     private func startPeriodicUpdateChecks() {
         updateCheckTask?.cancel()
         updateCheckTask = Task { [weak self] in
-            // Initial check after startup
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
             self?.updateChecker.performDailyCheck()
 
-            // Periodic check loop (every 4 hours = 14,400 seconds)
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 14_400_000_000_000)
                 guard !Task.isCancelled else { break }
@@ -395,17 +306,6 @@ final class HopwatchCoordinator {
 
     // MARK: - Window activation policy
 
-    /// How many of the app's real `Window` scenes (dashboard, settings,
-    /// onboarding) are currently on screen. The app ships as `LSUIElement`
-    /// — no Dock icon, no app-switcher slot, which is right for an always-on
-    /// menu-bar monitor. But a window the user opened on purpose should
-    /// behave like a normal window while it is on screen: the policy flips
-    /// to `.regular` the moment the first one appears (Dock icon + Cmd-Tab
-    /// slot) and back to `.accessory` the instant the last one closes (Dock
-    /// icon vanishes, menu-bar dot stays). Driven by `onAppear`/`onDisappear`
-    /// on each window's root view rather than by `NSWindow` notifications,
-    /// which fire unreliably for SwiftUI `Window` scenes and left the Dock
-    /// icon stuck or the switcher slot missing.
     private var openWindowCount = 0
 
     func windowAppeared() {
@@ -422,169 +322,7 @@ final class HopwatchCoordinator {
         let hasWindows = openWindowCount > 0
         let regular = hasWindows || Defaults.showInDock
         NSApp?.setActivationPolicy(regular ? .regular : .accessory)
-        // Activating on open is what makes the window arrive in front
-        // rather than behind whatever was frontmost, and is also the nudge
-        // the app switcher needs to pick up a policy that just changed to
-        // `.regular` at runtime.
         if hasWindows { NSApp?.activate(ignoringOtherApps: true) }
-    }
-
-    // MARK: - Cold-launch hydration
-    //
-    // Home used to render nothing until the first scan of the session
-    // finished, even on a machine with ~2,000 runs already in
-    // `~/net-diag`. This fills that gap once, right after launch, without
-    // ever letting the fallback be mistaken for a live measurement.
-
-    /// Picks the newest run **on the network this machine is currently on**
-    /// that counts as a check (`HistoryDocument.Run.isCheck` — the
-    /// `run_mode` predicate docs/JSON-SCHEMA.md documents and
-    /// `helpers/history.py` applies identically) and has an id `--show` can
-    /// open, then fetches its full record via `details.detail(for:)`.
-    ///
-    /// The network predicate is the fix for a real bug. This used to take
-    /// the newest stored check *anywhere*, and Home renders a hydrated
-    /// report through the same `RunReportView` as a live one, with nothing
-    /// on screen saying otherwise — so arriving somewhere new showed the
-    /// previous building's report as if it were this network's, which is
-    /// where a phantom "Wi-Fi over the last hour" warning at the top of a
-    /// brand-new network's dashboard came from. Having no run for this
-    /// network is the correct empty state: the arrival card is already
-    /// saying a check is on its way.
-    ///
-    /// A nil current network means "not identified yet", never "any network
-    /// will do" — hydrating from an arbitrary run there would reintroduce
-    /// exactly this bug on a slow start. It is also the *ordinary* state at
-    /// the moment `start()` first calls this: `monitor.start()` runs after
-    /// this task is created, and the monitor's first sample costs a child
-    /// process where `history.load()` is a local file read. So the first
-    /// attempt normally finds no network and deliberately does nothing, and
-    /// `handleSample` retries on the sample that finally names one — see
-    /// `didHydrateForNetwork`. The one exception is monitoring being
-    /// switched off, where no sample is ever coming and "wait" would mean
-    /// "never"; the body says what happens there and why it is still safe.
-    ///
-    /// Silent on failure: a pruned run (the store rolls into an archive and
-    /// is eventually trimmed) or a `netdiag` older than `--show` must fall
-    /// back to the ordinary empty state, not an error banner for something
-    /// the user never asked to happen. Called once, from `start()`, before
-    /// any scan can plausibly have finished — but if one lands anyway while
-    /// the `await` below is in flight, the assignment after it is
-    /// deliberately not re-guarded: `reportSource` prefers `.live`
-    /// regardless of which of the two was written last, so a hydrated
-    /// report landing a moment after a real one is inert, not a race worth
-    /// closing.
-    /// Internal rather than private only so `GalleryMode` can reproduce the
-    /// same state `start()` reaches without also starting the monitor —
-    /// this is a read, and the screenshot harness needs Home to render the
-    /// report a real launch would show rather than its empty state.
-    ///
-    /// - Parameter explicitNetworkID: The network to scope to, for a caller
-    ///   with no live monitor to read one from. `GalleryMode` is the only
-    ///   one: it deliberately never starts the monitor, so the live id is
-    ///   always nil there and a strictly-scoped hydration would put the
-    ///   empty state in every screenshot.
-    func hydrateFromHistoryIfNeeded(explicitNetworkID: String? = nil) async {
-        let generation = connectionGeneration
-        // "Nothing to show for this network", not "nothing in memory": after
-        // a move, the previous network's report is still held but is out of
-        // scope (`currentNetworkRun`), and this is how the new network gets
-        // its own stored one rather than an empty Home until the next scan.
-        if currentNetworkRun == nil {
-            let current = explicitNetworkID ?? confirmedNetworkID
-            let id: String?
-            if let current {
-                // Latched on the first attempt that had a network at all,
-                // so the `handleSample` retry stops once this has really
-                // run.
-                didHydrateForNetwork = true
-                id = newestCheckID(onNetwork: current)
-            } else if !Defaults.monitoringEnabled {
-                // With monitoring off there will never be a sample, so
-                // "wait for the monitor to name the network" leaves Home
-                // empty forever rather than briefly — a different situation
-                // from a slow start, and a regression against the behaviour
-                // this had before it was scoped. So this one case keeps the
-                // old fallback: the newest check anywhere.
-                //
-                // Safe, because it cannot produce the unlabelled report the
-                // scoping exists to prevent. `HomeView.storedProvenance`
-                // captions any report the live monitor cannot confirm is
-                // about the network you are on, and with monitoring off it
-                // can confirm nothing — so a report hydrated here always
-                // arrives saying which network and when it came from.
-                didHydrateForNetwork = true
-                id = history.recentChecks(limit: 1).compactMap(\.runID).first
-            } else {
-                id = nil
-            }
-            if let id {
-                do {
-                    let detail = try await details.detail(for: id)
-                    guard generation == connectionGeneration,
-                          explicitNetworkID != nil || current.map(history.canonicalID) == confirmedNetworkID.map(history.canonicalID)
-                    else { return }
-                    hydratedReport = detail
-                } catch {
-                    log.debug("cold-launch hydration skipped: \(error.localizedDescription, privacy: .public)")
-                }
-            }
-        }
-        if latestSpeedTest == nil {
-            // Scoped to the network we are on, or nothing: the unscoped
-            // "newest speed test anywhere" is what put another network's
-            // throughput on a cold launch's first screen. With no network
-            // identified yet there is nothing to scope to, and `handleSample`
-            // calls `adoptStoredSpeedTest(for:)` the moment one is.
-            let current = explicitNetworkID ?? resolvedNetworkID(for: monitor.latest) ?? monitor.latest?.network.historyJoinID
-            if let current { adoptStoredSpeedTest(for: current) }
-        }
-    }
-
-    /// Replaces the in-memory speed test with the newest stored one *on this
-    /// network* — a hydrated report's own if it is for this network, else the
-    /// store's — or clears it when there is none. The only two writers of
-    /// `latestSpeedTest` besides a finished scan, and both pass a network.
-    private func adoptStoredSpeedTest(for networkID: String) {
-        let hydratedID = hydratedReport.flatMap { $0.context.networkID ?? $0.run.network.historyJoinID }
-        if let st = hydratedReport?.run.speedtest, st.downMbps != nil,
-           let hydratedID,
-           runIsForNetwork(hydratedID, live: networkID) {
-            latestSpeedTest = st
-            latestSpeedTestAt = hydratedReport?.run.timestamp.flatMap { FastISO8601.parse($0) }
-            latestSpeedTestNetwork = networkID
-        } else if let speed = history.latestSpeedTest(for: networkID) {
-            latestSpeedTest = RunSnapshot.Speedtest(downMbps: speed.down, upMbps: speed.up)
-            latestSpeedTestAt = speed.date
-            latestSpeedTestNetwork = networkID
-        } else {
-            latestSpeedTest = nil
-            latestSpeedTestAt = nil
-            latestSpeedTestNetwork = nil
-        }
-    }
-
-    /// The newest run on one network that counts as a check and carries an
-    /// id `--show` can open.
-    ///
-    /// `history.runs(networkID:window:)` rather than a hand-rolled filter
-    /// because it canonicalises *both* sides of the comparison through the
-    /// store's own `canonicalID`, which follows manual merges — comparing
-    /// raw ids would miss every run the user has merged into this network.
-    ///
-    /// Ordering matches `recentChecks`: newest first on the raw `ts`
-    /// string, which docs/JSON-SCHEMA.md fixes at ISO 8601 UTC with no
-    /// fractional seconds, so lexicographic order is already chronological
-    /// order and the parse can be skipped.
-    private func newestCheckID(onNetwork networkID: String) -> String? {
-        var runs = history.runs(networkID: networkID, window: .all)
-        if runs.isEmpty, let liveSsid = liveSSID, !liveSsid.isEmpty {
-            runs = history.runs(networkID: "ssid:\(liveSsid)", window: .all)
-        }
-        return runs
-            .filter { $0.isCheck && $0.runID != nil }
-            .max { ($0.ts ?? "") < ($1.ts ?? "") }?
-            .runID
     }
 
     // MARK: - Monitoring toggle
@@ -601,27 +339,13 @@ final class HopwatchCoordinator {
         syncAlertPauseState()
     }
 
-    /// The reason a scan holds the monitor paused under. One constant so the
-    /// holder and the alert engine's "pause that isn't a scan" agree.
     static let scanPauseReason = "a check is running"
 
-    /// Re-derives `alerts.monitoringPaused` from what actually holds the
-    /// monitor paused, instead of each pause/resume site guessing.
-    ///
-    /// It used to be assigned by hand in four places, and a scan's own pause
-    /// released through a path that never reassigned it: wake the display
-    /// mid-scan and `isPausedForAnyReason` was still true (the scan), so the
-    /// flag was set to true; the scan then ended, and nothing set it back.
-    /// With it stuck, `AlertEngine` suppressed every alert until relaunch.
-    /// Call this after every pause or resume, whatever the holder.
     func syncAlertPauseState() {
         alerts.monitoringPaused = !Defaults.monitoringEnabled
             || monitor.isPaused(besides: Self.scanPauseReason)
     }
 
-    /// Apply changed cadence settings. A restart rather than a signal,
-    /// because the intervals are command-line arguments — the process has
-    /// no way to be told about new ones.
     func applyCadenceSettings() {
         guard Defaults.monitoringEnabled, monitor.isRunning else { return }
         monitor.restart()
@@ -629,82 +353,6 @@ final class HopwatchCoordinator {
 
     // MARK: - Samples
 
-    // MARK: - Automatic Wi-Fi reconnect
-
-    /// A name worth passing to a rejoin: present, and not one of the
-    /// placeholders macOS or the CLI substitutes when it will not say.
-    static func readableSSID(_ name: String?) -> String? {
-        guard let name, !name.isEmpty,
-              !name.contains("<redacted>"),
-              !name.contains("hidden by macOS") else { return nil }
-        return name
-    }
-
-    /// The network a reconnect should rejoin, or nil to cycle the radio and
-    /// let macOS choose. After a drop (WJ-1, WF-1) that is the network that
-    /// was lost. For any other fault the Mac is *still joined*, so the only
-    /// name to trust is the one CoreWLAN reads this instant: a remembered
-    /// name could belong to the network the user left on purpose.
-    func reconnectTarget(forRule ruleID: String) -> String? {
-        switch ruleID {
-        case "WJ-1", "WF-1": return lastAssociatedSSID
-        default:             return liveSSID
-        }
-    }
-
-    /// The app's whole part in an automatic reconnect. Whether one is
-    /// warranted, why, and how many have been tried is the monitor's
-    /// decision (`status.auto_reconnect`, lib/monitor.sh, every cutoff in
-    /// lib/thresholds.sh). All this checks is the user's setting and that no
-    /// repair is already running — an automatic one must never race a
-    /// manual one, or another automatic one — and then it runs the repair
-    /// and records that it did.
-    private func considerAutoReconnect(_ sample: MonitorSample) {
-        guard appSettings.autoReconnectWiFi,
-              let decision = sample.status.autoReconnect,
-              !isRepairing else { return }
-        let ruleID = decision.rule ?? "WJ-1"
-        var params: [String: String] = [:]
-        if let target = reconnectTarget(forRule: ruleID) { params["network"] = target }
-        let attempt = decision.attempt ?? 1
-        let of = decision.maxAttempts.map { "/\($0)" } ?? ""
-        log.info("Auto-reconnecting Wi-Fi: \(decision.reason, privacy: .public) (\(ruleID, privacy: .public), attempt \(attempt)\(of, privacy: .public))")
-        repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                      phase: .working, detail: nil)
-        let summary = "Auto-reconnect Wi-Fi (\(decision.reason), attempt \(attempt)\(of))"
-        repairTask = Task { [weak self] in
-            await self?.performAutoReconnect(ruleID: ruleID, params: params, summary: summary)
-        }
-    }
-
-    private func performAutoReconnect(ruleID: String, params: [String: String],
-                                      summary: String) async {
-        do {
-            let result = try await repairRunner("reconnect-wifi", params)
-            eventLog.record(kind: "repair", summary: "\(summary): \(result.message)", ruleID: ruleID,
-                            network: monitor.latest?.network.id)
-            repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                          phase: result.ok ? .done : .failed,
-                                          detail: result.message)
-        } catch {
-            log.error("Auto-reconnect Wi-Fi failed: \(error.localizedDescription)")
-            eventLog.record(kind: "repair", summary: "\(summary): failed — \(error.localizedDescription)",
-                            ruleID: ruleID, network: monitor.latest?.network.id)
-            repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                          phase: .failed, detail: error.localizedDescription)
-        }
-    }
-
-    /// Lets a test wait for the repair a sample just started.
-    func awaitRepairForTesting() async {
-        await repairTask?.value
-    }
-
-    /// Normalises a monitor sample's network key when macOS hides the SSID
-    /// from the CLI helper and falls back to a generic private gateway IP.
-    /// On Wi-Fi, if CoreWLAN in the GUI knows the live SSID, resolve the
-    /// private gateway key to `ssid:<name>` so history, scans, and speed tests
-    /// match the real network.
     func resolvedNetworkID(for sample: MonitorSample?) -> String? {
         guard let sample, let id = sample.network.historyJoinID else { return nil }
         if (sample.link.isWiFi || liveSSID != nil), NetworkIdentity.isPrivateOrLocalGateway(id) {
@@ -715,9 +363,6 @@ final class HopwatchCoordinator {
         return id
     }
 
-    /// A decoded sample is the first positive evidence of an identity change
-    /// when CoreWLAN/NWPath did not deliver an event. Invalidate older async
-    /// work before evaluating this sample, while retaining the sample itself.
     @discardableResult
     func reconcileNetworkIdentity(for sample: MonitorSample) -> Bool {
         guard !sample.status.paused, let id = resolvedNetworkID(for: sample) else { return false }
@@ -727,10 +372,6 @@ final class HopwatchCoordinator {
                 lastNetworkID = id
                 return false
             }
-            // When Location Services permission is granted while already connected to a Wi-Fi
-            // network whose identity had fallen back to a private gateway key (`gw:<ip>`),
-            // `resolvedNetworkID` upgrades to `ssid:<name>` on the exact same gateway session.
-            // Adopt the upgraded SSID identity in place without invalidating the active session.
             if previous.hasPrefix("gw:"), id.hasPrefix("ssid:"),
                sample.network.historyJoinID == previous {
                 lastNetworkID = id
@@ -745,17 +386,16 @@ final class HopwatchCoordinator {
         return true
     }
 
-    private func handleSample(_ sample: MonitorSample) {
-        // The CLI's pause marker repeats the last path's identity and
-        // readings; it must not revive them after a connection boundary.
+    func handleSample(_ sample: MonitorSample) {
         guard !sample.status.paused else { return }
+        if sample.link.up {
+            preScanSample = sample
+        } else {
+            preScanSample = nil
+        }
         refreshLiveWiFi()
         let previousNetworkID = lastNetworkID
         let identityChanged = reconcileNetworkIdentity(for: sample)
-        // A different network: whatever name was remembered belonged to the
-        // last one. Cleared before anything below can re-set it, so a
-        // network whose name macOS hides ends up with no name rather than
-        // the previous network's.
         if identityChanged {
             lastAssociatedSSID = nil
             lastKnownPublicInfo = nil
@@ -781,6 +421,18 @@ final class HopwatchCoordinator {
             unlearnCurrentNetworkPortal()
         }
         alerts.evaluate(sample: sample)
+        if sample.health == .healthy && alerts.active.isEmpty && !isScanning && currentDegradedExperience == nil {
+            let now = alerts.now()
+            if let healthyRecoverySince {
+                if now.timeIntervalSince(healthyRecoverySince) >= 120 {
+                    lastAlertTriggeredScanAt = nil
+                }
+            } else {
+                healthyRecoverySince = now
+            }
+        } else {
+            healthyRecoverySince = nil
+        }
         if alerts.active.isEmpty && !notifications.announcedFaults.isEmpty && sample.health == .healthy {
             notifications.deliverRestored(
                 networkName: liveSSID ?? sample.network.label ?? "Network",
@@ -793,7 +445,6 @@ final class HopwatchCoordinator {
         }
         evaluateResolutions(sample: sample)
         considerInvestigationBurst(sample)
-
         considerAutoReconnect(sample)
 
         let isTargetFiltered: Bool = {
@@ -809,14 +460,6 @@ final class HopwatchCoordinator {
             heartbeat.seedFromSamples(eligible)
         }
 
-        // The first cycle of a monitor process records monitor-started, matching
-        // the event journal (helpers/monitor_sample.py:256). ActivityEntry.fold
-        // uses this boundary to close open episodes as lower bounds rather than
-        // silently spanning the restart with a "+" — except where this app
-        // restarted its own monitor, which it knows, and the network is not
-        // known to have changed. That one is marked and stepped over: it is
-        // no evidence a fault ended. The captured previous identity names the network
-        // before reconciliation advanced the current connection.
         if sample.seq == 1 {
             eventLog.record(
                 kind: "monitor-started",
@@ -869,1230 +512,29 @@ final class HopwatchCoordinator {
             }
         }
 
-        // Not identified yet — the CLI has no group and no usable record
-        // id. Decide nothing: `nil` here has never meant "a new network".
         guard let id = resolvedNetworkID(for: sample) else { return }
 
-        // The sample that finally names a network is also the first moment
-        // cold-launch hydration can be scoped to one — `start()` runs it
-        // well before this, when there is nothing to scope to. See
-        // `didHydrateForNetwork`.
         if !didHydrateForNetwork, latestRun == nil, hydratedReport == nil {
             Task { await hydrateFromHistoryIfNeeded() }
         }
 
         if identityChanged {
-            // A throughput figure is about one network. Swap it for this
-            // network's own stored one (or none) before any view can draw
-            // the previous network's under the new name.
             if latestSpeedTestNetwork.map({ history.canonicalID($0) }) != history.canonicalID(id) || latestSpeedTest == nil {
                 adoptStoredSpeedTest(for: id)
             }
             if currentNetworkRun == nil { Task { await hydrateFromHistoryIfNeeded() } }
             alerts.networkChanged(to: id)
             log.info("now on network \(id, privacy: .public)")
-            // A different network's backoff is meaningless.
             arrivalAttempts = 0
             nextArrivalAttemptAt = nil
         } else if latestSpeedTest == nil {
             adoptStoredSpeedTest(for: id)
         }
 
-        // Deliberately outside the id-changed guard above. The previous
-        // version attempted the arrival scan *inside* it, having already
-        // advanced `lastNetworkID` — so a scan declined for being busy
-        // could never be retried, because every later sample returned at
-        // the guard. Its comment promised "the next sighting retries";
-        // there is no next sighting while you stay on the network. A live
-        // install had "SB Airbnb" named in `networkNames` and absent from
-        // `seenNetworks`, which is only reachable that way.
         considerArrival(for: id, sample: sample)
     }
 
-    // MARK: - Arrival
-
-    /// The one automatic check, and the reason there is no timed one:
-    /// joining a network for the first time is exactly when a baseline of
-    /// what it can do — throughput, bufferbloat, path MTU — is worth
-    /// having. Monitoring covers the continuous question; this covers the
-    /// one-off one. See CLAUDE.md's three-depth table.
-    private func considerArrival(for id: String, sample: MonitorSample) {
-        // On Wi-Fi, never use a private gateway IP as the primary arrival key
-        let targetID: String = {
-            if sample.link.isWiFi || liveSSID != nil, NetworkIdentity.isPrivateOrLocalGateway(id) {
-                if let ssid = liveSSID ?? Self.readableSSID(sample.link.ssid) {
-                    return "ssid:\(ssid)"
-                }
-            }
-            return id
-        }()
-
-        let canonical = history.canonicalID(targetID)
-        let state = Defaults.arrivalStates[targetID]
-            ?? (NetworkIdentity.isPrivateOrLocalGateway(canonical) ? nil : Defaults.arrivalStates[canonical])
-            ?? .unchecked
-        // Assigned only on a real change. Under `@Observable` a write
-        // invalidates every observer whether or not the value differs, and
-        // this runs once per monitor sample — every 5 s on the fast tier.
-        // Unguarded, the arrival card would redraw on a timer for as long
-        // as the app is open.
-        if arrivalNetworkID != targetID { arrivalNetworkID = targetID }
-        if arrivalState != state { arrivalState = state }
-
-        // Published before the guards below, because the card renders what
-        // is *not* going to happen as carefully as what is. An `.unchecked`
-        // network whose automatic check is switched off, or is queued
-        // behind a running scan, must not wear the same spinner as one
-        // being measured right now.
-        let intent = arrivalIntent(now: Date())
-        if arrivalIntent != intent { arrivalIntent = intent }
-
-        guard Defaults.scanOnNewNetwork else { return }
-        let now = Date()
-        guard state.needsAttempt(now: now) else { return }
-        if let next = nextArrivalAttemptAt, now < next { return }
-
-        switch ArrivalPolicy.decide(hasSample: true,
-                                    severity: sample.status.severity,
-                                    isExpensive: events.pathIsExpensive,
-                                    isConstrained: events.pathIsConstrained,
-                                    isSettling: isSettling) {
-        case .wait:
-            // Unreachable from here — we hold a sample. Kept exhaustive
-            // rather than defaulted so a future case cannot be silently
-            // swallowed into "do nothing".
-            return
-
-        case .full:
-            let reason = state.isDeclined ? "new network (now healthy)" : "new network"
-            attemptArrival(id: targetID, depth: .full, reason: reason)
-
-        case .quick(let why):
-            // If already declined for this reason at quick depth, do not re-run
-            // the quick check; wait until the network becomes healthy.
-            if case .declined(let d, let r, _) = state, d == .quick, r == why {
-                return
-            }
-            // A decision, not a failure: recorded so it does not retry,
-            // and rendered as a button rather than a spinner.
-            attemptArrival(id: targetID, depth: .quick,
-                           reason: "new network (\(why.rawValue))",
-                           declineWith: why)
-        }
-    }
-
-    /// Try to start an arrival check, and record what happened.
-    ///
-    /// `launch()` silently declines while another scan is in flight. That
-    /// decline must leave the state `.unchecked` so the next sample tries
-    /// again — the bug being fixed here is precisely a decline that was
-    /// recorded as nothing and never retried.
-    private func attemptArrival(id: String, depth: ArrivalDepth, reason: String,
-                                declineWith: DeclineReason? = nil) {
-        let now = Date()
-        guard runScan(depth: depth.runnerDepth, reason: reason) else {
-            arrivalAttempts += 1
-            // 30 s doubling, capped at five minutes. In memory only.
-            let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
-            nextArrivalAttemptAt = now.addingTimeInterval(delay)
-            log.debug("arrival check for \(id, privacy: .public) declined — a scan is running; retrying in \(delay, format: .fixed(precision: 0))s")
-            return
-        }
-
-        arrivalAttempts = 0
-        nextArrivalAttemptAt = nil
-
-        // `.checking` while it runs, so Home shows progress rather than a
-        // stale report. The scan's completion writes the terminal state.
-        setArrivalState(.checking(depth: depth, startedAt: now), for: id)
-        pendingArrivalNetworkID = id
-        pendingArrivalDepth = depth
-        pendingArrivalDecline = declineWith
-        heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
-        heartbeat.reset()
-    }
-
-    /// Stand in for the arrival state the monitor would have established,
-    /// for `GalleryMode` only.
-    ///
-    /// The gallery never starts the monitor, so without this every Home
-    /// screenshot renders the arrival card over a report the app has
-    /// plainly already got — "New network: this network", above a header
-    /// naming the network, above a full set of measurements. That is not
-    /// what a launch on a known network looks like, and the gallery exists
-    /// to show what the app looks like.
-    ///
-    /// `.checked` rather than the real stored state: the ordinary case
-    /// this screenshot stands for is a network already known, and the
-    /// arrival card's own states have seven dedicated renders from
-    /// `--verify`. Writes nothing to `Defaults` — a screenshot run must
-    /// not mutate arrival history, which is the same contract
-    /// `GalleryMode.hydrate` keeps for the monitor and the event log.
-    func adoptGalleryArrivalState(networkID: String?) {
-        arrivalNetworkID = networkID.flatMap(HopwatchGUI.NetworkIdentity.canonical)
-        arrivalState = .checked(depth: .full, at: Date(), runID: nil)
-        arrivalIntent = .starting
-    }
-
-    /// Sets up a synthetic healthy sample for GalleryMode previews.
-    func adoptGalleryMonitorSample(networkID: String?, displayName: String?) {
-        let name = displayName ?? "Home Wi-Fi"
-        self.liveSSID = name
-        self.stalenessSuspended = true
-
-        let now = Date()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        // Create a realistic sequence of ~20 samples for sparklines and live charts
-        var historySamples: [MonitorSample] = []
-        let baselineGwRtt = 3.2
-        let baselineInetRtt = 17.8
-
-        for i in (0..<30).reversed() {
-            let sampleDate = now.addingTimeInterval(-Double(i * 10))
-            let gwJitter = Double((i * 7) % 5) * 0.2 - 0.4
-            let inetJitter = Double((i * 13) % 7) * 0.4 - 1.2
-            let s = MonitorSample(
-                schema: 2,
-                version: AppVersion.display,
-                ts: formatter.string(from: sampleDate),
-                seq: 100 - i,
-                gapS: 0,
-                jitterMs: 1.2,
-                refreshed: ["fast", "medium", "slow"],
-                link: .init(
-                    up: true,
-                    interface: "en0",
-                    type: "wifi",
-                    ip: "192.168.1.142",
-                    gateway: "192.168.1.1",
-                    gatewayMAC: "14:91:82:aa:bb:cc",
-                    ssid: name,
-                    bssid: "14:91:82:aa:bb:cc"
-                ),
-                network: .init(
-                    id: networkID ?? "wifi:ssid=\(name)",
-                    label: name,
-                    groupId: networkID ?? "mac:14:91:82:aa:bb:cc"
-                ),
-                vpn: .init(
-                    active: false,
-                    type: nil,
-                    name: nil
-                ),
-                gateway: .init(
-                    lossPct: 0.0,
-                    rttAvgMs: max(1.0, baselineGwRtt + gwJitter),
-                    rttJitterMs: 0.4
-                ),
-                internet: .init(
-                    lossPct: 0.0,
-                    rttAvgMs: max(10.0, baselineInetRtt + inetJitter),
-                    rttJitterMs: 1.2
-                ),
-                wifi: .init(
-                    rssi: -52,
-                    noise: -92,
-                    snr: 40,
-                    channel: "149 (5 GHz, 80 MHz)"
-                ),
-                dns: .init(
-                    ok: true,
-                    resolver: "192.168.1.1",
-                    elapsedMs: 8.4
-                ),
-                tcp: .init(
-                    anyOk: true,
-                    targets: [
-                        .init(host: "1.1.1.1", port: 443, ok: true, elapsedMs: 16.2),
-                        .init(host: "8.8.8.8", port: 443, ok: true, elapsedMs: 18.1)
-                    ]
-                ),
-                publicInfo: .init(
-                    ok: true,
-                    ip: "198.51.100.42",
-                    isp: "Fiber Broadband",
-                    asn: "AS13335",
-                    city: "San Francisco",
-                    country: "United States",
-                    countryISO: "US",
-                    captivePortal: false
-                ),
-                status: .init(
-                    severity: "ok",
-                    measurement: "measured",
-                    rules: [],
-                    icmpFiltered: false,
-                    degraded: false,
-                    paused: false,
-                    cadenceS: 10
-                ),
-                changes: []
-            )
-            historySamples.append(s)
-        }
-
-        if let latestSample = historySamples.last {
-            monitor.adoptGallerySample(latestSample, historical: historySamples)
-        }
-    }
-
-
-    /// `--verify` only: put the session's report and speed test in place
-    /// without running a scan or touching the CLI.
-    func adoptSessionStateForTesting(latestRun: RunResult? = nil, hydrated: RunDetail? = nil,
-                                     speed: RunSnapshot.Speedtest? = nil, speedAt: Date? = nil,
-                                     speedNetwork: String? = nil) {
-        self.latestRun = latestRun
-        self.scanIdentity = nil
-        if let latestRun { adoptAcceptedScanIdentity(latestRun) }
-        self.hydratedReport = hydrated
-        self.latestSpeedTest = speed
-        self.latestSpeedTestAt = speedAt
-        self.latestSpeedTestNetwork = speedNetwork
-    }
-
-    func handleSampleForTesting(_ sample: MonitorSample) {
-        handleSample(sample)
-        if heartbeat.beats.isEmpty {
-            heartbeat.adoptTestBeat(latencyMs: 18.5, isMiss: false, seq: 1)
-            heartbeat.adoptTestBeat(latencyMs: 22.1, isMiss: false, seq: 2)
-            heartbeat.adoptTestBeat(latencyMs: 19.0, isMiss: false, seq: 3)
-            heartbeat.adoptTestBeat(latencyMs: nil, isMiss: true, seq: 4)
-            heartbeat.adoptTestBeat(latencyMs: 45.2, isMiss: false, seq: 5)
-            heartbeat.adoptTestBeat(latencyMs: 18.5, isMiss: false, seq: 6)
-        }
-    }
-
-    private var isTestingLiveSSID = false
-
-    func setLiveSSIDForTesting(_ ssid: String?) {
-        liveSSID = ssid
-        isTestingLiveSSID = (ssid != nil)
-    }
-
-    /// Gallery fixture for the moved-network state (`--gallery-moved`): the
-    /// monitor now says the Mac is on a network the hydrated report and the
-    /// stored speed test are *not* about, and its public lookup came back
-    /// empty (a portal blocking it) — the case where an unscoped fallback
-    /// chain fills the flag, IP and ISP from the previous network.
-    func adoptGalleryMovedNetwork() {
-        guard var moved = monitor.latest else { return }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        moved.ts = formatter.string(from: Date())
-        moved.network = .init(id: "wifi:ssid=Corner Cafe", label: "Corner Cafe", groupId: "ssid:corner-cafe")
-        moved.link.ssid = "Corner Cafe"
-        moved.publicInfo = .init()
-        moved.gateway = .init()
-        moved.internet = .init()
-        moved.jitterMs = nil
-        moved.dns = .init()
-        moved.tcp = .init()
-        moved.wifi = nil
-        moved.status.measurement = "unknown"
-        liveSSID = "Corner Cafe"
-        monitor.adoptGallerySample(moved, historical: monitor.recent.dropLast() + [moved])
-    }
-
-    /// Gallery fixture for the stale-monitor state (`--gallery-stale`): the
-    /// healthy sample, aged past the freshness window, with staleness
-    /// checking switched back on (the other fixtures suspend it, because they
-    /// are written once and rendered over many seconds).
-    func adoptGalleryStaleSample() {
-        guard var old = monitor.latest else { return }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        old.ts = formatter.string(from: Date().addingTimeInterval(-300))
-        monitor.adoptGallerySample(old, historical: monitor.recent.dropLast() + [old])
-        stalenessSuspended = false
-    }
-
-    /// The sentence the no-link gallery fixture shows under the headline: a
-    /// fixture standing in for what the CLI emits as
-    /// `link.offline.precursor_summary`. `--verify` pins it equal to a line
-    /// generated by `helpers/monitor_sample.py`, so it cannot drift from the
-    /// CLI's wording unnoticed. Nothing outside the gallery reads it.
-    static let galleryPrecursorSummary =
-        "Your router stopped responding right before Wi-Fi dropped, which usually means it restarted."
-    /// Likewise for `link.offline.reason_label` on `wifi-not-joined`.
-    static let galleryReasonLabel = "Not connected"
-
-    /// Gallery fixture for the no-link state (`--gallery-no-link`): the
-    /// newest sample says `link.up == false` while still *carrying* the last
-    /// healthy sample's measurements — stale router loss, jitter, public
-    /// country, and the CLI's default `type: "wired"` — over a rolling
-    /// window of healthy samples. That is the worst case the GUI has to
-    /// survive whatever the monitor emits (a CLI that nulls a down sample
-    /// makes it easier, never harder), and it is what the original
-    /// screenshots showed.
-    ///
-    /// Carries a `link.offline` block, since the card's duration, network and
-    /// precursor lines are drawn from it. `restarted` is the shape a monitor
-    /// process that started already offline emits when it could vouch for
-    /// nothing the previous process knew (the hand-over record was missing,
-    /// stale or about another network): a duration from its own start, no
-    /// last network, no precursor. When the hand-over works, the card reads
-    /// like the default fixture.
-    func adoptGalleryNoLinkSample(restarted: Bool = false) {
-        guard var down = monitor.latest else { return }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        down.ts = formatter.string(from: Date())
-        down.seq = (down.seq ?? 0) + 1
-        down.link = .init(up: false, interface: nil, type: "wired", ip: nil, gateway: nil,
-                          gatewayMAC: nil, ssid: nil, bssid: nil,
-                          offline: .init(reason: "wifi-not-joined", downSince: nil,
-                                         downDurationS: restarted ? 10 : 252,
-                                         lastNetwork: restarted ? nil : "Home",
-                                         precursor: restarted ? nil : "router-unreachable",
-                                         precursorSummary: restarted ? nil : Self.galleryPrecursorSummary,
-                                         reasonLabel: Self.galleryReasonLabel))
-        down.gateway.lossPct = 10
-        down.gateway.rttJitterMs = 3
-        down.status = .init(severity: "critical", measurement: "link-down", rules: ["N1"],
-                            icmpFiltered: false, degraded: true, paused: false, cadenceS: 5)
-        monitor.adoptGallerySample(down, historical: monitor.recent + [down])
-    }
-
-    /// What the app is about to do on its own about an unchecked network.
-    ///
-    /// Exists because "unchecked" alone cannot tell a user whether to wait
-    /// or to press something. Three outcomes, and the card renders each
-    /// differently: a check is imminent, a check is queued behind one
-    /// already running, or no automatic check is coming at all because the
-    /// Settings toggle is off. Before this, all three showed the same
-    /// spinner and the same "Starting a check." — so a user who had turned
-    /// the feature off saw a permanent promise of work that would never
-    /// arrive.
-    private func arrivalIntent(now: Date) -> ArrivalCopy.Intent {
-        guard Defaults.scanOnNewNetwork else { return .notAutomatic }
-        // A backoff is only ever set by a decline for busy-ness, and the
-        // longest is five minutes — far too long to keep claiming a check
-        // is "starting".
-        if let next = nextArrivalAttemptAt, now < next { return .waitingForAnotherCheck }
-        if isScanning, !isArrivalCheck { return .waitingForAnotherCheck }
-        return .starting
-    }
-
-    /// Write one network's arrival state to both the store and the
-    /// observable mirror, so the two cannot disagree.
-    /// Private/local gateway IPs (RFC 1918) are strictly rejected so they
-    /// cannot poison other networks sharing common gateway subnets (e.g. 192.168.1.1).
-    private func setArrivalState(_ state: ArrivalState, for id: String) {
-        guard !NetworkIdentity.isPrivateOrLocalGateway(id) else { return }
-        var all = Defaults.arrivalStates
-        all[id] = state
-        Defaults.arrivalStates = all
-        if id == arrivalNetworkID { arrivalState = state }
-    }
-
-    /// Write the terminal arrival state for a scan that has just landed.
-    ///
-    /// `.declined` when the policy chose the quick check for a reason the
-    /// user can override, `.checked` otherwise. Both are terminal: neither
-    /// retries. A check that failed or was cancelled never reaches here and
-    /// stays `.unchecked`, so the next sample tries again.
-    ///
-    /// `measured` is the network the finished run actually describes. When
-    /// it disagrees with the network the check was started for, the user
-    /// changed networks mid-scan and this result belongs to neither: the
-    /// run may have measured the new network for most of its length, so
-    /// crediting it to the old one would either file a report labelled B
-    /// under A, or — on an early switch — mark A checked having never
-    /// measured it, silently spending its one automatic baseline. Both
-    /// networks are left `.unchecked` instead, and both retry.
-    /// Determines whether two network identifiers refer to the same physical network,
-    /// accounting for history merges, weak-key folding (gw: vs ssid: vs mac:),
-    /// matching gateway IPs, and known Wi-Fi SSIDs.
-    func networkMatches(scanNetwork: String?, measured: String?, snapshot: RunSnapshot? = nil) -> Bool {
-        guard let scanNetwork, let measured else { return true }
-        if history.canonicalID(measured) == history.canonicalID(scanNetwork) {
-            return true
-        }
-        // Fallback: check if one is a weak non-private gateway key and the snapshot or other key agrees on gateway IP
-        if scanNetwork.starts(with: "gw:") {
-            let gw = String(scanNetwork.dropFirst(3))
-            if !NetworkIdentity.isPrivateOrLocalGateway(gw) {
-                if let snapGw = snapshot?.gateway.ip, snapGw == gw {
-                    return true
-                }
-                if measured.starts(with: "gw:") && String(measured.dropFirst(3)) == gw {
-                    return true
-                }
-            }
-        }
-        if measured.starts(with: "gw:") {
-            let gw = String(measured.dropFirst(3))
-            if !NetworkIdentity.isPrivateOrLocalGateway(gw) {
-                if let snapGw = snapshot?.gateway.ip, snapGw == gw {
-                    return true
-                }
-            }
-        }
-        // Fallback: check if one is an ssid key and the SSID matches liveSSID or snapshot SSID
-        if scanNetwork.starts(with: "ssid:") {
-            let ssid = String(scanNetwork.dropFirst(5))
-            if let snapSsid = snapshot?.wifi?.ssid, snapSsid == ssid {
-                return true
-            }
-            if let live = liveSSID, live == ssid {
-                return true
-            }
-        }
-        if measured.starts(with: "ssid:") {
-            let ssid = String(measured.dropFirst(5))
-            if let snapSsid = snapshot?.wifi?.ssid, snapSsid == ssid {
-                return true
-            }
-            if let live = liveSSID, live == ssid {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Write the terminal arrival state for a scan that has just landed.
-    ///
-    /// `.declined` when the policy chose the quick check for a reason the
-    /// user can override, `.checked` otherwise. Both are terminal: neither
-    /// retries. A check that failed or was cancelled never reaches here and
-    /// stays `.unchecked` with exponential backoff so the next sample tries again safely.
-    private func finishArrivalIfPending(runID: String?, measured: String?) {
-        guard let id = pendingArrivalNetworkID, let depth = pendingArrivalDepth else { return }
-        let decline = pendingArrivalDecline
-
-        // `measured == nil` is "the run could not name its network", not
-        // "a different network" — treat it as agreeing, since the check
-        // did run and refusing it would retry forever.
-        let isMatching: Bool
-        if let measured {
-            isMatching = networkMatches(scanNetwork: id, measured: measured, snapshot: latestRun?.snapshot)
-        } else {
-            isMatching = true
-        }
-
-        guard isMatching else {
-            clearPendingArrival(failed: true)
-            log.info("arrival check for \(id, privacy: .public) landed after a network change — left unchecked so it retries")
-            return
-        }
-
-        clearPendingArrival(failed: false)
-
-        let targetState: ArrivalState
-        if let decline {
-            targetState = .declined(depth: depth, reason: decline, at: Date())
-        } else {
-            targetState = .checked(depth: depth, at: Date(), runID: runID)
-        }
-
-        // Record the terminal state under both the requested id, the measured
-        // identity, and its canonical history id, so monitor samples reporting
-        // either alias (e.g. gw: vs ssid: vs mac:) won't re-trigger arrival.
-        setArrivalState(targetState, for: id)
-        if let measured, measured != id {
-            setArrivalState(targetState, for: measured)
-        }
-        let canonical = history.canonicalID(id)
-        if canonical != id {
-            setArrivalState(targetState, for: canonical)
-        }
-        if let measured {
-            let canMeasured = history.canonicalID(measured)
-            if canMeasured != measured && canMeasured != canonical {
-                setArrivalState(targetState, for: canMeasured)
-            }
-        }
-        log.info("arrival check for \(id, privacy: .public) finished at \(depth.rawValue, privacy: .public)")
-    }
-
-    /// Forget the in-flight arrival check without writing a terminal
-    /// state. Used when a scan fails or is cancelled: the network stays
-    /// `.unchecked`, so the next sample retries with backoff.
-    private func clearPendingArrival(failed: Bool = false) {
-        if let id = pendingArrivalNetworkID {
-            setArrivalState(.unchecked, for: id)
-            if failed {
-                arrivalAttempts += 1
-                let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
-                nextArrivalAttemptAt = Date().addingTimeInterval(delay)
-                log.info("arrival check for \(id, privacy: .public) cleared after failure/cancel (attempt \(self.arrivalAttempts)) — retrying in \(delay, format: .fixed(precision: 0))s")
-            }
-        }
-        pendingArrivalNetworkID = nil
-        pendingArrivalDepth = nil
-        pendingArrivalDecline = nil
-    }
-
-    /// Whether the in-flight scan (if any) is an arrival check.
-    var isArrivalCheck: Bool { pendingArrivalNetworkID != nil }
-
-    /// The arrival card's override button: run the full check the policy
-    /// declined, and record it as this network's arrival check.
-    func runDeclinedFullCheck() {
-        guard let id = arrivalNetworkID else { return }
-        guard runScan(depth: .full, reason: "you asked for the full check anyway") else { return }
-        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
-        pendingArrivalNetworkID = id
-        pendingArrivalDepth = .full
-        pendingArrivalDecline = nil
-    }
-
-    /// Auto-start a short, fast-cadence "investigation" burst the moment
-    /// the CLI's verdict turns from ok/info to warn/critical — before an
-    /// alert's dwell has elapsed and before any triggered scan lands. The
-    /// user's mental model is that the app starts pinging constantly and
-    /// fast the instant something looks wrong, and this is what delivers
-    /// it: the monitor restarts at the 2 s latency-test floor for 60 s, so
-    /// gateway and internet ping arrive every 2 s rather than every 5 s
-    /// while the problem is being confirmed. After the burst, sustained
-    /// degraded (3 s) takes over for as long as severity stays warn/
-    /// critical — `MON_DEGRADED` follows severity in `lib/monitor.sh`'s
-    private func evaluateResolutions(sample: MonitorSample) {
-        // If an active resolution exists, verify it remains valid under the new sample.
-        // If packet loss has returned or new alerts/faults appeared, dismiss it immediately.
-        if activeResolution != nil {
-            let hasLoss = (sample.gateway.lossPct ?? 0) >= 3.0 || (sample.internet.lossPct ?? 0) >= 3.0
-            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty || hasLoss {
-                dismissActiveResolution()
-            }
-        }
-
-        // Only evaluate resolutions if the link is up and the connection is currently healthy
-        guard sample.link.up, sample.status.severity == "ok", alerts.active.isEmpty else {
-            if sample.status.severity == "critical" || sample.status.severity == "warn" || sample.publicInfo.captivePortal == true || !alerts.active.isEmpty {
-                lastUnhealthySample = sample
-            }
-            previousActiveAlerts = alerts.active
-            lastSample = sample
-            return
-        }
-
-        // We are currently healthy. Check if we just transitioned from an unhealthy state
-        if let prev = lastUnhealthySample {
-            // Case 1: Captive Portal Authentication Succeeded
-            if prev.publicInfo.captivePortal == true && sample.publicInfo.captivePortal == false {
-                recordResolution(
-                    title: "Online",
-                    message: "Captive portal authentication succeeded. Internet access active.",
-                    icon: "checkmark.circle.fill"
-                )
-            }
-            // Case 2: Wi-Fi Band Switch (2.4 GHz to 5 GHz / 6 GHz)
-            else if let prevCh = prev.wifi?.channel, let prevChNum = Int(prevCh.prefix(while: { $0.isNumber })), prevChNum <= 14,
-                    let currCh = sample.wifi?.channel, let currChNum = Int(currCh.prefix(while: { $0.isNumber })), currChNum >= 32 {
-                recordResolution(
-                    title: "Wi-Fi Improved",
-                    message: "Moved from 2.4 GHz to 5 GHz (Ch \(currCh)). Negotiated higher throughput.",
-                    icon: "wifi"
-                )
-            }
-            // Case 3: Wi-Fi Signal Restored
-            else if let prevRssi = prev.wifi?.rssi, prevRssi <= -75,
-                    let currRssi = sample.wifi?.rssi, currRssi >= -65 {
-                recordResolution(
-                    title: "Signal Restored",
-                    message: "Wi-Fi signal jumped from \(prevRssi) dBm to \(currRssi) dBm (Excellent).",
-                    icon: "wifi"
-                )
-            }
-            // Case 4: Network Packet Loss Stabilized
-            else if (prev.gateway.lossPct ?? 0) >= 3.0 || (prev.internet.lossPct ?? 0) >= 3.0,
-                    (sample.gateway.lossPct ?? 0) < 1.0 && (sample.internet.lossPct ?? 0) < 1.0 {
-                let ping = sample.internet.rttAvgMs ?? sample.gateway.rttAvgMs
-                let pingText = ping.map { "\(Int($0.rounded())) ms ping" } ?? "low latency"
-                recordResolution(
-                    title: "Network Stabilized",
-                    message: "Packet loss resolved (0% loss, \(pingText)).",
-                    icon: "checkmark.circle.fill"
-                )
-            }
-            // Case 5: Previous active alert cleared
-            else if let clearedAlert = previousActiveAlerts.values.first {
-                recordResolution(
-                    title: "Issue Resolved",
-                    message: "\(clearedAlert.title) is back to normal.",
-                    icon: "checkmark.circle.fill"
-                )
-            }
-            // Reset lastUnhealthySample now that it's been resolved
-            lastUnhealthySample = nil
-        } else if let clearedAlert = previousActiveAlerts.values.first {
-            // Even if lastUnhealthySample wasn't retained, an alert cleared
-            recordResolution(
-                title: "Issue Resolved",
-                message: "\(clearedAlert.title) is back to normal.",
-                icon: "checkmark.circle.fill"
-            )
-        }
-
-        previousActiveAlerts = alerts.active
-        lastSample = sample
-    }
-
-    /// `_mon_rules` in `lib/monitor.sh` automatically switches the running
-    /// monitor from the fast cadence (5 s) to the degraded cadence (3 s) the
-    /// instant severity becomes `warn` or `critical`. Avoid calling
-    /// `monitor.beginBurst` here because `beginBurst` kills and restarts the
-    /// bash process, wiping rolling packet-loss windows and forcing a slow
-    /// full three-tier startup cycle right in the middle of an outage.
-    private func considerInvestigationBurst(_ sample: MonitorSample) {
-        let sev = sample.status.severity
-        defer { lastSeverity = sev }
-        let turnedBad = (sev == "warn" || sev == "critical")
-            && lastSeverity != "warn" && lastSeverity != "critical"
-        guard turnedBad,
-              !sample.status.paused,
-              monitor.isRunning, !monitor.isPaused,
-              !isScanning,
-              !monitor.isBursting,
-              Defaults.monitoringEnabled else { return }
-        log.info("severity turned \(sev, privacy: .public) — monitor entering degraded cadence")
-    }
-
-    private func handleNetworkEvent(_ event: NetworkEventWatcher.Event) {
-        // A roam between access points of the same network, or a link
-        // flap on it, is not a new connection: the report on screen is
-        // still about this network, and a full check running on it is
-        // still measuring it. Invalidating here wiped the report and
-        // cancelled the scan every time the Mac roamed. Only a resample is
-        // wanted; if the network really did change, the monitor's next
-        // sample carries a different identity and `reconcileNetworkIdentity`
-        // invalidates then, on evidence rather than on a CoreWLAN callback.
-        switch event {
-        case .bssidChanged, .linkChanged:
-            log.debug("same-network roam or link change — forcing monitor refresh only")
-            monitor.forceRefresh()
-            return
-        case .pathChanged(let satisfied, _):
-            log.debug("network path changed (satisfied=\(satisfied)) — forcing monitor refresh")
-            monitor.forceRefresh()
-            return
-        case .ssidChanged(let newSSID):
-            let readable = Self.readableSSID(newSSID)
-            let knownSSID = self.liveSSID ?? self.lastAssociatedSSID
-            // If readable is nil (transitioning/unreadable) or matches the known SSID (AP roam),
-            // refresh Wi-Fi state and force a resample without wiping the connection.
-            guard let readable, readable != knownSSID else {
-                log.debug("ssidDidChange without a new SSID — refreshing Wi-Fi and forcing monitor refresh only")
-                refreshLiveWiFi()
-                monitor.forceRefresh()
-                return
-            }
-            lastAssociatedSSID = readable
-            liveSSID = readable
-        }
-        invalidateCurrentConnection()
-        if Defaults.monitoringEnabled {
-            if monitor.isRunning {
-                monitor.forceRefresh()
-            } else {
-                monitor.start()
-            }
-        }
-        log.debug("network event — refreshing history")
-        Task { await history.load() }
-        updateChecker.performDailyCheck()
-    }
-
-    func invalidateCurrentConnection(preserving sample: MonitorSample? = nil) {
-        if isScanning {
-            cancelScan()
-            clearPendingArrival()
-        }
-        if sample == nil {
-            lastNetworkID = nil
-        }
-        connectionGeneration += 1
-        connectionChangedAt = Date()
-        monitor.invalidateConnection(preserving: sample)
-        hydratedReport = nil
-        latestRun = nil
-        scanIdentity = nil
-        latestSpeedTest = nil
-        latestSpeedTestAt = nil
-        latestSpeedTestNetwork = nil
-        lastKnownPublicInfo = nil
-        didHydrateForNetwork = false
-        routerAdminAvailable = false
-        lastProbedRouterIP = nil
-        lastSample = nil
-        lastUnhealthySample = nil
-        lastSeverity = "ok"
-        previousActiveAlerts = [:]
-        alerts.invalidateConnection()
-        heartbeatSeedMinSeq = 0
-        heartbeat.reset()
-        notifications.clearAnnouncedFaults()
-        dismissActiveResolution()
-        events.markSettling()
-        refreshLiveWiFi()
-    }
-
-    // MARK: - Scans
-
-    /// Returns whether the scan actually started, as opposed to being
-    /// silently declined because one was already in flight — see
-    /// `launch(depth:reason:target:adoptAsReport:)` for the guard, and the
-    /// first-sighting trigger in `handleSample` for the caller that has to
-    /// tell the two apart. Every other caller uses this as a plain
-    /// fire-and-forget action, which is why the result is
-    /// `@discardableResult`.
-    @discardableResult
-    func runScan(depth: NetdiagRunner.Depth, reason: String, target: String? = nil) -> Bool {
-        launch(depth: depth, reason: reason, target: target, adoptAsReport: true)
-    }
-
-    /// Whether the "Full check" action should be offered as runnable right
-    /// now. Read by the views to disable the control and say why.
-    var fullCheckIsSafe: Bool {
-        FullCheckPolicy.isSafe(severity: monitor.latest?.status.severity ?? "")
-    }
-
-    /// The full battery: bufferbloat, the MTU probe, per-hop loss and a
-    /// speed test — none of which any other depth produces, and all of
-    /// which the Report card, the Trends charts and the dropdown's
-    /// throughput cells are built to display.
-    ///
-    /// Refuses while the CLI's verdict is critical, and falls back to the
-    /// alert-triggered depth instead of doing nothing: someone who pressed
-    /// this button wants a check, and the lighter one is still worth
-    /// running. See `FullCheckPolicy` for why bufferbloat is the specific
-    /// hazard.
-    ///
-    /// Returns whether a scan actually started (full depth, or the
-    /// `alertTriggered` fallback) — see `runScan` for why this is a
-    /// `Bool` rather than `Void`.
-    @discardableResult
-    func runFullCheck(reason: String = "you asked for a full check") -> Bool {
-        guard fullCheckIsSafe else {
-            return runScan(depth: .alertTriggered, reason: reason)
-        }
-        return runScan(depth: .full, reason: reason)
-    }
-
-    /// Runs a focused speed test (--speed-only) to measure download, upload,
-    /// latency and jitter without running a full diagnostic check.
-    /// Updates latestSpeedTest and reloads history.
-    @discardableResult
-    func runSpeedTest(reason: String = "speed test requested") -> Bool {
-        launch(depth: .speedOnly, reason: reason, target: nil, adoptAsReport: false)
-    }
-
-    /// Returns `true` once the scan has actually been handed to a `Task` —
-    /// `false` when the guard below declined it. That distinction is the
-    /// whole point of the return value: a caller that only finds out a scan
-    /// *would* run by checking `isScanning` beforehand has a race between
-    /// the check and this call, where the return value has none, since both
-    /// happen on the same synchronous call.
-    @discardableResult
-    private func launch(depth: NetdiagRunner.Depth, reason: String,
-                        target: String? = nil, adoptAsReport: Bool) -> Bool {
-        guard !isScanning else {
-            log.debug("scan already running, ignoring request: \(reason, privacy: .public)")
-            return false
-        }
-        isScanning = true
-        activeScanDepth = depth
-        scanStartedAt = Date()
-        lastRunError = nil
-        progress.reset()
-        let generation = connectionGeneration
-        let scanNetwork = confirmedNetworkID
-        let wasArrival = isArrivalCheck
-        if wasArrival {
-            heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
-            heartbeat.reset()
-        }
-
-        // Both halves matter. Pausing the monitor keeps the scan's speed
-        // test and bufferbloat probe from poisoning the samples and
-        // flipping the cadence to "degraded"; holding alerts keeps the app
-        // from notifying about latency it caused itself. And the scan's own
-        // loss probe needs a quiet link — the same constraint that forbids
-        // parallelising it with bufferbloat inside the CLI.
-        //
-        // The pause is SIGUSR1, not SIGSTOP. See MonitorStream for why the
-        // obvious mechanism kills the process 2 s in.
-        monitor.pause(reason: Self.scanPauseReason)
-        heartbeat.pause()
-        alerts.scanInProgress = true
-
-        scanTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                self.isScanning = false
-                self.activeScanDepth = nil
-                self.scanStartedAt = nil
-                self.scanWasAlertTriggered = false
-                self.alerts.scanInProgress = false
-                // After `evaluate(run:)` had its chance (the success path
-                // above ran it already), so this only reaches an alert whose
-                // scan failed, was cancelled, or never landed — the banner
-                // must not go on saying it is checking once the child is gone.
-                self.alerts.scanEnded()
-                self.monitor.resume(reason: Self.scanPauseReason)
-                if wasArrival {
-                    self.heartbeatSeedMinSeq = (self.monitor.latest?.seq ?? 0) + 1
-                    self.heartbeat.reset()
-                }
-                self.heartbeat.resume()
-                self.syncAlertPauseState()
-                // Whatever happened — a clean exit, a crash, Cancel — the
-                // child is gone, so no phase can report again. Without this
-                // a cancelled run leaves its rows spinning forever.
-                self.progress.processEnded(exit: nil)
-            }
-            do {
-                let result = try await NetdiagRunner.run(depth: depth, target: target,
-                                                         progress: self.progress)
-                guard !Task.isCancelled else {
-                    // Cancelled between the child exiting and this line.
-                    // The run may well have completed, but nothing here
-                    // adopted it, so claiming the network was checked
-                    // would record a baseline the user cannot open.
-                    self.clearPendingArrival(failed: true)
-                    return
-                }
-                let measured = result.snapshot.network.historyJoinID
-                let matches = scanNetwork == nil || measured == nil || self.networkMatches(scanNetwork: scanNetwork, measured: measured!, snapshot: result.snapshot)
-                guard generation == self.connectionGeneration, matches else {
-                    self.clearPendingArrival(failed: true)
-                    await self.history.load()
-                    return
-                }
-                self.adoptAcceptedScanIdentity(result)
-                if adoptAsReport {
-                    self.latestRun = result
-                    self.hydratedReport = nil
-                    self.alerts.evaluate(run: result.snapshot)
-                }
-                // The run appended itself to baseline.jsonl, so the charts
-                // and the network list are one record out of date until
-                // this reload.
-                await self.history.load()
-                if self.latestSpeedTest == nil, let current = self.confirmedNetworkID {
-                    self.adoptStoredSpeedTest(for: current)
-                }
-                guard generation == self.connectionGeneration else { return }
-                self.finishArrivalIfPending(runID: result.snapshot.runID,
-                                            measured: result.snapshot.network.historyJoinID)
-                self.log.info("\(reason, privacy: .public) finished in \(result.duration, format: .fixed(precision: 1))s, exit \(result.exitCode)")
-            } catch is CancellationError {
-                self.clearPendingArrival(failed: true)
-                self.log.debug("scan cancelled")
-            } catch {
-                self.clearPendingArrival(failed: true)
-                self.lastRunError = error.localizedDescription
-                self.log.error("scan failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        return true
-    }
-
-    func cancelScan() {
-        scanTask?.cancel()
-        scanTask = nil
-    }
-
-    /// A successful speed-only check establishes identity even though it
-    /// does not replace the full diagnostic report in `latestRun`.
-    func adoptAcceptedScanIdentity(_ result: RunResult) {
-        guard let id = result.snapshot.network.historyJoinID else { return }
-        scanIdentity = (id, result.startedAt, result.finishedAt)
-        if let speed = result.snapshot.speedtest, speed.downMbps != nil {
-            latestSpeedTest = speed
-            latestSpeedTestAt = result.finishedAt
-            latestSpeedTestNetwork = id
-        }
-    }
-
-    // MARK: - Repairs
-
-    /// Where the repair the user last pressed has got to; `nil` once
-    /// dismissed. One at a time: a second repair while one is in flight is
-    /// refused rather than queued.
-    private(set) var repairOutcome: RepairOutcome?
-    private var repairTask: Task<Void, Never>?
-
-    var isRepairing: Bool { repairOutcome?.isInFlight == true }
-
-    /// Whether a finding's repair buttons may be shown. They are for the
-    /// network you are on *now*, so they require a scan from this session
-    /// — never a report hydrated from history, which may be from another
-    /// network and hours old — and, when the monitor has a sample, that the
-    /// monitor still sees the rule firing. A button offering to quit an app
-    /// for a fault that has already cleared is a button that does nothing.
-    func repairsAreCurrent(forRule ruleID: String?) -> Bool {
-        guard let ruleID, latestRun != nil else { return false }
-        if let rules = monitor.latest?.status.rules { return rules.contains(ruleID) }
-        return true
-    }
-
-    func dismissRepairOutcome() {
-        guard !isRepairing else { return }
-        repairOutcome = nil
-    }
-
-    /// The firing rule (of `rules`, in order) that the rules catalog says can
-    /// offer the reconnect-wifi repair, or nil: none does, or the catalog has
-    /// not loaded. The offline card draws its Reconnect button from this, so
-    /// which finding offers it stays the CLI's call (lib/repairs.sh).
-    func reconnectRule(amongFiring rules: [String]) -> String? {
-        rulesCatalog.catalog?.firstRule(offering: "reconnect-wifi", among: rules)
-    }
-
-    /// Run the reconnect-wifi repair on demand (e.g. from an offline card button).
-    func reconnectWiFi(ruleID: String = "WJ-1") {
-        guard !isRepairing else { return }
-        var params: [String: String] = [:]
-        if let target = reconnectTarget(forRule: ruleID) { params["network"] = target }
-        repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                      phase: .working, detail: nil)
-        repairTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let result = try await self.repairRunner("reconnect-wifi", params)
-                self.eventLog.record(kind: "repair", summary: result.message, ruleID: ruleID,
-                                     network: self.monitor.latest?.network.id)
-                self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                                   phase: result.ok ? .done : .failed,
-                                                   detail: result.message)
-            } catch {
-                self.repairOutcome = RepairOutcome(ruleID: ruleID, label: "Reconnect Wi-Fi",
-                                                   phase: .failed, detail: error.localizedDescription)
-            }
-        }
-    }
-
-    // MARK: - Captive Portal & Custom DNS Support
-
-    /// Current reason why link is offline (e.g. "no-route", "no-interface", etc.)
-    var offlineReason: String? {
-        liveSample?.link.offline?.reason ?? monitor.latest?.link.offline?.reason
-    }
-
-    /// Servers configured manually by the user on the primary network service,
-    /// bypassing DHCP DNS. When present, captive portals that intercept DNS or
-    /// block external port 53 will cause standard URL probes to time out.
-    var customDNSServers: [String] {
-        guard let store = SCDynamicStoreCreate(nil, "Hopwatch" as CFString, nil, nil) else { return [] }
-        guard let primaryIface = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
-              let serviceID = primaryIface["PrimaryService"] as? String else { return [] }
-        if let customDNS = SCDynamicStoreCopyValue(store, "Setup:/Network/Service/\(serviceID)/DNS" as CFString) as? [String: Any],
-           let servers = customDNS["ServerAddresses"] as? [String], !servers.isEmpty {
-            return servers
-        }
-        return []
-    }
-
-    /// Whether the Mac is configured with custom DNS on its primary connection.
-    var hasCustomDNS: Bool {
-        !customDNSServers.isEmpty
-    }
-
-    /// True when macOS itself reports the interface is awaiting captive portal interaction.
-    func isSystemCaptiveActive() -> Bool {
-        // If internet has already been verified as accessible and clean, no captive portal is active.
-        if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
-            return false
-        }
-        guard let store = SCDynamicStoreCreate(nil, "Hopwatch" as CFString, nil, nil) else { return false }
-        let iface = monitor.latest?.link.interface ?? "en0"
-        if let dict = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(iface)/CaptiveNetwork" as CFString) as? [String: Any] {
-            if let waiting = dict["WaitingOnUI"] as? Bool, waiting { return true }
-            if let waitingNum = dict["WaitingOnUI"] as? Int, waitingNum != 0 { return true }
-            if let stage = dict["Stage"] as? String {
-                let s = stage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if s == "captive" || s == "redirect" { return true }
-            }
-        }
-        return false
-    }
-
-    /// Whether the current network has been identified or learned as requiring a portal sign-in.
-    var currentNetworkRequiresPortal: Bool {
-        if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
-            return false
-        }
-        let internetHealthy = (liveSample?.internet.lossPct ?? monitor.latest?.internet.lossPct ?? 100) < 50
-            || liveSample?.publicInfo.ip != nil || monitor.latest?.publicInfo.ip != nil
-            || liveSample?.tcp.anyOk == true || monitor.latest?.tcp.anyOk == true
-        if internetHealthy && (liveSample?.internet.rttAvgMs != nil || monitor.latest?.internet.rttAvgMs != nil || liveSample?.tcp.anyOk == true) {
-            return false
-        }
-        if let id = monitor.latest?.network.historyJoinID, Defaults.portalNetworks.contains(id) {
-            return true
-        }
-        if let key = monitor.latest?.network.id, Defaults.portalNetworks.contains(key) {
-            return true
-        }
-        if let ssid = wifiDisplayName, Defaults.portalNetworks.contains("ssid:\(ssid)") {
-            return true
-        }
-        if let lastSSID = lastAssociatedSSID, Defaults.portalNetworks.contains("ssid:\(lastSSID)") {
-            return true
-        }
-        return false
-    }
-
-    /// Records the current network's identity into persistent memory so future connections
-    /// know immediately that it requires a captive portal sign-in.
-    func learnCurrentNetworkRequiresPortal() {
-        if let id = monitor.latest?.network.historyJoinID, !id.isEmpty {
-            Defaults.recordPortalNetwork(id)
-        }
-        if let key = monitor.latest?.network.id, !key.isEmpty {
-            Defaults.recordPortalNetwork(key)
-        }
-        if let ssid = wifiDisplayName, !ssid.isEmpty {
-            Defaults.recordPortalNetwork("ssid:\(ssid)")
-        }
-        if let lastSSID = lastAssociatedSSID, !lastSSID.isEmpty {
-            Defaults.recordPortalNetwork("ssid:\(lastSSID)")
-        }
-    }
-
-    /// Removes the current network from persistent portal memory when internet access is confirmed.
-    func unlearnCurrentNetworkPortal() {
-        if let id = monitor.latest?.network.historyJoinID, !id.isEmpty {
-            Defaults.removePortalNetwork(id)
-        }
-        if let key = monitor.latest?.network.id, !key.isEmpty {
-            Defaults.removePortalNetwork(key)
-        }
-        if let ssid = wifiDisplayName, !ssid.isEmpty {
-            Defaults.removePortalNetwork("ssid:\(ssid)")
-        }
-        if let lastSSID = lastAssociatedSSID, !lastSSID.isEmpty {
-            Defaults.removePortalNetwork("ssid:\(lastSSID)")
-        }
-    }
-
-    /// Presents the native macOS Software Update modal showing version differences,
-    /// formatted release notes, and install options.
-    func showSoftwareUpdate() {
-        onOpenSoftwareUpdate?()
-    }
-
-    /// Directs the user to the captive portal sign-in page across all compatible methods:
-    /// native Captive Network Assistant, detected portal redirect URL, canary detect URL,
-    /// and raw router gateway HTTP (for custom DNS compatibility).
-    func openPortalPage() {
-        if liveSample?.publicInfo.captivePortal == true ||
-           monitor.latest?.status.rules.contains("CP-1") == true ||
-           isSystemCaptiveActive() {
-            learnCurrentNetworkRequiresPortal()
-        }
-
-        // 1. If liveSample has a detected captive portal URL, open that in default browser
-        if let urlStr = liveSample?.publicInfo.captivePortalURL,
-           let url = URL(string: urlStr) {
-            NSWorkspace.shared.open(url)
-            eventLog.record(kind: "repair", summary: "Opened captive portal sign-in page", ruleID: "CP-1",
-                            network: monitor.latest?.network.id)
-            return
-        }
-
-        // 2. Launch macOS native Captive Network Assistant.app if present
-        let cnaPath = "/System/Library/CoreServices/Captive Network Assistant.app"
-        if FileManager.default.fileExists(atPath: cnaPath) {
-            let cnaURL = URL(fileURLWithPath: cnaPath)
-            NSWorkspace.shared.openApplication(at: cnaURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
-            eventLog.record(kind: "repair", summary: "Launched Captive Network Assistant", ruleID: "CP-1",
-                            network: monitor.latest?.network.id)
-            return
-        }
-
-        // 3. If custom DNS is active and router IP is known, open http://<gateway> which bypasses DNS
-        if hasCustomDNS, let gw = liveSample?.link.gateway ?? monitor.latest?.link.gateway, !gw.isEmpty,
-           let gwURL = URL(string: "http://\(gw)") {
-            NSWorkspace.shared.open(gwURL)
-            eventLog.record(kind: "repair", summary: "Opened gateway HTTP sign-in page", ruleID: "CP-1",
-                            network: monitor.latest?.network.id)
-            return
-        }
-
-        // 4. Fall back to Apple's hotspot detect URL in default browser
-        if let detectURL = URL(string: "http://captive.apple.com/hotspot-detect.html") {
-            NSWorkspace.shared.open(detectURL)
-        }
-
-        eventLog.record(kind: "repair", summary: "Opened captive portal sign-in page", ruleID: "CP-1",
-                        network: monitor.latest?.network.id)
-    }
-
-    /// Run a repair the user has just confirmed, then find out whether it
-    /// worked. Only ever called from a button the user pressed — never from
-    /// a timer, an arrival or an alert (CLAUDE.md, Read-only).
-    ///
-    /// The repair itself is `hopwatch --repair=…`: this app only invokes
-    /// it. Afterwards, for a repair whose effect is immediate, the existing
-    /// quick depth re-checks (non-saturating, the same depth an arrival
-    /// uses; deliberately not a button), and the answer is whether the
-    /// finding's own rule still fires. A repair the user has to finish
-    /// (sign in) or that ends the session (restart) is not judged: the CLI's
-    /// message is shown, and the monitor keeps watching as it always does.
-    func runRepair(_ repair: RunSnapshot.Diagnosis.Repair, forRule ruleID: String) {
-        guard !isRepairing else { return }
-        repairOutcome = RepairOutcome(ruleID: ruleID, label: repair.label,
-                                      phase: .working, detail: nil)
-        repairTask = Task { [weak self] in
-            await self?.performRepair(repair, forRule: ruleID)
-        }
-    }
-
-    private func performRepair(_ repair: RunSnapshot.Diagnosis.Repair,
-                               forRule ruleID: String) async {
-        func finish(_ phase: RepairOutcome.Phase, _ detail: String? = nil) {
-            repairOutcome = RepairOutcome(ruleID: ruleID, label: repair.label,
-                                          phase: phase, detail: detail)
-        }
-        let result: NetdiagRunner.RepairResult
-        do {
-            result = try await repairRunner(repair.id, repair.params)
-        } catch NetdiagError.scriptError(let reason) {
-            finish(.failed, reason)
-            return
-        } catch {
-            finish(.failed, error.localizedDescription)
-            return
-        }
-        eventLog.record(kind: "repair", summary: result.message, ruleID: ruleID,
-                        network: monitor.latest?.network.id)
-        guard result.ok else {
-            finish(.failed, result.message)
-            return
-        }
-        guard repair.recheck == "now" else {
-            finish(.done, result.message)
-            return
-        }
-
-        finish(.checking)
-        // A scan already running is waited out rather than raced: its
-        // result may predate the repair.
-        if isScanning { await scanTask?.value }
-        let startedAt = Date()
-        guard runScan(depth: .quick, reason: "checking whether that helped") else {
-            finish(.failed, "Hopwatch couldn't re-check just now.")
-            return
-        }
-        await scanTask?.value
-        guard lastRunError == nil, let run = latestRun, run.startedAt >= startedAt else {
-            finish(.failed, "Hopwatch couldn't re-check just now.")
-            return
-        }
-        if run.snapshot.diagnosis.contains(where: { $0.rule == ruleID }) {
-            finish(.didntHelp, repair.ifUnfixed)
-        } else {
-            finish(.fixed)
-        }
-    }
-
-    // MARK: - Latency test
+    // MARK: - Latency test & Alerts
 
     func stopLatencyTest() { monitor.endBurst() }
 
@@ -2101,27 +543,8 @@ final class HopwatchCoordinator {
         return requestedDestination
     }
 
-    /// An alert fired. Run a scan so the notification can be replaced with
-    /// the CLI's own explanation — that in-place update is the entire point
-    /// of the trigger.
-    ///
-    /// Returns whether a scan was actually started, because the answer is
-    /// what decides whether the alert's banner may say it is checking: every
-    /// early `return false` below is a path where nothing is running, and
-    /// `AlertEngine` settles the banner's text on it rather than leaving the
-    /// holding line up for a check that does not exist.
     @discardableResult
     private func handleAlertFired(_ def: AlertDefinition, firingRules: Set<String>) -> Bool {
-        // Recorded regardless of scanOnAlert: the timeline's job is to
-        // show every *live* alert that fired, not just the ones the
-        // auto-scan preference happened to act on. (Scan-only alerts never
-        // reach here — see the `!def.scanOnly` guard in `AlertEngine.step`
-        // — so the five of those are absent from the timeline by design.)
-        //
-        // `firingRules.min()`, never `def.rules.first`: the latter
-        // reads an arbitrary element of an unordered Set of everything the
-        // alert *listens* for, which is why one L2 condition was logged as
-        // "rule=L1" and the next identical one as "rule=L2".
         var alertExtra: String? = nil
         var alertTo: String? = nil
         if def.id == "public-ip-changed" {
@@ -2137,27 +560,20 @@ final class HopwatchCoordinator {
             NSSound(named: "Basso")?.play()
         }
         guard Defaults.scanOnAlert else { return false }
-        // Loop guard, two clauses. A scan started by an alert never starts
-        // another, and no scan starts while one is running. Between them
-        // there is no path from "alert fires" back to "alert fires".
         guard !scanWasAlertTriggered, !isScanning else {
             log.debug("loop guard: not scanning for \(def.id, privacy: .public)")
             return false
         }
+        if isAlertTriggeredScanInCooldown() {
+            log.debug("cooldown guard: not scanning for \(def.id, privacy: .public)")
+            return false
+        }
         scanWasAlertTriggered = true
-        // .alertTriggered skips bufferbloat and the speed test. Both
-        // deliberately saturate the link, and running a load test on a
-        // connection that is *already* failing makes the user's situation
-        // worse in the middle of whatever broke.
         return runScan(depth: .alertTriggered, reason: "checking \(def.title.lowercased())")
     }
 
     // MARK: - Power
 
-    /// Display sleep and battery, from NSWorkspace. These events arrive
-    /// here for free; asking bash to poll pmset for the same information
-    /// would cost a process spawn per cycle, forever. Energy is the main UX
-    /// risk of an always-on app, and this is where the awareness belongs.
     private func observeWorkspace() {
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.screensDidSleepNotification,
@@ -2178,9 +594,6 @@ final class HopwatchCoordinator {
                 self?.syncAlertPauseState()
             }
         }
-        // System sleep pauses regardless of the display-sleep preference:
-        // the machine is going away, and a frozen child is what makes the
-        // wake instantaneous instead of costing a fresh bash startup.
         nc.addObserver(forName: NSWorkspace.willSleepNotification,
                        object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
@@ -2198,8 +611,6 @@ final class HopwatchCoordinator {
                 self?.heartbeat.resume()
                 if Defaults.monitoringEnabled { self?.monitor.restart() }
                 self?.syncAlertPauseState()
-                // The world may be entirely different after a wake, and
-                // the monitor's own timers do not know that.
                 await self?.history.load()
             }
         }
@@ -2217,8 +628,6 @@ final class HopwatchCoordinator {
         }
     }
 
-    /// Evaluates whether background monitoring and ping heartbeats should be paused
-    /// due to low battery (< 20% while unplugged) when `Defaults.pauseOnBattery` is enabled.
     func evaluateBatteryPauseState() {
         let shouldPause = Defaults.pauseOnBattery && PowerSourceHelper.isLowBattery
         if shouldPause {
@@ -2231,866 +640,6 @@ final class HopwatchCoordinator {
             }
         }
         syncAlertPauseState()
-    }
-
-    // MARK: - Presentation helpers
-
-    /// Refreshes Location Services authorization and unredacts Wi-Fi details
-    /// if newly granted.
-    func refreshLocationState() {
-        locationPermissions.refresh()
-        if locationPermissions.isAuthorized {
-            refreshLiveWiFi()
-            adoptLiveSSIDAsNameIfNeeded()
-        }
-    }
-
-    /// Refresh `liveSSID` from CoreWLAN. Called once per monitor sample
-    /// rather than from a view body: a `CWWiFiClient` read is a real
-    /// syscall, and `wifiDisplayName` is read on every redraw of an
-    /// always-visible menu. Returns nil when Location is not authorized —
-    /// CoreWLAN returns a redacted `<SSID>` / nil in that state, and
-    /// passing that through would surface a raw placeholder as a name.
-    func refreshLiveWiFi() {
-        guard !isTestingLiveSSID else { return }
-        // CoreWLAN's `interface()` returns the current Wi-Fi interface, but
-        // has been observed returning nil on some builds even when
-        // associated; fall back to the first power-on interface from
-        // `interfaces()` before giving up.
-        guard locationPermissions.isAuthorized else {
-            if liveSSID != nil { log.debug("wifi: location not authorized — SSID unavailable") }
-            liveSSID = nil
-            return
-        }
-        let client = CWWiFiClient.shared()
-        let iface = client.interface() ?? client.interfaces()?.first { $0.powerOn() }
-        guard let iface else {
-            log.debug("wifi: no CoreWLAN interface (on ethernet, or WiFi off)")
-            liveSSID = nil
-            return
-        }
-        let name = iface.ssid()
-        if let name, !name.isEmpty, !name.contains("<redacted>"), !name.contains("hidden by macOS") {
-            log.debug("wifi: live SSID read OK")
-            liveSSID = name
-        } else {
-            log.debug("wifi: CoreWLAN interface present but ssid() returned nil — location grant may be provisional or revoked")
-            liveSSID = nil
-        }
-    }
-
-    /// Adopt the live SSID as the current network's display name when no
-    /// real name is recorded yet. The CLI records networks in
-    /// baseline.jsonl with a MAC-keyed id and a redacted label (TCC
-    /// attributes `ipconfig getsummary` to `/usr/sbin/ipconfig`, not this
-    /// .app), so without this a network the user has granted Location for
-    /// still shows up as "wifi:mac=…" in the Networks tab and in search
-    /// forever. The GUI's CoreWLAN `ssid()` *does* see the real name, so
-    /// the moment we have it we record it as the network's custom name —
-    /// the same store `displayName` and the Networks-tab search already
-    /// read. Joins on `historyJoinID` (the `--history` group key), not the
-    /// raw sample id: the rename has to land on the same key the Networks
-    /// tab renders by, or the name shows on Home and not there — the exact
-    /// bug this replace fixed. Never overwrites a name that is not ugly
-    /// (a user rename, or a real SSID the CLI captured under sudo), and
-    /// writes at most once per network per name change rather than every
-    /// sample.
-    private func adoptLiveSSIDAsNameIfNeeded(for sample: MonitorSample? = nil) {
-        guard let live = liveSSID, !live.isEmpty,
-              !live.contains("<redacted>"), !live.contains("hidden by macOS") else { return }
-        let currentSample = sample ?? monitor.latest
-        guard let s = currentSample, !s.status.paused, s.link.up, s.link.isWiFi else { return }
-        // Only ever adopt an SSID name onto a hardware router MAC key.
-        // Never adopt onto an ssid: key (it already is an SSID) or gw: key (weak RFC1918 IP).
-        guard let id = s.network.historyJoinID, id.starts(with: "mac:") else { return }
-        // Ensure the sample is from the current connection, not in-flight from before a network switch.
-        if let boundary = connectionChangedAt {
-            guard s.timestamp >= boundary else { return }
-        }
-        if let sampleSSID = Self.readableSSID(s.link.ssid), !sampleSSID.isEmpty {
-            guard sampleSSID == live else { return }
-        }
-        // If the user has assigned their own custom name (and it's not a placeholder), don't overwrite it
-        if let custom = history.customName(for: id), !custom.isEmpty,
-           !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
-           !Self.isRawNetworkKey(custom) {
-            return
-        }
-        let current = history.displayName(for: id)
-        guard current != live else { return }
-        history.rename(id, to: live)
-        log.info("adopted live SSID as name for \(id, privacy: .public)")
-    }
-
-    /// True when a "name" is actually a raw network key rather than
-    /// anything a person wrote or recognised — `wifi:mac=AA:BB:…` (the
-    /// record format), `mac:aa:bb:…` / `gw:…` / `ssid:…` (the history
-    /// group format). Both spellings must be caught here: renames can
-    /// predate the group-id join, and the group key is what a network with
-    /// no name at all falls back to in `displayName`.
-    static func isRawNetworkKey(_ s: String) -> Bool {
-        s.starts(with: "wifi:mac=") || s.starts(with: "lan:mac=")
-            || s.starts(with: "wifi:ssid=") || s.starts(with: "lan:gw=")
-            || s.starts(with: "mac:") || s.starts(with: "gw:")
-            || s.starts(with: "ssid:")
-    }
-
-    /// What `HomeView` has to render: either the run that finished in
-    /// this session, or a historical one fetched to fill the screen before
-    /// any scan has run this launch. See `reportSource` for how the choice
-    /// between the two is made and what it does and doesn't mean.
-    enum ReportSource {
-        case live(RunResult)
-        case stored(RunDetail)
-    }
-
-    /// `.live` always wins: `launch()` clears `hydratedReport` the moment a
-    /// scan lands, and this checks `latestRun` first regardless, so the two
-    /// can never be shown in the wrong order even if that clear were ever
-    /// missed.
-    ///
-    /// Deliberately not read by `currentHealth`, `headline`, or the alert
-    /// engine — all three read `latestRun` directly, unaffected by this
-    /// property's existence. A hydrated report is a *display* fallback for
-    /// a screen that would otherwise be empty; it is not a fresh
-    /// measurement, and nothing that judges the network's current state is
-    /// allowed to treat it as one.
-    ///
-    /// Scoped like `currentNetworkRun`: a report about another network is
-    /// not offered, so Home shows its "Awaiting check" state rather than the
-    /// living room's report in a café.
-    var reportSource: ReportSource? {
-        let live = confirmedNetworkID
-        if let latestRun, runIsForNetwork(latestRun.snapshot.network.historyJoinID, live: live) {
-            return .live(latestRun)
-        }
-        if let hydratedReport,
-           runIsForNetwork(hydratedReport.context.networkID ?? hydratedReport.run.network.historyJoinID, live: live) {
-            return .stored(hydratedReport)
-        }
-        return nil
-    }
-
-    private func runIsForNetwork(_ runNetwork: String?, live: String?) -> Bool {
-        guard let runNetwork, let live else { return false }
-        if RunScope.isSameNetwork(run: runNetwork, live: live, canonical: history.canonicalID) {
-            return true
-        }
-        // Fallback: if one is an SSID key and matches liveSSID, while the other is a private gateway on Wi-Fi
-        if let liveSsid = liveSSID, !liveSsid.isEmpty {
-            let liveTarget = "ssid:\(liveSsid)"
-            if (runNetwork == liveTarget || history.canonicalID(runNetwork) == liveTarget) &&
-                (NetworkIdentity.isPrivateOrLocalGateway(live) || live == liveTarget) {
-                return true
-            }
-            if (live == liveTarget || history.canonicalID(live) == liveTarget) &&
-                (NetworkIdentity.isPrivateOrLocalGateway(runNetwork) || runNetwork == liveTarget) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// The one place a stored or session run becomes "the report for the
-    /// network I am on" — and the only door the display fallback chains
-    /// (public IP, country, flag, ISP, gateway, the check table, the
-    /// technical panel, findings, the reliability card, the last-scan loss
-    /// and RTT) go through.
-    ///
-    /// Returns the session's scan, else the hydrated report, whichever is
-    /// about a positively confirmed current network, with its age. Unknown
-    /// identity, including the wake interval, cannot authorize a fallback.
-    /// Saved reports remain available through historical views.
-    var currentNetworkRun: CurrentNetworkRun? {
-        guard let live = confirmedNetworkID else { return nil }
-        if let latestRun, runIsForNetwork(latestRun.snapshot.network.historyJoinID, live: live) {
-            return CurrentNetworkRun(result: latestRun, isLive: true)
-        }
-        if let hydratedReport,
-           runIsForNetwork(hydratedReport.context.networkID ?? hydratedReport.run.network.historyJoinID, live: live) {
-            return CurrentNetworkRun(result: cachedHydratedRunResult ?? hydratedReport.asRunResult, isLive: false)
-        }
-        return nil
-    }
-
-    /// Whichever report is currently active (live or stored), as a
-    /// `RunResult` — only if it is about the network we are on.
-    var currentRunResult: RunResult? {
-        currentNetworkRun?.result
-    }
-
-    /// The scoped run, when it is recent enough to stand in for a live
-    /// measurement: a scan that finished within one sample-freshness window.
-    /// For loss, RTT and stability — figures that describe the link *now* —
-    /// so a report from an hour ago, or from this morning's cold launch,
-    /// never answers "how is the connection". `currentNetworkRun` is for
-    /// things that describe the network (its ISP, its country, its findings).
-    var freshNetworkRunSnapshot: RunSnapshot? {
-        _ = staleEpoch
-        guard let run = currentNetworkRun,
-              run.age() <= SampleFreshness.window(cadenceS: monitor.latest?.status.cadenceS),
-              connectionChangedAt.map({ run.result.startedAt >= $0 }) ?? true
-        else { return nil }
-        return run.snapshot
-    }
-
-    /// The throughput last measured on the network we are on, with when.
-    /// `nil` on another network (or none yet): the in-memory figure is
-    /// keyed to the network it was measured on and dropped on a change
-    /// (`adoptStoredSpeedTest`), and this re-checks at read time so a view
-    /// drawn before the first sample of the new network cannot beat it.
-    var currentSpeedTest: (speed: RunSnapshot.Speedtest, at: Date?)? {
-        guard let speed = latestSpeedTest else { return nil }
-        guard let live = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return nil }
-        guard runIsForNetwork(latestSpeedTestNetwork, live: live) else { return nil }
-        return (speed, latestSpeedTestAt)
-    }
-
-    var currentSuitabilitySpeed: RunSnapshot.Speedtest? {
-        if let speed = freshNetworkRunSnapshot?.speedtest { return speed }
-        guard let current = currentSpeedTest, let date = current.at,
-              Date().timeIntervalSince(date) <= SampleFreshness.window(cadenceS: liveSample?.status.cadenceS)
-        else { return nil }
-        return current.speed
-    }
-
-    var currentPublicInfo: MonitorSample.PublicInfo? {
-        guard !linkIsDown else { return nil }
-        if let sample = liveSample, sample.publicInfo.captivePortal == true {
-            return nil
-        }
-        if let sample = liveSample, sample.publicInfo.ok == true, !(sample.publicInfo.countryISO ?? "").isEmpty {
-            return sample.publicInfo
-        }
-        if let last = lastKnownPublicInfo {
-            return last
-        }
-        if let sample = liveSample, sample.publicInfo.ok == false {
-            return nil
-        }
-        let info = freshNetworkRunSnapshot?.publicInfo
-        return info?.ok == false ? nil : info
-    }
-
-    // MARK: - Sample freshness
-
-    /// Bumped by the watchdog so every age-based reading can expire even
-    /// when no monitor sample arrives.
-    private(set) var staleEpoch = 0
-    private var staleWatchTask: Task<Void, Never>?
-    /// Gallery fixtures are written once and rendered for as long as the
-    /// run takes; they would age past the window mid-render.
-    private var stalenessSuspended = false
-
-    /// The monitor is supposed to be reporting and its newest sample is
-    /// older than `SampleFreshness` allows. False while monitoring is off or
-    /// held by any pause (those have their own states, and a paused monitor
-    /// is meant to be quiet), when there is no sample yet (that is "not
-    /// measured", not "late"), and for a sample that is itself a paused
-    /// one. Does not mask no-link: the resolvers test `linkIsDown` first.
-    var latestSampleIsStale: Bool {
-        _ = staleEpoch
-        return computeSampleIsStale(now: Date())
-    }
-
-    func computeSampleIsStale(now: Date) -> Bool {
-        guard !stalenessSuspended, let sample = monitor.latest else { return false }
-        let reference = max(
-            sample.timestamp,
-            monitor.awaitingSince ?? .distantPast,
-            monitor.lastSpawnedAt ?? .distantPast
-        )
-        return SampleFreshness.isWatchdogStale(
-            sampleAge: now.timeIntervalSince(reference),
-            cadenceS: sample.status.cadenceS,
-            observing: Defaults.monitoringEnabled && !monitor.isPausedForAnyReason,
-            samplePaused: sample.status.paused)
-    }
-
-    /// The newest monitor sample, if it can be believed to describe the
-    /// network now: not stale, and not one that predates a stop or a pause
-    /// (`MonitorStream.awaitingSince` — after a lid-close in one place and
-    /// an open in another, `latest` is from the other place until the first
-    /// fresh sample, and it used to read "Live" for those seconds).
-    ///
-    /// This is the gate for *readings* — router and internet ping, loss,
-    /// jitter, public IP, country, flag, ISP. It is deliberately not
-    /// `running && !paused`: a pause is held for the whole length of every
-    /// full check, and blanking every tile for a minute and a half each time
-    /// would trade one misleading display for another; the paused states
-    /// already say so out loud. `MonitorStream.stop()` still keeps `latest`
-    /// itself, because a "no link" sample must survive a monitor restart.
-    var liveSample: MonitorSample? {
-        _ = staleEpoch
-        guard let sample = monitor.latest,
-              !monitor.isAwaitingFirstSample,
-              !sample.status.paused else { return nil }
-        let reference = max(sample.timestamp, monitor.lastSpawnedAt ?? .distantPast)
-        guard stalenessSuspended
-              || Date().timeIntervalSince(reference)
-                 <= SampleFreshness.watchdogWindow(cadenceS: sample.status.cadenceS)
-        else { return nil }
-        return sample
-    }
-
-    var confirmedNetworkID: String? {
-        if let sample = liveSample { return resolvedNetworkID(for: sample) }
-        // A user-requested scan can establish identity while monitoring is
-        // switched off. It must have begun after every pending boundary.
-        guard let identity = scanIdentity,
-              Date().timeIntervalSince(identity.finishedAt) <= SampleFreshness.window(cadenceS: nil),
-              identity.startedAt >= max(connectionChangedAt ?? .distantPast, monitor.awaitingSince ?? .distantPast)
-        else { return nil }
-        return identity.id
-    }
-
-    var currentSamples: [MonitorSample] {
-        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return [] }
-        let canonical = history.canonicalID(id)
-        return monitor.recent.filter {
-            !$0.status.paused && (resolvedNetworkID(for: $0).map(history.canonicalID) == canonical || $0.network.historyJoinID.map(history.canonicalID) == canonical)
-        }
-    }
-
-    var currentNetworkEvents: [NetworkEvent] { currentNetworkEvents(withinHours: 24) }
-
-    /// The current network's events over `hours`, or the whole retained log
-    /// when `nil`. Never another network's: a surface that must not cap at
-    /// 24 h (the "nothing has changed in…" line) still scopes by identity.
-    func currentNetworkEvents(withinHours hours: Double?) -> [NetworkEvent] {
-        guard let id = confirmedNetworkID ?? (monitor.isAwaitingFirstSample ? nil : resolvedNetworkID(for: monitor.latest)) else { return [] }
-        let canonical = history.canonicalID(id)
-        let pool = hours.map { eventLog.within(hours: $0) } ?? eventLog.events
-        return pool.filter { event in
-            if event.network.flatMap(NetworkIdentity.canonical).map(history.canonicalID) == canonical
-                || event.network.map(history.canonicalID) == canonical {
-                return true
-            }
-            if let net = event.network, NetworkIdentity.isPrivateOrLocalGateway(net) {
-                if let liveSsid = liveSSID, (canonical == "ssid:\(liveSsid)" || canonical == history.canonicalID("ssid:\(liveSsid)")) {
-                    return true
-                }
-            }
-            return false
-        }
-    }
-
-    /// The newest condition event on the network the Mac is on now (last
-    /// 24 h), for any surface that shows "what happened last".
-    var latestCurrentNetworkEvent: NetworkEvent? {
-        NetworkEvent.latestCondition(in: currentNetworkEvents)
-    }
-
-    /// Synthesized live availability reflecting real-time network interruptions, drops,
-    /// and uptime, updated continuously as monitoring samples and events occur.
-    var liveAvailability: AvailabilityEngine.Result {
-        let events = currentNetworkEvents
-        let result = AvailabilityEngine.evaluate(
-            networkEvents: events,
-            allRecentEvents: eventLog.within(hours: 24),
-            currentRunAvailability: currentRunResult?.snapshot.availability,
-            heartbeatMisses: heartbeat.missCount,
-            heartbeatTotal: heartbeat.totalCount,
-            networkConnectedAt: connectionChangedAt
-        )
-        _ = DataSanityWatchdog.checkAvailability(
-            result: result,
-            events: events,
-            heartbeatMisses: heartbeat.missCount
-        )
-        return result
-    }
-
-    var vpnFreshness: String {
-        guard let sample = liveSample else { return "Awaiting reading" }
-        let age = Date().timeIntervalSince(sample.timestamp)
-        return age >= 0 && age < 5 ? "Checked just now"
-            : "Checked \(RelativeTime.string(from: sample.timestamp))"
-    }
-
-    private func startStaleWatch() {
-        staleWatchTask?.cancel()
-        staleWatchTask = Task { [weak self] in
-            // Scan freshness and the longer no-link window also expire when
-            // `liveSample` stays nil, so a stale-only transition misses them.
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard let self, !Task.isCancelled else { return }
-                self.tickAgeDrivenState()
-            }
-        }
-    }
-
-    func tickAgeDrivenState() { staleEpoch += 1 }
-
-    /// True if any monitor sample in the rolling loss window (~last 10 probes / 100s) recorded a Wi-Fi roam event.
-    var hasRecentRoam: Bool {
-        if monitor.latest?.changes.contains(where: { $0.kind == "wifi-roamed" }) == true {
-            return true
-        }
-        let windowSamples = monitor.recent.suffix(10)
-        return windowSamples.contains { sample in
-            sample.changes.contains { $0.kind == "wifi-roamed" }
-        }
-    }
-
-    /// Unified effective packet loss across internet and gateway probes.
-    /// Evaluates whichever is worse so loss on either leg is visible and accounted for.
-    ///
-    /// A leg the CLI says ping cannot measure (TCP-1 / `icmp_filtered` for the
-    /// gateway, ICMP-1 for the internet) is excluded — see `EffectiveLoss`.
-    var effectiveLoss: Double? {
-        // No link: neither the null probes in the sample nor the last scan's
-        // figures say anything about the link now. The `latestRun` fallbacks
-        // below are how a router "10% packet loss" survived a disconnect.
-        if linkIsDown { return nil }
-        // The fallback is a scan of *this* network that finished within the
-        // freshness window — not any run in memory. A report from another
-        // network, or from this morning, is not a measurement of the link.
-        return EffectiveLoss.compute(
-            internetLoss: liveSample?.internet.lossPct
-                ?? freshNetworkRunSnapshot?.internetLatency.lossPct,
-            gatewayLoss: liveSample?.gateway.lossPct
-                ?? freshNetworkRunSnapshot?.gateway.lossPct,
-            filtering: lossFiltering,
-            hasRecentRoam: hasRecentRoam
-        )
-    }
-
-    /// The rules actively considered firing for suitability and experience evaluation.
-    ///
-    /// When the monitor is actively running and producing samples for the current connection,
-    /// it is the real-time authority for monitor-tracked rules (e.g. SOCK-1, CONN-1, D1, N1, G1, P1).
-    /// If such a rule appeared in a completed diagnostic run snapshot from minutes ago, but the live
-    /// monitor has since cleared it or does not report it, the stale snapshot rule must not poison
-    /// the live suitability grid (e.g. claiming "Browsing: Offline" when the connection is live and healthy).
-    /// Conversely, scan-only rules (e.g. bufferbloat BL-1, double NAT N4, MTU M1) that the monitor
-    /// does not evaluate are preserved from the fresh snapshot until the next scan.
-    var activeFiredRules: Set<String> {
-        let liveRules = Set(liveSample?.status.rules ?? [])
-        guard let snap = freshNetworkRunSnapshot else { return liveRules }
-        let snapRules = snap.diagnosis.compactMap(\.rule)
-        guard liveSample != nil else { return Set(snapRules) }
-
-        let catalog = rulesCatalog.catalog
-        var combined = liveRules
-        for ruleID in snapRules {
-            let scope = catalog?[ruleID]?.scope
-            let isMonitored = scope == "both" || scope == "monitor"
-                || ruleID == "SOCK-1" || ruleID == "CONN-1" || ruleID == "HOG-1"
-                || ruleID.hasPrefix("D") || ruleID.hasPrefix("P")
-                || ruleID.hasPrefix("G") || ruleID.hasPrefix("N")
-                || ruleID.hasPrefix("WJ") || ruleID.hasPrefix("CP")
-            if !isMonitored {
-                combined.insert(ruleID)
-            }
-        }
-        return combined
-    }
-
-    /// Subtitle describing the in-flight diagnostic or arrival scan phase.
-    /// Returns nil if not scanning or if no specific phase detail is active.
-    var activeScanProgressSubtitle: String? {
-        guard isScanning else { return nil }
-        if progress.isSpeedTesting, let speed = progress.speed {
-            let arrow = speed.directionSymbol.map { "\($0) " } ?? ""
-            let stage = speed.stage.isEmpty ? "Speed test" : PhaseLabel.humanised(speed.stage)
-            if let mbps = speed.mbps {
-                return String(format: "%@%@ · %.1f Mbps", arrow, stage, mbps)
-            }
-            return "\(arrow)\(stage)…"
-        }
-        if let bb = progress.bufferbloat, bb.stage != "" {
-            return "Testing bufferbloat & latency under load…"
-        }
-        if let running = progress.runningPhase {
-            return "\(running.label)…"
-        }
-        return nil
-    }
-
-    /// Which loss legs are unmeasurable by ping, from the live sample and any
-    /// run diagnosis in view. Pass this to `SuitabilityEngine` alongside
-    /// `effectiveLoss` so "filtered, unknown" is not mistaken for "not yet
-    /// measured".
-    var lossFiltering: EffectiveLoss.Filtering {
-        EffectiveLoss.filtering(
-            icmpFilteredFlag: liveSample?.status.icmpFiltered == true,
-            ruleIDs: Array(activeFiredRules)
-        )
-    }
-
-    /// The newest monitor sample says there is no link, and is recent enough
-    /// to believe. The one answer the dot, both stage cards and every tile
-    /// read — see `LinkState`.
-    var linkIsDown: Bool {
-        _ = staleEpoch
-        return LinkState.isDown(sample: monitor.latest)
-    }
-
-    /// Whether the Mac's connection is Wi-Fi, for icons and captions.
-    /// With no link the monitor's `link.type` is only the CLI's default
-    /// ("wired" when there is no interface to ask), so it is not read; the
-    /// question falls through to whether the Wi-Fi radio is on, which is what
-    /// a person on Wi-Fi who lost their network would expect it to say.
-    var linkIsWiFi: Bool {
-        if linkIsDown { return CWWiFiClient.shared().interface()?.powerOn() ?? true }
-        return monitor.latest?.link.isWiFi ?? true
-    }
-
-    /// Effective instantaneous or moving RFC 3550 jitter.
-    ///
-    /// Nil with no link. The fallback below averages `monitor.recent`, which
-    /// at the moment of a drop is made entirely of samples from before it —
-    /// so the dropdown said "Jitter 3 ms · Stable response times" over a
-    /// card reading "no network connection".
-    var currentJitter: Double? {
-        if linkIsDown { return nil }
-        // No believable newest sample, no jitter: the averaged fallback
-        // below is only meaningful as "the last few seconds of this link".
-        guard let live = liveSample else { return nil }
-        // On a newly joined connection with fewer than 2 samples, a single-packet
-        // handshake delay can produce an unrepresentative transient jitter spike.
-        // Wait for at least 2 samples before asserting elevated jitter.
-        if currentSamples.count < 2, (live.liveJitterMs ?? 0) >= 30.0 {
-            return nil
-        }
-        if let jitter = live.liveJitterMs { return jitter }
-        // `movingJitter` keeps only samples from this network, link up, not
-        // paused and within a few cadences of the newest — not the hour the
-        // buffer holds.
-        return MonitorSeries.movingJitter(samples: currentSamples)
-    }
-
-    /// Overall connection stability rating evaluated from current RTT, jitter, and packet loss.
-    var currentStability: ConnectionStability {
-        if linkIsDown { return .noLink }
-        let rtt = liveSample?.internet.rttAvgMs ?? liveSample?.gateway.rttAvgMs
-            ?? freshNetworkRunSnapshot?.internetLatency.rttAvgMs ?? freshNetworkRunSnapshot?.gateway.rttAvgMs
-        return ConnectionStability.evaluate(rtt: rtt, jitter: currentJitter, loss: effectiveLoss)
-    }
-
-    /// The menu-bar dot. Thin wrapper over `HealthResolver.resolve` — see
-    /// that file for the precedence and for why a paused app no longer
-    /// reports the last reading from before it stopped looking.
-    var currentHealth: Health {
-        let activeSnapshot = alerts.urgentActiveSorted.first.map {
-            StageResolver.AlertSnapshot(
-                title: $0.title, body: $0.body,
-                raisedAt: $0.raisedAt, rules: $0.rules,
-                severityRank: $0.rules.compactMap(severityRank(forRuleID:)).max() ?? 0,
-                id: $0.id,
-                isUrgent: $0.isUrgent)
-        }
-        // A run is the dot's answer only when there is no sample at all
-        // (a cold launch before the first one). Once the monitor has spoken
-        // and `liveSample` is nil, the sample is awaiting a fresh one or is
-        // stale, and an older scan must not turn the dot green in its place.
-        let currentRunHealth = monitor.latest == nil
-            ? currentNetworkRun?.snapshot.worstSeverity : nil
-
-        let isDetermining = isSettling
-            || monitor.isAwaitingFirstSample
-            || (isScanning && isArrivalCheck)
-            || (liveSample != nil && liveSample?.status.measurement != "measured")
-            || (liveSample == nil && freshNetworkRunSnapshot == nil)
-
-        return HealthResolver.resolve(.init(
-            isScanning: isScanning,
-            isArrivalCheck: isArrivalCheck,
-            monitoringEnabled: Defaults.monitoringEnabled,
-            isPausedForAnyReason: monitor.isPausedForAnyReason,
-            monitorRunning: monitor.isRunning,
-            activeAlert: activeSnapshot,
-            sampleHealth: liveSample?.health,
-            runHealth: currentRunHealth,
-            linkDown: linkIsDown,
-            sampleStale: latestSampleIsStale,
-            isChecking: isDetermining))
-    }
-
-    /// The CLI's severity for one rule ID, ranked so the worst of a set can
-    /// be picked out — higher is worse. The single place both
-    /// `alerts.severityRank` (ranking *active alerts*, each of which can
-    /// back more than one rule) and `headline` (ranking the rule IDs on one
-    /// sample) ask this question, so the two never drift into disagreeing
-    /// about which of two rules is worse. Degrades to 0 before the catalog
-    /// loads, or for a rule the catalog doesn't name, so an unranked rule
-    /// sorts as least urgent rather than winning a comparison by default.
-    func severityRank(forRuleID ruleID: String) -> Int {
-        Self.severityRank(rulesCatalog.catalog?[ruleID]?.severity)
-    }
-
-    /// The catalog's severity as a comparable rank, higher being worse.
-    /// Static and total: an unknown or absent severity ranks 0 rather than
-    /// throwing, so a rule this build has never heard of sorts below every
-    /// rule it has.
-    static func severityRank(_ severity: String?) -> Int {
-        switch severity {
-        case "critical": return 3
-        case "warn", "warning": return 2
-        case "info": return 1
-        default: return 0
-        }
-    }
-
-    /// The worst rule among `ruleIDs`, by the catalog's own severity.
-    ///
-    /// Pure, static, and separated from `headline` for one reason: the
-    /// behaviour it encodes — worst wins, not first — is the fix for a bug
-    /// that is invisible on inspection (`lib/monitor.sh` appends rules in
-    /// evaluation order, so an info-level VPN-1 can precede a critical L1),
-    /// and a computed property on an object that spawns a monitor and reads
-    /// history cannot be checked. `--verify` calls this directly.
-    ///
-    /// Ties keep the earliest rule, which is the CLI's own evaluation
-    /// order — arbitrary between equals, but stable, so the same sample
-    /// never produces two different headlines.
-    static func worstRule(among ruleIDs: [String],
-                          catalog: RulesCatalog?) -> RulesCatalog.Rule? {
-        guard let catalog else { return nil }
-        var best: RulesCatalog.Rule?
-        var bestRank = Int.min
-        for id in ruleIDs {
-            guard let rule = catalog[id] else { continue }
-            let rank = severityRank(rule.severity)
-            if rank > bestRank {
-                best = rule
-                bestRank = rank
-            }
-        }
-        return best
-    }
-
-    /// What `headline` shows for a firing rule: its blurb, else its title,
-    /// else nothing. Static alongside `worstRule` and for the same reason.
-    static func headlineText(forRulesIn ruleIDs: [String],
-                             catalog: RulesCatalog?) -> String? {
-        guard let worst = worstRule(among: ruleIDs, catalog: catalog) else { return nil }
-        if let blurb = worst.blurb, !blurb.isEmpty { return blurb }
-        if let title = worst.title, !title.isEmpty { return title }
-        return nil
-    }
-
-    /// The one sentence the dropdown leads with.
-    ///
-    /// Every branch here either states an observable fact about the app's
-    /// own state ("Monitoring is off") or hands back prose the CLI wrote.
-    /// The healthy line is the only exception, and it is the CLI's own
-    /// wording from lib/diagnosis.sh's `ok()` branch.
-    ///
-    /// The guard order below is deliberately the same order
-    /// `StageResolver.resolve` uses for the dropdown's stage card: scanning,
-    /// then monitoring-off, then paused-for-any-reason, then a skewed
-    /// monitor, then link-down, then an active alert, then
-    /// not-yet-measured, then severity. Before this fix the two orders
-    /// disagreed — scanning and "paused" were missing here entirely, and
-    /// the active-alert check ran ahead of the skewed-monitor check — so
-    /// the header (this property, read by `HomeView`) and the dropdown's
-    /// stage card (`StageResolver`, fed the same underlying state) could
-    /// describe the same moment two different ways. The concrete case: the
-    /// display sleeps, `monitoringEnabled` stays true so this used to fall
-    /// through the first guard, and a stale `activeSorted.first` from
-    /// before the sleep kept being shown here while the dropdown correctly
-    /// said "Monitoring paused — the display is asleep."
-    var headline: String {
-        if isScanning { return "Running a network check…" }
-        if !Defaults.monitoringEnabled { return "Monitoring is off." }
-        if monitor.isPausedForAnyReason {
-            guard let reason = monitor.pauseReason else { return "Monitoring is paused." }
-            return "Monitoring is paused — \(reason)."
-        }
-        // A monitor that died leaves `monitor.latest` holding whatever it
-        // last measured, which can still read "healthy" — checking this
-        // before `activeAlert` and the sample-based branches below is what
-        // stops a crashed monitor from being reported as a quiet network.
-        if let error = monitor.lastError, !monitor.isRunning {
-            return "The netdiag command needs attention — \(error)"
-        }
-        // Ahead of the active alert, like `StageResolver`'s `.noLink`: the
-        // subtitle under "No network connection" must be about the missing
-        // link, not an older alert's body. The sentence is the CLI's own N1
-        // text from the rules catalog; the literal is only the fallback for
-        // a catalog that has not loaded.
-        if linkIsDown {
-            let offline = liveSample?.link.offline ?? monitor.latest?.link.offline
-            let firing = monitor.latest?.status.rules ?? []
-            // The CLI's sentence about what preceded the drop, verbatim; it
-            // is absent (and this falls through) when the CLI has none to
-            // say or a more specific rule explains the outage.
-            if let summary = offline?.precursorSummary, !summary.isEmpty {
-                return summary
-            }
-            // DH-3 and N1 both fire when the Mac is joined without an
-            // address, and N1 would win the tie with "nothing is joined".
-            // The more specific rule's own catalog text leads.
-            if firing.contains("DH-3"),
-               let text = Self.headlineText(forRulesIn: ["DH-3"], catalog: rulesCatalog.catalog) {
-                return text
-            }
-            return Self.headlineText(forRulesIn: firing,
-                                     catalog: rulesCatalog.catalog)
-                ?? NoLinkCopy.fallbackSubtitle
-        }
-        if let alert = alerts.urgentActiveSorted.first {
-            return alert.body.isEmpty ? alert.title : alert.body
-        }
-        if !monitor.isRunning {
-            return "Reconnecting to the connection monitor…"
-        }
-        // The process is up and its last line is old: say so, rather than
-        // the last thing it said.
-        if latestSampleIsStale { return StaleSampleCopy.subtitle }
-        // `liveSample == nil` here means the newest sample predates a stop
-        // or a pause (the stale case returned above).
-        if let sample = monitor.latest, liveSample == nil || sample.status.measurement != "measured" {
-            return "Checking your connection — a live internet reading is not available yet."
-        }
-        if let sample = monitor.latest, sample.status.severity == "critical" || sample.status.severity == "warn" {
-            // Worst rule wins, not first rule: `lib/monitor.sh`'s
-            // `_mon_rules` appends rules in the order it evaluates them
-            // (TCP-1, then the G-loss rules, then P-reach, D1, CP-1, VPN-1,
-            // ICMP-1, then the L-loss rules) — not by severity. An
-            // informational VPN-1 notice can therefore sit ahead of a
-            // critical L1 in `sample.status.rules`. Picking "the first rule
-            // with a catalog entry" used to mean a VPN user losing most of
-            // their packets got a red "Detecting a network problem" card
-            // whose body read "A VPN is carrying your traffic right now."
-            if let text = Self.headlineText(forRulesIn: sample.status.rules,
-                                            catalog: rulesCatalog.catalog) {
-                return text
-            }
-        }
-        if let res = activeResolution {
-            return res.message.isEmpty ? res.title : "\(res.title) — \(res.message)"
-        }
-        if let sample = liveSample {
-            let snap = currentNetworkRun?.snapshot
-            let items = SuitabilityEngine.evaluateAll(.init(
-                monitorSample: sample,
-                speedTest: currentSuitabilitySpeed,
-                savedSuitability: snap?.suitability,
-                catalog: rulesCatalog.catalog,
-                firedRules: sample.status.rules,
-                isLinkUp: sample.link.up,
-                isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-                mtu: snap?.mtu.effective ?? snap?.mtu.pathSize ?? 1500,
-                vpnActive: sample.vpn.active,
-                vpnName: sample.vpn.name,
-                currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss,
-                lossFiltering: lossFiltering,
-                isSettling: isSettling,
-                isArrivalCheck: isArrivalCheck
-            ))
-            if let degraded = SuitabilityEngine.synthesizeDegradedExperience(
-                items: items,
-                monitorSample: sample,
-                currentJitter: currentJitter,
-                effectiveLoss: effectiveLoss,
-                lossFiltering: lossFiltering
-            ) {
-                return "\(degraded.headline) — \(degraded.subtitle)"
-            }
-        }
-        let currentSnapshot = currentNetworkRun?.snapshot
-        if let cause = currentSnapshot?.mostLikelyRootCause, !cause.isEmpty {
-            let isLocationNotice = cause.localizedCaseInsensitiveContains("location services")
-                || cause.localizedCaseInsensitiveContains("generic name")
-                || cause.localizedCaseInsensitiveContains("not telling netdiag")
-            if !isLocationNotice {
-                return cause
-            }
-        }
-        if monitor.latest == nil && currentNetworkRun == nil { return "Starting up…" }
-        return "Nothing obviously wrong — your network looks healthy."
-    }
-
-    /// Whether the current network is marked as owned by the user ("My Network").
-    var isCurrentNetworkOwned: Bool {
-        let candidate = confirmedNetworkID
-            ?? resolvedNetworkID(for: liveSample ?? monitor.latest)
-            ?? liveSample?.network.historyJoinID
-            ?? monitor.latest?.network.historyJoinID
-            ?? liveSample?.network.id
-            ?? monitor.latest?.network.id
-        guard let candidate else { return false }
-        return history.isOwned(networkID: candidate)
-    }
-
-    /// A displayable network name, or `nil` when there isn't a clean one —
-    /// never the raw `network.id`/`network.label` a redacted or
-    /// not-yet-permitted record can carry (`"wifi:mac=…"`,
-    /// `"<redacted>"`, `"hidden by macOS"`). Shared by `DropdownView`'s
-    /// quiet-line caption and `HomeView`'s Wi-Fi row — one place, so the
-    /// two can't describe the same network two different ways.
-    ///
-    /// Without Location Services, macOS never hands this app a real SSID,
-    /// so the only name worth showing is one the user typed themselves in
-    /// `HistoryStore.displayName` — a raw `network.id` in that state is a
-    /// MAC-keyed string nobody recognizes, not a name.
-    var wifiDisplayName: String? {
-        // CoreWLAN's live SSID is the authoritative, hardware-verified source of truth
-        // for the current Wi-Fi network's name.
-        if let live = liveSSID, !live.isEmpty,
-           !live.contains("<redacted>"), !live.contains("hidden by macOS") {
-            // Check if the user assigned an explicit custom rename to this Wi-Fi SSID
-            if let custom = history.customName(for: "ssid:\(live)"), !custom.isEmpty,
-               !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
-               !Self.isRawNetworkKey(custom),
-               custom != live {
-                return custom
-            }
-            return live
-        }
-
-        // Without live SSID, check if the current network has a user-assigned rename (on a non-gateway key)
-        if let id = monitor.latest?.network.historyJoinID, !id.starts(with: "gw:"),
-           !NetworkIdentity.isPrivateOrLocalGateway(id) {
-            if let custom = history.customName(for: id), !custom.isEmpty,
-               !custom.contains("<redacted>"), !custom.contains("hidden by macOS"),
-               !Self.isRawNetworkKey(custom) {
-                return custom
-            }
-        }
-
-        // Without live SSID or custom rename, check if HistoryStore has a
-        // recorded SSID from a past scan.
-        if let id = monitor.latest?.network.historyJoinID, !id.starts(with: "gw:"),
-           !NetworkIdentity.isPrivateOrLocalGateway(id) {
-            let hist = history.displayName(for: id)
-            if !hist.isEmpty, hist != id, !hist.contains("<redacted>"),
-               !hist.contains("hidden by macOS"), !Self.isRawNetworkKey(hist) {
-                return hist
-            }
-        }
-        // Without Location and without a rename, the CLI's raw label is a
-        // MAC-keyed string nobody recognises; hide it rather than show
-        // furniture that reads as a bug.
-        let raw = monitor.latest?.network.label ?? currentNetworkRun?.snapshot.network.label
-        guard let raw, !raw.isEmpty else { return nil }
-        if raw.contains("<redacted>") || raw.contains("hidden by macOS")
-            || Self.isRawNetworkKey(raw) {
-            return nil
-        }
-        return raw
-    }
-
-    // MARK: - Sharing
-
-    /// Raw JSON for the active report (either the live run or the hydrated stored report).
-    var currentReportRawJSON: String? {
-        currentNetworkRun?.result.rawJSON
-    }
-
-    /// Shares the current report (or newest stored run) as redacted plain text.
-    func shareCurrentReportText() async throws -> String {
-        try await NetdiagRunner.share(rawJSON: currentReportRawJSON)
-    }
-
-    /// Shares the current report (or newest stored run) as redacted JSON.
-    func shareCurrentReportJSON() async throws -> String {
-        try await NetdiagRunner.shareJSON(rawJSON: currentReportRawJSON)
     }
 }
 

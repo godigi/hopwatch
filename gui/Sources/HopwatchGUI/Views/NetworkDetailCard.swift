@@ -137,6 +137,7 @@ struct NetworkDetailCard: View {
                 secondary: reliabilitySubcaption
             )
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func metricTile(
@@ -165,7 +166,7 @@ struct NetworkDetailCard: View {
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -195,7 +196,7 @@ struct NetworkDetailCard: View {
                     .background(Color.blue.opacity(0.12), in: Capsule())
             }
 
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 if let curGW = comp.currentGatewayLatencyMs {
                     comparisonChip(
                         icon: "gauge.with.needle",
@@ -226,6 +227,7 @@ struct NetworkDetailCard: View {
                     )
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -251,7 +253,7 @@ struct NetworkDetailCard: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(

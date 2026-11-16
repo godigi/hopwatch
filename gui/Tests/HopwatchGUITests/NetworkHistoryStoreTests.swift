@@ -309,4 +309,42 @@ import Testing
         #expect(!fullChecked.needsAttempt(now: now))
         #expect(!fullChecked.isDeclined)
     }
+
+    @Test @MainActor func networkNotesAndHistoryCSVExport() {
+        let store = HistoryStore()
+        let netID = "ssid:OfficeFloor4"
+
+        // Set and retrieve custom notes
+        store.setNote("Conference room router next to water cooler", for: netID)
+        #expect(store.note(for: netID) == "Conference room router next to water cooler")
+
+        // Adopt a run for CSV export verification
+        let run = HistoryDocument.Run(
+            ts: "2026-11-09T10:00:00Z",
+            runID: "2026-11-09.12345678",
+            networkID: netID,
+            version: "1.23.1",
+            runMode: "full",
+            severity: "ok",
+            rules: ["L1", "G1"],
+            rootCause: "All clean",
+            metrics: [
+                "gateway_rtt_ms": 4.5,
+                "inet_rtt_ms": 14.2,
+                "loss_pct": 0.0,
+                "gateway_jitter_ms": 1.2,
+                "speed_down_mbps": 320.0,
+                "speed_up_mbps": 45.0
+            ]
+        )
+        store.adoptRunsForTesting([run])
+
+        let csv = store.exportNetworkHistoryCSV(networkID: netID)
+        #expect(csv.contains("Timestamp,Network,Mode,Severity,GatewayRTT_ms,InternetRTT_ms,Loss_pct,Jitter_ms,Down_mbps,Up_mbps,Rules,RootCause"))
+        #expect(csv.contains("full,ok,4.5,14.2,0.0,1.2,320.0,45.0,\"L1; G1\",\"All clean\""))
+
+        // Clearing note
+        store.setNote(nil, for: netID)
+        #expect(store.note(for: netID) == nil)
+    }
 }

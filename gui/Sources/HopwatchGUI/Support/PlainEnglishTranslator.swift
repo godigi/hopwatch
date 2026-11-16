@@ -306,13 +306,13 @@ public enum PlainEnglishTranslator {
         ),
         "BLOAT-1": PlainExplanation(
             title: "Network Overload (Bufferbloat)",
-            explanation: "Your router is buffering too much data during heavy downloading or uploading, causing video calls to freeze and games to lag.",
-            action: "Pause large downloads or cloud backups during calls, or enable Smart Queue Management (SQM) / QoS in your router settings."
+            explanation: "Latency spikes when big downloads or uploads saturate the connection, which can make calls stutter.",
+            action: "Pause large backups or downloads during calls. Only if you own this router: enabling SQM / QoS helps, though many routers don't support it."
         ),
         "BLOAT-2": PlainExplanation(
             title: "Internet Provider Bufferbloat",
-            explanation: "Your internet provider's modem or uplink queue is overwhelmed during heavy traffic, adding huge delays to real-time traffic.",
-            action: "Limit heavy upload or download activity during important calls, or contact your provider to ask about modem firmware updates or improved plans."
+            explanation: "The uplink queue backs up during heavy uploads or downloads, adding delay to live calls and games.",
+            action: "Pause large uploads or downloads during important calls; this is a modem/ISP-side limit you usually can't configure."
         ),
         "DNS-1": PlainExplanation(
             title: "Sluggish Website Lookup (DNS)",
@@ -383,8 +383,8 @@ public enum PlainEnglishTranslator {
         ),
         "W6": PlainExplanation(
             title: "Connected to Slow 2.4 GHz Wi-Fi",
-            explanation: "Your Mac is connected to the older, slower 2.4 GHz Wi-Fi band even though faster 5 GHz or 6 GHz Wi-Fi is available.",
-            action: "Open Wi-Fi settings and choose your router's 5 GHz or 6 GHz network for much faster speeds."
+            explanation: "Your Mac is on the slower 2.4 GHz band. On public or shared Wi-Fi, faster 5 GHz or 6 GHz bands may not be offered.",
+            action: "If you see a 5 GHz or 6 GHz network you have access to, switch to it; on public Wi-Fi, no action is needed."
         ),
         "AWDL-1": PlainExplanation(
             title: "Apple Wireless Direct Interference",
@@ -393,8 +393,8 @@ public enum PlainEnglishTranslator {
         ),
         "WS-1": PlainExplanation(
             title: "Crowded Wi-Fi Channel",
-            explanation: "Too many neighboring Wi-Fi networks are broadcasting on the exact same channel, causing network traffic jams.",
-            action: "Restart your router so it automatically picks an open channel, or choose an empty channel in router settings."
+            explanation: "Nearby Wi-Fi networks are sharing the same channel, which can add lag. Common in apartments, cafes, and airports.",
+            action: "On public or shared Wi-Fi, you can't change this. Only if you manage this router: restart it or pick a quieter channel."
         ),
         "WF-1": PlainExplanation(
             title: "Wi-Fi Turned Off",
@@ -618,13 +618,13 @@ public enum PlainEnglishTranslator {
         ),
         "NAT-1": PlainExplanation(
             title: "Double NAT Detected",
-            explanation: "Your network has two routers in a row performing address translation, which can cause issues with games and smart home devices.",
-            action: "Set your secondary router or Wi-Fi mesh system into 'Bridge Mode' / 'Access Point Mode'."
+            explanation: "Traffic passes through two routers doing address translation. Normal on hotel, office, or mesh setups; mostly affects peer-to-peer gaming or port forwarding.",
+            action: "No action needed for browsing or calls. Only if you own this hardware: set the secondary router to Bridge / Access Point Mode."
         ),
         "NAT-1B": PlainExplanation(
             title: "ISP-Side Private Routing (CGNAT)",
-            explanation: "Your internet provider is using Carrier-Grade NAT, sharing one public IP among many households.",
-            action: "Contact your internet provider and request a dedicated public IP address if you host servers or game consoles."
+            explanation: "Your ISP shares one public IP across multiple customers (Carrier-Grade NAT). Normal for cellular, satellite, and many fiber plans.",
+            action: "No action needed for everyday browsing or calls; only matters if you host servers or need incoming ports."
         ),
         "BL-1": PlainExplanation(
             title: "Performance Regressed",

@@ -524,6 +524,7 @@ struct MenuStatusHeroView: View {
     let headline: String
     let subtitle: String
     var isChecking: Bool = false
+    var backgroundActivityText: String? = nil
     var actionTitle: String? = nil
     var onAction: (() -> Void)? = nil
     var secondaryActionTitle: String? = nil
@@ -560,6 +561,17 @@ struct MenuStatusHeroView: View {
                     .foregroundStyle(Theme.ColorToken.muted)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if let backgroundActivityText {
+                    HStack(spacing: 5) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text(backgroundActivityText)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.blue)
+                    }
+                    .padding(.top, 2)
+                }
 
                 if actionTitle != nil || secondaryActionTitle != nil {
                     HStack(spacing: 8) {
@@ -632,6 +644,7 @@ struct ConnectionRouteView: View {
 
     let vpnActive: Bool
     var vpnKnown: Bool = true
+    var vpnUnknownText: String = "VPN checking…"
     let vpnName: String?
     let vpnFreshness: String
 
@@ -695,7 +708,9 @@ struct ConnectionRouteView: View {
                     Text(macDetail)
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.ColorToken.muted)
-                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -894,7 +909,7 @@ struct ConnectionRouteView: View {
                                 .foregroundStyle(Theme.ColorToken.muted)
                         }
                     } else {
-                        Text(vpnKnown ? "VPN off" : "VPN checking…")
+                        Text(vpnKnown ? "VPN off" : vpnUnknownText)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.ColorToken.muted)
                     }
@@ -919,16 +934,21 @@ struct ConnectionRouteView: View {
     }
 
     private func pingReadingText(_ value: String, tint: Color) -> some View {
-        let parts = value.split(separator: " ")
-        return HStack(alignment: .firstTextBaseline, spacing: 2) {
-            Text(parts.first.map(String.init) ?? value)
-                .font(.system(size: 22, weight: .bold))
-                .kerning(-0.5)
-                .foregroundStyle(tint)
-            if parts.count > 1 {
-                Text(parts.dropFirst().joined(separator: " "))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.ColorToken.muted)
+        Group {
+            if value.hasSuffix(" ms"), let unitRange = value.range(of: " ms", options: .backwards) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(value[..<unitRange.lowerBound])
+                        .font(.system(size: 22, weight: .bold))
+                        .kerning(-0.5)
+                        .foregroundStyle(tint)
+                    Text("ms")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                }
+            } else {
+                Text(value)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(tint)
             }
         }
         .lineLimit(1)
@@ -1075,8 +1095,9 @@ struct ExperienceGridView: View {
             Text(status.label)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(status.tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let metric = status.metric {
                 Text(metric)
@@ -1094,38 +1115,114 @@ struct MenuSpeedView: View {
     let downMbps: String
     let upMbps: String
     let meta: String
+    var isScanning: Bool = false
+    var isSpeedTesting: Bool = false
+    var speedProgress: ScanProgress.Speed? = nil
+    var onRunSpeedTest: (() -> Void)? = nil
+    var onCancelSpeedTest: (() -> Void)? = nil
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(alignment: .center) {
-            HStack(spacing: 16) {
-                HStack(spacing: 3) {
-                    Text("↓ \(downMbps)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.ColorToken.ink)
-                    Text("Mbps")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                }
-                HStack(spacing: 3) {
-                    Text("↑ \(upMbps)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.ColorToken.ink)
-                    Text("Mbps")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.ColorToken.muted)
-                }
-            }
+            if isSpeedTesting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
 
-            Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(speedProgress?.directionSymbol.map { "\($0) " } ?? "")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Theme.ColorToken.blue)
+                            Text(speedProgress?.stage.isEmpty == false ? PhaseLabel.humanised(speedProgress!.stage) : "Testing speed…")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.ink)
+                            if let mbps = speedProgress?.mbps {
+                                Text(String(format: "%.1f Mbps", mbps))
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Theme.ColorToken.blue)
+                            }
+                        }
+                        Text("Measuring throughput…")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Last speed test")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.ColorToken.muted)
-                Text(meta)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.ColorToken.ink)
-                    .lineLimit(1)
+                    Spacer()
+
+                    if let onCancelSpeedTest {
+                        Button("Cancel", action: onCancelSpeedTest)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.ColorToken.nodeBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ColorToken.line, lineWidth: 1))
+                    }
+                }
+            } else {
+                HStack(spacing: 16) {
+                    HStack(spacing: 3) {
+                        Text("↓ \(downMbps)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        Text("Mbps")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                    HStack(spacing: 3) {
+                        Text("↑ \(upMbps)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                        Text("Mbps")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Last speed test")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                        Text(meta)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .lineLimit(1)
+                    }
+
+                    if let onRunSpeedTest {
+                        Button {
+                            onRunSpeedTest()
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "gauge.with.needle")
+                                    .font(.system(size: 9, weight: .semibold))
+                                Text("Test")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(isHovering ? Theme.ColorToken.blueWash : Theme.ColorToken.nodeBackground)
+                            .foregroundStyle(isHovering ? Theme.ColorToken.blue : Theme.ColorToken.ink)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(isHovering ? Theme.ColorToken.blue.opacity(0.4) : Theme.ColorToken.line, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isScanning)
+                        .opacity(isScanning ? 0.5 : 1.0)
+                        .onHover { isHovering = $0 }
+                        .help("Run focused download & upload speed test")
+                    }
+                }
             }
         }
         .padding(.vertical, 10)
@@ -1281,7 +1378,7 @@ struct MenuFooterView: View {
             HStack(spacing: 5) {
                 Image(systemName: isWiFi ? "wifi" : "cable.connector")
                     .font(.system(size: 11))
-                Text(networkName ?? (linkDown ? "DISCONNECTED" : (isWiFi ? "Wi-Fi network" : "Ethernet")))
+                Text(networkName ?? (linkDown ? "Disconnected" : (isWiFi ? "Wi-Fi network" : "Ethernet")))
                     .font(.system(size: 10, weight: .semibold))
                     .lineLimit(1)
             }

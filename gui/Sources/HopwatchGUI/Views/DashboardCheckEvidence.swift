@@ -18,7 +18,7 @@ enum DashboardCheckEvidence {
         let hasVerdict = isCrowded || neighborCount != nil
         let channelText = channel != nil ? "\(channel!)" : (bandChannelText.isEmpty ? "—" : bandChannelText)
         let channelBadge = DashboardCheckTable.GradeBadge(
-            label: hasVerdict ? (isCrowded ? "Crowded" : "Clear") : "Unknown",
+            label: hasVerdict ? (isCrowded ? "Crowded" : "Clear") : (channel != nil ? "Not scanned" : "Unknown"),
             tone: hasVerdict ? (isCrowded ? .warn : .good) : .neutral
         )
         return .init(
@@ -26,7 +26,7 @@ enum DashboardCheckEvidence {
             icon: isCrowded ? "antenna.radiowaves.left.and.right.slash" : "antenna.radiowaves.left.and.right",
             label: "Wi-Fi channel",
             measured: channelText,
-            subvalue: neighborCount.map { "\($0) neighboring networks" },
+            subvalue: neighborCount.map { "\($0) neighboring \($0 == 1 ? "network" : "networks")" },
             usual: "—",
             badge: channelBadge,
             isWarning: isCrowded,

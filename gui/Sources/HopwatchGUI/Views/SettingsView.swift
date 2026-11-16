@@ -32,13 +32,17 @@ struct SettingsView: View {
         }
     }
 
-    @State private var selectedTab: Tab = .general
+    @State private var selectedTab: Tab
     @State private var capabilities: CapabilityState?
     @State private var isRechecking = false
     @State private var alertSearchText = ""
     @State private var selectedAlertCategory: AlertCategory = .all
     @State private var copiedPathToast: String? = nil
     @State private var copiedReportsPathToast: String? = nil
+
+    init(initialTab: Tab = .general) {
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +69,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
         }
-        .background(Theme.ColorToken.cardBackground.opacity(0.35))
+        .background(Theme.ColorToken.cardBackground)
         .task {
             capabilities = await CapabilityStore.shared.current()
             await coordinator.alerts.refreshAuthorization()
@@ -105,7 +109,7 @@ struct SettingsView: View {
                 }
             }
             .padding(3)
-            .background(Theme.ColorToken.nodeBackground)
+            .background(Theme.ColorToken.neutralWash)
             .clipShape(RoundedRectangle(cornerRadius: 9))
             .overlay(
                 RoundedRectangle(cornerRadius: 9)
@@ -115,7 +119,7 @@ struct SettingsView: View {
         .padding(.horizontal, 32)
         .padding(.top, 20)
         .padding(.bottom, 14)
-        .background(Theme.ColorToken.nodeBackground.opacity(0.8))
+        .background(Theme.ColorToken.nodeBackground)
     }
 
     private func tabButton(_ tab: Tab) -> some View {
@@ -247,8 +251,7 @@ struct SettingsView: View {
                         description: "Sends lightweight pings to your router to immediately detect Wi-Fi drops, jitter, and packet loss.",
                         value: appSettings.fastInterval,
                         range: 2...60,
-                        step: 1,
-                        binding: intervalBinding(\.fastInterval),
+                        binding: intervalBinding(\.fastInterval, step: 1),
                         presets: [
                             (label: "5s (Fast)", value: 5),
                             (label: "10s (Default)", value: 10),
@@ -263,8 +266,7 @@ struct SettingsView: View {
                         description: "Queries local DNS resolvers and inspects Wi-Fi RSSI signal strength, noise, and radio channel status.",
                         value: appSettings.mediumInterval,
                         range: 15...600,
-                        step: 5,
-                        binding: intervalBinding(\.mediumInterval),
+                        binding: intervalBinding(\.mediumInterval, step: 5),
                         presets: [
                             (label: "30s", value: 30),
                             (label: "60s (Default)", value: 60),
@@ -279,8 +281,7 @@ struct SettingsView: View {
                         description: "Checks your public IP and country from an external service to identify VPN switches and ISP routing changes.",
                         value: appSettings.slowInterval,
                         range: 60...1800,
-                        step: 30,
-                        binding: intervalBinding(\.slowInterval),
+                        binding: intervalBinding(\.slowInterval, step: 30),
                         presets: [
                             (label: "180s", value: 180),
                             (label: "300s (Default)", value: 300),
@@ -424,7 +425,8 @@ struct SettingsView: View {
         if coordinator.monitor.isBursting { return "Testing latency · every \(appSettings.latencyTestInterval)s" }
         if let reason = coordinator.monitor.pauseReason { return "Paused (\(reason))" }
         if !coordinator.monitor.isRunning { return "Monitoring stopped" }
-        return "Active · router checked every \(appSettings.fastInterval)s"
+        let cadence = coordinator.liveSample?.status.cadenceS ?? appSettings.fastInterval
+        return "Active · router checked every \(cadence)s"
     }
 
     private var menuBarPreviewCard: some View {
@@ -485,7 +487,6 @@ struct SettingsView: View {
         description: String,
         value: Int,
         range: ClosedRange<Double>,
-        step: Double,
         binding: Binding<Double>,
         presets: [(label: String, value: Int)]
     ) -> some View {
@@ -516,7 +517,7 @@ struct SettingsView: View {
             }
 
             HStack(spacing: 12) {
-                Slider(value: binding, in: range, step: step) { editing in
+                Slider(value: binding, in: range) { editing in
                     if !editing { coordinator.applyCadenceSettings() }
                 }
 
@@ -543,10 +544,13 @@ struct SettingsView: View {
         }
     }
 
-    private func intervalBinding(_ keyPath: ReferenceWritableKeyPath<AppSettings, Int>) -> Binding<Double> {
+    private func intervalBinding(_ keyPath: ReferenceWritableKeyPath<AppSettings, Int>, step: Int = 1) -> Binding<Double> {
         Binding(
             get: { Double(appSettings[keyPath: keyPath]) },
-            set: { appSettings[keyPath: keyPath] = Int($0) }
+            set: { newValue in
+                let snapped = Int((newValue / Double(step)).rounded()) * step
+                appSettings[keyPath: keyPath] = snapped
+            }
         )
     }
 
@@ -634,7 +638,8 @@ struct SettingsView: View {
                                 }
                             }
                             .pickerStyle(.menu)
-                            .frame(width: 220)
+                            .labelsHidden()
+                            .fixedSize()
                         }
 
                         HStack(spacing: 6) {
@@ -794,6 +799,17 @@ struct SettingsView: View {
                         TextField("Filter alert types…", text: $alertSearchText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 11))
+                        if !alertSearchText.isEmpty {
+                            Button {
+                                alertSearchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear search")
+                        }
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
@@ -814,11 +830,19 @@ struct SettingsView: View {
 
                 // List of filtered alerts
                 let filtered = filteredAlerts
-                VStack(spacing: 10) {
-                    ForEach(filtered) { def in
-                        alertDefinitionRow(def)
-                        if def.id != filtered.last?.id {
-                            Divider()
+                if filtered.isEmpty {
+                    Text("No alert types match your current filter.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 14)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(filtered) { def in
+                            alertDefinitionRow(def)
+                            if def.id != filtered.last?.id {
+                                Divider()
+                            }
                         }
                     }
                 }
@@ -1270,6 +1294,30 @@ struct SettingsView: View {
                 Text("Could not communicate with the hopwatch command to verify capabilities.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.ColorToken.red)
+            }
+        case .missingBash5:
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.ColorToken.amber)
+                    Text("Hopwatch requires Bash 5 or newer (macOS ships Bash 3.2).")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ColorToken.ink)
+                }
+                HStack(spacing: 8) {
+                    Text("brew install bash")
+                        .font(.system(size: 11, design: .monospaced))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.ColorToken.nodeBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .textSelection(.enabled)
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("brew install bash", forType: .string)
+                    }
+                    .controlSize(.small)
+                }
             }
         case .legacy:
             HStack(spacing: 8) {

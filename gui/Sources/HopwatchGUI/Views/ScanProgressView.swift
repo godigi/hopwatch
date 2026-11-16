@@ -313,7 +313,7 @@ struct SpeedometerGaugeView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     // Big readout
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(speed.mbps.map { String(format: "%.1f", $0) } ?? "--")
+                        Text(speed.mbps.map { String(format: "%.1f", $0) } ?? "—")
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .monospacedDigit()
                         Text("Mbps")

@@ -20,13 +20,20 @@
 # shellcheck disable=SC2034
 # shellcheck source-path=SCRIPTDIR/..
 
-# Require bash 5+. Re-exec under Homebrew bash if found, otherwise fail clean.
+# Require bash 5+. Re-exec under Homebrew/MacPorts/PATH bash 5+ if found, otherwise fail clean.
 if [ -z "${BASH_VERSION:-}" ] || [ "${BASH_VERSINFO[0]:-0}" -lt 5 ]; then
-  for _cand in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+  for _cand in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash; do
     if [ -x "$_cand" ]; then
       exec "$_cand" "$0" "$@"
     fi
   done
+  if _path_bash="$(command -v bash 2>/dev/null)" && [ -x "$_path_bash" ]; then
+    # shellcheck disable=SC2016 # BASH_VERSINFO must be evaluated by the target bash, not bash 3.2
+    _major="$("$_path_bash" -c 'printf "%s" "${BASH_VERSINFO[0]:-0}"' 2>/dev/null || printf '0')"
+    if [ "${_major:-0}" -ge 5 ]; then
+      exec "$_path_bash" "$0" "$@"
+    fi
+  fi
   printf 'hopwatch: requires bash 5+. Install with: brew install bash\n' >&2
   exit 3
 fi

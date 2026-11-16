@@ -73,6 +73,9 @@ final class UpdateChecker {
                 let release = try decoder.decode(GitHubRelease.self, from: data)
 
                 Defaults.lastUpdateCheck = Date()
+                if let body = release.body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Defaults.setReleaseNotes(body, for: release.cleanVersion)
+                }
 
                 let remoteVersion = SemanticVersion(release.cleanVersion)
                 let localVersion = SemanticVersion(Defaults.appVersion)
@@ -486,6 +489,13 @@ final class UpdateChecker {
 
         # Strip Gatekeeper quarantine & provenance attributes recursively
         xattr -cr "$TMP_STAGING" 2>/dev/null || true
+
+        # Verify bundle signature integrity before replacing the installed app
+        if ! /usr/bin/codesign --verify --deep --strict "$TMP_STAGING" >/dev/null 2>&1; then
+            rm -rf "$TMP_STAGING"
+            open "$TARGET"
+            exit 1
+        fi
 
         if [ -d "$TARGET" ]; then
             mv "$TARGET" "$BACKUP" 2>/dev/null || rm -rf "$TARGET"

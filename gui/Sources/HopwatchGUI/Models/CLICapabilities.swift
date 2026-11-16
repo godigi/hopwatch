@@ -89,6 +89,12 @@ enum CapabilityState: Sendable {
     /// probe, because only this case is "the CLI is there and coherent,
     /// just old" rather than "something about running it at all failed".
     case legacy(supportsProgress: Bool)
+    /// The CLI exited 3 because Bash 5+ is not installed on this Mac (macOS
+    /// ships Bash 3.2, and `bin/hopwatch` requires Homebrew/MacPorts Bash 5+).
+    /// Kept distinct from `.legacy` so the UI tells the user to install
+    /// Bash 5 (`brew install bash`) instead of falsely claiming the bundled
+    /// CLI is too old.
+    case missingBash5
     /// The probe couldn't establish either of the above — no binary, a
     /// spawn failure, or `--capabilities` exiting 0 with something that
     /// didn't decode as JSON. Gated the same as `.legacy` (nothing beyond

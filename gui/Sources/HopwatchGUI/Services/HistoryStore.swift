@@ -22,6 +22,8 @@ final class HistoryStore {
     /// User-assigned display names, keyed by the group's stable key (the
     /// `mac:` component where one exists).
     private(set) var customNames: [String: String] = Defaults.networkNames
+    /// User-assigned notes per network, keyed by the canonical network key.
+    private(set) var customNotes: [String: String] = Defaults.networkNotes
     /// Manual merges: member group key → the key it was merged into. The
     /// honest fallback for the cases the bridge heuristic left apart, since
     /// a wrong automatic merge silently corrupts a chart while a missing
@@ -64,7 +66,15 @@ final class HistoryStore {
         return out
     }
 
-    init() {
+    private let cacheDirectory: URL?
+    private let logDirectory: URL
+
+    init(
+        cacheDirectory: URL? = StoreDiskCache.defaultCacheDirectory(),
+        logDirectory: URL = StoreDiskCache.resolveLogDirectory()
+    ) {
+        self.cacheDirectory = cacheDirectory
+        self.logDirectory = logDirectory
         // Reads first, migration second, so the migrated shape is what
         // both the store and Defaults hold from here on.
         let names = Self.migrateRawKeys(Defaults.networkNames)
@@ -117,7 +127,31 @@ final class HistoryStore {
             if loadsInFlight == 0 { isLoading = false }
         }
         do {
-            let loaded = try await NetdiagRunner.history()
+            let loaded: HistoryDocument
+            let fingerprint: String?
+            if case .modern(let caps) = await CapabilityStore.shared.current(),
+               caps.supports(CapabilityStore.Feature.history.rawValue) {
+                fingerprint = StoreDiskCache.currentFingerprint(
+                    logDirectory: logDirectory,
+                    cliVersion: caps.version,
+                    binaryPath: BinaryLocator.resolve()
+                )
+            } else {
+                fingerprint = nil
+            }
+
+            if let fingerprint,
+               let cachedData = StoreDiskCache.readHistory(in: cacheDirectory, expectedFingerprint: fingerprint),
+               let cachedDoc = try? JSONDecoder().decode(HistoryDocument.self, from: cachedData) {
+                loaded = cachedDoc
+            } else {
+                let fresh = try await NetdiagRunner.historyRaw()
+                loaded = fresh.document
+                if let fingerprint {
+                    StoreDiskCache.writeHistory(fresh.data, fingerprint: fingerprint, in: cacheDirectory)
+                }
+            }
+
             guard generation > publishedGeneration else { return }
             publishedGeneration = generation
             document = loaded
@@ -199,6 +233,57 @@ final class HistoryStore {
         if trimmed.isEmpty { customNames.removeValue(forKey: key) } else { customNames[key] = trimmed }
         Defaults.networkNames = customNames
         invalidateNetworkCaches()
+    }
+
+    /// Retrieves user-assigned notes for a network.
+    func note(for networkID: String) -> String? {
+        let key = canonicalID(networkID)
+        return customNotes[key] ?? customNotes[networkID]
+    }
+
+    /// Persists or clears user-assigned notes for a network.
+    func setNote(_ note: String?, for networkID: String) {
+        let key = canonicalID(networkID)
+        var notes = customNotes
+        if let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            notes[key] = note
+        } else {
+            notes.removeValue(forKey: key)
+            notes.removeValue(forKey: networkID)
+        }
+        customNotes = notes
+        Defaults.networkNotes = notes
+        invalidateNetworkCaches()
+    }
+
+    /// Exports all recorded historical runs for a network as a standard CSV report.
+    func exportNetworkHistoryCSV(networkID: String) -> String {
+        let runs = self.runs(networkID: networkID, window: .all)
+        let netName = displayName(for: networkID)
+        var lines: [String] = ["Timestamp,Network,Mode,Severity,GatewayRTT_ms,InternetRTT_ms,Loss_pct,Jitter_ms,Down_mbps,Up_mbps,Rules,RootCause"]
+        let isoFormatter = ISO8601DateFormatter()
+        for run in runs {
+            let ts = isoFormatter.string(from: run.date)
+            let mode = run.runMode ?? "check"
+            let sev = run.severity
+            let gwRTT = run.metrics["gateway_rtt_ms"].map { String(format: "%.1f", $0) } ?? ""
+            let inetRTT = run.metrics["inet_rtt_ms"].map { String(format: "%.1f", $0) } ?? ""
+            let loss = run.metrics["loss_pct"].map { String(format: "%.1f", $0) } ?? ""
+            let jit = run.metrics["gateway_jitter_ms"].map { String(format: "%.1f", $0) } ?? ""
+            let down = run.metrics["speed_down_mbps"].map { String(format: "%.1f", $0) } ?? ""
+            let up = run.metrics["speed_up_mbps"].map { String(format: "%.1f", $0) } ?? ""
+            let rulesStr = run.rules.joined(separator: "; ")
+            let cause = run.rootCause ?? ""
+            let escapedNet = csvField(netName)
+            let escapedRules = csvField(rulesStr)
+            let escapedCause = csvField(cause)
+            lines.append("\(ts),\(escapedNet),\(mode),\(sev),\(gwRTT),\(inetRTT),\(loss),\(jit),\(down),\(up),\(escapedRules),\(escapedCause)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func csvField(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 
     func isOwned(networkID: String?) -> Bool {

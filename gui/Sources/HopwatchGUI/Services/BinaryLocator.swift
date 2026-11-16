@@ -24,7 +24,7 @@ enum BinaryLocator {
     /// Injected into every child process. Homebrew first (Apple Silicon,
     /// then Intel), then the system directories the CLI's own helpers need.
     static let processPATH =
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     /// The CLI copy bundled inside this app by `gui/Makefile`'s `bundle`
     /// target. For a bare executable (`swift run`, the raw build product)

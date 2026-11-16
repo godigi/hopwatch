@@ -46,6 +46,11 @@ enum HealthResolver {
         let sampleStale: Bool
         /// True while the connection baseline is actively being determined.
         let isChecking: Bool
+        /// Set when service-level suitability detects degradation (`StageResolver.degraded`)
+        /// even while raw monitor severity is `"ok"` (e.g. residual 10% packet loss).
+        /// Matches `StageResolver`'s pill so the menu-bar dot never stays green over
+        /// a red/amber degraded hero card.
+        let degradedIsCritical: Bool?
 
         init(isScanning: Bool, isArrivalCheck: Bool = false,
              monitoringEnabled: Bool,
@@ -53,7 +58,8 @@ enum HealthResolver {
              activeAlert: StageResolver.AlertSnapshot? = nil,
              sampleHealth: Health?, runHealth: Health?,
              linkDown: Bool = false, sampleStale: Bool = false,
-             isChecking: Bool = false) {
+             isChecking: Bool = false,
+             degradedIsCritical: Bool? = nil) {
             self.isScanning = isScanning
             self.isArrivalCheck = isArrivalCheck
             self.monitoringEnabled = monitoringEnabled
@@ -65,6 +71,7 @@ enum HealthResolver {
             self.linkDown = linkDown
             self.sampleStale = sampleStale
             self.isChecking = isChecking
+            self.degradedIsCritical = degradedIsCritical
         }
     }
 
@@ -78,7 +85,13 @@ enum HealthResolver {
                 return alert.severityRank >= 3 ? .critical : .warning
             }
             if i.isArrivalCheck { return .checking }
-            return worst(i.sampleHealth, i.runHealth) ?? .warning
+            let effectiveSampleHealth: Health? = {
+                if i.sampleHealth != .critical, let degradedCritical = i.degradedIsCritical {
+                    return degradedCritical ? .critical : .warning
+                }
+                return i.sampleHealth
+            }()
+            return worst(effectiveSampleHealth, i.runHealth) ?? .warning
         }
         // Switched off by the user, or held by display sleep / battery /
         // the pause signal. Either can last indefinitely, and while it does
@@ -115,6 +128,9 @@ enum HealthResolver {
         // contention, bufferbloat grade) must not permanently lock the menu dot to
         // amber when the connection is healthy and no alerts are active.
         if let sampleHealth = i.sampleHealth {
+            if sampleHealth != .critical, let degradedCritical = i.degradedIsCritical {
+                return degradedCritical ? .critical : .warning
+            }
             return sampleHealth
         }
         if let runHealth = i.runHealth {

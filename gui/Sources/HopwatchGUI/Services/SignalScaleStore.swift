@@ -28,18 +28,29 @@ final class SignalScaleStore {
     /// `RulesCatalogStore.ensureLoaded()`'s identical header.
     func ensureLoaded() {
         guard refreshTask == nil else { return }
-        refreshTask = Task { [weak self] in
+        Task { [weak self] in
             await self?.refresh()
-            guard let self else { return }
-            self.refreshTask = nil
         }
     }
 
     /// Re-probes the handshake and, if the version it reports differs from
     /// `loadedForVersion` (or nothing has loaded yet), fetches that
-    /// version's scale. Safe to call repeatedly — see
-    /// `RulesCatalogStore.refresh()`'s identical reasoning.
+    /// version's scale. Safe to call repeatedly — concurrent callers coalesce
+    /// onto the single in-flight `refreshTask`.
     func refresh() async {
+        if let existing = refreshTask {
+            await existing.value
+            return
+        }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.performRefresh()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
         guard await CapabilityStore.shared.supports(.signalScale) else {
             scale = nil
             loadedForVersion = nil

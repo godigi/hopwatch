@@ -20,6 +20,9 @@ test-cli:
 test-gui:
 	$(MAKE) -C gui test
 
+visual-audit: gui
+	python3 scripts/visual_audit.py
+
 gui:
 	$(MAKE) -C gui
 

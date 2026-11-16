@@ -73,7 +73,7 @@ struct HopwatchApp: App {
             .environment(coordinator)
             .environment(coordinator.appSettings)
         }
-        .defaultSize(width: 480, height: 520)
+        .defaultSize(width: 520, height: 560)
         .windowResizability(.contentSize)
 
         Window("Software Update", id: WindowID.softwareUpdate) {
@@ -140,7 +140,7 @@ extension HopwatchApp {
         // unlike `--verify` this guard is the *only* thing standing between
         // a screenshot run and a spawned monitor child. It builds its own
         // coordinator and hydrates it read-only.
-        if GalleryMode.isRequested { return }
+        if GalleryMode.isRequested || VisualAuditMode.isRequested { return }
         coordinator.start()
 
         var didOpenWindow = false
@@ -294,6 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // `GalleryMode.scheduleIfRequested`. `bootstrap()` is what keeps it
         // from starting the monitor.
         if GalleryMode.scheduleIfRequested() { return }
+        if VisualAuditMode.scheduleIfRequested() { return }
         if runVerifyIfNeeded() {
             // `runVerifyIfNeeded`'s harness exits the process itself; this
             // is reached only if it somehow returned, in which case stop
@@ -465,7 +466,14 @@ struct MenuBarLabel: View {
     }
 
     static func formatLoss(lossPct: Double?) -> String? {
+        formatLoss(lossPct: lossPct, lastProbeLossPct: nil)
+    }
+
+    static func formatLoss(lossPct: Double?, lastProbeLossPct: Double?) -> String? {
         guard let lossPct, lossPct >= 0 else { return nil }
+        if EffectiveLoss.isRecovering(windowLoss: lossPct, lastProbeLoss: lastProbeLossPct) {
+            return "\(LossFormatter.formatPct(lossPct)) avg"
+        }
         return "\(LossFormatter.formatPct(lossPct)) loss"
     }
 
@@ -473,7 +481,8 @@ struct MenuBarLabel: View {
         if coordinator.linkIsDown { return nil }
         let filtering = EffectiveLoss.filtering(sample: coordinator.monitor.latest)
         let loss = filtering.internetLeg ? nil : (coordinator.liveSample?.internet.lossPct ?? coordinator.currentNetworkRun?.snapshot.internetLatency.lossPct)
-        return Self.formatLoss(lossPct: loss)
+        let lastProbe = filtering.internetLeg ? nil : coordinator.liveSample?.internet.lastProbeLossPct
+        return Self.formatLoss(lossPct: loss, lastProbeLossPct: lastProbe)
     }
 
     private var pingString: String? {

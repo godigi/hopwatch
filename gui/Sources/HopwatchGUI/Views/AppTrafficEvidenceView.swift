@@ -14,7 +14,8 @@ struct AppTrafficEvidenceView: View {
                                evidence.latencyDetail].compactMap { $0 }.joined(separator: "\n"))
                 }
                 if let limit, entry.trafficEvidence.count > limit {
-                    Text("\(entry.trafficEvidence.count - limit) more traffic observations in Activity")
+                    let remaining = entry.trafficEvidence.count - limit
+                    Text("\(remaining) more traffic \(remaining == 1 ? "observation" : "observations") in Activity")
                 }
             }
             .font(.caption)

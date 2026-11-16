@@ -87,7 +87,9 @@ enum MonitorSeries {
             current = []
         }
 
-        for sample in samples {
+        let orderedSamples = samples.sorted { $0.timestamp < $1.timestamp }
+
+        for sample in orderedSamples {
             let now = sample.timestamp
 
             if let previous, let prevTime = previousTime {

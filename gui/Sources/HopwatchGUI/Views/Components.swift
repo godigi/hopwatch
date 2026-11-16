@@ -148,6 +148,7 @@ struct SuitabilityPanel: View {
                         tileView(row)
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -180,7 +181,7 @@ struct SuitabilityPanel: View {
         }
         .padding(.horizontal, Theme.Spacing.xs)
         .padding(.vertical, Theme.Spacing.sm)
-        .frame(maxWidth: .infinity, minHeight: 86, alignment: .top)
+        .frame(maxWidth: .infinity, minHeight: 86, maxHeight: .infinity, alignment: .top)
         .background(tint.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: Theme.Radius.control))
         .help(Self.detail(row, catalog: activeCatalog) ?? Self.word(row.verdict))

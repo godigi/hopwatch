@@ -30,6 +30,11 @@ import AppKit
         #expect(MenuBarLabel.formatLoss(lossPct: 3.4) == "3% loss")
         #expect(MenuBarLabel.formatLoss(lossPct: nil) == nil)
         #expect(MenuBarLabel.formatLoss(lossPct: -1.0) == nil)
+
+        #expect(MenuBarLabel.formatLoss(lossPct: 10.0, lastProbeLossPct: 0.0) == "10% avg")
+        #expect(MenuBarLabel.formatLoss(lossPct: 10.0, lastProbeLossPct: 10.0) == "10% loss")
+        #expect(MenuBarLabel.formatLoss(lossPct: 0.0, lastProbeLossPct: 0.0) == "0% loss")
+        #expect(MenuBarLabel.formatLoss(lossPct: 10.0, lastProbeLossPct: nil) == "10% loss")
     }
 
     @Test @MainActor func showInDockDefaultsAndToggles() {

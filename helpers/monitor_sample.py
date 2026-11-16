@@ -93,6 +93,27 @@ def _i(name: str) -> int | None:
         return None
 
 
+def _max_present(*values: float | None) -> float | None:
+    """Return the highest non-None measurement, or None if none were measured."""
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
+
+
+def _effective_inet_loss(primary: float | None, alt: float | None) -> float | None:
+    """Return corroborated internet loss when primary and alternate diverge sharply."""
+    if primary is not None and alt is not None:
+        crit_pct = _f("LOSS_CRIT_PCT")
+        if crit_pct is None:
+            crit_pct = 20.0
+        # When one target is in critical loss (>= crit_pct) and the other is below it,
+        # L1 refuses to escalate because single-resolver burst rate-limiting is common;
+        # avoid broadcasting a single-target burst artifact (e.g. 94% vs 5%) as the headline loss.
+        if (primary >= crit_pct > alt) or (alt >= crit_pct > primary):
+            return min(primary, alt)
+        return primary
+    return primary if primary is not None else alt
+
+
 def _tri(name: str) -> bool | None:
     """Three-valued: "1" true, "0" false, unset/empty None.
 
@@ -662,20 +683,24 @@ def main() -> None:
         },
         "gateway": {
             "loss_pct": _f("GW_LOSS"),
+            "last_probe_loss_pct": _f("GW_LAST_LOSS"),
             "rtt_avg_ms": _f("GW_RTT"),
             "rtt_jitter_ms": _f("GW_JITTER"),
         },
         "internet": {
-            "loss_pct": _f("INET_LOSS"),
+            "loss_pct": _effective_inet_loss(_f("INET_LOSS"), _f("INET_LOSS_ALT")),
+            "loss_pct_alt": _f("INET_LOSS_ALT"),
+            "last_probe_loss_pct": _effective_inet_loss(_f("INET_LAST_LOSS"), _f("INET_LAST_LOSS_ALT")),
             "rtt_avg_ms": _f("INET_RTT"),
             "rtt_jitter_ms": _f("INET_JITTER"),
         },
-        "jitter_ms": _f("INET_JITTER") if _f("INET_JITTER") is not None else _f("GW_JITTER"),
+        "jitter_ms": _max_present(_f("INET_JITTER"), _f("GW_JITTER")),
         "wifi": ({
             "rssi": _i("WIFI_RSSI"),
             "noise": _i("WIFI_NOISE"),
             "snr": _i("WIFI_SNR"),
             "channel": _env("WIFI_CHAN"),
+            "tx_rate": _i("WIFI_TX_RATE"),
         } if is_wifi else None),
         "dns": {
             "ok": _tri("DNS_OK"),

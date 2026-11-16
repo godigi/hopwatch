@@ -123,8 +123,11 @@ MON_VPN_ACTIVE=0
 MON_VPN_TYPE=""
 MON_VPN_NAME=""
 MON_GW_LOSS=""
+MON_GW_LAST_LOSS=""
 MON_INET_LOSS=""
+MON_INET_LAST_LOSS=""
 MON_INET_LOSS_ALT=""
+MON_INET_LAST_LOSS_ALT=""
 MON_GW_RTT=""
 # Read by _mon_emit even on a cycle that never probed (the "paused" sample
 # the loop announces before its first probe), and bin/hopwatch runs under
@@ -200,6 +203,7 @@ MON_WIFI_RSSI=""
 MON_WIFI_NOISE=""
 MON_WIFI_SNR=""
 MON_WIFI_CHAN=""
+MON_WIFI_TX_RATE=""
 MON_DNS_OK=""
 # The same question put to a second, unrelated resolver, asked only after the
 # first went unanswered (rule CONN-1). "" = not asked.
@@ -606,6 +610,19 @@ _mon_loss_pct() {
   }'
 }
 
+# Compute the single-probe loss percentage from the newest "sent:lost" pair
+# in a rolling history string. Prints nothing when the history is empty.
+_mon_last_probe_loss_from_hist() {
+  local hist="$1"
+  [ -n "$hist" ] || return 0
+  local latest="${hist##* }"
+  local sent="${latest%%:*}"
+  local lost="${latest##*:}"
+  case "$sent" in ''|*[!0-9]*|0) return 0 ;; esac
+  case "$lost" in ''|*[!0-9]*) return 0 ;; esac
+  awk -v s="$sent" -v l="$lost" 'BEGIN { printf "%.0f", l * 100 / s }'
+}
+
 # Clear both windows: a dead link or a different network invalidates every
 # reading in them. Stale packets from before the change would dilute a
 # fresh problem; a window half full of the old network is measuring
@@ -614,6 +631,9 @@ _mon_loss_reset() {
   MON_GW_HIST=""
   MON_INET_HIST=""
   MON_INET_HIST_ALT=""
+  MON_GW_LAST_LOSS=""
+  MON_INET_LAST_LOSS=""
+  MON_INET_LAST_LOSS_ALT=""
 }
 
 # Parse ping's -q summary into raw counts, fold it into a leg's history,
@@ -646,7 +666,7 @@ _mon_loss_fold() {
 }
 
 _mon_probe_gateway() {
-  MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
+  MON_GW_LOSS=""; MON_GW_LAST_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
   [ -n "$MON_GATEWAY" ] || return 0
   local out summary
   # -q: summary only. The scanner keeps the per-packet lines because it
@@ -672,6 +692,7 @@ _mon_probe_gateway() {
   summary="$(_mon_loss_fold "$MON_GW_HIST" "$out" "$MONITOR_PING_COUNT")"
   MON_GW_HIST="${summary%%|*}"
   MON_GW_LOSS="${summary#*|}"
+  MON_GW_LAST_LOSS="$(_mon_last_probe_loss_from_hist "$MON_GW_HIST")"
   local _gw_parsed
   _gw_parsed="$(ping_parse_summary "$out")"
   MON_GW_RTT="$(printf '%s' "$_gw_parsed" | cut -d'|' -f2)"
@@ -743,7 +764,7 @@ _mon_probe_tcp() {
 }
 
 _mon_probe_internet() {
-  MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
+  MON_INET_LOSS=""; MON_INET_LAST_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_LAST_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
   local out out_alt summary summary_alt tmp_dir target target_alt
   target="${INET_TARGET:-1.1.1.1}"
@@ -778,9 +799,11 @@ _mon_probe_internet() {
   summary="$(_mon_loss_fold "$MON_INET_HIST" "$out" "$MONITOR_INET_PING_COUNT")"
   MON_INET_HIST="${summary%%|*}"
   MON_INET_LOSS="${summary#*|}"
+  MON_INET_LAST_LOSS="$(_mon_last_probe_loss_from_hist "$MON_INET_HIST")"
   summary_alt="$(_mon_loss_fold "$MON_INET_HIST_ALT" "$out_alt" "$MONITOR_INET_PING_COUNT")"
   MON_INET_HIST_ALT="${summary_alt%%|*}"
   MON_INET_LOSS_ALT="${summary_alt#*|}"
+  MON_INET_LAST_LOSS_ALT="$(_mon_last_probe_loss_from_hist "$MON_INET_HIST_ALT")"
   local _inet_parsed
   _inet_parsed="$(ping_parse_summary "$out")"
   MON_INET_RTT="$(printf '%s' "$_inet_parsed" | cut -d'|' -f2)"
@@ -844,7 +867,7 @@ _mon_web_verdict() {
 }
 
 _mon_probe_wifi_signal() {
-  MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""
+  MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""; MON_WIFI_TX_RATE=""
   [ "$MON_IFACE_TYPE" = "wifi" ] || return 0
   local out=""
   local helper="${HELPERS_DIR:-$(dirname "${BASH_SOURCE[0]}")/../helpers}/wifi_telemetry.py"
@@ -859,16 +882,18 @@ _mon_probe_wifi_signal() {
     [ -n "$raw" ] && out="$(wifi_parse_wdutil "$raw")"
   fi
   [ -n "$out" ] || return 0
-  local rssi noise chan _
+  local rssi noise chan tx_rate _
   {
-    # Fields 1-3 only; the parser's SSID/BSSID tail is scanner policy.
-    IFS="$WIFI_FS" read -r rssi noise chan _
+    # Fields 1-4 (rssi, noise, channel, tx_rate); the SSID/BSSID tail is scanner policy.
+    IFS="$WIFI_FS" read -r rssi noise chan tx_rate _
   } <<<"$out"
   is_numeric "$rssi"  || rssi=""
   is_numeric "$noise" || noise=""
+  is_numeric "$tx_rate" || tx_rate=""
   MON_WIFI_RSSI="$rssi"
   MON_WIFI_NOISE="$noise"
   MON_WIFI_CHAN="$chan"
+  MON_WIFI_TX_RATE="$tx_rate"
   if [ -n "$rssi" ] && [ -n "$noise" ]; then
     MON_WIFI_SNR=$((rssi - noise))
   fi
@@ -1038,14 +1063,14 @@ _mon_add_rule() {
 # back (see monitor_run), so clearing here does not leave the tiles blank for
 # up to MONITOR_SLOW_INTERVAL afterwards.
 _mon_clear_measurements() {
-  MON_GW_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
-  MON_INET_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
+  MON_GW_LOSS=""; MON_GW_LAST_LOSS=""; MON_GW_RTT=""; MON_GW_JITTER=""
+  MON_INET_LOSS=""; MON_INET_LAST_LOSS=""; MON_INET_LOSS_ALT=""; MON_INET_LAST_LOSS_ALT=""; MON_INET_RTT=""; MON_INET_JITTER=""
   MON_WEB_OK=""
   MON_DNS_OK=""; MON_DNS_ALT_OK=""; MON_DNS_RESOLVER=""; MON_DNS_MS=""
   MON_DNS_LOCAL_FAIL=""; MON_DNS_LOCAL_BIND=""; MON_DNS_UDP_SOCKETS=""
   MON_DNS_UDP_HOLDERS=""; MON_DNS_UDP_TOP_SHARE_PCT=""; MON_DNS_TCP_DNS_OK=""
   MON_TCP_OK=""; MON_TCP_LINES=""
-  MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""
+  MON_WIFI_RSSI=""; MON_WIFI_NOISE=""; MON_WIFI_SNR=""; MON_WIFI_CHAN=""; MON_WIFI_TX_RATE=""
   MON_PUBLIC_OK=""; MON_CAPTIVE=""; MON_CAPTIVE_URL=""
   MON_PUB_IP=""; MON_PUB_ISP=""; MON_PUB_ASN=""
   MON_PUB_CITY=""; MON_PUB_CC=""; MON_PUB_CC_ISO=""
@@ -1299,7 +1324,9 @@ _mon_rules() {
     # dropping ICMP to the gateway, not a failing home router.
     MON_GW_LOSS_STREAK=0
   elif loss_at_least "$MON_GW_LOSS" "$THRESH_GW_LOSS_CRIT_PCT"; then
-    MON_GW_LOSS_STREAK=0
+    # Maintain warn confirmation across critical->warn recovery transitions
+    # so easing from G1/G2 into the G3 band does not flash a false-clean cycle.
+    MON_GW_LOSS_STREAK="$THRESH_MON_LOSS_CONFIRM_CYCLES"
     if [ -n "$MON_WIFI_RSSI" ] && is_numeric "$MON_WIFI_RSSI" && [ "$MON_WIFI_RSSI" -le "$THRESH_WIFI_RSSI_G1_DBM" ]; then
       _mon_add_rule critical G1
     else
@@ -1386,6 +1413,16 @@ _mon_rules() {
     _mon_add_rule info VPN-1
   fi
 
+  # W4 — Wi-Fi rate collapse: negotiated transmit rate collapsed despite strong RSSI.
+  # Evaluated identically to lib/diagnosis.sh against lib/thresholds.sh.
+  if [ "$MON_IFACE_TYPE" = "wifi" ] \
+     && [ -n "${MON_WIFI_TX_RATE:-}" ] && is_numeric "${MON_WIFI_TX_RATE:-}" \
+     && [ -n "${MON_WIFI_RSSI:-}" ] && is_numeric "${MON_WIFI_RSSI:-}" \
+     && [ "$MON_WIFI_RSSI" -ge "$THRESH_WIFI_COLLAPSE_MIN_RSSI" ] \
+     && [ "$MON_WIFI_TX_RATE" -lt "$THRESH_WIFI_TX_COLLAPSE_MBPS" ]; then
+    _mon_add_rule warn W4
+  fi
+
   # TCP-1 is decided above the gateway loss rules, because it decides
   # whether they fire at all.
 
@@ -1405,7 +1442,7 @@ _mon_rules() {
   if [ "$_mon_icmp_filtered" -eq 0 ] && loss_below "$MON_GW_LOSS" "$LOSS_WARN_PCT"; then
     if loss_at_least "$MON_INET_LOSS" "$LOSS_CRIT_PCT" \
        && loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_CRIT_PCT"; then
-      MON_INET_LOSS_STREAK=0
+      MON_INET_LOSS_STREAK="$THRESH_MON_LOSS_CONFIRM_CYCLES"
       _mon_add_rule critical L1
     elif loss_at_least "$MON_INET_LOSS" "$LOSS_WARN_PCT" \
          || loss_at_least "$MON_INET_LOSS_ALT" "$LOSS_WARN_PCT"; then
@@ -1493,6 +1530,10 @@ _mon_rules() {
     *" medium "*) [ "$MON_BROWSER_CHECKED" -eq 1 ] \
                      && MON_CLEARABLE_RULES+="BR-1 " ;;
   esac
+  if [ "$MON_IFACE_TYPE" != "wifi" ] \
+     || { [ -n "${MON_WIFI_RSSI:-}" ] && [ -n "${MON_WIFI_TX_RATE:-}" ]; }; then
+    MON_CLEARABLE_RULES+="W4 "
+  fi
 
   # Preserve unresolved last-known rules in the public sample as well as
   # the private snapshot. Otherwise the GUI sees rules=[] and severity=ok
@@ -1503,7 +1544,7 @@ _mon_rules() {
     case " $MON_CLEARABLE_RULES " in *" $prior "*) continue ;; esac
     case "$prior" in
       N1|G1|G2|P1|P2|L1|SOCK-1) _mon_add_rule critical "$prior" ;;
-      G3|D1|CP-1|L2|BR-1|CONN-1|HOG-1)
+      G3|D1|CP-1|L2|BR-1|CONN-1|HOG-1|W4)
         if [ "$prior" = "CP-1" ] && [ "$_mon_public_ok" = "0" ]; then
           _mon_add_rule critical "$prior"
         else
@@ -1907,15 +1948,21 @@ _mon_emit() {
   NETDIAG_MON_VPN_TYPE="$MON_VPN_TYPE" \
   NETDIAG_MON_VPN_NAME="$MON_VPN_NAME" \
   NETDIAG_MON_GW_LOSS="$MON_GW_LOSS" \
+  NETDIAG_MON_GW_LAST_LOSS="$MON_GW_LAST_LOSS" \
   NETDIAG_MON_GW_RTT="$MON_GW_RTT" \
   NETDIAG_MON_GW_JITTER="${MON_GW_JITTER:-}" \
   NETDIAG_MON_INET_LOSS="$MON_INET_LOSS" \
+  NETDIAG_MON_INET_LAST_LOSS="$MON_INET_LAST_LOSS" \
+  NETDIAG_MON_INET_LOSS_ALT="$MON_INET_LOSS_ALT" \
+  NETDIAG_MON_INET_LAST_LOSS_ALT="$MON_INET_LAST_LOSS_ALT" \
+  NETDIAG_MON_LOSS_CRIT_PCT="$LOSS_CRIT_PCT" \
   NETDIAG_MON_INET_RTT="$MON_INET_RTT" \
   NETDIAG_MON_INET_JITTER="${MON_INET_JITTER:-}" \
   NETDIAG_MON_WIFI_RSSI="$MON_WIFI_RSSI" \
   NETDIAG_MON_WIFI_NOISE="$MON_WIFI_NOISE" \
   NETDIAG_MON_WIFI_SNR="$MON_WIFI_SNR" \
   NETDIAG_MON_WIFI_CHAN="$MON_WIFI_CHAN" \
+  NETDIAG_MON_WIFI_TX_RATE="$MON_WIFI_TX_RATE" \
   NETDIAG_MON_DNS_OK="$MON_DNS_OK" \
   NETDIAG_MON_DNS_RESOLVER="$MON_DNS_RESOLVER" \
   NETDIAG_MON_DNS_MS="$MON_DNS_MS" \

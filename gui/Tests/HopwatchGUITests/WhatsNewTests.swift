@@ -6,9 +6,9 @@ import SwiftUI
 @Suite("WhatsNewTests")
 struct WhatsNewTests {
 
-    @Test("curated highlights for current release contains expected 5 features")
-    func currentContentCuratedHighlights() {
-        let content = WhatsNewContent.current(version: "1.17.1")
+    @Test("curated highlights contains expected 6 features")
+    func curatedHighlightsContainsExpectedFeatures() {
+        let content = WhatsNewContent.curatedHighlights(version: "1.17.1")
 
         #expect(content.version == "1.17.1")
         #expect(content.cleanVersion == "1.17.1")
@@ -16,6 +16,7 @@ struct WhatsNewTests {
         #expect(content.title == "What’s New in Hopwatch v1.17.1")
         #expect(content.subtitle == "Here is what changed in this version")
         #expect(content.features.count == 6)
+        #expect(content.isCuratedFallback == true)
 
         // 1. Plain English Mode
         let f1 = content.features[0]
@@ -54,13 +55,45 @@ struct WhatsNewTests {
         #expect(!f6.icon.isEmpty)
     }
 
-    @Test("current content default version uses Defaults.appVersion")
+    @Test("current content default version loads real changelog")
     func currentContentDefaultVersion() {
         let content = WhatsNewContent.current()
         #expect(content.version == Defaults.appVersion)
         #expect(!content.displayVersion.isEmpty)
         #expect(content.title.contains("What’s New in Hopwatch"))
-        #expect(content.features.count == 6)
+        #expect(!content.features.isEmpty)
+        #expect(content.isCuratedFallback == false)
+    }
+
+    @Test("current content loads actual changelog section for 1.23.1")
+    func currentContentLoadsChangelogFor1231() {
+        let content = WhatsNewContent.current(version: "1.23.1")
+        #expect(content.cleanVersion == "1.23.1")
+        #expect(content.displayVersion == "v1.23.1")
+        #expect(content.title == "What’s New in Hopwatch v1.23.1")
+        #expect(content.subtitle.contains("November 7, 2026"))
+        #expect(!content.features.isEmpty)
+        #expect(content.isCuratedFallback == false)
+
+        // Real changelog items from 1.23.1
+        let first = content.features.first
+        #expect(first?.title == "Automatic Arrival Full Check Recovery on Unhealthy Link Clearance")
+        #expect(first?.category == "Fix")
+        #expect(first?.description.contains("Hopwatch now automatically retries the full check") == true)
+    }
+
+    @Test("current content loads actual changelog section for 1.23.0")
+    func currentContentLoadsChangelogFor1230() {
+        let content = WhatsNewContent.current(version: "1.23.0")
+        #expect(content.cleanVersion == "1.23.0")
+        #expect(content.subtitle.contains("November 1, 2026"))
+        #expect(content.isCuratedFallback == false)
+
+        // Verify feature categorization
+        let addedFeature = content.features.first(where: { $0.title == "Smart Battery-Saver Cadence" })
+        #expect(addedFeature != nil)
+        #expect(addedFeature?.category == "New")
+        #expect(addedFeature?.icon == "battery.100.bolt")
     }
 
     @Test("version string formatting handles prefixes and empty strings")
@@ -107,6 +140,113 @@ struct WhatsNewTests {
         #expect(content.features[2].icon == "doc.text.fill")
     }
 
+    @Test("markdown cleaning removes bold, code backticks, links, and commit prefixes")
+    func markdownCleaning() {
+        let input = "fix(core): **Router Discovery**: Check `arp -an` and [read docs](https://example.com) (#42) by @alice in https://github.com"
+        let cleaned = WhatsNewContent.cleanMarkdown(input)
+        #expect(cleaned == "Router Discovery: Check arp -an and read docs")
+    }
+
+    @Test("date formatting converts ISO date to friendly English date")
+    func dateFormatting() {
+        #expect(WhatsNewContent.formatReleaseDate("2026-11-07") == "November 7, 2026")
+        #expect(WhatsNewContent.formatReleaseDate("2026-01-15") == "January 15, 2026")
+        #expect(WhatsNewContent.formatReleaseDate("invalid-date") == "invalid-date")
+    }
+
+    @Test("changelog reader extracts specific section from raw changelog")
+    func changelogReaderSectionExtraction() {
+        let sample = """
+        # Changelog
+
+        ## [2.0.0] - 2026-12-01
+
+        ### Added
+        - **Major Feature**: Exciting new capability.
+
+        ## [1.0.0] - 2026-01-01
+
+        ### Fixed
+        - Bug fix item.
+        """
+
+        let section2 = ChangelogReader.section(for: "2.0.0", in: sample)
+        #expect(section2?.version == "2.0.0")
+        #expect(section2?.date == "2026-12-01")
+        #expect(section2?.content.contains("Major Feature") == true)
+
+        let section1 = ChangelogReader.section(for: "1.0.0", in: sample)
+        #expect(section1?.version == "1.0.0")
+        #expect(section1?.date == "2026-01-01")
+        #expect(section1?.content.contains("Bug fix item") == true)
+
+        let nonexistent = ChangelogReader.section(for: "9.9.9", in: sample)
+        #expect(nonexistent == nil)
+    }
+
+    @Test("changelog reader lists available released versions in chronological order")
+    func changelogReaderAvailableVersions() {
+        let sample = """
+        # Changelog
+
+        ## [Unreleased]
+        - Pending work
+
+        ## [2.1.0] - 2026-12-10
+        - Feature 2
+
+        ## [2.0.0] - 2026-11-20
+        - Feature 1
+        """
+
+        let versions = ChangelogReader.availableVersions(in: sample)
+        #expect(versions.count == 2)
+        #expect(versions[0].version == "2.1.0")
+        #expect(versions[0].date == "2026-12-10")
+        #expect(versions[1].version == "2.0.0")
+        #expect(versions[1].date == "2026-11-20")
+    }
+
+    @Test("summary and details splitter splits multi-sentence descriptions")
+    func summaryAndDetailsSplitter() {
+        let longText = "First important sentence that gives users a quick takeaway. Second sentence with deep technical detail that explains the exact underlying mechanism and parameters."
+        let (summary, details) = WhatsNewContent.splitSummaryAndDetails(longText)
+
+        #expect(summary == "First important sentence that gives users a quick takeaway.")
+        #expect(details != nil)
+        #expect(details?.contains("Second sentence") == true)
+
+        // Abbreviation test (e.g. should not be split)
+        let abbrText = "Feature handling various scenarios (e.g. low latency or packet loss) properly. More technical details follow here in the second sentence."
+        let (abbrSummary, abbrDetails) = WhatsNewContent.splitSummaryAndDetails(abbrText)
+        #expect(abbrSummary.contains("(e.g. low latency or packet loss)"))
+        #expect(abbrDetails != nil)
+
+        let shortText = "Quick simple fix."
+        let (shortSummary, shortDetails) = WhatsNewContent.splitSummaryAndDetails(shortText)
+        #expect(shortSummary == "Quick simple fix.")
+        #expect(shortDetails == nil)
+    }
+
+    @Test("markdown generation formats clean structured notes for clipboard")
+    func toMarkdownFormatting() {
+        let feature1 = WhatsNewFeature(icon: "wifi", color: .blue, title: "Wi-Fi Polish", description: "Better mesh handoffs.", category: "New")
+        let feature2 = WhatsNewFeature(icon: "wrench", color: .green, title: "Crash Fix", description: "Resolved nil unwrap.", category: "Fix")
+
+        let content = WhatsNewContent(
+            version: "2.0.0",
+            releaseDate: "2026-11-07",
+            features: [feature1, feature2]
+        )
+
+        let md = content.toMarkdown()
+        #expect(md.contains("# What’s New in Hopwatch v2.0.0 (November 7, 2026)"))
+        #expect(md.contains("### Added"))
+        #expect(md.contains("- **Wi-Fi Polish**: Better mesh handoffs."))
+        #expect(md.contains("### Fixed"))
+        #expect(md.contains("- **Crash Fix**: Resolved nil unwrap."))
+    }
+
     @Test("release notes parser falls back to curated highlights if notes are empty")
     func releaseNotesEmptyFallback() {
         let emptyNotes = """
@@ -114,9 +254,10 @@ struct WhatsNewTests {
 
         
         """
-        let content = WhatsNewContent.current(version: "1.17.1", releaseNotes: emptyNotes)
+        let content = WhatsNewContent.current(version: "99.99.99", releaseNotes: emptyNotes)
         #expect(content.features.count == 6)
         #expect(content.features[0].title == "Plain English Mode")
+        #expect(content.isCuratedFallback == true)
     }
 
     @Test("feature model properties and identity")
@@ -125,13 +266,15 @@ struct WhatsNewTests {
             icon: "star.fill",
             color: .yellow,
             title: "Super Feature",
-            description: "Does amazing things."
+            description: "Does amazing things.",
+            category: "New"
         )
 
         #expect(feature.id == "Super Feature")
         #expect(feature.icon == "star.fill")
         #expect(feature.title == "Super Feature")
         #expect(feature.description == "Does amazing things.")
+        #expect(feature.category == "New")
 
         let customIDFeature = WhatsNewFeature(
             id: "custom-id",
@@ -141,18 +284,18 @@ struct WhatsNewTests {
             description: "Does amazing things."
         )
         #expect(customIDFeature.id == "custom-id")
+        #expect(customIDFeature.category == nil)
     }
 
     @Test("view instantiation and dismissal callback")
     func viewInstantiationAndDismiss() {
         var didDismiss = false
         let view = WhatsNewView(
-            content: .current(version: "1.17.1"),
+            content: .curatedHighlights(version: "1.17.1"),
             dismissButtonTitle: "Continue",
             onDismiss: { didDismiss = true }
         )
 
-        #expect(view.content.version == "1.17.1")
         #expect(view.dismissButtonTitle == "Continue")
 
         view.onDismiss()

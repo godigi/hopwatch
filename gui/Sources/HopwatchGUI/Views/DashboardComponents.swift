@@ -157,7 +157,7 @@ struct DashboardStatusHeroView: View {
                 Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.ColorToken.muted)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -233,6 +233,7 @@ struct DashboardRouteView: View {
     let bandChannelText: String
     let vpnActive: Bool
     var vpnKnown: Bool = true
+    var vpnUnknownText: String = "VPN checking…"
     let vpnProvider: String?
     let publicIP: String?
     let pingTarget: String?
@@ -252,6 +253,9 @@ struct DashboardRouteView: View {
     /// for the readings. Neither "fine" nor "faulty" has been established
     /// for a hop nothing can reach.
     var linkDown: Bool = false
+
+    @State private var copiedPublicIP = false
+    @State private var isHoveringPublicIP = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -277,7 +281,7 @@ struct DashboardRouteView: View {
                     let x1 = hopWidth * 0.5
                     let x2 = hopWidth * 1.5
                     let x3 = hopWidth * 2.5
-                    let lineY: CGFloat = 84
+                    let lineY: CGFloat = 91
 
                     // Dashed line hop1 -> hop2
                     Path { path in
@@ -532,7 +536,7 @@ struct DashboardRouteView: View {
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(routerLossText)
                         .fontWeight(.semibold)
-                        .foregroundStyle((routerLossText == "0%" || routerLossText == "Not measured") ? Theme.ColorToken.ink : Theme.ColorToken.amber)
+                        .foregroundStyle(isNeutralLossText(routerLossText) ? Theme.ColorToken.ink : Theme.ColorToken.amber)
                     Text("· Jitter")
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(routerJitterText)
@@ -554,7 +558,7 @@ struct DashboardRouteView: View {
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(internetLossText)
                         .fontWeight(.semibold)
-                        .foregroundStyle(internetLossText == "0%" ? Theme.ColorToken.ink : Theme.ColorToken.amber)
+                        .foregroundStyle(isNeutralLossText(internetLossText) ? Theme.ColorToken.ink : Theme.ColorToken.amber)
                     Text("· Jitter")
                         .foregroundStyle(Theme.ColorToken.muted)
                     Text(internetJitterText)
@@ -577,7 +581,7 @@ struct DashboardRouteView: View {
                     Image(systemName: "shield.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(vpnActive ? Theme.ColorToken.blue : Theme.ColorToken.muted)
-                    Text(vpnKnown ? (vpnActive ? "VPN on" : "VPN off") : "VPN checking…")
+                    Text(vpnKnown ? (vpnActive ? "VPN on" : "VPN off") : vpnUnknownText)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(vpnActive ? Theme.ColorToken.blue : Theme.ColorToken.muted)
                     if let vpnProvider, !vpnProvider.isEmpty {
@@ -590,14 +594,39 @@ struct DashboardRouteView: View {
                 Spacer()
 
                 HStack(spacing: 16) {
-                    if !linkDown, let publicIP, !publicIP.isEmpty {
-                        HStack(spacing: 4) {
-                            Text("Public IP")
-                                .foregroundStyle(Theme.ColorToken.muted)
-                            Text(publicIP)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Theme.ColorToken.ink)
+                    if !linkDown, let publicIP, !publicIP.isEmpty, publicIP != "—" {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(publicIP, forType: .string)
+                            copiedPublicIP = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                copiedPublicIP = false
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Public IP")
+                                    .foregroundStyle(Theme.ColorToken.muted)
+                                if copiedPublicIP {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 8, weight: .bold))
+                                        Text("Copied")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundStyle(Theme.ColorToken.green)
+                                } else {
+                                    Text(publicIP)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(isHoveringPublicIP ? Theme.ColorToken.blue : Theme.ColorToken.ink)
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(isHoveringPublicIP ? Theme.ColorToken.blue : Theme.ColorToken.muted.opacity(0.7))
+                                }
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .onHover { isHoveringPublicIP = $0 }
+                        .help("Click to copy public IP (\(publicIP))")
                     }
 
                     if let pingTarget, !pingTarget.isEmpty {
@@ -628,6 +657,10 @@ struct DashboardRouteView: View {
 
     /// `.unknown` and `.down` exist for the no-link state only.
     private enum HopState { case normal, unknown, down }
+
+    private func isNeutralLossText(_ text: String) -> Bool {
+        text == "0%" || text == "Not measured" || text == "—" || text == "roamed"
+    }
 
     private func hopNode(icon: String, isWarning: Bool, flag: String?, isCulprit: Bool, isCritical: Bool = false,
                          state: HopState = .normal) -> some View {
@@ -664,18 +697,6 @@ struct DashboardRouteView: View {
                     .offset(x: 16, y: 16)
             }
 
-            // Optional Culprit Banner
-            if isCulprit {
-                Text("Issue source")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1.5)
-                    .background(culpritTint)
-                    .clipShape(Capsule())
-                    .offset(y: -26)
-            }
-
             // Optional Flag Badge on Internet Node
             if let flag, !flag.isEmpty {
                 Text(flag)
@@ -689,8 +710,23 @@ struct DashboardRouteView: View {
                     )
                     .offset(x: 18, y: -16)
             }
+
+            // Optional Culprit Banner (above flag badge so it never overlaps)
+            if isCulprit {
+                let hasFlag = (flag?.isEmpty == false)
+                Text("Issue source")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .fixedSize()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(culpritTint)
+                    .clipShape(Capsule())
+                    .offset(y: hasFlag ? -31 : -26)
+            }
         }
         .frame(width: 44, height: 44)
+        .padding(.top, (isCulprit && flag?.isEmpty == false) ? 18 : 12)
     }
 }
 
@@ -703,24 +739,42 @@ struct DashboardLiveChartPanel: View {
     var burstUntil: Date? = nil
     let onToggleBurst: () -> Void
 
+    @State private var selectedDate: Date? = nil
+
     private var filteredSamples: [MonitorSample] {
         let cutoff = Date().addingTimeInterval(-Double(selectedWindowMinutes) * 60)
         return samples.filter { $0.timestamp >= cutoff }
     }
 
     private func buildInternetSeries(from filtered: [MonitorSample]) -> MonitorSeries.Result {
-        MonitorSeries.build(filtered, tier: "fast") { sample in
-            PingReadout.internetSeriesValue(for: sample)
-        }
+        MonitorSeries.build(
+            filtered,
+            tier: "fast",
+            isDrop: { sample in
+                !EffectiveLoss.filtering(sample: sample).internetLeg
+                    && ((sample.internet.lossPct ?? 0) >= 100 || sample.internet.rttAvgMs == nil)
+            },
+            value: { sample in
+                PingReadout.internetSeriesValue(for: sample)
+            }
+        )
     }
 
     private func buildRouterSeries(from filtered: [MonitorSample]) -> MonitorSeries.Result {
-        MonitorSeries.build(filtered, tier: "fast") { sample in
-            sample.gateway.rttAvgMs
-        }
+        MonitorSeries.build(
+            filtered,
+            tier: "fast",
+            isDrop: { sample in
+                !EffectiveLoss.filtering(sample: sample).gatewayLeg
+                    && ((sample.gateway.lossPct ?? 0) >= 100 || sample.gateway.rttAvgMs == nil)
+            },
+            value: { sample in
+                EffectiveLoss.filtering(sample: sample).gatewayLeg ? nil : sample.gateway.rttAvgMs
+            }
+        )
     }
 
-    private func computeInternetStats(from series: MonitorSeries.Result) -> (min: Double, avg: Double, max: Double)? {
+    private func computeStats(from series: MonitorSeries.Result) -> (min: Double, avg: Double, max: Double)? {
         let segments = series.segments
         var minVal = Double.infinity
         var maxVal = -Double.infinity
@@ -739,13 +793,30 @@ struct DashboardLiveChartPanel: View {
         return (minVal, sum / Double(count), maxVal)
     }
 
+    private func nearestPoint(in points: [MonitorSeries.Point], to date: Date) -> MonitorSeries.Point? {
+        guard let best = points.min(by: {
+            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+        }) else { return nil }
+        return abs(best.date.timeIntervalSince(date)) <= 30 ? best : nil
+    }
+
+    private func nearestDrop(in drops: [MonitorSeries.Drop], to date: Date) -> MonitorSeries.Drop? {
+        guard let best = drops.min(by: {
+            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+        }) else { return nil }
+        return abs(best.date.timeIntervalSince(date)) <= 20 ? best : nil
+    }
+
     var body: some View {
         let filtered = filteredSamples
         let internetSeries = buildInternetSeries(from: filtered)
         let routerSeries = buildRouterSeries(from: filtered)
-        let internetStats = computeInternetStats(from: internetSeries)
+        let internetStats = computeStats(from: internetSeries)
+        let routerStats = computeStats(from: routerSeries)
         let internetSegments = internetSeries.identifiedSegments
         let routerSegments = routerSeries.identifiedSegments
+        let maxObservedPing = max(internetStats?.max ?? 0, routerStats?.max ?? 0)
+        let yDomainUpper = max(30.0, ceil(maxObservedPing * 1.15))
 
         VStack(spacing: 0) {
             // Panel Head
@@ -811,6 +882,17 @@ struct DashboardLiveChartPanel: View {
                         .foregroundStyle(Theme.ColorToken.muted)
                 }
 
+                if !internetSeries.drops.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Theme.ColorToken.red)
+                        Text("\(internetSeries.drops.count) \(internetSeries.drops.count == 1 ? "drop" : "drops")")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.ColorToken.red)
+                    }
+                }
+
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -826,9 +908,36 @@ struct DashboardLiveChartPanel: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 145)
             } else {
+                let hoveredInet = selectedDate.flatMap { nearestPoint(in: internetSeries.points, to: $0) }
+                let hoveredRouter = selectedDate.flatMap { nearestPoint(in: routerSeries.points, to: $0) }
+                let hoveredDrop = selectedDate.flatMap { nearestDrop(in: internetSeries.drops, to: $0) }
+                let hoverDate = hoveredDrop?.date ?? hoveredInet?.date ?? hoveredRouter?.date
+
                 Chart {
+                    ForEach(internetSeries.gaps) { gap in
+                        RectangleMark(
+                            xStart: .value("From", gap.start),
+                            xEnd: .value("To", gap.end)
+                        )
+                        .foregroundStyle(.quaternary.opacity(0.45))
+                    }
+
                     ForEach(internetSegments) { segment in
                         ForEach(segment.points) { point in
+                            AreaMark(
+                                x: .value("Time", point.date),
+                                yStart: .value("Baseline", 0),
+                                yEnd: .value("Ping", point.value),
+                                series: .value("SeriesArea", "Internet-\(segment.id.timeIntervalSinceReferenceDate)")
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Theme.ColorToken.blue.opacity(0.18), Theme.ColorToken.blue.opacity(0.01)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Ping", point.value),
@@ -850,7 +959,71 @@ struct DashboardLiveChartPanel: View {
                             .lineStyle(StrokeStyle(lineWidth: 1.75))
                         }
                     }
+
+                    ForEach(internetSeries.drops) { drop in
+                        RuleMark(x: .value("Time", drop.date))
+                            .foregroundStyle(Theme.ColorToken.red.opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1.25, dash: [3, 3]))
+                        PointMark(
+                            x: .value("Time", drop.date),
+                            y: .value("Ping", 0)
+                        )
+                        .foregroundStyle(Theme.ColorToken.red)
+                        .symbol(.cross)
+                        .symbolSize(30)
+                    }
+
+                    if let hoverDate {
+                        RuleMark(x: .value("Selected", hoverDate))
+                            .foregroundStyle(Theme.ColorToken.muted.opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                                HStack(spacing: 8) {
+                                    Text(hoverDate.formatted(date: .omitted, time: .standard))
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(Theme.ColorToken.muted)
+
+                                    if hoveredDrop != nil {
+                                        Text("Internet dropped")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(Theme.ColorToken.red)
+                                    } else if let inet = hoveredInet {
+                                        HStack(spacing: 3) {
+                                            Circle().fill(Theme.ColorToken.blue).frame(width: 5, height: 5)
+                                            Text("\(Int(round(inet.value))) ms")
+                                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(Theme.ColorToken.ink)
+                                        }
+                                    }
+
+                                    if let rtr = hoveredRouter {
+                                        HStack(spacing: 3) {
+                                            Circle().fill(Theme.ColorToken.amber).frame(width: 5, height: 5)
+                                            Text("\(Int(round(rtr.value))) ms")
+                                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(Theme.ColorToken.ink)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                            }
+                    }
+
+                    if let inet = hoveredInet, hoveredDrop == nil {
+                        PointMark(x: .value("Time", inet.date), y: .value("Ping", inet.value))
+                            .foregroundStyle(Theme.ColorToken.blue)
+                            .symbolSize(32)
+                    }
+                    if let rtr = hoveredRouter {
+                        PointMark(x: .value("Time", rtr.date), y: .value("Ping", rtr.value))
+                            .foregroundStyle(Theme.ColorToken.amber)
+                            .symbolSize(32)
+                    }
                 }
+                .chartYScale(domain: 0...yDomainUpper)
+                .chartXSelection(value: $selectedDate)
                 .chartYAxis {
                     AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
                         AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
@@ -878,20 +1051,54 @@ struct DashboardLiveChartPanel: View {
             }
 
             // Chart Foot
-            HStack {
-                Text("Internet min / avg / max")
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Circle().fill(Theme.ColorToken.blue).frame(width: 6, height: 6)
+                    Text("Internet")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.ColorToken.muted)
+                    if let stats = internetStats {
+                        Text("\(Int(round(stats.min)))/\(Int(round(stats.avg)))/\(Int(round(stats.max))) ms")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
+                }
+
+                Text("·")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.ColorToken.muted)
-                Spacer()
-                if let stats = internetStats {
-                    Text("\(Int(round(stats.min))) / \(Int(round(stats.avg))) / \(Int(round(stats.max))) ms")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.ColorToken.ink)
-                } else {
-                    Text("— / — / —")
-                        .font(.system(size: 11, design: .monospaced))
+
+                HStack(spacing: 5) {
+                    Circle().fill(Theme.ColorToken.amber).frame(width: 6, height: 6)
+                    Text("Router")
+                        .font(.system(size: 10))
                         .foregroundStyle(Theme.ColorToken.muted)
+                    if let stats = routerStats {
+                        Text("\(Int(round(stats.min)))/\(Int(round(stats.avg)))/\(Int(round(stats.max))) ms")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.ColorToken.ink)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.ColorToken.muted)
+                    }
                 }
+
+                Spacer(minLength: 4)
+
+                Text("min / avg / max")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
@@ -1413,7 +1620,7 @@ struct DashboardCheckTable: View {
                 Text("Measured & State")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("Usual")
-                    .frame(width: 70, alignment: .trailing)
+                    .frame(width: 105, alignment: .trailing)
             }
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(Theme.ColorToken.muted)
@@ -1428,6 +1635,7 @@ struct DashboardCheckTable: View {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                     HStack(alignment: .center, spacing: 0) {
                         // Label
+                        let rowHelp = MetricGlossary.help(for: row.label)
                         HStack(alignment: .center, spacing: 6) {
                             Image(systemName: row.icon)
                                 .font(.system(size: 11))
@@ -1436,8 +1644,14 @@ struct DashboardCheckTable: View {
                             Text(row.label)
                                 .font(.system(size: 11))
                                 .foregroundStyle(Theme.ColorToken.ink)
+                            if rowHelp != nil {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(Theme.ColorToken.muted.opacity(0.65))
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(rowHelp ?? "")
 
                         // Measured & Grade Badge
                         HStack(alignment: .center, spacing: 6) {
@@ -1470,7 +1684,9 @@ struct DashboardCheckTable: View {
                         Text(row.usual)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.ColorToken.muted)
-                            .frame(width: 70, alignment: .trailing)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(width: 105, alignment: .trailing)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 7)
@@ -1843,6 +2059,7 @@ struct DashboardSpeedCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
@@ -1907,6 +2124,7 @@ struct DashboardReliabilityCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
@@ -2003,6 +2221,27 @@ struct DashboardNetworkDetailsPanel: View {
     var routerAdminAvailable: Bool = false
     let onOpenNetworkSettings: () -> Void
 
+    @State private var copiedKey: String? = nil
+    @State private var hoveredKey: String? = nil
+
+    private static let copyableKeys: Set<String> = [
+        "Local IP", "Public IP", "Gateway IP", "DNS Server"
+    ]
+
+    private func isCopyable(key: String, value: String) -> Bool {
+        guard Self.copyableKeys.contains(key) else { return false }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != "—" && trimmed != "None" && trimmed != "Unknown" && trimmed != "Checking…"
+    }
+
+    private func copyValue(for value: String) -> String {
+        // Strip trailing annotations like "(DHCP)" or "( router)" if present
+        if let parenIndex = value.firstIndex(of: "(") {
+            return value[..<parenIndex].trimmingCharacters(in: .whitespaces)
+        }
+        return value.trimmingCharacters(in: .whitespaces)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Panel Head
@@ -2055,6 +2294,7 @@ struct DashboardNetworkDetailsPanel: View {
             .background(Theme.ColorToken.footerBackground)
             .overlay(alignment: .top) { Divider().foregroundStyle(Theme.ColorToken.line) }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
         .overlay(
@@ -2073,15 +2313,55 @@ struct DashboardNetworkDetailsPanel: View {
     }
 
     private func cell(k: String, v: String) -> some View {
-        HStack {
+        let canCopy = isCopyable(key: k, value: v)
+        let isCopied = copiedKey == k
+        let isHovered = hoveredKey == k
+
+        return HStack(spacing: 4) {
             Text(k)
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.ColorToken.muted)
             Spacer()
-            Text(v)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.ColorToken.ink)
-                .lineLimit(1)
+            if canCopy {
+                Button {
+                    let clean = copyValue(for: v)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(clean, forType: .string)
+                    copiedKey = k
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        if copiedKey == k { copiedKey = nil }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if isCopied {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Theme.ColorToken.green)
+                            Text("Copied")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.green)
+                        } else {
+                            Text(v)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(isHovered ? Theme.ColorToken.blue : Theme.ColorToken.ink)
+                                .lineLimit(1)
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 9))
+                                .foregroundStyle(isHovered ? Theme.ColorToken.blue : Theme.ColorToken.muted.opacity(0.65))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredKey = hovering ? k : (hoveredKey == k ? nil : hoveredKey)
+                }
+                .help("Click to copy \(k.lowercased())")
+            } else {
+                Text(v)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -2198,12 +2478,13 @@ struct DashboardSuitabilityStrip: View {
                     .foregroundStyle(Theme.ColorToken.quiet)
             }
 
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(items) { item in
                     chip(item)
-                        .frame(maxWidth: .infinity)
+                        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -2236,7 +2517,9 @@ struct DashboardSuitabilityStrip: View {
             Text(item.status)
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(item.tint)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
 
             if !item.metric.isEmpty {
                 Text(item.metric)
@@ -2248,12 +2531,12 @@ struct DashboardSuitabilityStrip: View {
             Text(item.consequence)
                 .font(.system(size: 8.5))
                 .foregroundStyle(item.verdict == .good ? Theme.ColorToken.muted : item.tint)
-                .lineLimit(2)
+                .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(item.verdict == .good ? Theme.ColorToken.nodeBackground : item.tint.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -2283,6 +2566,27 @@ struct DashboardTechnicalPanel: View {
     let onCopyRedacted: () -> Void
     let onSaveMarkdown: () -> Void
     var canShare: Bool = true
+    var canViewRawJSON: Bool = true
+
+    @State private var copiedKey: String? = nil
+    @State private var hoveredKey: String? = nil
+
+    private static let copyableKeys: Set<String> = [
+        "Traceroute Hops", "IPv6 Reachability", "Double NAT Detection",
+        "Wi-Fi Protocol & Channel", "Signal / Noise (RSSI)", "Signal-to-Noise Ratio",
+        "DHCP Lease Remaining", "IP Conflicts / Neighbors", "Loaded Latency (Bufferbloat)",
+        "Diagnostic Engine"
+    ]
+
+    private func isCopyable(key: String, value: String) -> Bool {
+        guard Self.copyableKeys.contains(key) else { return false }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != "—" && trimmed != "Not measured" && trimmed != "Unknown"
+    }
+
+    private func copyValue(for value: String) -> String {
+        value.trimmingCharacters(in: .whitespaces)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2302,7 +2606,7 @@ struct DashboardTechnicalPanel: View {
 
             // 2-Column Key-Values Grid
             VStack(spacing: 0) {
-                row(k1: "Traceroute Hops", v1: tracerouteHops.map { "\($0) hops to target" } ?? "Not measured",
+                row(k1: "Traceroute Hops", v1: tracerouteHops.map { "\($0) \($0 == 1 ? "hop" : "hops") to target" } ?? "Not measured",
                     k2: "IPv6 Reachability", v2: isIPv6.map { $0 ? "Dual-stack IPv6" : "IPv4 only (No global v6)" } ?? "Not measured")
                 row(k1: "Double NAT Detection", v1: isDoubleNAT.map { $0 ? "Double NAT detected" : "None detected" } ?? "Not measured",
                     k2: "Wi-Fi Protocol & Channel", v2: wifiBandChannel.isEmpty ? "Not measured" : wifiBandChannel)
@@ -2311,7 +2615,7 @@ struct DashboardTechnicalPanel: View {
                 row(k1: "DHCP Lease Remaining", v1: dhcpRemaining,
                     k2: "IP Conflicts / Neighbors", v2: conflictAndNeighborText)
                 row(k1: "Loaded Latency (Bufferbloat)", v1: loadedRTT,
-                    k2: "Diagnostic Engine", v2: "netdiag v\(appVersion)")
+                    k2: "Diagnostic Engine", v2: "hopwatch v\(appVersion)")
             }
             .padding(.horizontal, 17)
             .padding(.bottom, 6)
@@ -2321,9 +2625,11 @@ struct DashboardTechnicalPanel: View {
                 Button("View Raw JSON") {
                     onViewRawJSON()
                 }
+                .disabled(!canViewRawJSON)
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.blue)
+                .opacity(canViewRawJSON ? 1.0 : 0.45)
 
                 Button("Copy Redacted Report") {
                     onCopyRedacted()
@@ -2332,6 +2638,7 @@ struct DashboardTechnicalPanel: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.blue)
+                .opacity(canShare ? 1.0 : 0.45)
 
                 Button("Save Markdown…") {
                     onSaveMarkdown()
@@ -2340,6 +2647,7 @@ struct DashboardTechnicalPanel: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.ColorToken.blue)
+                .opacity(canShare ? 1.0 : 0.45)
 
                 Spacer()
             }
@@ -2348,6 +2656,7 @@ struct DashboardTechnicalPanel: View {
             .background(Theme.ColorToken.footerBackground)
             .overlay(alignment: .top) { Divider().foregroundStyle(Theme.ColorToken.line) }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.ColorToken.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.routeCard))
         .overlay(
@@ -2359,7 +2668,7 @@ struct DashboardTechnicalPanel: View {
     private var conflictAndNeighborText: String {
         guard let ipConflict else { return "Not measured" }
         if ipConflict { return "IP conflict flagged" }
-        return neighborCount.map { "0 duplicates · \($0) neighbors" } ?? "0 duplicates · neighbors not measured"
+        return neighborCount.map { "0 duplicates · \($0) \($0 == 1 ? "neighbor" : "neighbors")" } ?? "0 duplicates · neighbors not measured"
     }
 
     private func row(k1: String, v1: String, k2: String, v2: String) -> some View {
@@ -2372,15 +2681,55 @@ struct DashboardTechnicalPanel: View {
     }
 
     private func cell(k: String, v: String) -> some View {
-        HStack {
+        let canCopy = isCopyable(key: k, value: v)
+        let isCopied = copiedKey == k
+        let isHovered = hoveredKey == k
+
+        return HStack(spacing: 4) {
             Text(k)
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.ColorToken.muted)
             Spacer()
-            Text(v)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.ColorToken.ink)
-                .lineLimit(1)
+            if canCopy {
+                Button {
+                    let clean = copyValue(for: v)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(clean, forType: .string)
+                    copiedKey = k
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        if copiedKey == k { copiedKey = nil }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if isCopied {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Theme.ColorToken.green)
+                            Text("Copied")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.ColorToken.green)
+                        } else {
+                            Text(v)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(isHovered ? Theme.ColorToken.blue : Theme.ColorToken.ink)
+                                .lineLimit(1)
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 9))
+                                .foregroundStyle(isHovered ? Theme.ColorToken.blue : Theme.ColorToken.muted.opacity(0.65))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredKey = hovering ? k : (hoveredKey == k ? nil : hoveredKey)
+                }
+                .help("Click to copy \(k.lowercased())")
+            } else {
+                Text(v)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity)
     }

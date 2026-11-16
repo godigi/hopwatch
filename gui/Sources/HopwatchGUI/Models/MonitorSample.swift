@@ -239,11 +239,13 @@ struct MonitorSample: Decodable, Sendable {
         /// null-vs-0 discipline in docs/JSON-SCHEMA.md exists because
         /// treating the first as the second produced false criticals.
         var lossPct: Double?
+        var lastProbeLossPct: Double?
         var rttAvgMs: Double?
         var rttJitterMs: Double?
 
         enum CodingKeys: String, CodingKey {
             case lossPct = "loss_pct"
+            case lastProbeLossPct = "last_probe_loss_pct"
             case rttAvgMs = "rtt_avg_ms"
             case rttJitterMs = "rtt_jitter_ms"
         }
@@ -251,11 +253,15 @@ struct MonitorSample: Decodable, Sendable {
 
     struct Internet: Decodable, Sendable {
         var lossPct: Double?
+        var lossPctAlt: Double?
+        var lastProbeLossPct: Double?
         var rttAvgMs: Double?
         var rttJitterMs: Double?
 
         enum CodingKeys: String, CodingKey {
             case lossPct = "loss_pct"
+            case lossPctAlt = "loss_pct_alt"
+            case lastProbeLossPct = "last_probe_loss_pct"
             case rttAvgMs = "rtt_avg_ms"
             case rttJitterMs = "rtt_jitter_ms"
         }
@@ -266,9 +272,11 @@ struct MonitorSample: Decodable, Sendable {
         var noise: Int?
         var snr: Int?
         var channel: String?
+        var txRate: Int?
 
         enum CodingKeys: String, CodingKey {
             case rssi, noise, snr, channel
+            case txRate = "tx_rate"
         }
     }
 
@@ -407,8 +415,8 @@ struct MonitorSample: Decodable, Sendable {
         default:
             if status.degraded { return .warning }
             let filtering = EffectiveLoss.filtering(sample: self)
-            let inetLoss = internet.lossPct ?? 0
-            let gwLoss = gateway.lossPct ?? 0
+            let inetLoss = filtering.internetLeg ? 0.0 : (internet.lossPct ?? 0)
+            let gwLoss = filtering.gatewayLeg ? 0.0 : (gateway.lossPct ?? 0)
             // Downstream validation: if internet is healthy (<= 1.0%), isolated router loss
             // (< 20%) or complete gateway ICMP filtering (TCP-1 / icmp_filtered) is control-plane
             // rate limiting or filtering by policy and does not degrade user traffic.
@@ -525,6 +533,7 @@ extension MonitorSample.Gateway {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lossPct = c.lenient(.lossPct)
+        lastProbeLossPct = c.lenient(.lastProbeLossPct)
         rttAvgMs = c.lenient(.rttAvgMs)
         rttJitterMs = c.lenient(.rttJitterMs)
     }
@@ -534,6 +543,8 @@ extension MonitorSample.Internet {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lossPct = c.lenient(.lossPct)
+        lossPctAlt = c.lenient(.lossPctAlt)
+        lastProbeLossPct = c.lenient(.lastProbeLossPct)
         rttAvgMs = c.lenient(.rttAvgMs)
         rttJitterMs = c.lenient(.rttJitterMs)
     }
@@ -546,6 +557,7 @@ extension MonitorSample.WiFi {
         noise = c.lenient(.noise)
         snr = c.lenient(.snr)
         channel = c.lenient(.channel)
+        txRate = c.lenient(.txRate)
     }
 }
 

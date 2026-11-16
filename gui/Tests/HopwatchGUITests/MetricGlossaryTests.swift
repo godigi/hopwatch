@@ -55,6 +55,12 @@ import Testing
         #expect(MetricGlossary.entry(for: "Availability")?.key == "availability")
         #expect(MetricGlossary.entry(for: "Local traffic")?.key == "traffic")
         #expect(MetricGlossary.entry(for: "Background watcher")?.key == "watcher")
+        #expect(MetricGlossary.entry(for: "Jitter")?.key == "jitter")
+        #expect(MetricGlossary.entry(for: "Wi-Fi channel")?.key == "wifi_channel")
+        #expect(MetricGlossary.entry(for: "Noise")?.key == "noise")
+        #expect(MetricGlossary.entry(for: "Web connections")?.key == "web_connections")
+        #expect(MetricGlossary.entry(for: "Lag under load")?.key == "bufferbloat")
+        #expect(MetricGlossary.entry(for: "Throughput / Speed")?.key == "speed")
     }
 
     @Test func handlesUnknownKeysGracefully() {

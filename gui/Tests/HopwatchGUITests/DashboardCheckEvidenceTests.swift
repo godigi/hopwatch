@@ -88,10 +88,13 @@ import Testing
 
     @Test func channelWithoutScanEvidenceIsNeutral() {
         let row = DashboardCheckEvidence.wifiChannel(snapshot: RunSnapshot(), channel: "44", fallbackChannel: "")
-        #expect(row.badge == .init(label: "Unknown", tone: .neutral))
+        #expect(row.badge == .init(label: "Not scanned", tone: .neutral))
         #expect(row.subvalue == nil)
         #expect(!row.isGood)
         #expect(!row.isWarning)
+
+        let unknown = DashboardCheckEvidence.wifiChannel(snapshot: RunSnapshot(), channel: nil, fallbackChannel: "")
+        #expect(unknown.badge == .init(label: "Unknown", tone: .neutral))
     }
 
     @Test func secondSuccessfulTCPTargetShowsWebReachable() {

@@ -184,5 +184,41 @@ struct NetworkEventTests {
         #expect(folded[0].extraDetail == "Comcast Cable")
         #expect(folded[0].detail?.contains("198.51.100.7 → 203.0.113.42 · Comcast Cable") == true)
     }
+
+    @Test @MainActor func eventStoreExportCSVAndMarkdownAndClear() {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = EventStore(directory: tempDir)
+
+        store.record(
+            kind: "rule-fired",
+            summary: "Packet loss to router",
+            ruleID: "G1",
+            network: "ssid:HomeWiFi",
+            extraDetail: "15% loss"
+        )
+        store.record(
+            kind: "public-ip-changed",
+            summary: "Public IP changed",
+            network: "ssid:HomeWiFi",
+            fromValue: "1.2.3.4",
+            toValue: "5.6.7.8"
+        )
+
+        let csv = store.exportCSV()
+        #expect(csv.contains("Timestamp,Kind,RuleID,Network,Summary,Detail,From,To,Evidence"))
+        #expect(csv.contains("rule-fired,G1,ssid:HomeWiFi,Packet loss to router,15% loss,,,"))
+        #expect(csv.contains("public-ip-changed,,ssid:HomeWiFi,Public IP changed,,1.2.3.4,5.6.7.8,"))
+
+        let md = store.exportMarkdown(network: "HomeWiFi")
+        #expect(md.contains("# Hopwatch Network Activity History"))
+        #expect(md.contains("**Network:** HomeWiFi"))
+        #expect(md.contains("Packet loss to router"))
+        #expect(md.contains("G1"))
+
+        store.clear()
+        #expect(store.events.isEmpty)
+        #expect(store.exportCSV().components(separatedBy: .newlines).count == 1)
+        try? FileManager.default.removeItem(at: tempDir)
+    }
 }
 

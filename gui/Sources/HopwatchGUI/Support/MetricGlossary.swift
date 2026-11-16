@@ -145,6 +145,30 @@ public enum MetricGlossary {
             summary: "How fast data leaves your Mac for the internet during a full speed test.",
             impact: "Essential for smooth outgoing video on Zoom/FaceTime calls, sending files, and cloud backups."
         ),
+        Entry(
+            key: "jitter",
+            title: "Jitter (Latency Variation)",
+            summary: "How much your ping time fluctuates from moment to moment in milliseconds.",
+            impact: "Even with a low average ping, high jitter (>15–20 ms) causes robotic voices, frozen video frames, and rubber-banding in games."
+        ),
+        Entry(
+            key: "wifi_channel",
+            title: "Wi-Fi Channel & Band",
+            summary: "The specific radio frequency slice (2.4 GHz, 5 GHz, or 6 GHz) your Mac uses to talk to the access point.",
+            impact: "2.4 GHz travels farther through walls but is slower and crowded; 5 GHz and 6 GHz are much faster when nearby. Crowded channels add lag on shared Wi-Fi."
+        ),
+        Entry(
+            key: "noise",
+            title: "Wi-Fi Background Noise",
+            summary: "Ambient radio interference in the air around your Mac, measured in dBm (lower negative numbers like -95 dBm mean quieter air).",
+            impact: "High background noise (above -85 dBm) forces your Wi-Fi radio to slow down and resend packets."
+        ),
+        Entry(
+            key: "web_connections",
+            title: "Web Connections (HTTPS / TCP 443)",
+            summary: "Verifies whether encrypted web traffic (port 443) can actually reach major sites beyond basic ping tests.",
+            impact: "Confirms browsers and apps can connect even on networks that block ICMP ping packets."
+        ),
     ]
 
     private static let entriesByKey: [String: Entry] = Dictionary(
@@ -188,6 +212,17 @@ public enum MetricGlossary {
         "availability": entriesByKey["availability"]!,
         "local traffic": entriesByKey["traffic"]!,
         "background watcher": entriesByKey["watcher"]!,
+        "jitter": entriesByKey["jitter"]!,
+        "packet loss to router": entriesByKey["packet_loss"]!,
+        "internet packet loss": entriesByKey["packet_loss"]!,
+        "wi-fi channel": entriesByKey["wifi_channel"]!,
+        "signal": entriesByKey["rssi"]!,
+        "noise": entriesByKey["noise"]!,
+        "router latency": entriesByKey["router"]!,
+        "internet latency": entriesByKey["internet"]!,
+        "lag under load": entriesByKey["bufferbloat"]!,
+        "web connections": entriesByKey["web_connections"]!,
+        "throughput / speed": entriesByKey["speed"]!,
     ]
 
     /// Lookup glossary entry by key, label, or metric identifier.

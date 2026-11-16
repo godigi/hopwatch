@@ -54,6 +54,64 @@ enum EffectiveLoss {
         )
     }
 
+    /// True when gateway ICMP ping loss (< 20%) is isolated while downstream
+    /// internet traffic is clean (<= 1.0%), indicating harmless router
+    /// control-plane ICMP rate-limiting rather than physical link loss.
+    static func isIsolatedGatewayRateLimit(
+        gatewayLoss: Double?,
+        internetLoss: Double?,
+        gatewayFiltered: Bool = false
+    ) -> Bool {
+        guard !gatewayFiltered,
+              let gw = gatewayLoss, gw > 0, gw < 20.0,
+              let inet = internetLoss, inet <= 1.0 else {
+            return false
+        }
+        return true
+    }
+
+    /// True when the rolling-window loss is non-zero from a recent burst,
+    /// while the most recent probe cycle completed with zero dropped packets.
+    static func isRecovering(windowLoss: Double?, lastProbeLoss: Double?) -> Bool {
+        guard let windowLoss, windowLoss > 0, let lastProbeLoss else {
+            return false
+        }
+        return lastProbeLoss == 0
+    }
+
+    /// Formats a non-zero loss detail string that distinguishes ongoing drops
+    /// from a rolling-window reading that is already clean on the latest probe.
+    static func formatWindowDetail(windowLoss: Double, lastProbeLoss: Double?) -> String {
+        if isRecovering(windowLoss: windowLoss, lastProbeLoss: lastProbeLoss) {
+            return "0% now · \(LossFormatter.formatPct(windowLoss)) avg"
+        }
+        return LossFormatter.formatPacketLoss(windowLoss)
+    }
+
+    /// Returns the `lastProbeLossPct` matching the leg that `compute(...)` selected.
+    static func effectiveLastProbeLoss(
+        sample: MonitorSample?,
+        filtering: Filtering,
+        hasRecentRoam: Bool
+    ) -> Double? {
+        guard let sample else { return nil }
+        let inetLoss: Double? = filtering.internetLeg ? nil : sample.internet.lossPct
+        let gwLoss: Double? = filtering.gatewayLeg ? nil : sample.gateway.lossPct
+
+        var candidateGW = gwLoss
+        if hasRecentRoam, let gw = candidateGW, gw < 10.0 {
+            candidateGW = inetLoss ?? 0.0
+        }
+
+        if let inetLoss, let candidateGW {
+            if inetLoss < 2.0 && candidateGW > inetLoss {
+                return sample.internet.lastProbeLossPct
+            }
+            return candidateGW > inetLoss ? sample.gateway.lastProbeLossPct : sample.internet.lastProbeLossPct
+        }
+        return inetLoss != nil ? sample.internet.lastProbeLossPct : sample.gateway.lastProbeLossPct
+    }
+
     /// Unified effective packet loss across the internet and gateway probes,
     /// or `nil` when no usable figure exists (not yet measured, or every leg
     /// that was measured is one a filter makes meaningless).

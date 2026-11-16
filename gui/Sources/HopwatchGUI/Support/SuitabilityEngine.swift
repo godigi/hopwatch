@@ -50,6 +50,7 @@ enum SuitabilityEngine {
                     if status == "Audio stutter" { return "Robotic speech distortion" }
                     if status == "Audio delay" { return "Conversational talk-over lag" }
                     if status == "Video limited" { return "Restricted to low-res video" }
+                    if status == "Glitch risk" { return "Occasional audio glitches" }
                     return "Robotic audio & dropouts"
                 case .broken:
                     return "Frequent call disconnections"
@@ -78,7 +79,7 @@ enum SuitabilityEngine {
                 case .broken:
                     return "Constant rubberbanding"
                 case .unknown, .unmeasured:
-                    return "Assessing multiplayer latency"
+                    return "Assessing game latency"
                 }
             case "vpn":
                 switch verdict {
@@ -130,6 +131,8 @@ enum SuitabilityEngine {
         var lossFiltering: EffectiveLoss.Filtering?
         var isSettling: Bool
         var isArrivalCheck: Bool
+        var isPaused: Bool
+        var isStale: Bool
 
         init(
             monitorSample: MonitorSample? = nil,
@@ -146,7 +149,9 @@ enum SuitabilityEngine {
             effectiveLoss: Double? = nil,
             lossFiltering: EffectiveLoss.Filtering? = nil,
             isSettling: Bool = false,
-            isArrivalCheck: Bool = false
+            isArrivalCheck: Bool = false,
+            isPaused: Bool = false,
+            isStale: Bool = false
         ) {
             self.lossFiltering = lossFiltering
             self.monitorSample = monitorSample?.status.paused == true ? nil : monitorSample
@@ -163,6 +168,8 @@ enum SuitabilityEngine {
             self.effectiveLoss = effectiveLoss
             self.isSettling = isSettling
             self.isArrivalCheck = isArrivalCheck
+            self.isPaused = isPaused
+            self.isStale = isStale
         }
 
         /// The legs a filter makes unmeasurable, resolved once for all evaluators.
@@ -184,17 +191,27 @@ enum SuitabilityEngine {
     }
 
     static func evaluateAll(_ inputs: Inputs) -> [Item] {
+        if inputs.isLinkUp && inputs.isPaused {
+            return uniformItems(
+                status: "Paused",
+                metric: "Monitoring paused",
+                help: "Live monitoring is paused.",
+                consequence: "Resume monitoring to check"
+            )
+        }
+        if inputs.isLinkUp && inputs.isStale {
+            return uniformItems(
+                status: "No reading",
+                metric: "Not reporting",
+                help: "Waiting for recent monitoring readings.",
+                consequence: "Waiting for fresh readings"
+            )
+        }
         if inputs.isSettling || inputs.isArrivalCheck {
             let isCheckingNetwork = inputs.isArrivalCheck
             let status = isCheckingNetwork ? "Checking…" : "Settling…"
             let help = isCheckingNetwork ? "Running initial check on network." : "Stabilizing connection baseline."
-            return [
-                Item(id: "calls", title: "Calls", icon: "video", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "streaming", title: "Streaming", icon: "play.rectangle", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "gaming", title: "Gaming", icon: "gamecontroller", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "vpn", title: "VPN / Remote", icon: "shield", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help),
-                Item(id: "browsing", title: "Browsing", icon: "globe", status: status, metric: "Measuring", tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help)
-            ]
+            return uniformItems(status: status, metric: "Measuring", help: help)
         }
         return [
             evaluateCalls(inputs),
@@ -202,6 +219,16 @@ enum SuitabilityEngine {
             evaluateGaming(inputs),
             evaluateVPN(inputs),
             evaluateBrowsing(inputs)
+        ]
+    }
+
+    private static func uniformItems(status: String, metric: String, help: String, consequence: String? = nil) -> [Item] {
+        [
+            Item(id: "calls", title: "Calls", icon: "video", status: status, metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help, consequence: consequence),
+            Item(id: "streaming", title: "Streaming", icon: "play.rectangle", status: status, metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help, consequence: consequence),
+            Item(id: "gaming", title: "Gaming", icon: "gamecontroller", status: status, metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help, consequence: consequence),
+            Item(id: "vpn", title: "VPN / Remote", icon: "shield", status: status, metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help, consequence: consequence),
+            Item(id: "browsing", title: "Browsing", icon: "globe", status: status, metric: metric, tint: Theme.ColorToken.muted, verdict: .unknown, helpText: help, consequence: consequence)
         ]
     }
 
@@ -486,6 +513,19 @@ enum SuitabilityEngine {
             )
         }
 
+        if inputs.filtering.internetLeg {
+            return Item(
+                id: "streaming",
+                title: "Streaming",
+                icon: "play.rectangle",
+                status: "Unmeasured",
+                metric: "No ICMP",
+                tint: Theme.ColorToken.muted,
+                verdict: .unknown,
+                helpText: "ICMP ping is blocked and no recent speed test exists to confirm streaming bandwidth"
+            )
+        }
+
         guard inputs.measuredLoss != nil else {
             return awaiting("streaming", "Streaming", "play.rectangle")
         }
@@ -529,18 +569,10 @@ enum SuitabilityEngine {
         // impacts still judge below; only the "all clear" is reworded, because
         // without RTT the most that can be said is that TCP connects.
         let pingFiltered = rtt == nil && inputs.filtering.any
+        let lossOrCatalogKnown = loss >= 2.0 || impacts.contains("broken") || impacts.contains("degraded")
 
-        guard rtt != nil || pingFiltered else {
-            return Item(
-                id: "gaming",
-                title: "Gaming",
-                icon: "gamecontroller",
-                status: "Checking",
-                metric: "Measuring",
-                tint: Theme.ColorToken.muted,
-                verdict: .unknown,
-                helpText: "Measuring latency, jitter, and packet loss…"
-            )
+        guard rtt != nil || pingFiltered || lossOrCatalogKnown else {
+            return awaiting("gaming", "Gaming", "gamecontroller")
         }
         let ping = rtt ?? 0.0
 
@@ -549,12 +581,18 @@ enum SuitabilityEngine {
         let metric: String
         if pingFiltered {
             metric = loss > 0 ? LossFormatter.formatLoss(loss) : "TCP 443 ok"
+        } else if let rtt {
+            if loss > 0 {
+                metric = String(format: "%.0f ms · %@", rtt, LossFormatter.formatLoss(loss))
+            } else if measuredJitter != nil {
+                metric = String(format: "%.0f ms · %.0fms jit", rtt, jitter)
+            } else {
+                metric = String(format: "%.0f ms", rtt)
+            }
         } else if loss > 0 {
-            metric = String(format: "%.0f ms · %@", ping, LossFormatter.formatLoss(loss))
-        } else if measuredJitter != nil {
-            metric = String(format: "%.0f ms · %.0fms jit", ping, jitter)
+            metric = LossFormatter.formatLoss(loss)
         } else {
-            metric = String(format: "%.0f ms", ping)
+            metric = "Route blocked"
         }
 
         // Broken conditions: constant rollbacks, extreme jitter desync, or unplayable ping
@@ -847,7 +885,7 @@ enum SuitabilityEngine {
                 ruleID = rule.id
                 metric = LossFormatter.formatLoss(loss)
                 help = rule.blurb ?? status
-                ruleConsequence = rule.blurb.map(firstSentence)
+                ruleConsequence = shortCardConsequence(for: rule)
             } else if let dnsMs = dnsElapsed, dnsMs >= 250.0 {
                 status = "Slow lookups"
                 metric = String(format: "%.0fms DNS", dnsMs)
@@ -1131,6 +1169,34 @@ enum SuitabilityEngine {
     private static func firstSentence(_ text: String) -> String {
         guard let end = text.range(of: ". ") else { return text }
         return String(text[..<end.lowerBound]) + "."
+    }
+
+    /// Condenses multi-clause CLI rule blurbs so narrow suitability cards never
+    /// clip mid-word while keeping the full blurb intact for tooltips.
+    private static func shortCardConsequence(for rule: RulesCatalog.Rule) -> String? {
+        if rule.id == "W4" {
+            return "Severely limited Wi-Fi throughput"
+        }
+        guard let blurb = rule.blurb else { return nil }
+        let sentence = firstSentence(blurb)
+        let maxChars = 54
+        if sentence.count <= maxChars { return sentence }
+        for separator in ["; ", " — ", ", "] {
+            if let range = sentence.range(of: separator) {
+                let clause = String(sentence[..<range.lowerBound])
+                if clause.count >= 12, clause.count <= maxChars {
+                    return clause
+                }
+            }
+        }
+        let words = sentence.split(separator: " ")
+        var trimmed = ""
+        for word in words {
+            let candidate = trimmed.isEmpty ? String(word) : "\(trimmed) \(word)"
+            if candidate.count > maxChars - 1 { break }
+            trimmed = candidate
+        }
+        return trimmed.isEmpty ? String(sentence.prefix(maxChars - 1)) + "…" : "\(trimmed)…"
     }
 
     private static func catalogImpacts(for activity: String, in inputs: Inputs) -> [String] {

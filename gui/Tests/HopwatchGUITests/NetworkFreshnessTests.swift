@@ -272,7 +272,8 @@ import Testing
         snapshot.network = .init(id: "ssid:home", groupId: "ssid:home")
         snapshot.diagnosis = [
             .init(severity: "critical", rule: "SOCK-1", summary: "Cannot open connections"),
-            .init(severity: "warn", rule: "BL-1", summary: "Bufferbloat under load")
+            .init(severity: "warn", rule: "BL-1", summary: "Bufferbloat under load"),
+            .init(severity: "warn", rule: "NAT-1", summary: "Double NAT detected")
         ]
         let result = RunResult(snapshot: snapshot, rawJSON: "{}", exitCode: 0,
                                startedAt: Date().addingTimeInterval(-60), finishedAt: Date())
@@ -283,10 +284,11 @@ import Testing
         #expect(coordinator.liveSample?.status.rules.isEmpty == true)
 
         // Stale monitor-scoped rule SOCK-1 should be evicted from active fired rules,
-        // while scan-only rule BL-1 (bufferbloat) is preserved for suitability.
+        // while scan-only rules BL-1 (bufferbloat) and NAT-1 (double NAT) are preserved for suitability.
         let active = coordinator.activeFiredRules
         #expect(!active.contains("SOCK-1"))
         #expect(active.contains("BL-1"))
+        #expect(active.contains("NAT-1"))
     }
 
     @Test func relativeTimeNeverRendersFutureTenseForJustNowOrClockSkew() {

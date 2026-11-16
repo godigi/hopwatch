@@ -55,7 +55,19 @@ struct MainWindow: View {
     @Environment(HopwatchCoordinator.self) private var coordinator
     @Environment(AppSettings.self) private var appSettings
     @Environment(\.openWindow) private var openWindow
-    @State private var selection: SidebarSection? = .home
+    @State private var selection: SidebarSection?
+    private let initialSettingsTab: SettingsView.Tab
+    private let skipHistoryReload: Bool
+
+    init(
+        initialSection: SidebarSection = .home,
+        initialSettingsTab: SettingsView.Tab = .general,
+        skipHistoryReload: Bool = false
+    ) {
+        _selection = State(initialValue: initialSection)
+        self.initialSettingsTab = initialSettingsTab
+        self.skipHistoryReload = skipHistoryReload
+    }
     /// Home's own navigation path, owned here rather than inside `HomeView`
     /// so a `.run(route)` request — which may arrive before this window
     /// exists at all — can push straight onto it without a second channel
@@ -65,8 +77,10 @@ struct MainWindow: View {
     var body: some View {
         NavigationSplitView {
             sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             detail
+                .background(Theme.ColorToken.detailBackground)
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -80,7 +94,9 @@ struct MainWindow: View {
             // two-path shape `DashboardWindow` used before this replaced
             // it.
             if let requested = coordinator.consumeRequestedDestination() { handle(requested) }
-            await coordinator.history.load()
+            if !skipHistoryReload {
+                await coordinator.history.load()
+            }
         }
         .onChange(of: coordinator.requestedDestination) { _, new in
             guard new != nil, let requested = coordinator.consumeRequestedDestination() else { return }
@@ -102,9 +118,13 @@ struct MainWindow: View {
                     Text("Hopwatch")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.ColorToken.ink)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     Text("v\(AppVersion.display)")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.ColorToken.muted)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -147,25 +167,54 @@ struct MainWindow: View {
             ?? coordinator.liveSample?.link.ssid
             ?? coordinator.freshNetworkRunSnapshot?.wifi?.ssid
             ?? (isWiFi ? "Wi-Fi network" : "Ethernet"))
-
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: isWiFi ? "wifi" : "cable.connector")
-                    .font(.system(size: 12))
-                Text(name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
+        let subtitle: String = {
+            if coordinator.linkIsDown {
+                return "No active link"
             }
-            .foregroundStyle(Theme.ColorToken.ink)
+            if let sample = coordinator.liveSample {
+                let rtt = PingReadout.internetSeriesValue(for: sample) ?? sample.gateway.rttAvgMs
+                let loss = coordinator.effectiveLoss
+                if let rtt {
+                    let lossPart = loss.map { $0 > 0 ? " · \(LossFormatter.formatPct($0)) loss" : " · 0% loss" } ?? ""
+                    return "\(Int(round(rtt))) ms\(lossPart)"
+                }
+                if let isp = sample.publicInfo.isp, !isp.isEmpty {
+                    return isp
+                }
+            }
+            return "Current network"
+        }()
 
-            Text("Current network")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.ColorToken.muted)
-                .padding(.leading, 18)
+        return Button {
+            selection = .networks
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Image(systemName: isWiFi ? "wifi" : "cable.connector")
+                        .font(.system(size: 12))
+                    Text(name)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.ColorToken.muted.opacity(0.7))
+                }
+                .foregroundStyle(Theme.ColorToken.ink)
+
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                    .lineLimit(1)
+                    .padding(.leading, 18)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
+        .help("View saved networks & current network baseline")
     }
 
     private var toolbarRightContent: some View {
@@ -206,36 +255,19 @@ struct MainWindow: View {
         return "Updated \(RelativeTime.string(from: ts))"
     }
 
-    private var statusPillText: String {
-        if coordinator.isScanning { return "Checking" }
-        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return "Paused" }
-        // Not a "Watching" over a monitor that has stopped reporting.
-        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return "Not reporting" }
-        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return "Problem" }
-        if coordinator.liveSample?.status.severity == "warn" { return "Degraded" }
-        guard coordinator.liveSample != nil else { return "Checking" }
-        return "Watching"
+    private var currentStage: StageResolver.Stage {
+        coordinator.currentStage(monitoringEnabled: appSettings.monitoringEnabled)
     }
 
-    private var statusPillColor: Color {
-        if coordinator.isScanning { return Theme.ColorToken.blue }
-        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.muted }
-        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amber }
-        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return .red }
-        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amber }
-        guard coordinator.liveSample != nil else { return Theme.ColorToken.muted }
-        return Theme.ColorToken.green
+    private var statusPill: StageResolver.StatusPill {
+        StageResolver.statusPill(for: currentStage)
     }
 
-    private var statusPillBackground: Color {
-        if coordinator.isScanning { return Theme.ColorToken.blueWash }
-        if coordinator.monitor.isPausedForAnyReason || !appSettings.monitoringEnabled { return Theme.ColorToken.neutralWash }
-        if coordinator.latestSampleIsStale && !coordinator.linkIsDown { return Theme.ColorToken.amberWash }
-        if coordinator.linkIsDown || coordinator.liveSample?.status.severity == "critical" { return Theme.ColorToken.redWash }
-        if coordinator.liveSample?.status.severity == "warn" { return Theme.ColorToken.amberWash }
-        guard coordinator.liveSample != nil else { return Theme.ColorToken.neutralWash }
-        return Theme.ColorToken.greenWash
-    }
+    private var statusPillText: String { statusPill.text }
+
+    private var statusPillColor: Color { statusPill.tone.color }
+
+    private var statusPillBackground: Color { statusPill.tone.background }
 
     @ViewBuilder
     private func row(_ section: SidebarSection) -> some View {
@@ -292,16 +324,25 @@ struct MainWindow: View {
         if coordinator.monitor.isBursting {
             return "Latency test · every \(appSettings.latencyTestInterval)s"
         }
-        if let reason = coordinator.monitor.pauseReason { return "Paused — \(reason)" }
+        if coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason),
+           let reason = coordinator.monitor.pauseReason {
+            return "Paused — \(reason)"
+        }
         guard appSettings.monitoringEnabled else { return "Monitoring is off" }
+        if coordinator.isBackgroundInvestigating { return "Investigating issue" }
         if let error = coordinator.monitor.lastError { return error }
         if !coordinator.monitor.isRunning { return "Starting…" }
-        return "Monitoring · every \(appSettings.fastInterval)s"
+        let cadence = coordinator.liveSample?.status.cadenceS ?? appSettings.fastInterval
+        return "Monitoring · every \(cadence)s"
     }
 
     private var monitoringDotColor: Color {
         guard appSettings.monitoringEnabled, coordinator.monitor.isRunning else { return .secondary }
-        return coordinator.monitor.isPausedForAnyReason ? .yellow : .green
+        if coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason)
+            || coordinator.isBackgroundInvestigating {
+            return .yellow
+        }
+        return .green
     }
 
     // MARK: - Detail
@@ -324,7 +365,7 @@ struct MainWindow: View {
             // RunDetail) exactly as it was — see NetworksView's header.
             NetworksView()
         case .settings:
-            SettingsView()
+            SettingsView(initialTab: initialSettingsTab)
         }
     }
 

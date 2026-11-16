@@ -940,6 +940,7 @@ CAPTIVE_CANARY_MARKER='<TITLE>Success</TITLE>'
 # the sign-in page (lib/repairs.sh) must open the very page detection used.
 # shellcheck disable=SC2034 # read by lib/public.sh, lib/monitor.sh and lib/repairs.sh
 CAPTIVE_CANARY_URL='http://captive.apple.com/hotspot-detect.html'
+# shellcheck disable=SC2034 # read by lib/public.sh and lib/monitor.sh
 CAPTIVE_CANARY_HOST='captive.apple.com'
 captive_portal_classify() {
   local http_status="${1:-}" body="${2:-}"
@@ -1434,7 +1435,7 @@ collect_parallel() {
       if _should_print_stdout; then
         if [ "${OPT_REDACT:-0}" -eq 1 ]; then
           while IFS= read -r line || [ -n "$line" ]; do
-            _redact_line "$line"
+            printf '%s\n' "$(_redact_line "$line")"
           done < "$out"
         else
           cat "$out"

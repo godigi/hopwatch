@@ -139,7 +139,8 @@ struct HomeView: View {
                     internetLoadedDelta: currentRunResult?.snapshot.bufferbloat.inetDeltaMs.map { String(format: "+%.0f ms", $0) },
                     bandChannelText: bandChannelText,
                     vpnActive: vpnActive,
-                    vpnKnown: coordinator.liveSample != nil || currentRunResult != nil,
+                    vpnKnown: !isMonitoringPaused && !coordinator.latestSampleIsStale && (coordinator.liveSample != nil || currentRunResult != nil),
+                    vpnUnknownText: vpnUnknownText,
                     vpnProvider: vpnProviderName,
                     publicIP: publicIPString,
                     pingTarget: pingTargetString,
@@ -247,16 +248,19 @@ struct HomeView: View {
                         onViewRawJSON: { showRawJSONSheet = true },
                         onCopyRedacted: { copyShareableReport() },
                         onSaveMarkdown: { saveMarkdownReport() },
-                        canShare: coordinator.supportsShare
+                        canShare: coordinator.supportsShare,
+                        canViewRawJSON: currentRunResult?.rawJSON != nil
                     )
                     .frame(maxWidth: .infinity)
                 }
+                .fixedSize(horizontal: false, vertical: true)
 
                 // 8. Dashboard Footer
                 DashboardFooterView()
             }
             .padding(24)
         }
+        .background(Theme.ColorToken.detailBackground)
         .sheet(isPresented: $showRawJSONSheet) {
             rawJSONSheet
         }
@@ -280,38 +284,7 @@ struct HomeView: View {
     // MARK: - Status Hero Section
 
     private var stage: StageResolver.Stage {
-        let degraded = SuitabilityEngine.synthesizeDegradedExperience(
-            items: suitabilityItems,
-            monitorSample: coordinator.liveSample,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering
-        )
-        return StageResolver.resolve(.init(
-            isScanning: coordinator.isScanning,
-            isArrivalCheck: coordinator.isArrivalCheck,
-            monitoringEnabled: appSettings.monitoringEnabled,
-            isPausedForAnyReason: coordinator.monitor.isPausedForAnyReason,
-            pauseReason: coordinator.monitor.pauseReason,
-            lastError: coordinator.monitor.lastError,
-            monitorRunning: coordinator.monitor.isRunning,
-            activeAlert: coordinator.alerts.urgentActiveSorted.first.map {
-                StageResolver.AlertSnapshot(
-                    title: $0.title, body: $0.body,
-                    raisedAt: $0.raisedAt, rules: $0.rules,
-                    severityRank: $0.rules
-                        .map(coordinator.severityRank(forRuleID:)).max() ?? 0,
-                    id: $0.id,
-                    isUrgent: $0.isUrgent)
-            },
-            severity: coordinator.liveSample?.status.severity ?? "ok",
-            linkUp: !linkDown,
-            sampleStale: coordinator.latestSampleIsStale,
-            measurementState: coordinator.liveSample?.status.measurement ?? "unknown",
-            activeResolution: coordinator.activeResolution?.snapshot,
-            degradedExperience: degraded,
-            settling: coordinator.isSettling
-        ))
+        coordinator.currentStage(monitoringEnabled: appSettings.monitoringEnabled)
     }
 
     @ViewBuilder
@@ -590,7 +563,7 @@ struct HomeView: View {
                     downMbps: speedValues.down,
                     upMbps: speedValues.up,
                     testedMeta: lastSpeedMetaText,
-                    isScanning: coordinator.isScanning,
+                    isScanning: coordinator.isScanning && !coordinator.isBackgroundInvestigating,
                     isSpeedTesting: coordinator.isSpeedTesting,
                     speedProgress: coordinator.progress.speed,
                     onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") },
@@ -606,13 +579,14 @@ struct HomeView: View {
                 )
                 .frame(maxWidth: .infinity)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 16) {
                 DashboardSpeedCard(
                     downMbps: speedValues.down,
                     upMbps: speedValues.up,
                     testedMeta: lastSpeedMetaText,
-                    isScanning: coordinator.isScanning,
+                    isScanning: coordinator.isScanning && !coordinator.isBackgroundInvestigating,
                     isSpeedTesting: coordinator.isSpeedTesting,
                     speedProgress: coordinator.progress.speed,
                     onRunSpeedTest: { coordinator.runSpeedTest(reason: "speed test requested") },
@@ -639,32 +613,14 @@ struct HomeView: View {
     }
 
     private var suitabilityItems: [SuitabilityEngine.Item] {
-        let snap = currentRunResult?.snapshot
-        let fired = Array(coordinator.activeFiredRules)
-        let inputs = SuitabilityEngine.Inputs(
-            monitorSample: coordinator.liveSample,
-            speedTest: coordinator.currentSuitabilitySpeed,
-            savedSuitability: snap?.suitability,
-            catalog: coordinator.rulesCatalog.catalog,
-            firedRules: fired,
-            isLinkUp: coordinator.liveSample?.link.up ?? true,
-            isDoubleNat: snap?.wan.doubleNat.detected ?? false,
-            mtu: snap?.mtu.effective ?? snap?.mtu.pathSize,
-            vpnActive: vpnActive,
-            vpnName: vpnProviderName,
-            currentJitter: coordinator.currentJitter,
-            effectiveLoss: coordinator.effectiveLoss,
-            lossFiltering: coordinator.lossFiltering,
-            isSettling: coordinator.isSettling,
-            isArrivalCheck: coordinator.isArrivalCheck
-        )
-        return SuitabilityEngine.evaluateAll(inputs)
+        coordinator.currentSuitabilityItems
     }
 
     // MARK: - Findings Computation
 
     private var findingsEmptyState: DashboardFindingsPanel.EmptyState {
-        if !coordinator.isScanning, let live = coordinator.liveSample,
+        if (!coordinator.isScanning || coordinator.isBackgroundInvestigating),
+           let live = coordinator.liveSample,
            live.status.measurement == "measured",
            live.gateway.rttAvgMs != nil,
            live.internet.rttAvgMs != nil || live.tcp.anyOk == true {
@@ -732,8 +688,12 @@ struct HomeView: View {
         let measuredJitter = coordinator.currentJitter ?? snap?.internetLatency.rttJitterMs
         let measuredInetLoss = coordinator.liveSample?.internet.lossPct ?? snap?.internetLatency.lossPct
         let loss1 = measuredInetLoss ?? 0
-        let loss2 = snap?.internetLatency.lossPctAlt ?? loss1
+        // Do not mix a live primary loss reading with a historical full-scan alternate reading.
+        let measuredInetLossAlt: Double? = coordinator.liveSample != nil
+            ? coordinator.liveSample?.internet.lossPctAlt
+            : snap?.internetLatency.lossPctAlt
         let rssi = resolvedRSSI
+        let txRate: Int? = coordinator.liveSample?.wifi?.txRate ?? snap?.wifi?.txRate.flatMap { Int($0) }
         let snr = snap?.wifi?.snr
         let noise = snap?.wifi?.noise
         let channel = coordinator.liveSample?.wifi?.channel
@@ -759,24 +719,38 @@ struct HomeView: View {
             }()
             return ("\(Int(round(j))) ms", b, j >= 10, j < 10)
         }()
+        let jitterUsual = mem?.typicalGatewayJitterMs.map { String(format: "%.1f ms", $0) } ?? "—"
         rows.append(.init(
             id: "jitter",
             icon: "waveform.path",
             label: "Jitter",
             measured: jitterMeasured,
             subvalue: nil,
-            usual: "—",
+            usual: jitterUsual,
             badge: jitterBadge,
             isWarning: jitterIsWarning,
             isGood: jitterIsGood
         ))
 
         // 2. Packet loss to router (Matching user mockup)
+        let isGwRateLimited = !isFilteredGateway && !isRoamBlip
+            && EffectiveLoss.isIsolatedGatewayRateLimit(
+                gatewayLoss: measuredGwLoss,
+                internetLoss: measuredInetLoss,
+                gatewayFiltered: isFilteredGateway
+            )
+        let gwRecovering = !isFilteredGateway && !isRoamBlip && !isGwRateLimited
+            && EffectiveLoss.isRecovering(
+                windowLoss: measuredGwLoss,
+                lastProbeLoss: coordinator.liveSample?.gateway.lastProbeLossPct
+            )
         let gwLossBadge: DashboardCheckTable.GradeBadge = {
             if isFilteredGateway {
                 return .init(label: "Declined by router", tone: .neutral)
             } else if isRoamBlip {
                 return .init(label: "Roamed", tone: .good)
+            } else if isGwRateLimited {
+                return .init(label: "Good", tone: .good)
             } else if gwLoss >= 10.0 {
                 return .init(label: "Unstable", tone: .critical)
             } else if gwLoss >= 3.0 {
@@ -785,16 +759,25 @@ struct HomeView: View {
                 return .init(label: "Good", tone: .good)
             }
         }()
+        let gwLossSubvalue: String? = {
+            if isGwRateLimited && gwLoss >= 1.0 {
+                return "\(LossFormatter.formatPct(gwLoss)) ping rate-limited (internet clean)"
+            }
+            if gwRecovering {
+                return "0% last probe · clearing"
+            }
+            return nil
+        }()
         rows.append(.init(
             id: "gw-loss",
-            icon: isFilteredGateway ? "slash.circle" : ((!isRoamBlip && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network"),
+            icon: isFilteredGateway ? "slash.circle" : ((!isRoamBlip && !isGwRateLimited && gwLoss >= 3.0) ? "exclamationmark.triangle.fill" : "network"),
             label: "Packet loss to router",
-            measured: isFilteredGateway ? "Blocked" : LossFormatter.formatPct(gwLoss),
-            subvalue: nil,
+            measured: isFilteredGateway ? "Blocked" : (isGwRateLimited ? "0%" : LossFormatter.formatPct(gwLoss)),
+            subvalue: gwLossSubvalue,
             usual: "0%",
             badge: gwLossBadge,
-            isWarning: !isFilteredGateway && !isRoamBlip && gwLoss >= 3.0,
-            isGood: isFilteredGateway || isRoamBlip || gwLoss < 1.0
+            isWarning: !isFilteredGateway && !isRoamBlip && !isGwRateLimited && gwLoss >= 3.0,
+            isGood: isFilteredGateway || isRoamBlip || isGwRateLimited || gwLoss < 1.0
         ))
 
         // 3. Wi-Fi channel (Matching user mockup)
@@ -810,7 +793,9 @@ struct HomeView: View {
             .map { "\(Int(round($0))) dB" } ?? "—"
 
         if isConnectedToWiFi {
+            let hasW4 = firedRules.contains("W4")
             let signalBadge: DashboardCheckTable.GradeBadge = {
+                if hasW4 { return .init(label: "Slow TX rate", tone: .warn) }
                 guard let r = rssi else { return .init(label: "Good", tone: .good) }
                 if r >= -55 { return .init(label: "Excellent", tone: .good) }
                 if r >= -65 { return .init(label: "Good", tone: .good) }
@@ -822,11 +807,11 @@ struct HomeView: View {
                 icon: "wifi",
                 label: "Signal",
                 measured: rssi.map { "\($0) dBm" } ?? "Connected",
-                subvalue: nil,
+                subvalue: txRate.map { "\($0) Mbps TX" },
                 usual: rssiUsual,
                 badge: signalBadge,
-                isWarning: rssi != nil && rssi! < -70,
-                isGood: rssi != nil && rssi! >= -65
+                isWarning: hasW4 || (rssi != nil && rssi! < -70),
+                isGood: !hasW4 && rssi != nil && rssi! >= -65
             ))
         }
 
@@ -914,7 +899,18 @@ struct HomeView: View {
         ))
 
         // 9. Internet packet loss
-        let lossText = isFilteredInternet ? "Filtered (TCP ok)" : "\(LossFormatter.formatPct(loss1)) / \(LossFormatter.formatPct(loss2))"
+        let lossText: String = {
+            if isFilteredInternet { return "Filtered (TCP ok)" }
+            if let loss2 = measuredInetLossAlt {
+                return "\(LossFormatter.formatPct(loss1)) / \(LossFormatter.formatPct(loss2))"
+            }
+            return LossFormatter.formatPct(loss1)
+        }()
+        let inetRecovering = !isFilteredInternet
+            && EffectiveLoss.isRecovering(
+                windowLoss: measuredInetLoss,
+                lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct
+            )
         let lossBadge: DashboardCheckTable.GradeBadge = {
             if isFilteredInternet {
                 return .init(label: "Filtered", tone: .neutral)
@@ -929,7 +925,7 @@ struct HomeView: View {
             icon: (!isFilteredInternet && loss1 >= 3.0) ? "exclamationmark.triangle.fill" : "checkmark",
             label: "Internet packet loss",
             measured: lossText,
-            subvalue: nil,
+            subvalue: inetRecovering ? "0% last probe · clearing" : nil,
             usual: "0%",
             badge: lossBadge,
             isWarning: !isFilteredInternet && loss1 >= 3.0,
@@ -999,13 +995,22 @@ struct HomeView: View {
             if d >= 25 { return .init(label: "Good", tone: .good) }
             return .init(label: "Slow", tone: .warn)
         }()
+        let speedUsual: String = {
+            if let d = mem?.typicalDownMbps, let u = mem?.typicalUpMbps {
+                return String(format: "↓ %.0f · ↑ %.0f Mbps", d, u)
+            }
+            if let d = mem?.typicalDownMbps {
+                return String(format: "↓ %.0f Mbps", d)
+            }
+            return "—"
+        }()
         rows.append(.init(
             id: "speed",
             icon: "waveform.path.ecg",
             label: "Throughput / Speed",
             measured: speedText,
             subvalue: nil,
-            usual: "—",
+            usual: speedUsual,
             badge: speedBadge,
             isWarning: false,
             isGood: speedDown != nil
@@ -1020,7 +1025,7 @@ struct HomeView: View {
             "loss": isFilteredInternet || measuredInetLoss != nil,
             "mtu": snap?.mtu.effective != nil || snap?.mtu.pathSize != nil,
             "ipv6": snap?.measuredIPv6 != nil,
-            "speed": speedDown != nil
+            "speed": snap != nil || speedDown != nil
         ]
         return rows.map {
             DashboardCheckEvidence.requiringMeasurement($0, hasMeasurement: evidence[$0.id] ?? true,
@@ -1095,12 +1100,23 @@ struct HomeView: View {
         return SignalScale.cellContent(rssi: rssi, scale: coordinator.signalScale.scale).value
     }
 
+    private var isMonitoringPaused: Bool {
+        !appSettings.monitoringEnabled || coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason)
+    }
+
+    private var vpnUnknownText: String {
+        if isMonitoringPaused { return "Monitoring paused" }
+        if coordinator.latestSampleIsStale { return "Not reporting" }
+        return "VPN checking…"
+    }
+
     private var wifiSignalDetail: String {
-        if linkDown { return "" }
+        if linkDown || isMonitoringPaused || coordinator.latestSampleIsStale { return "" }
         if coordinator.liveSample == nil && resolvedRSSI == nil { return "No reading" }
         if !isConnectedToWiFi { return "Wired connection" }
         guard let rssi = resolvedRSSI else { return "No reading" }
-        return "\(rssi) dBm"
+        let raw = "\(rssi) dBm"
+        return wifiSignalText == raw ? "" : raw
     }
 
     private var wifiSignalTint: Color {
@@ -1288,6 +1304,7 @@ struct HomeView: View {
 
     private var routerDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
+        if isMonitoringPaused { return "Paused" }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         guard coordinator.liveSample != nil || coordinator.freshNetworkRunSnapshot != nil else { return "Checking…" }
         if lossFiltering.filters(.gateway) {
@@ -1301,12 +1318,14 @@ struct HomeView: View {
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct
             ?? coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct
-            ?? 0
-        if inetLoss <= 1.0 && loss < 20.0 {
+        if EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: loss, internetLoss: inetLoss, gatewayFiltered: lossFiltering.filters(.gateway)) {
             return routerGatewayIP ?? "default gateway"
         }
         if loss > 0 {
-            return LossFormatter.formatPacketLoss(loss)
+            return EffectiveLoss.formatWindowDetail(
+                windowLoss: loss,
+                lastProbeLoss: coordinator.liveSample?.gateway.lastProbeLossPct
+            )
         }
         if routerWarn {
             let gwJitter = coordinator.liveSample?.gateway.rttJitterMs
@@ -1326,6 +1345,7 @@ struct HomeView: View {
 
     private var internetDetailText: String {
         if linkDown { return NoLinkCopy.nodeDetail }
+        if isMonitoringPaused { return "Paused" }
         if coordinator.latestSampleIsStale { return StaleSampleCopy.unknownValue }
         guard coordinator.liveSample?.internet.lossPct != nil
                 || coordinator.freshNetworkRunSnapshot?.internetLatency.lossPct != nil else {
@@ -1348,10 +1368,16 @@ struct HomeView: View {
             return "Ping blocked"
         }
         if loss > 0 && jitter >= 30.0 {
+            if EffectiveLoss.isRecovering(windowLoss: loss, lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct) {
+                return "0% now · \(LossFormatter.formatPct(loss)) avg · \(Int(round(jitter)))ms jit"
+            }
             return "\(LossFormatter.formatLoss(loss)) · \(Int(round(jitter)))ms jit"
         }
         if loss > 0 {
-            return LossFormatter.formatPacketLoss(loss)
+            return EffectiveLoss.formatWindowDetail(
+                windowLoss: loss,
+                lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct
+            )
         }
         if jitter >= 30.0 && !isGatewayJitterDominant {
             return String(format: "%.0f ms jitter", jitter)
@@ -1538,7 +1564,11 @@ struct HomeView: View {
     private var dhcpRemainingText: String {
         if let secs = currentRunResult?.snapshot.dhcp.timeRemainingS {
             let hours = secs / 3600
-            return "\(hours) hours remaining"
+            if hours < 1 {
+                let mins = max(1, secs / 60)
+                return mins == 1 ? "1 minute remaining" : "\(mins) minutes remaining"
+            }
+            return hours == 1 ? "1 hour remaining" : "\(hours) hours remaining"
         }
         return "Not measured"
     }
@@ -1577,10 +1607,10 @@ struct HomeView: View {
                     .foregroundStyle(.orange)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Wi-Fi network name & radio diagnostics are restricted")
+                    Text("Location Services required for Wi-Fi diagnostics")
                         .font(.callout)
                         .fontWeight(.medium)
-                    Text("macOS requires Location Services to display your network name and diagnose local radio strength.")
+                    Text("macOS needs Location Services enabled to display your Wi-Fi network name and diagnose local radio strength.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1785,31 +1815,14 @@ struct HomeView: View {
     }
 
     private var rawJSONSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Raw JSON Report")
-                    .font(.headline)
-                Spacer()
-                Button("Copy") {
-                    if let raw = currentRunResult?.rawJSON {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(raw, forType: .string)
-                    }
-                }
-                Button("Done") { showRawJSONSheet = false }
-                    .keyboardShortcut(.defaultAction)
-            }
-
-            ScrollView([.horizontal, .vertical]) {
-                Text(currentRunResult?.rawJSON ?? "No raw JSON available")
-                    .font(Theme.Font.rawJSONMonospace)
-                    .textSelection(.enabled)
-                    .padding(8)
-            }
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .padding(16)
-        .frame(minWidth: 600, minHeight: 450)
+        RawJSONViewerSheet(
+            rawJSON: currentRunResult?.rawJSON,
+            title: "Diagnostic Report Raw JSON",
+            defaultFileName: DiagnosticReportSharing.defaultFileName(
+                extension: "json",
+                timestamp: currentRunResult?.snapshot.timestamp ?? coordinator.latestRun?.snapshot.timestamp
+            ),
+            isPresented: $showRawJSONSheet
+        )
     }
 }

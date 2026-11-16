@@ -37,6 +37,8 @@ struct NetworksView: View {
     @State private var selectedRunRoute: RunRoute?
     @State private var editingName = false
     @State private var draftName = ""
+    @State private var editingNoteForNetworkID: String? = nil
+    @State private var draftNoteText: String = ""
     @State private var mergeSource: HistoryDocument.Network?
     @State private var problemsOnly = false
 
@@ -124,6 +126,9 @@ struct NetworksView: View {
             Divider()
             detailColumn
         }
+        .onAppear {
+            selectCurrentNetworkIfNeeded()
+        }
         .task {
             if store.document.networks.isEmpty { await store.load() }
             selectCurrentNetworkIfNeeded()
@@ -136,6 +141,7 @@ struct NetworksView: View {
             selectCurrentNetworkIfNeeded()
         }
         .onChange(of: selectedNetworkID) { old, new in
+            editingName = false
             if old != nil && new == nil { userDeselected = true }
             if new != nil { userDeselected = false }
         }
@@ -164,7 +170,8 @@ struct NetworksView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            if coordinator.linkIsWiFi && !coordinator.locationPermissions.isAuthorized {
+            if coordinator.linkIsWiFi && !coordinator.locationPermissions.isAuthorized
+                && (coordinator.liveSample?.link.ssid == nil || coordinator.liveSample?.link.ssid?.isEmpty == true) {
                 HStack(spacing: 6) {
                     Image(systemName: "location.slash.fill")
                         .font(.system(size: 11))
@@ -291,7 +298,17 @@ struct NetworksView: View {
                     }
                 }
 
-                if !mem.summaryChipText.isEmpty {
+                if let note = store.note(for: net.id), !note.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.blue)
+                        Text(note)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else if !mem.summaryChipText.isEmpty {
                     Text(mem.summaryChipText)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -374,6 +391,7 @@ struct NetworksView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 networkHeader(net)
+                networkNotesCard(net)
                 NetworkDetailCard(memory: mem, comparison: comp, showHeader: false, showCardTitle: true)
                 if !net.bridgedFrom.isEmpty {
                     HStack(spacing: 6) {
@@ -431,6 +449,15 @@ struct NetworksView: View {
 
                 if !editingName {
                     HStack(spacing: 8) {
+                        Button {
+                            exportHistory(net)
+                        } label: {
+                            Label("Export CSV…", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Export all recorded checks for this network as CSV")
+
                         Button {
                             editingName = true
                             draftName = store.displayName(for: net.id)
@@ -551,6 +578,89 @@ struct NetworksView: View {
         }
     }
 
+    // MARK: - Network Notes Card
+
+    @ViewBuilder
+    private func networkNotesCard(_ net: HistoryDocument.Network) -> some View {
+        let isEditing = editingNoteForNetworkID == net.id
+        let note = store.note(for: net.id)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.blue)
+                Text("Network Notes")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !isEditing {
+                    Button(note == nil ? "Add Note" : "Edit") {
+                        draftNoteText = note ?? ""
+                        editingNoteForNetworkID = net.id
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.blue)
+                }
+            }
+
+            if isEditing {
+                VStack(alignment: .trailing, spacing: 6) {
+                    TextField("Add notes, credentials or location details…", text: $draftNoteText, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+
+                    HStack(spacing: 6) {
+                        Button("Cancel") {
+                            editingNoteForNetworkID = nil
+                        }
+                        .controlSize(.small)
+
+                        Button("Save") {
+                            store.setNote(draftNoteText, for: net.id)
+                            editingNoteForNetworkID = nil
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            } else if let note, !note.isEmpty {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(Theme.ColorToken.ink)
+                    .padding(.top, 2)
+            } else {
+                Text("No custom notes saved for this network. Add notes for passwords, router locations, or IT policies.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+        )
+    }
+
+    private func exportHistory(_ net: HistoryDocument.Network) {
+        let csv = store.exportNetworkHistoryCSV(networkID: net.id)
+        let safeName = store.displayName(for: net.id)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let name = "\(safeName)-history.csv"
+        DiagnosticReportSharing.saveFile(
+            content: csv,
+            defaultName: name,
+            contentType: .commaSeparatedText
+        )
+    }
+
     // MARK: - Checks list (inline, no navigation push)
 
     private func checksList(_ net: HistoryDocument.Network) -> some View {
@@ -608,7 +718,7 @@ struct NetworksView: View {
                          ? "All recorded checks for this network passed without any detected warnings or disruptions."
                          : (checkScope == .fullOnly && !networkRuns(net).isEmpty
                             ? "No full checks recorded yet. Partial or speed-only runs exist."
-                            : "Run a check from the Home tab to analyze and record performance on this network."))
+                            : "Run a check from the Overview tab to analyze and record performance on this network."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

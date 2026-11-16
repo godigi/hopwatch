@@ -45,6 +45,10 @@ struct PingHeartbeatView: View {
             || coordinator.monitor.isPaused(besides: HopwatchCoordinator.scanPauseReason))
     }
 
+    private var isNotReporting: Bool {
+        !isScanning && !linkDown && !isPaused && coordinator.latestSampleIsStale
+    }
+
     private var gatewayIP: String? {
         coordinator.liveSample?.link.gateway
             ?? coordinator.monitor.latest?.link.gateway
@@ -137,6 +141,9 @@ struct PingHeartbeatView: View {
             } else if isScanning {
                 Image(systemName: "circle.dashed")
                     .foregroundStyle(Theme.ColorToken.blue)
+            } else if isNotReporting {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.ColorToken.amber)
             } else if isTargetFiltered {
                 Image(systemName: "shield.slash.fill")
                     .foregroundStyle(Theme.ColorToken.muted)
@@ -153,6 +160,7 @@ struct PingHeartbeatView: View {
     private var heartIconColor: Color {
         if linkDown { return .red }
         if isScanning { return Theme.ColorToken.blue }
+        if isNotReporting { return Theme.ColorToken.amber }
         if isPaused { return Theme.ColorToken.muted }
         if heartbeat.latestBeat?.isMiss == true { return .red }
         guard let lat = heartbeat.latestBeat?.latencyMs else { return Theme.ColorToken.muted }
@@ -162,12 +170,31 @@ struct PingHeartbeatView: View {
     }
 
     private var liveCadenceBadge: some View {
-        HStack(spacing: 3) {
+        let badgeTint: Color = {
+            if linkDown { return Theme.ColorToken.red }
+            if isScanning { return Theme.ColorToken.blue }
+            if isNotReporting { return Theme.ColorToken.amber }
+            if isPaused || isTargetFiltered { return Theme.ColorToken.muted }
+            return Theme.ColorToken.green
+        }()
+        let badgeText: String = {
+            if isScanning {
+                if coordinator.isBackgroundInvestigating { return "Paused · check" }
+                return isArrivalCheck ? "Checking" : (heartbeat.recentBeats.isEmpty ? "Testing" : "Paused · check")
+            }
+            if linkDown { return "No link" }
+            if isPaused { return "Paused" }
+            if isNotReporting { return "Not reporting" }
+            if isTargetFiltered { return "ICMP blocked" }
+            return "1s live"
+        }()
+
+        return HStack(spacing: 3) {
             Circle()
-                .fill(linkDown ? .red : (isScanning ? Theme.ColorToken.blue : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green))))
+                .fill(badgeTint)
                 .frame(width: 4.5, height: 4.5)
-                .scaleEffect((isTargetFiltered || isScanning) ? 1.0 : livePulseScale)
-            Text(isScanning ? (isArrivalCheck ? "Checking" : "Testing") : (isPaused ? "Paused" : (isTargetFiltered ? "ICMP blocked" : "1s live")))
+                .scaleEffect((linkDown || isPaused || isNotReporting || isTargetFiltered || isScanning) ? 1.0 : livePulseScale)
+            Text(badgeText)
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(isScanning ? Theme.ColorToken.blue : Theme.ColorToken.muted)
         }
@@ -177,20 +204,26 @@ struct PingHeartbeatView: View {
         .clipShape(Capsule())
     }
 
+    private var canToggleTarget: Bool {
+        heartbeat.target != PingHeartbeat.defaultTarget || !(gatewayIP ?? "").isEmpty
+    }
+
     private var targetTogglePill: some View {
         Button {
             toggleTarget()
         } label: {
             HStack(spacing: 3) {
                 Circle()
-                    .fill(linkDown ? .red : (isScanning ? Theme.ColorToken.blue : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green))))
+                    .fill(linkDown ? Theme.ColorToken.red : (isScanning ? Theme.ColorToken.blue : (isPaused ? Theme.ColorToken.muted : (isTargetFiltered ? Theme.ColorToken.muted : Theme.ColorToken.green))))
                     .frame(width: 4.5, height: 4.5)
                 Text(heartbeat.target)
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(Theme.ColorToken.muted)
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 7.5))
-                    .foregroundStyle(Theme.ColorToken.muted.opacity(0.8))
+                if canToggleTarget {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(Theme.ColorToken.muted.opacity(0.8))
+                }
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
@@ -198,7 +231,8 @@ struct PingHeartbeatView: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("Click to toggle ping target between Internet and Router Gateway")
+        .disabled(!canToggleTarget)
+        .help(canToggleTarget ? "Click to toggle ping target between Internet and Router Gateway" : "Monitoring Internet target")
     }
 
     private func toggleTarget() {
@@ -239,14 +273,18 @@ struct PingHeartbeatView: View {
                 .padding(.vertical, 1.5)
                 .background(Color.red.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 3))
-        } else if isScanning {
+        } else if isScanning && heartbeat.recentBeats.isEmpty {
             Text(isArrivalCheck ? "CHECKING" : "TESTING")
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.blue)
-        } else if isPaused {
+        } else if isPaused || isScanning {
             Text("PAUSED")
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted)
+        } else if isNotReporting {
+            Text("NO READING")
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.amber)
         } else if isTargetFiltered {
             if let tcpMs = activeTcpMs {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -348,8 +386,8 @@ struct PingHeartbeatView: View {
                         .foregroundStyle(Color.red.opacity(0.85))
                     }
                 }
-            } else if isScanning {
-                // Scanning / Testing View
+            } else if isScanning && heartbeat.recentBeats.isEmpty {
+                // Scanning / Testing View (only when no beats have been collected yet)
                 ZStack {
                     Theme.ColorToken.nodeBackground
                     HStack(spacing: 6) {
@@ -372,6 +410,19 @@ struct PingHeartbeatView: View {
                         Text("Monitoring paused")
                             .font(.system(size: 9))
                             .foregroundStyle(Color.gray.opacity(0.6))
+                    }
+                }
+            } else if isNotReporting {
+                ZStack {
+                    Theme.ColorToken.nodeBackground
+                    VStack(spacing: 2) {
+                        Rectangle()
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                            .foregroundStyle(Theme.ColorToken.amber.opacity(0.45))
+                            .frame(height: 1)
+                        Text("Monitor not reporting recent samples")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.ColorToken.muted)
                     }
                 }
             } else if isTargetFiltered {
@@ -412,7 +463,7 @@ struct PingHeartbeatView: View {
                     LinegraphZonedCanvas(
                         beats: beats,
                         beatTick: heartbeat.beatTick,
-                        isPaused: isPaused,
+                        isPaused: isPaused || isScanning,
                         linkDown: linkDown,
                         hoveredBeat: $hoveredBeat,
                         hoverLocation: $hoverLocation
@@ -426,8 +477,23 @@ struct PingHeartbeatView: View {
 
     private var footerStatsRow: some View {
         HStack {
-            if isScanning {
+            if isScanning && heartbeat.recentBeats.isEmpty {
                 Text(isArrivalCheck ? "Awaiting first check results…" : "Sampling paused during check")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
+            } else if linkDown {
+                Text("Waiting for network connection")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
+            } else if isPaused {
+                Text("Live sampling paused")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.ColorToken.muted)
+                Spacer()
+            } else if isNotReporting {
+                Text("Waiting for fresh sample")
                     .font(.system(size: 9))
                     .foregroundStyle(Theme.ColorToken.muted)
                 Spacer()
@@ -437,11 +503,11 @@ struct PingHeartbeatView: View {
                     .foregroundStyle(Theme.ColorToken.muted)
             } else if let min = heartbeat.minLatency, let avg = heartbeat.avgLatency, let max = heartbeat.maxLatency {
                 HStack(spacing: 4) {
-                    Text("min \(formatLatency(min))ms")
+                    Text("min \(formatLatency(min)) ms")
                     Text("·")
-                    Text("avg \(formatLatency(avg))ms")
+                    Text("avg \(formatLatency(avg)) ms")
                     Text("·")
-                    Text("max \(formatLatency(max))ms")
+                    Text("max \(formatLatency(max)) ms")
                 }
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted)
@@ -451,7 +517,7 @@ struct PingHeartbeatView: View {
                     .foregroundStyle(Theme.ColorToken.muted)
             }
 
-            if !isScanning {
+            if !(isScanning && heartbeat.recentBeats.isEmpty) && !linkDown && !isPaused && !isNotReporting {
                 Spacer()
 
                 // Reliability & Dropped packets counter

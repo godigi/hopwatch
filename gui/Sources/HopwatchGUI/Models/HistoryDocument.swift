@@ -27,7 +27,7 @@ struct HistoryDocument: Decodable, Sendable {
     /// for concurrent use from multiple threads (it isn't, explicitly).
     /// `RunSnapshot` and `MonitorSample` still construct their own per call;
     /// that's a different file and out of scope here.
-    static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) static let iso = ISO8601DateFormatter()
 
     struct Counts: Decodable, Sendable {
         var recordsRead: Int = 0

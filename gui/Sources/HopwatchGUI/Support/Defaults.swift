@@ -25,7 +25,8 @@ enum Defaults {
     /// app happens to construct things in unable to matter: every getter
     /// and setter below goes through `d`, so registration is guaranteed to
     /// have already run by the time any of them do.
-    private static let d: UserDefaults = {
+    // UserDefaults is documented thread-safe by Apple across threads.
+    private nonisolated(unsafe) static let d: UserDefaults = {
         let defaults = UserDefaults.standard
         defaults.register(defaults: [
             Key.monitoringEnabled: true,
@@ -95,6 +96,7 @@ enum Defaults {
         static let expertExpanded     = "expertExpanded"
         static let binaryPath         = "netdiagBinaryPath"
         static let networkNames       = "networkNames"
+        static let networkNotes       = "networkNotes"
         static let networkMerges      = "networkMerges"
         static let networkOwned       = "networkOwned"
         static let portalNetworks     = "portalNetworks"
@@ -171,6 +173,16 @@ enum Defaults {
         set { d.set(newValue, forKey: Key.lastSeenAppVersion) }
     }
 
+    static func releaseNotes(for version: String) -> String? {
+        let clean = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+        return d.string(forKey: "hopwatch.releaseNotes.\(clean)")
+    }
+
+    static func setReleaseNotes(_ notes: String, for version: String) {
+        let clean = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+        d.set(notes, forKey: "hopwatch.releaseNotes.\(clean)")
+    }
+
     // MARK: - Audio & Shortcuts
 
     static var audioChimesEnabled: Bool {
@@ -191,7 +203,11 @@ enum Defaults {
     // MARK: - Monitoring
 
     static var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.10.0"
+        if let bundleVer = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           bundleVer != "0.0.0-unstamped" && bundleVer != "0.10.0" {
+            return bundleVer
+        }
+        return ChangelogReader.latestVersion() ?? "1.23.1"
     }
 
     static var monitoringEnabled: Bool {
@@ -324,6 +340,11 @@ enum Defaults {
     static var networkNames: [String: String] {
         get { d.dictionary(forKey: Key.networkNames) as? [String: String] ?? [:] }
         set { d.set(newValue, forKey: Key.networkNames) }
+    }
+
+    static var networkNotes: [String: String] {
+        get { d.dictionary(forKey: Key.networkNotes) as? [String: String] ?? [:] }
+        set { d.set(newValue, forKey: Key.networkNotes) }
     }
 
     static var networkMerges: [String: String] {

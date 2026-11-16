@@ -69,14 +69,10 @@ actor CapabilityStore {
         let resolved = BinaryLocator.resolve()
         if let probing, probing.path == resolved { return await probing.task.value }
         if resolved == resolvedPath {
-            // `.unavailable` is "the probe couldn't establish anything" — a
-            // spawn failure, a timeout, a launch while the disk was busy.
-            // Remembering that for the whole session turned one bad
-            // moment into a monitor that never started and a Settings
-            // screen that blamed the CLI until relaunch. It is held only
-            // briefly, so a genuinely broken CLI is not re-spawned on every
-            // call, and then asked again.
-            if case .unavailable = state, let at = unavailableSince,
+            // `.unavailable` / `.missingBash5` may clear externally (a disk stall
+            // or `brew install bash` in Terminal), so re-probe after a short TTL
+            // rather than pinning the monitor off until relaunch.
+            if state.isRetryable, let at = unavailableSince,
                Date().timeIntervalSince(at) >= Self.unavailableTTL {
                 return await beginProbe(path: resolved)
             }
@@ -89,12 +85,13 @@ actor CapabilityStore {
     static let unavailableTTL: TimeInterval = 10
     private var unavailableSince: Date?
 
-    /// True when the handshake could not be completed at all — as opposed
-    /// to completing and finding an old CLI. This is the one answer worth
-    /// retrying later; a `.legacy` answer will not change by itself.
+    /// True when the handshake could not be completed at all or failed due to
+    /// a missing runtime dependency (`brew install bash`) — as opposed to
+    /// completing and finding an old CLI. A `.legacy` answer will not change
+    /// by itself, whereas `.unavailable` and `.missingBash5` can resolve once
+    /// the environment is fixed.
     func isUnavailable() async -> Bool {
-        if case .unavailable = await current() { return true }
-        return false
+        await current().isRetryable
     }
 
     /// Forces a fresh probe of whatever path is resolved right now, even
@@ -111,14 +108,17 @@ actor CapabilityStore {
         supported(feature, in: await current())
     }
 
-    /// Throws `NetdiagError.cliTooOld` when `feature` isn't there. Every
-    /// gated call site (`NetdiagRunner.history()`/`.show()`,
-    /// `MonitorStream.start()`) funnels through this instead of checking
-    /// `supports(_:)` and composing its own message, so there is exactly
-    /// one place that turns "unsupported" into the actionable string.
+    /// Throws `HopwatchError.bash5Required` or `HopwatchError.cliTooOld` when
+    /// `feature` isn't available. Every gated call site (`NetdiagRunner.history()`
+    /// /`.show()`, `MonitorStream.start()`) funnels through this instead of
+    /// checking `supports(_:)` and composing its own message, so there is
+    /// exactly one place that turns "unsupported" into the actionable string.
     func requireSupport(for feature: Feature) async throws {
         let state = await current()
         guard !supported(feature, in: state) else { return }
+        if case .missingBash5 = state {
+            throw HopwatchError.bash5Required
+        }
         let found: String? = if case .modern(let caps) = state { caps.version } else { nil }
         throw NetdiagError.cliTooOld(found: found, needs: Self.requiredVersion)
     }
@@ -129,7 +129,7 @@ actor CapabilityStore {
             return caps.supports(feature.rawValue)
         case .legacy(let supportsProgress):
             return feature == .progress ? supportsProgress : false
-        case .unavailable:
+        case .missingBash5, .unavailable:
             return false
         }
     }
@@ -147,23 +147,39 @@ actor CapabilityStore {
         if probing?.task == task {
             resolvedPath = path
             state = result
-            if case .unavailable = result { unavailableSince = Date() } else { unavailableSince = nil }
+            if result.isRetryable { unavailableSince = Date() } else { unavailableSince = nil }
             probing = nil
         }
         return result
     }
 
-    private static func probe() async -> CapabilityState {
-        guard let (out, _, status) = try? await NetdiagRunner.execute(
-            arguments: ["--capabilities"]) else { return .unavailable }
+    /// Pure classification of `--capabilities` output so missing Bash 5+ is
+    /// distinguished from an older CLI before running the `--progress --help` fallback.
+    static func classifyCapabilitiesResult(
+        stdout: String,
+        stderr: String,
+        status: Int32
+    ) -> CapabilityState? {
         if status == 0 {
-            guard let data = out.data(using: .utf8),
+            guard let data = stdout.data(using: .utf8),
                   let caps = try? JSONDecoder().decode(CLICapabilities.self, from: data) else {
                 return .unavailable
             }
             return .modern(caps)
         }
         guard status == 3 else { return .unavailable }
+        if stderr.localizedCaseInsensitiveContains("requires bash 5") {
+            return .missingBash5
+        }
+        return nil
+    }
+
+    private static func probe() async -> CapabilityState {
+        guard let (out, err, status) = try? await NetdiagRunner.execute(
+            arguments: ["--capabilities"]) else { return .unavailable }
+        if let classified = classifyCapabilitiesResult(stdout: out, stderr: err, status: status) {
+            return classified
+        }
         // The CLI's answer to a flag it has never heard of (bin/netdiag's
         // catch-all `-*)` branch) — exactly how every version before
         // commit 85bc9b4, this handshake's own introduction, answers
@@ -172,5 +188,14 @@ actor CapabilityStore {
         let progressResult = try? await NetdiagRunner.execute(
             arguments: ["--progress", "--help"])
         return .legacy(supportsProgress: progressResult?.2 == 0)
+    }
+}
+
+private extension CapabilityState {
+    var isRetryable: Bool {
+        switch self {
+        case .unavailable, .missingBash5: return true
+        case .modern, .legacy: return false
+        }
     }
 }

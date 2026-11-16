@@ -3554,8 +3554,8 @@ private enum VerifyHarness {
         check(connBrowsing?.verdict == .degraded, "CONN-1: browsing is degraded, not broken (new connections fail intermittently)")
         check(connBrowsing?.status == "Some new connections are failing", "CONN-1: the tile shows the CLI's own title")
         check(connBrowsing?.metric == "0% loss", "CONN-1: the tile's number is the clean ping figure")
-        check(connBrowsing?.consequence == "New connections from this Mac are being refused or dropped.",
-              "CONN-1: the consequence line is the first sentence of the CLI's blurb")
+        check(connBrowsing?.consequence == "New connections from this Mac are being refused or…",
+              "CONN-1: the consequence line condenses the CLI's first sentence to fit the card")
         let connSub = SuitabilityEngine.synthesizeDegradedExperience(
             items: connItems, monitorSample: connSample, currentJitter: 2,
             effectiveLoss: 0, lossFiltering: EffectiveLoss.filtering(sample: connSample))

@@ -179,9 +179,68 @@ import Testing
         #expect(ActivityView.summarySubtitle(allCount: 0, issuesCount: 0, daysCount: 1) == "Network transitions and disruptions will appear here as they are observed.")
 
         #expect(ActivityView.summaryTitle(activeCount: 0, issuesCount: 0, allCount: 5) == "Connection Stable & Quiet")
-        #expect(ActivityView.summarySubtitle(allCount: 5, issuesCount: 0, daysCount: 1) == "No packet loss, latency spikes, or disruptions observed across 1 day(s)")
+        #expect(ActivityView.summarySubtitle(allCount: 5, issuesCount: 0, daysCount: 1) == "No packet loss, latency spikes, or disruptions observed across 1 day")
+        #expect(ActivityView.summarySubtitle(allCount: 5, issuesCount: 0, daysCount: 3) == "No packet loss, latency spikes, or disruptions observed across 3 days")
+        #expect(ActivityView.summarySubtitle(allCount: 5, issuesCount: 1, daysCount: 2) == "1 incident · 5 total events over 2 days")
 
         #expect(ActivityView.summaryTitle(activeCount: 1, issuesCount: 1, allCount: 5) == "1 Active Alert Now")
         #expect(ActivityView.summaryTitle(activeCount: 0, issuesCount: 2, allCount: 5) == "Network Activity History")
+    }
+
+    @Test func effectiveLossDistinguishesIsolatedGatewayRateLimitAndRecovery() {
+        #expect(EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: 10.0, internetLoss: 0.0) == true)
+        #expect(EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: 20.0, internetLoss: 0.0) == false)
+        #expect(EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: 10.0, internetLoss: 5.0) == false)
+        #expect(EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: 10.0, internetLoss: 0.0, gatewayFiltered: true) == false)
+
+        #expect(EffectiveLoss.isRecovering(windowLoss: 10.0, lastProbeLoss: 0.0) == true)
+        #expect(EffectiveLoss.isRecovering(windowLoss: 10.0, lastProbeLoss: 10.0) == false)
+        #expect(EffectiveLoss.isRecovering(windowLoss: 0.0, lastProbeLoss: 0.0) == false)
+        #expect(EffectiveLoss.isRecovering(windowLoss: 10.0, lastProbeLoss: nil) == false)
+
+        #expect(EffectiveLoss.formatWindowDetail(windowLoss: 10.0, lastProbeLoss: 0.0) == "0% now · 10% avg")
+        #expect(EffectiveLoss.formatWindowDetail(windowLoss: 10.0, lastProbeLoss: 10.0) == "10% packet loss")
+
+        var sample = MonitorSample()
+        sample.gateway.lossPct = 10.0
+        sample.gateway.lastProbeLossPct = 0.0
+        sample.internet.lossPct = 0.0
+        sample.internet.lastProbeLossPct = 0.0
+
+        // When internet is clean (<2%) and gateway has higher loss, effectiveLastProbeLoss follows internet
+        let cleanLast = EffectiveLoss.effectiveLastProbeLoss(
+            sample: sample,
+            filtering: EffectiveLoss.Filtering(gatewayLeg: false, internetLeg: false),
+            hasRecentRoam: false
+        )
+        #expect(cleanLast == 0.0)
+
+        sample.internet.lossPct = 15.0
+        sample.internet.lastProbeLossPct = 0.0
+        sample.gateway.lossPct = 5.0
+        sample.gateway.lastProbeLossPct = 5.0
+        let inetLast = EffectiveLoss.effectiveLastProbeLoss(
+            sample: sample,
+            filtering: EffectiveLoss.Filtering(gatewayLeg: false, internetLeg: false),
+            hasRecentRoam: false
+        )
+        #expect(inetLast == 0.0)
+    }
+
+    @Test func monitorSampleDecodesLastProbeLossAltLossAndWifiTxRate() throws {
+        let json = """
+        {
+          "ts": "2026-11-14T11:00:00Z",
+          "seq": 12,
+          "gateway": {"ip": "192.168.1.1", "rtt_avg_ms": 2.4, "loss_pct": 10.0, "last_probe_loss_pct": 0.0},
+          "internet": {"target": "1.1.1.1", "rtt_avg_ms": 14.2, "loss_pct": 10.0, "loss_pct_alt": 0.0, "last_probe_loss_pct": 0.0},
+          "wifi": {"rssi_dbm": -58, "noise_dbm": -92, "tx_rate": 866}
+        }
+        """
+        let sample = try JSONDecoder().decode(MonitorSample.self, from: Data(json.utf8))
+        #expect(sample.gateway.lastProbeLossPct == 0.0)
+        #expect(sample.internet.lossPctAlt == 0.0)
+        #expect(sample.internet.lastProbeLossPct == 0.0)
+        #expect(sample.wifi?.txRate == 866)
     }
 }

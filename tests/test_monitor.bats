@@ -154,7 +154,8 @@ reset_state() {
   MON_LINK_UP=1 MON_IFACE_TYPE=wifi MON_GATEWAY=192.168.1.1
   MON_GW_LOSS=0 MON_GW_RTT=3 MON_INET_LOSS="" MON_INET_LOSS_ALT="" MON_INET_RTT=""
   MON_GW_HIST="" MON_INET_HIST="" MON_INET_HIST_ALT=""
-  MON_WIFI_RSSI="" MON_WIFI_SNR=""
+  MON_GW_LAST_LOSS="" MON_INET_LAST_LOSS="" MON_INET_LAST_LOSS_ALT=""
+  MON_WIFI_RSSI="" MON_WIFI_SNR="" MON_WIFI_TX_RATE=""
   MON_DNS_OK=1 MON_TCP_OK=1 MON_PUBLIC_OK=1 MON_CAPTIVE=0
   MON_DNS_LOCAL_FAIL="" DNS_LOCAL_FAIL=0
   MON_WEB_OK="" MON_MEASUREMENT_STATE="unknown"
@@ -164,7 +165,7 @@ reset_state() {
   _mon_conn_reset
   _mon_hog_reset
   # scanner side
-  GATEWAY=192.168.1.1 IS_WIFI=1 GW_LOSS=0 WIFI_RSSI="" WIFI_SNR=""
+  GATEWAY=192.168.1.1 IS_WIFI=1 GW_LOSS=0 WIFI_RSSI="" WIFI_SNR="" WIFI_TX=""
   DNS_OK=1 DNS_LINES="x|y|z|OK" PUBLIC_OK=1 PUBLIC_CHECKED=1
   TCP_REACH_ANY_OK=1 VPN_ACTIVE=0 CAPTIVE_PORTAL=0
   IPV6_AVAILABLE=0 MTU_EFFECTIVE="" MTR_FIRST_LOSSY_HOP=""
@@ -192,7 +193,7 @@ monitor_rules_here() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|HOG-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1)$'
+MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|HOG-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1|W4)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
@@ -998,13 +999,13 @@ assert up["status"]["measurement"] == "measured", up["status"]
 assert down["link"]["up"] is False
 assert down["status"]["measurement"] == "link-down", down["status"]
 assert down["status"]["rules"] == ["N1"], down["status"]
-assert down["gateway"] == {"loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["gateway"]
-assert down["internet"] == {"loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["internet"]
+assert down["gateway"] == {"loss_pct": None, "last_probe_loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["gateway"]
+assert down["internet"] == {"loss_pct": None, "loss_pct_alt": None, "last_probe_loss_pct": None, "rtt_avg_ms": None, "rtt_jitter_ms": None}, down["internet"]
 assert down["jitter_ms"] is None, down["jitter_ms"]
 assert down["dns"]["ok"] is None and down["dns"]["resolver"] is None \
     and down["dns"]["elapsed_ms"] is None and down["dns"]["local_fail"] is None, down["dns"]
 assert down["tcp"] == {"any_ok": None, "targets": []}, down["tcp"]
-assert down["wifi"] == {"rssi": None, "noise": None, "snr": None, "channel": None}, down["wifi"]
+assert down["wifi"] == {"rssi": None, "noise": None, "snr": None, "channel": None, "tx_rate": None}, down["wifi"]
 # The old network's public identity is not this (absent) network's.
 assert down["public"] == {"ok": None, "ip": None, "isp": None, "asn": None,
                           "city": None, "country": None, "country_iso": None,
@@ -3337,4 +3338,95 @@ assert a == {'reason': 'no-address', 'rule': 'DH-3', 'attempt': 2, 'max_attempts
   MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
   monitor_run
   [ "$(cat "$BATS_TEST_TMPDIR/verdicts")" = $'1|no-address\n2|\n3|' ]
+}
+
+@test "monitor_sample: single-resolver critical burst does not override healthy secondary resolver" {
+  run emit NETDIAG_MON_GW_RTT=12 NETDIAG_MON_GW_LOSS=0 NETDIAG_MON_GW_JITTER=4 \
+           NETDIAG_MON_INET_RTT=42 NETDIAG_MON_INET_LOSS=94 NETDIAG_MON_INET_LOSS_ALT=5 \
+           NETDIAG_MON_INET_JITTER=14 NETDIAG_MON_LOSS_CRIT_PCT=20
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)
+assert s['internet']['loss_pct'] == 5.0, s['internet']
+assert s['jitter_ms'] == 14.0, s['jitter_ms']
+"
+}
+
+@test "monitor_sample: critical loss agreed by both resolvers keeps primary reading and max jitter includes gateway" {
+  run emit NETDIAG_MON_GW_RTT=91 NETDIAG_MON_GW_LOSS=0 NETDIAG_MON_GW_JITTER=61 \
+           NETDIAG_MON_INET_RTT=60 NETDIAG_MON_INET_LOSS=42 NETDIAG_MON_INET_LOSS_ALT=38 \
+           NETDIAG_MON_INET_JITTER=24 NETDIAG_MON_LOSS_CRIT_PCT=20
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)
+assert s['internet']['loss_pct'] == 42.0, s['internet']
+assert s['jitter_ms'] == 61.0, s['jitter_ms']
+"
+}
+
+@test "critical loss recovering to moderate loss keeps confirmation streak primed for L2 and G3" {
+  reset_state
+  MON_GW_LOSS=0 MON_INET_LOSS=30 MON_INET_LOSS_ALT=28 MON_INET_LOSS_STREAK=0
+  _mon_rules
+  [[ " $MON_RULES " == *" L1 "* ]]
+  [ "$MON_INET_LOSS_STREAK" -eq "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]
+
+  MON_PREV_RULES="$MON_RULES" MON_INET_LOSS=10 MON_INET_LOSS_ALT=10
+  _mon_rules
+  [[ " $MON_RULES " == *" L2 "* ]]
+  [ "$MON_SEVERITY" = "warn" ]
+
+  reset_state
+  MON_GW_LOSS=30 MON_INET_LOSS=30 MON_INET_LOSS_ALT=30 MON_GW_LOSS_STREAK=0
+  _mon_rules
+  [[ " $MON_RULES " == *" G2 "* ]]
+  [ "$MON_GW_LOSS_STREAK" -eq "$THRESH_MON_LOSS_CONFIRM_CYCLES" ]
+
+  MON_PREV_RULES="$MON_RULES" MON_GW_LOSS=10
+  _mon_rules
+  [[ " $MON_RULES " == *" G3 "* ]]
+  [ "$MON_SEVERITY" = "warn" ]
+}
+
+@test "parity: Wi-Fi transmit rate collapse produces W4 on both and clears on recovery" {
+  reset_state
+  MON_IFACE_TYPE=wifi MON_WIFI_RSSI=-60 MON_WIFI_TX_RATE=34
+  IS_WIFI=1 WIFI_RSSI=-60 WIFI_TX=34
+  local m; m="$(monitor_rules)"
+  reset_state; IS_WIFI=1 WIFI_RSSI=-60 WIFI_TX=34
+  [ "$m" = "$(scanner_rules)" ]
+  [[ "$m" == *"W4"* ]] || return 1
+
+  reset_state
+  MON_IFACE_TYPE=wifi MON_WIFI_RSSI=-60 MON_WIFI_TX_RATE=34
+  _mon_rules
+  [[ " $MON_RULES " == *" W4 "* ]]
+  MON_PREV_RULES="$MON_RULES" MON_WIFI_TX_RATE=400
+  _mon_rules
+  [[ " $MON_RULES " != *" W4 "* ]]
+  [[ " $MON_CLEARABLE_RULES " == *" W4 "* ]]
+}
+
+@test "monitor_sample: emits last_probe_loss_pct, loss_pct_alt, and wifi.tx_rate" {
+  local gw_last inet_last
+  gw_last="$(_mon_last_probe_loss_from_hist "10:1 10:0 10:0")"
+  inet_last="$(_mon_last_probe_loss_from_hist "20:2 20:0")"
+  [ "$gw_last" = "0" ]
+  [ "$inet_last" = "0" ]
+
+  run emit NETDIAG_MON_IFACE_TYPE=wifi \
+           NETDIAG_MON_GW_LOSS=10 NETDIAG_MON_GW_LAST_LOSS="$gw_last" NETDIAG_MON_GW_RTT=5 \
+           NETDIAG_MON_INET_LOSS=5 NETDIAG_MON_INET_LAST_LOSS="$inet_last" \
+           NETDIAG_MON_INET_LOSS_ALT=0 NETDIAG_MON_INET_LAST_LOSS_ALT=0 \
+           NETDIAG_MON_INET_RTT=30 NETDIAG_MON_WIFI_RSSI=-65 NETDIAG_MON_WIFI_TX_RATE=36
+  printf '%s' "$output" | python3 -c "
+import json, sys
+s = json.load(sys.stdin)
+assert s['gateway']['loss_pct'] == 10.0, s['gateway']
+assert s['gateway']['last_probe_loss_pct'] == 0.0, s['gateway']
+assert s['internet']['loss_pct'] == 5.0, s['internet']
+assert s['internet']['loss_pct_alt'] == 0.0, s['internet']
+assert s['internet']['last_probe_loss_pct'] == 0.0, s['internet']
+assert s['wifi']['tx_rate'] == 36, s['wifi']
+"
 }

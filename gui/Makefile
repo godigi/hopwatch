@@ -34,14 +34,17 @@ endif
 # Prefer 'hopwatch-dev' identity, but seamlessly fall back to 'netdiag-dev'
 # if present, before falling back to ad-hoc.
 IDENTITY_NAME := hopwatch-dev
+ifndef SIGN_IDENTITY
 SIGN_IDENTITY := $(shell security find-identity -v -p codesigning 2>/dev/null \
                    | grep -F '"$(IDENTITY_NAME)"' | head -1 | awk '{print $$2}')
 ifeq ($(strip $(SIGN_IDENTITY)),)
 SIGN_IDENTITY := $(shell security find-identity -v -p codesigning 2>/dev/null \
                    | grep -F '"netdiag-dev"' | head -1 | awk '{print $$2}')
 endif
+endif
+SIGN_TIMESTAMP ?= --timestamp=none
 
-.PHONY: all build bundle sign run install clean identity check test dmg
+.PHONY: all build bundle sign run install clean identity check test dmg dmg-package
 
 all: sign
 
@@ -79,6 +82,7 @@ bundle: build
 	@cp "$(BIN)" "$(APP_DIR)/Contents/MacOS/HopwatchGUI"
 	@cp Resources/Info.plist "$(APP_DIR)/Contents/Info.plist"
 	@if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$(APP_DIR)/Contents/Resources/AppIcon.icns"; fi
+	@if [ -f ../CHANGELOG.md ]; then cp ../CHANGELOG.md "$(APP_DIR)/Contents/Resources/CHANGELOG.md"; fi
 	@printf 'APPL????' > "$(APP_DIR)/Contents/PkgInfo"
 	@mkdir -p "$(CLI_DIR)"
 	@cp -R ../bin "$(CLI_DIR)/bin"
@@ -103,7 +107,7 @@ ifeq ($(strip $(SIGN_IDENTITY)),)
 	@codesign --force --sign - --identifier "$(BUNDLE_ID)" "$(APP_DIR)"
 else
 	@codesign --force --sign "$(SIGN_IDENTITY)" --identifier "$(BUNDLE_ID)" \
-	          --options runtime --timestamp=none "$(APP_DIR)"
+	          --options runtime $(SIGN_TIMESTAMP) "$(APP_DIR)"
 	@echo "signed with stable identity $(SIGN_IDENTITY)"
 endif
 	@codesign --verify --verbose=1 "$(APP_DIR)" 2>&1 | sed 's/^/  /'
@@ -167,7 +171,9 @@ DMG_PATH := $(BUILD_DIR)/$(DMG_NAME)
 ZIP_NAME := Hopwatch-$(VERSION).zip
 ZIP_PATH := $(BUILD_DIR)/$(ZIP_NAME)
 
-dmg: sign
+dmg: sign dmg-package
+
+dmg-package:
 	@if [ -z "$(VERSION)" ]; then \
 	  echo "error: could not read HOPWATCH_VERSION from ../bin/hopwatch" >&2; exit 1; \
 	fi
