@@ -3,8 +3,8 @@ message: "If you use or reference Hopwatch in research, software benchmarks, or 
 authors:
   - name: "godigi"
 title: "Hopwatch: Zero-Jargon Network Monitoring and Diagnostic Companion for macOS"
-version: 1.24.0
-date-released: 2026-11-16
+version: 1.24.1
+date-released: 2026-11-19
 url: "https://github.com/godigi/hopwatch"
 license: "MIT"
 keywords:

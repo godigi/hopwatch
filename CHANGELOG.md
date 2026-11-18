@@ -8,6 +8,8 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+## [1.24.1] - 2026-11-19
+
 ### Fixed
 - **CLI & Monitor Reliability**:
   - Updated `hopwatch --watch` to source `lib/thresholds.sh` and `lib/common.sh` cleanly and set `LOG=/dev/null`; replaced remaining `netdiag:` stderr/banner strings in `bin/hopwatch` with `hopwatch`.
@@ -436,8 +438,9 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
      history lives in docs/CHANGELOG-archive.md, which tests/test_changelog.bats
      does not read. -->
 
-[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.24.0...HEAD
-[1.24.0]: https://github.com/godigi/hopwatch/releases/tag/v1.24.0
+[Unreleased]: https://github.com/godigi/hopwatch/compare/v1.24.1...HEAD
+[1.24.1]: https://github.com/godigi/hopwatch/releases/tag/v1.24.1
+[1.24.0]: https://github.com/godigi/hopwatch/commit/c8f842fd1fb1119b36e7b5e1b34722d80be00d76
 [1.23.1]: https://github.com/godigi/hopwatch/commit/3b79c6c402610411cf75d24e4e4a4569bbe96fc8
 [1.23.0]: https://github.com/godigi/hopwatch/commit/88326623acff0545af1da67884f03f31ac328e27
 [1.22.0]: https://github.com/godigi/hopwatch/commit/b9538f93648739b5515d34eea0eb29e7b592a752
