@@ -8,6 +8,7 @@ on:
 jobs:
   bats:
     runs-on: macos-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -128,3 +129,12 @@ jobs:
           /tmp/ndbin/hopwatch --help > /dev/null
           ./install.sh --prefix /tmp/ndbin --uninstall
           test ! -e /tmp/ndbin/hopwatch
+
+  gui:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run HopwatchGUI Swift unit tests
+        run: make test-gui

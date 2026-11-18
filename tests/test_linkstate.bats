@@ -218,6 +218,25 @@ en4" ]
   [ "$output" = "Wi-Fi" ] || { echo "got '$output'"; return 1; }
 }
 
+@test "linkstate: a disabled service's device is not attributed to the service before it" {
+  # macOS lists a disabled service as "(*) Name". It is a name line like any
+  # other; skipping it left the previous service's name in hand, so the
+  # device under it resolved to that service (and a bridge became "iPhone
+  # USB", which MET-1 then treats as a tethered, metered link).
+  local order
+  order="$(printf '%s\n' \
+    'An asterisk (*) denotes that a network service is disabled.' \
+    '(1) iPhone USB' \
+    '(Hardware Port: iPhone USB, Device: en7)' \
+    '' \
+    '(*) Thunderbolt Bridge' \
+    '(Hardware Port: Thunderbolt Bridge, Device: bridge0)')"
+  run linkstate_service_for_device "$order" bridge0
+  [ "$output" = "Thunderbolt Bridge" ] || { echo "got '$output'"; return 1; }
+  run linkstate_service_for_device "$order" en7
+  [ "$output" = "iPhone USB" ] || { echo "got '$output'"; return 1; }
+}
+
 @test "linkstate: an unknown device resolves to no service" {
   run linkstate_service_for_device \
     "$(cat "$FIX/networksetup_serviceorder.txt")" en99

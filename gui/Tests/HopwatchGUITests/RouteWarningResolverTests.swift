@@ -263,12 +263,33 @@ import Testing
         #expect(result.internetWarn)
     }
 
-    @Test func distanceGuidanceResolution() {
-        #expect(SignalScale.distanceGuidance(forRSSI: -43) == "Near router")
-        #expect(SignalScale.distanceGuidance(forRSSI: -50) == "Near router")
-        #expect(SignalScale.distanceGuidance(forRSSI: -55) == "Good range")
-        #expect(SignalScale.distanceGuidance(forRSSI: -70) == "Medium range")
-        #expect(SignalScale.distanceGuidance(forRSSI: -80) == "Too far from router")
-        #expect(SignalScale.distanceGuidance(forRSSI: nil) == nil)
+    @Test func distanceGuidanceFollowsTheCLIScaleNotItsOwnBoundaries() {
+        func band(_ min: Int?, _ label: String) -> SignalScale.Band {
+            var b = SignalScale.Band()
+            b.minDBm = min
+            b.label = label
+            return b
+        }
+        var scale = SignalScale()
+        scale.bands = [band(-55, "Excellent"), band(-70, "Good"),
+                       band(-75, "Fair"), band(nil, "Weak")]
+
+        #expect(SignalScale.distanceGuidance(forRSSI: -43, scale: scale) == "Near router")
+        #expect(SignalScale.distanceGuidance(forRSSI: -55, scale: scale) == "Near router")
+        // -60 is "Good range" here only because *this* scale says -55..-70
+        // is the second band; a different scale moves the word with it.
+        #expect(SignalScale.distanceGuidance(forRSSI: -60, scale: scale) == "Good range")
+        #expect(SignalScale.distanceGuidance(forRSSI: -72, scale: scale) == "Medium range")
+        #expect(SignalScale.distanceGuidance(forRSSI: -80, scale: scale) == "Too far from router")
+        #expect(SignalScale.distanceGuidance(forRSSI: nil, scale: scale) == nil)
+
+        var wider = SignalScale()
+        wider.bands = [band(-65, "Excellent"), band(-70, "Good"),
+                       band(-75, "Fair"), band(nil, "Weak")]
+        #expect(SignalScale.distanceGuidance(forRSSI: -60, scale: wider) == "Near router")
+
+        // No scale loaded: no phrase, never a Swift-authored one.
+        #expect(SignalScale.distanceGuidance(forRSSI: -43) == nil)
+        #expect(SignalScale.distanceGuidance(forRSSI: -43, scale: nil) == nil)
     }
 }

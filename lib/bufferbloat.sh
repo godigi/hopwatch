@@ -81,12 +81,12 @@ bufferbloat_run() {
 
   # If loaded ping suffered 100% loss (no RTT summary), but idle baseline was clean,
   # the link was saturated to total drop: that is Grade F bufferbloat.
-  if [ -z "$BUFFERBLOAT_LOADED_GW_RTT" ] && [ -n "$gw_loss" ] && loss_at_least "$gw_loss" 100; then
+  if [ -z "$BUFFERBLOAT_LOADED_GW_RTT" ] && [ -n "$gw_loss" ] && loss_at_least "$gw_loss" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
     BUFFERBLOAT_LOADED_GW_RTT=">2000"
     BUFFERBLOAT_GW_DELTA="$THRESH_BUFFERBLOAT_SATURATED_DELTA_MS"
     BUFFERBLOAT_GW_GRADE="F"
   fi
-  if [ -z "$BUFFERBLOAT_LOADED_INET_RTT" ] && [ -n "$inet_loss" ] && loss_at_least "$inet_loss" 100; then
+  if [ -z "$BUFFERBLOAT_LOADED_INET_RTT" ] && [ -n "$inet_loss" ] && loss_at_least "$inet_loss" "$THRESH_ICMP_TOTAL_LOSS_PCT"; then
     BUFFERBLOAT_LOADED_INET_RTT=">2000"
     BUFFERBLOAT_INET_DELTA="$THRESH_BUFFERBLOAT_SATURATED_DELTA_MS"
     BUFFERBLOAT_INET_GRADE="F"

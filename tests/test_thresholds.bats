@@ -111,6 +111,15 @@ setup() {
   [ "$status" -ne 0 ] || { echo "inline cutoff in diagnosis.sh:"; echo "$output"; return 1; }
 }
 
+@test "no check module compares a loss figure against a literal" {
+  # lib/bufferbloat.sh once read `loss_at_least "$gw_loss" 100` while
+  # THRESH_ICMP_TOTAL_LOSS_PCT already named that exact boundary. Only
+  # diagnosis.sh and monitor.sh were scanned, so it went unnoticed. A loss
+  # comparison against a bare number is a cutoff wherever it lives.
+  run grep -nE '(loss_at_least|loss_below) "\$[A-Za-z_]+" [0-9]+' "$REPO"/lib/*.sh
+  [ "$status" -ne 0 ] || { echo "inline loss cutoff:"; echo "$output"; return 1; }
+}
+
 @test "lib/monitor.sh and lib/repairs.sh carry no inline numeric cutoff either" {
   # The automatic Wi-Fi reconnect decides, unattended, to power-cycle a
   # radio, and it does so in monitor.sh against every number in the

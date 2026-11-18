@@ -123,6 +123,13 @@ final class HopwatchCoordinator {
     var pendingArrivalNetworkID: String?
     var pendingArrivalDepth: ArrivalDepth?
     var pendingArrivalDecline: DeclineReason?
+    /// Arrival state for networks known only by a private/link-local
+    /// gateway IP (`gw:192.168.1.1`). Never persisted — see
+    /// `setArrivalState` — and emptied at every connection boundary
+    /// (`invalidateCurrentConnection`), so the verdict for "the network
+    /// behind 192.168.1.1" cannot leak onto a different one that shares the
+    /// address.
+    var sessionArrivalStates: [String: ArrivalState] = [:]
     var heartbeatSeedMinSeq: Int = 0
     var lastSeverity: String = "ok"
 
@@ -412,7 +419,11 @@ final class HopwatchCoordinator {
         let isPortalConfirmed = sample.publicInfo.captivePortal == true ||
             sample.status.rules.contains("CP-1") ||
             isSystemCaptiveActive()
-        let internetHealthy = (sample.internet.lossPct ?? 100) < 50
+        // Evidence the internet is reachable: a reply was measured, or the
+        // public lookup / a TCP probe got through. A reply is enough; this
+        // is no verdict on loss, so no loss cutoff of this app's own (it
+        // used to be "< 50 %") belongs here.
+        let internetHealthy = sample.internet.rttAvgMs != nil
             || sample.publicInfo.ip != nil
             || sample.tcp.anyOk == true
         if isPortalConfirmed {

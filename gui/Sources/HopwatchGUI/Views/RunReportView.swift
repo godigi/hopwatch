@@ -1062,11 +1062,7 @@ struct RunReportView: View {
 
     private func isRouterIssue(_ d: RunSnapshot.Diagnosis) -> Bool {
         guard let ruleID = d.rule else { return false }
-        let rule = coordinator.rulesCatalog.catalog?[ruleID]
-        return rule?.fixTarget == "your_router"
-            || rule?.category == "router"
-            || ruleID.hasPrefix("G")
-            || ruleID.hasPrefix("B")
+        return HopAttributionResolver.isRouterRule(ruleID, catalog: coordinator.rulesCatalog.catalog)
     }
 }
 

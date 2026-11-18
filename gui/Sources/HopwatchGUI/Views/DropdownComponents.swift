@@ -789,7 +789,9 @@ struct ConnectionRouteView: View {
                         Text(internetDetail)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Theme.ColorToken.amber)
-                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let countryName, !countryName.isEmpty {
                             Text(countryName)
                                 .font(.system(size: 8))

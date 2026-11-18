@@ -772,7 +772,11 @@ struct DropdownView: View {
         }
         let inetLoss = coordinator.liveSample?.internet.lossPct
         if let loss = coordinator.liveSample?.gateway.lossPct, loss > 0 {
-            if EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: loss, internetLoss: inetLoss, gatewayFiltered: lossFiltering.filters(.gateway)) {
+            // Not while a gateway finding (G1-G3) is firing: the measured loss
+            // is what the finding is about and must stay visible.
+            let gatewayRuleFiring = ["G1", "G2", "G3"].contains { firedRules.contains($0) }
+            if !gatewayRuleFiring,
+               EffectiveLoss.isIsolatedGatewayRateLimit(gatewayLoss: loss, internetLoss: inetLoss, gatewayFiltered: lossFiltering.filters(.gateway)) {
                 return routerGatewayIP ?? "default gateway"
             }
             return EffectiveLoss.formatWindowDetail(
@@ -810,7 +814,7 @@ struct DropdownView: View {
         if lossFiltering.filters(.internet) {
             return "Ping blocked"
         }
-        if loss > 0 && jitter >= 30.0 {
+        if loss > 0 && jitter >= 30.0 && !isGatewayJitterDominant {
             if EffectiveLoss.isRecovering(windowLoss: loss, lastProbeLoss: coordinator.liveSample?.internet.lastProbeLossPct) {
                 return "0% now · \(LossFormatter.formatPct(loss)) avg · \(Int(round(jitter)))ms jit"
             }
@@ -1248,13 +1252,9 @@ struct DropdownView: View {
     }
 
     private func isRouterAlert(_ alert: StageResolver.AlertSnapshot) -> Bool {
-        for ruleID in alert.rules {
-            let rule = coordinator.rulesCatalog.catalog?[ruleID]
-            if rule?.fixTarget == "your_router" || rule?.category == "router" || ruleID.hasPrefix("G") || ruleID.hasPrefix("B") {
-                return true
-            }
+        alert.rules.contains {
+            HopAttributionResolver.isRouterRule($0, catalog: coordinator.rulesCatalog.catalog)
         }
-        return false
     }
 
     private var publicIP: String? {

@@ -49,7 +49,7 @@ final class UpdateChecker {
             do {
                 var request = URLRequest(url: self.releaseAPI)
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-                request.setValue("Netdiag-App/\(Defaults.appVersion)", forHTTPHeaderField: "User-Agent")
+                request.setValue("Hopwatch-App/\(Defaults.appVersion)", forHTTPHeaderField: "User-Agent")
                 request.timeoutInterval = 10
 
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -102,7 +102,15 @@ final class UpdateChecker {
                         if manual {
                             self.onPresentUpdateModal?(release)
                         }
-                        if !self.isDownloading && !self.isPreloaded {
+                        // Pre-caching spends the user's bandwidth (and, on a
+                        // hotspot, their data allowance), so it is opt-in:
+                        // with the setting off a check only *finds* the
+                        // update. `installUpdate()` downloads on demand when
+                        // nothing was preloaded, so nothing else depends on
+                        // this having run. Installing stays behind the
+                        // button either way.
+                        if Defaults.autoDownloadAndInstallUpdates
+                            && !self.isDownloading && !self.isPreloaded {
                             self.startBackgroundPreload(for: release)
                         }
                     } else {

@@ -5,7 +5,7 @@ cask "hopwatch" do
   url "https://github.com/godigi/hopwatch/releases/download/v#{version}/Hopwatch-#{version}.dmg"
   name "Hopwatch"
   desc "Network diagnostics and menu bar monitor"
-  homepage "https://github.com/godigi/hopwatch"
+  homepage "https://godigi.github.io/hopwatch/"
 
   depends_on macos: :sonoma
 

@@ -8,6 +8,24 @@ Releases before 1.16.2 are archived in [docs/CHANGELOG-archive.md](docs/CHANGELO
 
 ## [Unreleased]
 
+### Fixed
+- **CLI & Monitor Reliability**:
+  - Updated `hopwatch --watch` to source `lib/thresholds.sh` and `lib/common.sh` cleanly and set `LOG=/dev/null`; replaced remaining `netdiag:` stderr/banner strings in `bin/hopwatch` with `hopwatch`.
+  - Stopped running background spinner animations when `--expert` output mode is active (`lib/common.sh`).
+  - Hardened continuous monitor signal interruption, fast-refresh state tracking, wired link-drop vs. gateway-loss distinction, per-network `N1c` IP continuity, `WJ-1` / auto-reconnect guards, `THRESH_MON_PUBLIC_RETRY_S` backoff, and `rules_left` journal tracking (`lib/monitor.sh`, `helpers/monitor_sample.py`).
+  - Fixed `--app` installer pipeline cleanup (`install.sh`) and aligned `have_bash5` detection across Homebrew, MacPorts, and `PATH`.
+- **HopwatchGUI Alignment & Fixes**:
+  - Unified GUI suitability, stability, and health-rating thresholds with CLI `THRESH_*` cutoffs (`SuitabilityEngine.Cutoff`, `MonitorSeries`, `MonitorSample`, `DropdownView`, `HomeView`, `LiveView`, `RunReportView`, `SettingsView`).
+  - Driven post-repair resolution feedback (`evaluateResolutions`) and `signalRestoredMessage` directly from CLI rule transitions rather than local packet-loss heuristics, and preserved `sessionArrivalStates` across network arrivals and declined checks (`HopwatchCoordinator`, `ResolutionFeedbackTests`).
+  - Gated update preload on `autoDownloadAndInstallUpdates`, switched `UpdateChecker` `User-Agent` to `Hopwatch-App/<version>`, guarded unmeasured MTU displays, and updated plain-English `CONN-1` / `Lease expired` wording.
+  - Fixed degraded hero subtitles claiming `"4K streaming is fine"` when Streaming is `"HD ready"`, decoupled minor gateway packet loss (`< 2%`) from upstream loss so Wi-Fi isn't blamed for internet drops, wrapped long Internet node detail labels without ellipsis truncation, suppressed gateway-dominant jitter on the Internet node detail, and added a left axis gutter to `PingHeartbeatView` so `150ms`/`70ms` labels never collide with the trace (`SuitabilityEngine`, `DropdownComponents`, `DropdownView`, `HomeView`, `PingHeartbeatView`).
+
+### Changed
+- **CI, Docs & Release Metadata**:
+  - Added `make test-gui` Swift test job and `timeout-minutes` bounds across GitHub Actions workflows (`.github/workflows/bats.yml`, `auto-version.yml`, `release.yml`, `shellcheck.yml`).
+  - Updated `README.md`, `CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/DIAGNOSIS-RULES.md`, and `docs/JSON-SCHEMA.md` for current `hopwatch` paths, Dashboard sections, `make ship`, and redaction coverage.
+  - Updated `CITATION.cff` to `1.24.0`, wired `CITATION.cff` into `scripts/bump.py`, and pointed `Casks/hopwatch.rb` homepage to `https://godigi.github.io/hopwatch/`.
+
 ## [1.24.0] - 2026-11-16
 
 ### Added

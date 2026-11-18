@@ -252,6 +252,10 @@ MON_PAUSED=0
 MON_REFRESH_REQUESTED=0
 # The pid of the interruptible sleep in _mon_sleep, so a stop signal can end it.
 MON_SLEEP_PID=""
+MON_WAIT_RC=0
+# The type ("wifi" / "wired") of the link as of the last cycle it was up, so a
+# drop can be attributed to the right kind of link; see _mon_wired_drop.
+MON_LAST_LINK_TYPE=""
 # Set when _mon_emit failed and the loop stopped on it; see the end of
 # monitor_run.
 MON_EMIT_FAILED=0
@@ -343,6 +347,16 @@ MON_PREV_CADENCE=""
 MON_GAP_S=""
 MON_PREV_INTERFACE=""
 MON_PREV_RULES=""
+# What the monitor was on, and what was firing there, when it moved to a
+# different network this cycle; empty on every other cycle. See the network
+# change in monitor_run: it is what lets the journal close the old network's
+# episodes. MON_PREV_NETWORK_LABEL is the label of the network as of the last
+# emitted sample, kept because by the time a change is noticed the label
+# variable already holds the new one.
+MON_LEFT_NETWORK=""
+MON_LEFT_LABEL=""
+MON_LEFT_RULES=""
+MON_PREV_NETWORK_LABEL=""
 
 # ── Fast tier ────────────────────────────────────────────────────────────
 
@@ -375,10 +389,29 @@ _mon_probe_offline() {
     MON_OFFLINE_REASON="self-assigned"
   else
     MON_OFFLINE_REASON="no-route"
+    # Joined, and holding a real lease, with no default route: this is N1c's
+    # state. _mon_probe_link only reads an address through the default
+    # route's interface, so with no route MON_LOCAL_IP was always empty here
+    # and _mon_rules fell through to N1, "nothing joined", the false claim
+    # N1c exists to avoid. The address read just above is the evidence.
+    [ -n "$MON_LOCAL_IP" ] || MON_LOCAL_IP="$ip"
   fi
   if [ -n "$MON_ID_IFACE_TYPE" ]; then
     MON_INTERFACE="$wifi_dev"
   fi
+}
+
+# True when the link that was lost was a wired one. Wi-Fi-specific verdicts
+# (WJ-1 "Wi-Fi dropped and has not rejoined", the automatic Wi-Fi reconnect)
+# are about the radio, and _mon_probe_offline looks at the Wi-Fi device
+# whatever was lost: an Ethernet-only Mac with the radio on and no network in
+# range reads "wifi-not-joined" the moment its cable or switch goes. The type
+# comes from the held identity, and failing that from the last cycle the link
+# was up; unknown stays unknown and leaves the Wi-Fi path as it was, since
+# "wired" is a claim about a port that was actually looked at.
+_mon_wired_drop() {
+  local kind="${MON_ID_IFACE_TYPE:-$MON_LAST_LINK_TYPE}"
+  [ "$kind" = "wired" ]
 }
 
 # One `route -n get default` for both fields: it is a syscall to the
@@ -740,6 +773,34 @@ _mon_probe_dns() {
   MON_DNS_TCP_DNS_OK="$DNS_TCP_DNS_OK"
 }
 
+# Wait for one background probe, and keep waiting when a trapped signal ends
+# the `wait` instead of the probe. bash returns from `wait` with a status
+# above 128 the moment USR1/USR2/ALRM/INT/TERM arrives, with the child still
+# running; taking that for the child's own status turned a refresh nudge
+# mid-probe into a failed TCP check (with_timeout reports any >128 as a
+# timeout) or into an empty ping file that wiped the loss window. The child
+# is told apart from its status by whether it still exists: an interrupted
+# wait leaves it running or an unreaped zombie, a finished one is reaped.
+# A stop in progress abandons the wait, as the interrupted `wait` always did,
+# so SIGTERM is not held up behind a probe. Sets MON_WAIT_RC.
+_mon_wait_pid() {
+  local pid="$1" rc
+  MON_WAIT_RC=0
+  while :; do
+    # `|| rc=$?`, not a bare wait: a probe's non-zero exit is its answer, and
+    # must not abort a caller that runs under errexit.
+    rc=0
+    wait "$pid" 2>/dev/null || rc=$?
+    # 128 and below is an exit status. Above it is a signal, and only when
+    # the probe is still there was it the wait that the signal ended.
+    if [ "$rc" -le 128 ] || ! kill -0 "$pid" 2>/dev/null; then
+      MON_WAIT_RC="$rc"
+      return 0
+    fi
+    if [ "$MON_STOP" -ne 0 ]; then MON_WAIT_RC=124; return 0; fi
+  done
+}
+
 _mon_probe_tcp() {
   MON_TCP_OK=""; MON_TCP_LINES=""
   [ "$MON_LINK_UP" -eq 1 ] || return 0
@@ -752,7 +813,14 @@ _mon_probe_tcp() {
   for entry in "1.1.1.1:443" "8.8.8.8:443"; do
     host="${entry%:*}"; port="${entry##*:}"
     t0="$EPOCHREALTIME"
-    if with_timeout 4 nc -G 3 -z "$host" "$port" >/dev/null 2>&1; then
+    # In a background subshell, then _mon_wait_pid: with_timeout run directly
+    # in this shell reports a trapped signal arriving mid-probe as a timeout.
+    # `set +e` because the `if` this used to sit in is what kept errexit off
+    # inside with_timeout, whose reaping `wait` of its own killer returns the
+    # killer's SIGTERM status.
+    ( set +e; with_timeout 4 nc -G 3 -z "$host" "$port" ) >/dev/null 2>&1 &
+    _mon_wait_pid "$!"
+    if [ "$MON_WAIT_RC" -eq 0 ]; then
       ms="$(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN{printf "%.0f", (b-a)*1000}')"
       MON_TCP_LINES+="${host}|${port}|1|${ms}"$'\n'
       any=1
@@ -790,8 +858,8 @@ _mon_probe_internet() {
   with_timeout 8 ping -q -c "$MONITOR_INET_PING_COUNT" -i "$LOSS_PROBE_INTERVAL" \
     -W "$PING_REPLY_WAIT_MS" "$target_alt" >"$tmp_dir/alternate" 2>/dev/null &
   local pid_b=$!
-  wait "$pid_a" 2>/dev/null || true
-  wait "$pid_b" 2>/dev/null || true
+  _mon_wait_pid "$pid_a"
+  _mon_wait_pid "$pid_b"
   out="$(cat "$tmp_dir/primary" 2>/dev/null || true)"
   out_alt="$(cat "$tmp_dir/alternate" 2>/dev/null || true)"
   rm -rf "$tmp_dir"
@@ -834,8 +902,8 @@ _mon_probe_web() {
     --connect-timeout 1 --max-time 2 \
     https://www.gstatic.com/generate_204 >"$tmp_dir/google" 2>/dev/null &
   local pid_b=$!
-  wait "$pid_a" 2>/dev/null || true
-  wait "$pid_b" 2>/dev/null || true
+  _mon_wait_pid "$pid_a"
+  _mon_wait_pid "$pid_b"
 
   code_a="$(cat "$tmp_dir/cloudflare" 2>/dev/null || true)"
   code_b="$(cat "$tmp_dir/google" 2>/dev/null || true)"
@@ -1207,7 +1275,7 @@ _mon_rules() {
     [ "$MON_DOWN_SINCE_EPOCH" -gt 0 ] && down_duration=$(( EPOCHSECONDS - MON_DOWN_SINCE_EPOCH ))
     if [ "$MON_OFFLINE_REASON" = "wifi-off" ]; then
       _mon_add_rule critical WF-1
-    elif [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ]; then
+    elif [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ] && ! _mon_wired_drop; then
       if [ "$down_duration" -ge "$THRESH_WIFI_REJOIN_GRACE_S" ]; then
         _mon_add_rule critical WJ-1
       fi
@@ -1847,7 +1915,7 @@ _mon_auto_reconnect() {
     MON_AR_RADIO_TOUCHED=1
   fi
 
-  if [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ]; then
+  if [ "$MON_OFFLINE_REASON" = "wifi-not-joined" ] && ! _mon_wired_drop; then
     [ "$MON_AR_WJ_SINCE" -gt 0 ] || MON_AR_WJ_SINCE="$now"
   else
     MON_AR_WJ_SINCE=0
@@ -1912,6 +1980,9 @@ _mon_snapshot_prev() {
     esac
   done
   MON_PREV_RULES="$next_rules"
+  MON_PREV_NETWORK_LABEL="$MON_NETWORK_LABEL"
+  # Reported by the emit this follows, and only that one.
+  MON_LEFT_NETWORK=""; MON_LEFT_LABEL=""; MON_LEFT_RULES=""
   MON_HAVE_PREV=1
   return 0
 }
@@ -2015,6 +2086,9 @@ _mon_emit() {
   NETDIAG_MON_PREV_BSSID="$MON_PREV_BSSID" \
   NETDIAG_MON_PREV_INTERFACE="$MON_PREV_INTERFACE" \
   NETDIAG_MON_PREV_RULES="$MON_PREV_RULES" \
+  NETDIAG_MON_LEFT_NETWORK="$MON_LEFT_NETWORK" \
+  NETDIAG_MON_LEFT_LABEL="$MON_LEFT_LABEL" \
+  NETDIAG_MON_LEFT_RULES="$MON_LEFT_RULES" \
   NETDIAG_MON_OFFLINE_REASON="$MON_OFFLINE_REASON" \
   NETDIAG_MON_OFFLINE_DOWN_SINCE="$MON_DOWN_SINCE" \
   NETDIAG_MON_OFFLINE_DOWN_DURATION_S="$(( MON_DOWN_SINCE_EPOCH > 0 ? EPOCHSECONDS - MON_DOWN_SINCE_EPOCH : 0 ))" \
@@ -2067,8 +2141,12 @@ _mon_gap_seconds() {
 # so a GUI sending SIGTERM would wait up to a full cadence for the process
 # to die; backgrounding it and waiting makes the trap fire immediately.
 _mon_sleep() {
+  # A refresh already requested ends the rest period now, and the flag is
+  # left set. Only the top of monitor_run's loop turns it into "every tier
+  # is due"; clearing it here, as this once did, consumed the request
+  # without acting on it, so a SIGALRM or SIGUSR2 that landed mid-probe
+  # produced a probe-less duplicate sample and no early refresh at all.
   if [ "$MON_REFRESH_REQUESTED" -eq 1 ]; then
-    MON_REFRESH_REQUESTED=0
     return 0
   fi
   # Redirected away from the stream: a background child inherits stdout, and
@@ -2241,6 +2319,15 @@ monitor_run() {
         _mon_conn_reset
         _mon_hog_reset
         _mon_clear_measurements
+        # What was firing on the network being left is not carried into the
+        # new one, but it has to end somewhere: with no clear for the old
+        # network the journal reader kept each of those episodes open to the
+        # end of the file, and availability counted the days in between as
+        # one outage. Handed to the emit, which journals it against the old
+        # network and keeps it out of the stream's `changes`.
+        MON_LEFT_NETWORK="$prev_network_id_before"
+        MON_LEFT_LABEL="$MON_PREV_NETWORK_LABEL"
+        MON_LEFT_RULES="$MON_PREV_RULES"
         MON_PREV_RULES=""
         MON_PREV_PUB_IPV4="" MON_PREV_PUB_IPV6=""
         # Not on the first cycle: every network is "new" to a process that
@@ -2293,6 +2380,7 @@ monitor_run() {
           MON_LAST_INET_LOSS_TIME="$now"
         fi
         _mon_note_last_network
+        MON_LAST_LINK_TYPE="$MON_IFACE_TYPE"
         MON_DOWN_SINCE=""
         MON_DOWN_SINCE_EPOCH=0
         MON_OFFLINE_PRECURSOR=""
@@ -2343,7 +2431,7 @@ monitor_run() {
         if [ "${MON_PUBLIC_OK:-0}" -eq 1 ]; then
           next_slow=$((now + MONITOR_SLOW_INTERVAL))
         else
-          local retry_slow=30
+          local retry_slow="$THRESH_MON_PUBLIC_RETRY_S"
           [ "$MONITOR_SLOW_INTERVAL" -lt "$retry_slow" ] && retry_slow="$MONITOR_SLOW_INTERVAL"
           next_slow=$((now + retry_slow))
         fi
@@ -2387,7 +2475,7 @@ monitor_run() {
           if [ "${MON_PUBLIC_OK:-0}" -eq 1 ]; then
             next_slow=$((now + MONITOR_SLOW_INTERVAL))
           else
-            local retry_slow=30
+            local retry_slow="$THRESH_MON_PUBLIC_RETRY_S"
             [ "$MONITOR_SLOW_INTERVAL" -lt "$retry_slow" ] && retry_slow="$MONITOR_SLOW_INTERVAL"
             next_slow=$((now + retry_slow))
           fi
@@ -2399,7 +2487,15 @@ monitor_run() {
 
     _mon_probe_hog
     _mon_rules
-    _mon_auto_reconnect "$now"
+    # Only a cycle that probed the link decides anything: _mon_auto_reconnect
+    # counts consecutive samples, and an iteration that measured nothing is
+    # not a sample. It still clears the verdict, so a stale attempt is never
+    # re-emitted.
+    if [[ "$MON_REFRESHED" == *"fast "* ]]; then
+      _mon_auto_reconnect "$now"
+    else
+      MON_AR_REASON=""; MON_AR_RULE=""; MON_AR_ATTEMPT=0; MON_AR_MAX=0
+    fi
     # A failure still waiting for its confirmation is re-probed next cycle
     # rather than after the rest of the 60 s medium interval.
     if [ "$MON_CONN_PENDING" -eq 1 ]; then next_medium=0; fi

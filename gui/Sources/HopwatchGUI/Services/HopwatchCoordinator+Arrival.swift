@@ -21,8 +21,8 @@ extension HopwatchCoordinator {
         }()
 
         let canonical = history.canonicalID(targetID)
-        let state = Defaults.arrivalStates[targetID]
-            ?? (NetworkIdentity.isPrivateOrLocalGateway(canonical) ? nil : Defaults.arrivalStates[canonical])
+        let state = recordedArrivalState(for: targetID)
+            ?? recordedArrivalState(for: canonical)
             ?? .unchecked
         if arrivalNetworkID != targetID { arrivalNetworkID = targetID }
         if arrivalState != state { arrivalState = state }
@@ -60,7 +60,19 @@ extension HopwatchCoordinator {
     private func attemptArrival(id: String, depth: ArrivalDepth, reason: String,
                                 declineWith: DeclineReason? = nil) {
         let now = Date()
+        // Marked *before* the scan starts, not after: `launch` reads
+        // `isArrivalCheck` once, synchronously, to decide whether this scan
+        // reseeds the heartbeat around itself. Setting the marker only once
+        // `runScan` had returned meant that read was always false, so the
+        // reseed at the end of an arrival check never ran. Restored if the
+        // scan is declined, so a busy decline leaves the in-flight check's
+        // own marker (if any) exactly as it was.
+        let previousPending = (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline)
+        pendingArrivalNetworkID = id
+        pendingArrivalDepth = depth
+        pendingArrivalDecline = declineWith
         guard runScan(depth: depth.runnerDepth, reason: reason) else {
+            (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline) = previousPending
             arrivalAttempts += 1
             let delay = min(30 * pow(2, Double(arrivalAttempts - 1)), 300)
             nextArrivalAttemptAt = now.addingTimeInterval(delay)
@@ -72,11 +84,6 @@ extension HopwatchCoordinator {
         nextArrivalAttemptAt = nil
 
         setArrivalState(.checking(depth: depth, startedAt: now), for: id)
-        pendingArrivalNetworkID = id
-        pendingArrivalDepth = depth
-        pendingArrivalDecline = declineWith
-        heartbeatSeedMinSeq = (monitor.latest?.seq ?? 0) + 1
-        heartbeat.reset()
     }
 
     private func arrivalIntent(now: Date) -> ArrivalCopy.Intent {
@@ -86,12 +93,33 @@ extension HopwatchCoordinator {
         return .starting
     }
 
+    /// Those weak keys are never *persisted* — the store would let one
+    /// network's verdict suppress an unrelated one that happens to share
+    /// 192.168.1.1. They are still *remembered for this connection*, in
+    /// `sessionArrivalStates`. Dropping the write outright (the previous
+    /// behaviour) left every such network `.unchecked` forever: the full
+    /// check ran, its terminal state vanished, and the very next monitor
+    /// sample started another one — back-to-back, link-saturating, with the
+    /// arrival card stuck on "Starting a check".
     func setArrivalState(_ state: ArrivalState, for id: String) {
-        guard !NetworkIdentity.isPrivateOrLocalGateway(id) else { return }
-        var all = Defaults.arrivalStates
-        all[id] = state
-        Defaults.arrivalStates = all
+        if NetworkIdentity.isPrivateOrLocalGateway(id) {
+            sessionArrivalStates[id] = state
+        } else {
+            var all = Defaults.arrivalStates
+            all[id] = state
+            Defaults.arrivalStates = all
+        }
         if id == arrivalNetworkID { arrivalState = state }
+    }
+
+    /// One key's recorded arrival state: the persisted store for a
+    /// trustworthy identity, the in-memory per-connection map for a weak
+    /// (private gateway IP) one.
+    private func recordedArrivalState(for key: String) -> ArrivalState? {
+        if NetworkIdentity.isPrivateOrLocalGateway(key) {
+            return sessionArrivalStates[key]
+        }
+        return Defaults.arrivalStates[key]
     }
 
     /// Determines whether two network identifiers refer to the same physical network,
@@ -211,10 +239,16 @@ extension HopwatchCoordinator {
     /// declined, and record it as this network's arrival check.
     func runDeclinedFullCheck() {
         guard let id = arrivalNetworkID else { return }
-        guard runScan(depth: .full, reason: "you asked for the full check anyway") else { return }
-        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
+        // Marked before the scan starts for the reason given in
+        // `attemptArrival`; restored if the scan is declined.
+        let previousPending = (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline)
         pendingArrivalNetworkID = id
         pendingArrivalDepth = .full
         pendingArrivalDecline = nil
+        guard runScan(depth: .full, reason: "you asked for the full check anyway") else {
+            (pendingArrivalNetworkID, pendingArrivalDepth, pendingArrivalDecline) = previousPending
+            return
+        }
+        setArrivalState(.checking(depth: .full, startedAt: Date()), for: id)
     }
 }

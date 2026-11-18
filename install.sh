@@ -67,7 +67,12 @@ while [ $# -gt 0 ]; do
       if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/install-app.sh" ]; then
         exec "$SELF_DIR/install-app.sh"
       else
-        exec curl -fsSL "https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh" | bash
+        # Not `exec curl ... | bash`: in a pipeline `exec` replaces only the
+        # left-hand subshell, so the script carried on, never shifted --app
+        # off the argument list, and ran this branch again, downloading and
+        # reinstalling the app until it was killed. Run the installer, then stop.
+        curl -fsSL "https://raw.githubusercontent.com/godigi/hopwatch/main/install-app.sh" | bash
+        exit 0
       fi
       ;;
     --prefix)
@@ -154,7 +159,16 @@ fi
 # without a 5.x, so bootstrap it before the first run rather than letting
 # the user hit that error.
 have_bash5() {
-  [ -x /opt/homebrew/bin/bash ] || [ -x /usr/local/bin/bash ]
+  local cand major
+  for cand in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash; do
+    [ -x "$cand" ] && return 0
+  done
+  if cand="$(command -v bash 2>/dev/null)" && [ -x "$cand" ]; then
+    # shellcheck disable=SC2016  # Evaluated inside the candidate bash subprocess.
+    major="$("$cand" -c 'printf "%s" "${BASH_VERSINFO[0]:-0}"' 2>/dev/null || printf '0')"
+    [ "${major:-0}" -ge 5 ] && return 0
+  fi
+  return 1
 }
 
 if [ "$NO_BREW" -eq 0 ] && ! have_bash5; then

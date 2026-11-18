@@ -1526,6 +1526,7 @@ from stdin or the store.
 | `wifi.bssid` | masked | identifies the router |
 | `ipv6.global_addr` | masked | identifies the household |
 | `ipv6.gateway` | masked | EUI-64-derived from the router's MAC, so leaving it in republishes `interface.gateway_mac` sitting right next to it |
+| `netdiag_extras.target` (a positional `TARGET`), and wherever that name appears — `netdiag_extras.target_traceroute.target`, `dns[].name`, diagnosis prose | masked when it names something private | a single-label name (`nas`) or one ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain`, `.corp` or `.intranet` identifies a device on the household's own network. Matched as a whole name, case-insensitively, so `nas` does not mask the inside of `Nasdaq`. A public name such as `github.com` is kept: it identifies nobody, and masking it would delete the clue about which leg was measured. An IP literal follows the address rules below, not this one |
 | `watcher.program` | dropped, and scrubbed from prose | an absolute path under `$HOME`; the ND-1 summary quotes it |
 | `wifi_disconnects.events`, `hosts_file.suspicious_redirects` | dropped | raw log / hosts text — no secret matches a neighbour's BSSID or a private hostname |
 | any MAC address (`aa:bb:cc:dd:ee:ff`), anywhere | masked by a final sweep | a neighbour's BSSID identifies a device as surely as our own |

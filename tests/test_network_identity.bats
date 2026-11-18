@@ -50,3 +50,40 @@ PY
     [ "$status" -eq 0 ]
     [[ "$output" == *"all cases agree"* ]]
 }
+
+@test "netid_run's group key falls back to the DHCP router exactly as the id does" {
+    # A routeless run (no default route, so no GATEWAY) with a DHCP router
+    # is filed as `lan:gw=<router>`; history.py groups that id as
+    # `gw:<router>`. netid_run used to leave NETWORK_GROUP empty here, so a
+    # live monitor sample carried group_id null and could not join the
+    # stored run it describes.
+    run bash -c '
+        REPO_ROOT="$1"
+        . "$REPO_ROOT/lib/netid.sh"
+        IS_WIFI=0 WIFI_SSID="" GW_MAC="" GATEWAY="" LINK_DHCP_ROUTER="192.168.1.1"
+        NETWORK_ID="" NETWORK_LABEL="" NETWORK_GROUP=""
+        netid_run >/dev/null 2>&1
+        printf "%s|%s" "$NETWORK_ID" "$NETWORK_GROUP"
+    ' _ "$REPO_ROOT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lan:gw=192.168.1.1|gw:192.168.1.1" ] || { echo "got '$output'"; return 1; }
+    run python3 -I - "$REPO_ROOT/helpers" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import history
+print(history.group_key({"network": {"id": "lan:gw=192.168.1.1"}})[0])
+PY
+    [ "$output" = "gw:192.168.1.1" ] || { echo "history.py says '$output'"; return 1; }
+}
+
+@test "a real gateway still outranks the DHCP router in the group key" {
+    run bash -c '
+        REPO_ROOT="$1"
+        . "$REPO_ROOT/lib/netid.sh"
+        IS_WIFI=0 WIFI_SSID="" GW_MAC="" GATEWAY="10.0.0.1" LINK_DHCP_ROUTER="192.168.1.1"
+        NETWORK_ID="" NETWORK_LABEL="" NETWORK_GROUP=""
+        netid_run >/dev/null 2>&1
+        printf "%s" "$NETWORK_GROUP"
+    ' _ "$REPO_ROOT"
+    [ "$output" = "gw:10.0.0.1" ] || { echo "got '$output'"; return 1; }
+}

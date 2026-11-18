@@ -132,7 +132,12 @@ hdr() {
       progress_clear
       ;;
     *)
-      progress_spin_start "$*"
+      # Not under --expert: there every section body is printed to stdout as
+      # it finishes, on the same terminal, so a spinner repainting its caption
+      # on stderr every 100 ms lands in front of each printed line, and the
+      # last one (the Timing section) was never stopped before the report
+      # footer. The scrolling output is already the activity indicator.
+      [ "${EXPERT:-0}" -eq 1 ] || progress_spin_start "$*"
       ;;
   esac
   say ""

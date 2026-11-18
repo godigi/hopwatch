@@ -61,12 +61,23 @@ def _json_env(name: str, default=None):
     a second parser for a structure that already has one. Malformed input
     degrades to `default` rather than aborting the whole document: a
     truncated list is worth losing, a whole report is not.
+
+    Python's parser accepts the bare tokens NaN, Infinity and -Infinity,
+    and its serialiser writes them back out — which is not JSON, and which
+    jq and Foundation both refuse. _finite_float exists to keep that out of
+    every number this module builds itself; this is the one path that
+    carries someone else's numbers, so it refuses them at the door and
+    degrades like any other malformed input.
     """
     raw = _env(name)
     if raw is None:
         return default
+
+    def _refuse(token: str):
+        raise ValueError(f"{token} is not JSON")
+
     try:
-        return json.loads(raw)
+        return json.loads(raw, parse_constant=_refuse)
     except (ValueError, TypeError):
         return default
 

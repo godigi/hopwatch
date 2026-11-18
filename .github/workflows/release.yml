@@ -55,6 +55,7 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       # The tag's own tree: the app and CLI are built from exactly the commit
       # being released. Checking out the default branch instead would build

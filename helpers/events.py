@@ -334,6 +334,23 @@ def in_window(rows, hours, now=None):
     return [r for r in rows if r["_at"] and r["_at"] >= start], start, now
 
 
+def _left_behind(episode_network, row_network):
+    """True when a line on `row_network` shows an episode keyed on
+    `episode_network` is over: both are real identities of the same kind and
+    they differ.
+
+    The same kind only. A MAC id and a bare SSID or gateway address can be
+    one network spelled two ways (the identity folding above exists for
+    that), and closing on a spelling change would cut one fault in two. Two
+    different MACs, or two different SSIDs, are two networks.
+    """
+    a = canonical_network_id(episode_network)
+    b = canonical_network_id(row_network)
+    if not a or not b or a == b:
+        return False
+    return a.split(":", 1)[0] == b.split(":", 1)[0]
+
+
 def episodes(rows, bridge_s):
     """Pair rule-fired with the next rule-cleared for the same rule.
 
@@ -345,6 +362,11 @@ def episodes(rows, bridge_s):
     still be the episode it interrupted; see the module docstring.
     """
     open_eps: dict[tuple, dict] = {}
+    # Keys whose episode was closed because the monitor moved to another
+    # network and which have not fired since. A clear that turns up for one
+    # of them is the end of an episode already filed, not an end with no
+    # beginning, so it must not be reported a second time.
+    moved: set[tuple] = set()
     # Episodes closed by a restart that might yet turn out to be continued.
     # Each holds the episode, when the restart that closed it happened
     # (`blind_from`, where the unobserved stretch starts) and the latest
@@ -388,8 +410,26 @@ def episodes(rows, bridge_s):
         kind, at = row.get("kind"), row["_at"]
         network = row.get("network")
 
+        # A line from another network is proof the monitor is no longer on
+        # the one an episode belongs to. The monitor now journals an explicit
+        # rule-cleared for what it leaves behind, and that closes the episode
+        # first; this is the same fact read from the other side, for journals
+        # written before that, and for a clear that never made it to disk.
+        # Without it the episode ran to the end of the file, and a fault that
+        # ended when the Mac moved on was reported as lasting until whatever
+        # the recorder last wrote, days later.
+        #
+        # Not on a restart line: those close everything they find open, as
+        # a restart, and may yet be bridged back (see below).
+        if network and at and kind != "monitor-started":
+            for key in [k for k in open_eps if _left_behind(k[0], network)]:
+                open_eps[key]["ongoing"] = False
+                close(key, at, "network-changed")
+                moved.add(key)
+
         if kind == "rule-fired" and row.get("to"):
             key = (network, row["to"])
+            moved.discard(key)
             if key in open_eps:
                 # Fired twice with no clear between: the recorder restarted
                 # and re-observed the same fault. Keep the earlier start,
@@ -441,6 +481,8 @@ def episodes(rows, bridge_s):
             if key in open_eps:
                 open_eps[key]["ongoing"] = False
                 close(key, at, "cleared")
+            elif key in moved:
+                moved.discard(key)
             else:
                 # An orphan clear: the fire is not in what was read. Usually
                 # because the window cut it off — `--events=24` on a fault

@@ -551,6 +551,14 @@ THRESH_MON_GAP_MIN_S=60
 # regardless of this number. It bounds absence of evidence, never evidence.
 THRESH_MON_IDENTITY_HOLD_S=900
 
+# THRESH_MON_PUBLIC_RETRY_S: how soon the slow tier asks again after the
+# public-identity lookup (IP, ISP, country) came back empty, instead of
+# waiting out the whole MONITOR_SLOW_INTERVAL. The lookup is the monitor's
+# only external call, so the retry is short but not tight; it is also capped
+# at MONITOR_SLOW_INTERVAL, so a short test or custom interval is never
+# stretched by it.
+THRESH_MON_PUBLIC_RETRY_S=30
+
 # ── Bufferbloat grading ──────────────────────────────────────────────────
 # Waveform/DSLReports cutoffs for added latency under load, in ms:
 # A < 5, B < 30, C < 60, D < 200, F ≥ 200. B1/B2 warn at grade C and go
@@ -579,6 +587,19 @@ THRESH_BUFFERBLOAT_DL_MAX_TIME_SEC=11
 # A middle hop above this with a clean destination is classified as ICMP
 # rate limiting; the same boundary must be used by both branches.
 THRESH_MTR_HOP_LOSS_PCT=2
+
+# MTR run shape. mtr refuses a probe interval under 1 s unless it runs as
+# root ("non-root users cannot request an interval < 1.0 sec"), so there are
+# two shapes: the fast one (60 probes, 0.2 s apart, 12 s of traffic) that
+# root gets, and the slowest interval mtr allows everyone else, with fewer
+# probes so the run still ends inside its own timeout. One lost probe in
+# twenty reads as 5% on the slow shape.
+THRESH_MTR_COUNT=60
+THRESH_MTR_INTERVAL_S=0.2
+THRESH_MTR_TIMEOUT_S=20
+THRESH_MTR_UNPRIV_COUNT=20
+THRESH_MTR_UNPRIV_INTERVAL_S=1
+THRESH_MTR_UNPRIV_TIMEOUT_S=30
 
 # ── Default-route re-check [N1, N1c] ─────────────────────────────────────
 # How long to wait before re-reading the routing table when the first read

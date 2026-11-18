@@ -648,8 +648,8 @@ enum VisualAuditMode {
             let isDeg: Bool = { if case .degraded = s { return true }; return false }()
             return [
                 ("stage resolves to .degraded even when CLI severity==ok", isDeg),
-                ("pill is Problem (red) matching degraded critical experience", p.text == "Problem" && p.tone == .red),
-                ("menu-bar dot is .critical matching red Problem pill", coordinator.currentHealth == .critical),
+                ("pill is Degraded (amber) matching degraded experience, never green Watching", p.text == "Degraded" && p.tone == .amber),
+                ("menu-bar dot is .warning matching amber Degraded pill", coordinator.currentHealth == .warning),
                 ("alert scan cooldown still active", coordinator.isAlertTriggeredScanInCooldown()),
             ]
         }

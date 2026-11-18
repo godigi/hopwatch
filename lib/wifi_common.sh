@@ -67,9 +67,12 @@ wifi_primary_device() {
 wifi_parse_ipconfig_summary() {
   printf '%s\n' "$1" | awk -F': ' '
     function clean(v) { gsub(/\037/, "", v); return v }
-    /^[[:space:]]*SSID[[:space:]]*:/     {ssid=clean($2)}
-    /^[[:space:]]*BSSID[[:space:]]*:/    {bssid=clean($2)}
-    /^[[:space:]]*Security[[:space:]]*:/ {sec=clean($2)}
+    # Everything after the first colon of the label, not just up to the next ": ".
+    # Splitting on colon-space cut an SSID such as "Cafe: Free WiFi" to "Cafe".
+    function val(  s) { s=$0; sub(/^[^:]*:[ ]?/, "", s); return s }
+    /^[[:space:]]*SSID[[:space:]]*:/     {ssid=clean(val())}
+    /^[[:space:]]*BSSID[[:space:]]*:/    {bssid=clean(val())}
+    /^[[:space:]]*Security[[:space:]]*:/ {sec=clean(val())}
     END{printf "%s\037%s\037%s\n", ssid, bssid, sec}'
 }
 
@@ -113,18 +116,21 @@ wifi_resolve_ssid() {
 wifi_parse_wdutil() {
   printf '%s\n' "$1" | awk -F': ' '
     function clean(v) { gsub(/\037/, "", v); return v }
+    # Everything after the first colon of the label, not just up to the next ": ".
+    # Splitting on colon-space cut an SSID such as "Cafe: Free WiFi" to "Cafe".
+    function val(  s) { s=$0; sub(/^[^:]*:[ ]?/, "", s); return s }
     /^[[:space:]]*SSID[[:space:]]*:/ {
-      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); ssid=v }
+      v=clean(val()); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); ssid=v }
     /^[[:space:]]*BSSID[[:space:]]*:/ {
-      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); bssid=v }
+      v=clean(val()); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); bssid=v }
     /^[[:space:]]*RSSI[[:space:]]*:/ {
-      v=clean($2); gsub(/[[:space:]]*dBm/,"",v); rssi=v }
+      v=clean(val()); gsub(/[[:space:]]*dBm/,"",v); rssi=v }
     /^[[:space:]]*Noise[[:space:]]*:/ {
-      v=clean($2); gsub(/[[:space:]]*dBm/,"",v); noise=v }
-    /^[[:space:]]*Channel[[:space:]]*:/ {chan=clean($2)}
+      v=clean(val()); gsub(/[[:space:]]*dBm/,"",v); noise=v }
+    /^[[:space:]]*Channel[[:space:]]*:/ {chan=clean(val())}
     /Tx Rate/ {
-      v=clean($2); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
-    /PHY Mode/{phy=clean($2)}
+      v=clean(val()); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/[[:space:]]*(Mbps|Mb\/s)/,"",v); sub(/\.[0-9]+$/,"",v); tx=v }
+    /PHY Mode/{phy=clean(val())}
     END{printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n",
         rssi, noise, chan, tx, phy, ssid, bssid}'
 }

@@ -503,7 +503,7 @@ would say the same thing twice.
 - **Required:** bash 5 (`brew install bash`), and macOS built-ins
   (`ipconfig`, `networksetup`, `route`, `scutil`, `dig`, `traceroute`,
   `ping`, `nc`, `arp`, `system_profiler`, `sntp`, `curl`, `log`).
-- **Optional (Homebrew):** `jq` (for Tailscale VPN detection and raw JSON formatting — `--json`, `--history`, `--monitor` and
+- **Optional (Homebrew):** `jq` (for Tailscale VPN detection, sudo-only `mtr` per-hop parsing, and raw JSON formatting — `--json`, `--history`, `--monitor`, `--watch`, and
   the speed test are all python3-based and run without it), `mtr`
   (continuous per-hop loss), `gping` (live monitoring on exit), `speedtest`
   (Ookla) or `speedtest-cli`.
@@ -579,7 +579,7 @@ expert without asking anyone to declare which they are:
 |---|---|
 | Menu bar | health dot, country flag, optionally the public IP |
 | Dropdown | a one-card stage (healthy / alerted / testing / paused) with the "Check My Connection" button pinned under it, a fixed instrument grid (internet ping, internet loss, download, upload, router, Wi-Fi, VPN, location), a live heartbeat strip, the last 24 hours of changes, and a footer (Open Dashboard, Pause/Resume Monitoring, Settings, Quit) |
-| Dashboard | **Status** (report card + diagnosis prose, and the live phase list while a check runs) · **Live** (gateway RTT, internet RTT and router loss over the last hour) · **Activity** (every CLI-reported change and fired alert, newest first) · **History** (charts over every run) · **Networks** (per-network stats, rename, merge, and every stored check) |
+| Dashboard | **Overview** (status card, suitability checks, diagnosis prose, and live phase list while a check runs) · **Live monitoring** (gateway RTT, internet RTT, and router loss over the last hour) · **Activity** (every CLI-reported change and fired alert, newest first) · **Trends** (charts over every run) · **Networks** (per-network stats, rename, merge, and every stored check) · **Settings** |
 | Expert | raw measurements, rule IDs, hop tables, sparklines, raw JSON |
 
 The expert layer is a disclosure whose open/closed state persists — never
@@ -691,7 +691,7 @@ bats tests/
 ```
 
 The suite sandboxes `$HOME` (`tests/setup_suite.bash`), so running it never
-touches your real `~/net-diag` history, from `bats tests/` or from a single
+touches your real `~/hopwatch` history, from `bats tests/` or from a single
 file.
 
 ## License

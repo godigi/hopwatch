@@ -15,6 +15,7 @@ on:
 jobs:
   shellcheck:
     runs-on: self-hosted
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Run shellcheck

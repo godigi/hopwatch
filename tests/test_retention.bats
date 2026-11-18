@@ -143,3 +143,27 @@ seed_history() {
   run grep -n 'baseline.jsonl' "$REPO/lib/output.sh"
   [[ "$output" == *'$json_tmp'* ]] || [[ "$output" == *'json_tmp'* ]] || return 1
 }
+
+# ── prune_logs spares the launchd agents' logs ───────────────────────────
+
+@test "prune_logs trims per-run logs to the cap and leaves watcher and recorder logs alone" {
+  local dir="$TMP/logs" i
+  mkdir -p "$dir"
+  LOG_DIR="$dir"
+  # The agents' logs are the oldest files here, which is what used to doom them.
+  : >"$dir/recorder.stderr.log";  touch -t 202001010000 "$dir/recorder.stderr.log"
+  : >"$dir/watcher.stderr.log";   touch -t 202001010000 "$dir/watcher.stderr.log"
+  : >"$dir/watcher.stdout.log";   touch -t 202001010000 "$dir/watcher.stdout.log"
+  for i in 1 2 3 4 5 6; do
+    : >"$dir/2026-11-0${i}-120000.log"
+    touch -t "20261101120${i}" "$dir/2026-11-0${i}-120000.log"
+  done
+  prune_logs 3
+  [ -e "$dir/recorder.stderr.log" ]
+  [ -e "$dir/watcher.stderr.log" ]
+  [ -e "$dir/watcher.stdout.log" ]
+  [ "$(find "$dir" -name '2026-11-*.log' | wc -l | tr -d ' ')" -eq 3 ]
+  # The newest three survive.
+  [ -e "$dir/2026-11-06-120000.log" ]
+  [ ! -e "$dir/2026-11-01-120000.log" ]
+}

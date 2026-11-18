@@ -48,6 +48,14 @@
 #   rule US id US label US confirm US admin US recheck US if_unfixed US params
 # US is the ASCII unit separator, which no prose here contains. params is
 # "key=value" pairs joined by RS. helpers/emit_json.py reads this back.
+# wifi_primary_device lives here. The --repair entry point sources only
+# thresholds, common, globals and this file, so without this the lookup in
+# _repair_do_reconnect_wifi silently fell back to en0 on every real run and
+# power-cycled the wrong port on any Mac whose Wi-Fi is not en0 (iMac, Mac
+# mini, Studio, anything with built-in Ethernet).
+# shellcheck source=lib/wifi_common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/wifi_common.sh"
+
 REPAIR_US=$'\x1f'
 REPAIR_RS=$'\x1e'
 

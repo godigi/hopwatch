@@ -363,26 +363,33 @@ struct LiveView: View {
         return String(format: "%.0f ms", ms)
     }
 
+    /// The CLI's own gateway findings: G2 and G1 are critical, G3 a warning.
+    /// A latency number is never graded here (the CLI has no latency-only
+    /// rule), so a tile is amber or red only for a finding the monitor has
+    /// confirmed, or for no reply at all.
+    private var gatewayRuleTint: Color {
+        let rules = Set(activeSample?.status.rules ?? [])
+        if !rules.isDisjoint(with: ["G1", "G2"]) { return Theme.ColorToken.red }
+        if rules.contains("G3") { return Theme.ColorToken.amber }
+        return Theme.ColorToken.green
+    }
+
     private var routerTint: Color {
         if linkDown || routerIsFiltered { return .secondary }
-        guard let ms = routerMs else {
+        guard routerMs != nil else {
             return samples.isEmpty ? .secondary : Theme.ColorToken.red
         }
-        if ms < 25 { return Theme.ColorToken.green }
-        if ms < 60 { return Theme.ColorToken.amber }
-        return Theme.ColorToken.red
+        return gatewayRuleTint
     }
 
     private var routerDetail: String {
         if linkDown { return NoLinkCopy.nodeDetail }
         if routerIsFiltered { return "ICMP blocked by router" }
-        guard let ms = routerMs else {
+        guard routerMs != nil else {
             if samples.isEmpty { return "Measuring…" }
             return "Unresponsive to ping"
         }
-        if ms < 25 { return "Normal local link" }
-        if ms < 60 { return "Moderate latency" }
-        return "High router ping"
+        return "Router responding"
     }
 
     private var internetIsFiltered: Bool {
@@ -417,26 +424,27 @@ struct LiveView: View {
 
     private var internetTint: Color {
         if linkDown { return .secondary }
-        guard let ms = internetMsValue else {
+        guard internetMsValue != nil else {
             return samples.isEmpty ? .secondary : Theme.ColorToken.red
         }
-        if ms < 40 { return Theme.ColorToken.green }
-        if ms < 100 { return Theme.ColorToken.amber }
-        return Theme.ColorToken.red
+        // Not graded by latency (see `gatewayRuleTint`): only the monitor's
+        // confirmed internet findings colour it.
+        let rules = Set(activeSample?.status.rules ?? [])
+        if !rules.isDisjoint(with: ["P1", "P2", "L1"]) { return Theme.ColorToken.red }
+        if rules.contains("L2") { return Theme.ColorToken.amber }
+        return Theme.ColorToken.green
     }
 
     private var internetDetail: String {
         if linkDown { return NoLinkCopy.nodeDetail }
-        guard let ms = internetMsValue else {
+        guard internetMsValue != nil else {
             if samples.isEmpty { return "Measuring…" }
             return "No ping response"
         }
         if isUsingTCPFallback {
             return "TCP connect time (ICMP blocked)"
         }
-        if ms < 40 { return "Fast connection" }
-        if ms < 100 { return "Acceptable latency" }
-        return "Elevated ping"
+        return "Internet responding"
     }
 
     private var currentJitter: Double? {
@@ -467,9 +475,9 @@ struct LiveView: View {
     private var lossTint: Color {
         if linkDown { return .secondary }
         guard let l = currentLossPct else { return .secondary }
-        if l == 0 { return Theme.ColorToken.green }
-        if l <= 2.0 { return Theme.ColorToken.amber }
-        return Theme.ColorToken.red
+        if l >= SuitabilityEngine.Cutoff.lossCritPct { return Theme.ColorToken.red }
+        if l >= SuitabilityEngine.Cutoff.lossWarnPct { return Theme.ColorToken.amber }
+        return Theme.ColorToken.green
     }
 
     private var lossDetail: String {
@@ -484,9 +492,9 @@ struct LiveView: View {
         if EffectiveLoss.isRecovering(windowLoss: l, lastProbeLoss: lastProbe) {
             return "0% now · \(LossFormatter.formatPct(l)) avg"
         }
-        if l < 1.0 { return "\(LossFormatter.formatPct(l)) loss" }
-        if l <= 2.0 { return "Minor loss" }
-        return "Frequent drops"
+        // The measured figure, not a verdict word: whether it is a problem is
+        // the CLI's call (L2 / L1 / G3), and the tile colour follows those cutoffs.
+        return "\(LossFormatter.formatPct(l)) loss"
     }
 
     /// The cadence the stream reports about itself, plus the tier it is on.

@@ -143,24 +143,36 @@ import Testing
     }
 
     @MainActor
-    @Test func activeResolutionDismissedWhenLossReturns() {
+    @Test func activeResolutionDismissedWhenSeverityDegrades() {
         let coord = HopwatchCoordinator()
         coord.start()
         coord.recordResolution(
             title: "Network Stabilized",
-            message: "Packet loss resolved (0% loss, 80 ms ping)."
+            message: "Packet loss cleared (80 ms ping)."
         )
         #expect(coord.activeResolution != nil)
 
-        // Incoming sample with 3% packet loss must invalidate resolution immediately
-        var lossSample = MonitorSample()
-        lossSample.link.up = true
-        lossSample.status.measurement = "measured"
-        lossSample.status.severity = "ok"
-        lossSample.gateway.lossPct = 3.0
-        lossSample.internet.lossPct = 3.0
+        // Raw 3% loss while the CLI still says severity == "ok" must not
+        // dismiss the resolution over a Swift-only threshold.
+        var okSample = MonitorSample()
+        okSample.link.up = true
+        okSample.status.measurement = "measured"
+        okSample.status.severity = "ok"
+        okSample.gateway.lossPct = 3.0
+        okSample.internet.lossPct = 3.0
 
-        coord.monitor.onSample?(lossSample)
+        coord.monitor.onSample?(okSample)
+        #expect(coord.activeResolution != nil)
+
+        // When the CLI reports degraded severity (e.g. L2/G3), dismiss immediately.
+        var warnSample = MonitorSample()
+        warnSample.link.up = true
+        warnSample.status.measurement = "measured"
+        warnSample.status.severity = "warn"
+        warnSample.status.rules = ["L2"]
+        warnSample.internet.lossPct = 12.0
+
+        coord.monitor.onSample?(warnSample)
         #expect(coord.activeResolution == nil)
     }
 
@@ -208,20 +220,32 @@ import Testing
         #expect(HealthResolver.resolve(fallbackInputs) == .warning)
     }
 
-    @Test func monitorSampleHealthDetectsElevatedLoss() {
+    @Test func monitorSampleHealthFollowsTheCLISeverityNotRawLoss() {
         var sample = MonitorSample()
         sample.link.up = true
         sample.status.measurement = "measured"
         sample.status.severity = "ok"
 
-        // 1. Elevated internet loss triggers warning
+        // The GUI holds no thresholds: whatever the raw loss figures say,
+        // `status.severity == "ok"` is healthy (the CLI already applied
+        // its cutoffs and its ICMP-filtering exemptions).
         sample.gateway.lossPct = 0.0
         sample.internet.lossPct = 3.0
-        #expect(sample.health == .warning)
+        #expect(sample.health == .healthy)
 
-        // 2. Isolated router ping loss with clean internet stays healthy (harmless ICMP rate limiting)
-        sample.gateway.lossPct = 3.0
+        sample.gateway.lossPct = 25.0
         sample.internet.lossPct = 0.0
         #expect(sample.health == .healthy)
+
+        // An unmeasured figure is not a loss either.
+        sample.gateway.lossPct = nil
+        sample.internet.lossPct = nil
+        #expect(sample.health == .healthy)
+
+        // The CLI's own warn / critical verdicts are what move the dot.
+        sample.status.severity = "warn"
+        #expect(sample.health == .warning)
+        sample.status.severity = "critical"
+        #expect(sample.health == .critical)
     }
 }

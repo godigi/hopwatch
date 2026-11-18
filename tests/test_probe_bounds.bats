@@ -189,6 +189,21 @@ FAKE_EOF
   done
 }
 
+@test "ipv6_pick_global_addr: a unique-local (ULA) address is not global" {
+  # A router with no IPv6 uplink still advertises an fdxx: prefix.
+  run ipv6_pick_global_addr "$(printf '\tinet6 fe80::1%%en0 prefixlen 64 scopeid 0x4\n\tinet6 fd12:3456:789a:1:1c2d:3e4f:5a6b:7c8d prefixlen 64 autoconf secured\n')"
+  [ -z "$output" ] || { echo "ULA counted as global: $output"; return 1; }
+  run ipv6_pick_global_addr "$(printf '\tinet6 fc00::5 prefixlen 64\n')"
+  [ -z "$output" ]
+  run ipv6_pick_global_addr "$(printf '\tinet6 FD00::5 prefixlen 64\n')"
+  [ -z "$output" ]
+}
+
+@test "ipv6_pick_global_addr: a real global address is picked ahead of a ULA" {
+  run ipv6_pick_global_addr "$(printf '\tinet6 fd12:3456:789a:1::5 prefixlen 64\n\tinet6 2600:1700:abcd::7 prefixlen 64\n')"
+  [ "$output" = "2600:1700:abcd::7" ]
+}
+
 @test "ipv6_pick_global_addr: only link-local and loopback gives no address" {
   run ipv6_pick_global_addr "$(printf '\tinet6 fe80::1%%en0 prefixlen 64 scopeid 0x4\n\tinet6 ::1 prefixlen 128\n')"
   [ -z "$output" ]

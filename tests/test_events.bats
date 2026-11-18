@@ -89,10 +89,12 @@ assert eps[0]['ended_by'] == 'cleared', eps[0]
 
 @test "the same fault on two networks is two episodes" {
   # Keyed on (network, rule). Otherwise a laptop that moves has one
-  # network's recovery closing the other network's fault.
+  # network's recovery closing the other network's fault. The monitor
+  # journals a clear for the network it leaves, on that network, in the same
+  # append as the new network's first lines.
   NET=wifi:mac=aa ev rule-fired 2026-08-28T01:00:00Z 1 G3
+  NET=wifi:mac=aa ev rule-cleared 2026-08-28T01:01:00Z 2 G3
   NET=wifi:mac=bb ev rule-fired 2026-08-28T01:01:00Z 2 G3
-  NET=wifi:mac=aa ev rule-cleared 2026-08-28T01:05:00Z 3 G3
   run read_events
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c "
@@ -100,8 +102,60 @@ import json, sys
 d = json.load(sys.stdin)
 eps = {(e['network'], e['ongoing']): e for e in d['episodes']}
 assert len(d['episodes']) == 2, d['episodes']
-assert eps[('wifi:mac=aa', False)]['duration_s'] == 300
+assert eps[('wifi:mac=aa', False)]['duration_s'] == 60
+assert eps[('wifi:mac=aa', False)]['ended_by'] == 'cleared'
 assert ('wifi:mac=bb', True) in eps, list(eps)
+"
+}
+
+@test "leaving a network ends its open episode, even in a journal with no clear for it" {
+  # A journal written before the monitor filed a clear for the network it
+  # left. The fault belonged to Home; a line from another network is proof
+  # the monitor was no longer there, and the episode must end at that line
+  # rather than run to the end of the file two days later.
+  NET=wifi:mac=aa ev rule-fired 2026-10-06T08:05:00Z 5 P2
+  NET=wifi:mac=bb ev rule-fired 2026-10-06T08:10:00Z 6 G3
+  NET=wifi:mac=bb ev rule-cleared 2026-10-06T08:11:00Z 7 G3
+  NET=wifi:mac=bb ev gap 2026-10-08T08:00:00Z 8 30
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for P2 "
+assert len(eps) == 1, eps
+ep = eps[0]
+assert ep['network'] == 'wifi:mac=aa', ep
+assert ep['ended_by'] == 'network-changed', ep
+assert ep['ongoing'] is False, ep
+assert ep['duration_s'] == 300, ep
+"
+}
+
+@test "a clear for a network the episode already left is not reported a second time" {
+  # Mixed journals: the move closed the episode, and an explicit clear for
+  # the same fault then arrives. It is the end of an episode already filed,
+  # not an end with no beginning.
+  NET=wifi:mac=aa ev rule-fired 2026-10-06T08:05:00Z 5 P2
+  NET=wifi:mac=bb ev rule-fired 2026-10-06T08:10:00Z 6 G3
+  NET=wifi:mac=aa ev rule-cleared 2026-10-06T08:10:00Z 7 P2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for P2 "
+assert len(eps) == 1, eps
+assert eps[0]['duration_s'] == 300, eps[0]
+"
+}
+
+@test "a different spelling of the same network does not end its episode" {
+  # A MAC id and a bare SSID can be one network, which the identity folding
+  # exists for. Only two different identities of the same kind are a move.
+  NET=wifi:mac=aa ev rule-fired 2026-10-06T08:05:00Z 5 P2
+  NET=ssid:Home   ev gap 2026-10-06T08:06:00Z 6 5
+  NET=wifi:mac=aa ev rule-cleared 2026-10-06T08:20:00Z 7 P2
+  run read_events
+  [ "$status" -eq 0 ]
+  eps_for P2 "
+assert len(eps) == 1, eps
+assert eps[0]['ended_by'] == 'cleared', eps[0]
+assert eps[0]['duration_s'] == 900, eps[0]
 "
 }
 

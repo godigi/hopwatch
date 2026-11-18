@@ -1,7 +1,10 @@
 # shellcheck shell=bash
 # lib/mtr.sh — per-hop loss measurement. Prefers `mtr -j -c 60 -i 0.2`
-# under sudo (60 cycles for continuous-loss view); falls back to a
-# parallel 5-packet-per-hop loop when mtr/jq/sudo are unavailable.
+# (60 cycles for continuous-loss view) when mtr will accept that interval,
+# which it does only for root. Everyone else gets the slowest interval mtr
+# allows, `-i 1`, with fewer probes (THRESH_MTR_UNPRIV_*); root comes only
+# from the opt-in `sudo -n`. Falls back to a parallel 5-packet-per-hop loop
+# when mtr/jq are unavailable or neither shape works.
 #
 # Reads:  QUICK, HOPS
 # Writes: PER_HOP_LINES, MTR_FIRST_LOSSY_HOP
@@ -177,21 +180,34 @@ parse_mtr_tsv() {
 mtr_run() {
   [ "$QUICK" -eq 0 ] || { progress_skip "--quick"; return 0; }
 
+  # Probe with the very flags the real run will use. The old probe was a
+  # bare `mtr -c 1 127.0.0.1`, which succeeds for a non-root user, after
+  # which the real run's `-i 0.2` was refused outright (mtr will not go
+  # under 1 s unless it is root), so the unprivileged path never produced a
+  # report and every default run said "mtr returned no parseable report".
   local -a mtr_cmd=()
+  local mtr_count="$THRESH_MTR_COUNT" mtr_interval="$THRESH_MTR_INTERVAL_S"
+  local mtr_timeout="$THRESH_MTR_TIMEOUT_S"
   if command -v mtr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    if mtr -c 1 127.0.0.1 >/dev/null 2>&1; then
+    if mtr -c 1 -i "$THRESH_MTR_INTERVAL_S" 127.0.0.1 >/dev/null 2>&1; then
       mtr_cmd=(mtr)
+    elif mtr -c 1 -i "$THRESH_MTR_UNPRIV_INTERVAL_S" 127.0.0.1 >/dev/null 2>&1; then
+      # Works, but only at the slowest interval mtr allows a non-root user.
+      mtr_cmd=(mtr)
+      mtr_count="$THRESH_MTR_UNPRIV_COUNT"
+      mtr_interval="$THRESH_MTR_UNPRIV_INTERVAL_S"
+      mtr_timeout="$THRESH_MTR_UNPRIV_TIMEOUT_S"
     elif hopwatch_sudo_allowed; then
       # mtr's raw sockets need root on some installs. Opt-in last resort
-      # only, reached after the unprivileged probe above already failed.
+      # only, reached after the unprivileged probes above already failed.
       mtr_cmd=(sudo -n mtr)
     fi
   fi
 
   if [ "${#mtr_cmd[@]}" -gt 0 ]; then
-    hdr "Continuous loss to 1.1.1.1 (mtr -j -c 60 -i 0.2)"
+    hdr "Continuous loss to 1.1.1.1 (mtr -j -c ${mtr_count} -i ${mtr_interval})"
     local mtr_json mtr_tsv
-    mtr_json="$(with_timeout 20 "${mtr_cmd[@]}" -j -c 60 -n -i 0.2 1.1.1.1 2>/dev/null || true)"
+    mtr_json="$(with_timeout "$mtr_timeout" "${mtr_cmd[@]}" -j -c "$mtr_count" -n -i "$mtr_interval" 1.1.1.1 2>/dev/null || true)"
     printf '%s\n' "$mtr_json" >> "$LOG"
     if [ -z "$mtr_json" ] || ! printf '%s' "$mtr_json" | jq -e .report >/dev/null 2>&1; then
       warn "mtr returned no parseable report — falling back to per-hop loop."

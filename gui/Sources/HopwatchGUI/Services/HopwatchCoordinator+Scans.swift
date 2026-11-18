@@ -5,10 +5,34 @@ import os
 
 extension HopwatchCoordinator {
 
+    /// The monitor's packet-loss rules (`lib/monitor.sh`): router loss G3,
+    /// and internet loss L1 / L2.
+    private static let lossRuleIDs: Set<String> = ["G3", "L1", "L2"]
+
+    /// "Signal Restored" text when the reading moved out of the CLI signal
+    /// scale's weakest band into one the CLI tones good/ok, else `nil`.
+    /// Bands come from `signalScale` (`hopwatch --signal-scale`), so this
+    /// app states no dBm boundary and no "Excellent" of its own; with no
+    /// scale loaded there is simply no such resolution.
+    private func signalRestoredMessage(from prev: MonitorSample, to sample: MonitorSample) -> String? {
+        guard let scale = signalScale.scale, scale.bands.count >= 2,
+              let prevRssi = prev.wifi?.rssi, let currRssi = sample.wifi?.rssi,
+              let prevIndex = scale.bandIndex(forRSSI: prevRssi),
+              let currIndex = scale.bandIndex(forRSSI: currRssi),
+              prevIndex == scale.bands.count - 1, currIndex < prevIndex,
+              let label = scale.bands[currIndex].label,
+              let tone = scale.bands[currIndex].tone, tone == "good" || tone == "ok"
+        else { return nil }
+        return "Wi-Fi signal improved from \(prevRssi) dBm to \(currRssi) dBm (\(label))."
+    }
+
     func evaluateResolutions(sample: MonitorSample) {
         if activeResolution != nil {
-            let hasLoss = (sample.gateway.lossPct ?? 0) >= 3.0 || (sample.internet.lossPct ?? 0) >= 3.0
-            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty || hasLoss {
+            // The CLI's severity already says whether loss has returned
+            // (G3 / L1 / L2 are rules in `status.rules`); a figure read
+            // against a cutoff of this app's own would dismiss a resolution
+            // over a sample the CLI calls healthy.
+            if !sample.link.up || sample.status.severity != "ok" || !alerts.active.isEmpty {
                 dismissActiveResolution()
             }
         }
@@ -36,20 +60,23 @@ extension HopwatchCoordinator {
                     message: "Moved from 2.4 GHz to 5 GHz (Ch \(currCh)). Negotiated higher throughput.",
                     icon: "wifi"
                 )
-            } else if let prevRssi = prev.wifi?.rssi, prevRssi <= -75,
-                      let currRssi = sample.wifi?.rssi, currRssi >= -65 {
+            } else if let restored = signalRestoredMessage(from: prev, to: sample) {
                 recordResolution(
                     title: "Signal Restored",
-                    message: "Wi-Fi signal jumped from \(prevRssi) dBm to \(currRssi) dBm (Excellent).",
+                    message: restored,
                     icon: "wifi"
                 )
-            } else if (prev.gateway.lossPct ?? 0) >= 3.0 || (prev.internet.lossPct ?? 0) >= 3.0,
-                      (sample.gateway.lossPct ?? 0) < 1.0 && (sample.internet.lossPct ?? 0) < 1.0 {
+            } else if !Set(prev.status.rules).isDisjoint(with: Self.lossRuleIDs) {
+                // Case 4: Network Packet Loss Stabilized — the CLI had a loss
+                // rule firing on the earlier sample and has none now (this
+                // sample is severity "ok" with no active alerts, per the guard
+                // above). No percentage is asserted: the earlier "0% loss" was a
+                // claim about a figure that may not have been measured.
                 let ping = sample.internet.rttAvgMs ?? sample.gateway.rttAvgMs
                 let pingText = ping.map { "\(Int($0.rounded())) ms ping" } ?? "low latency"
                 recordResolution(
                     title: "Network Stabilized",
-                    message: "Packet loss resolved (0% loss, \(pingText)).",
+                    message: "Packet loss cleared (\(pingText)).",
                     icon: "checkmark.circle.fill"
                 )
             } else if let clearedAlert = previousActiveAlerts.values.first {
@@ -129,6 +156,9 @@ extension HopwatchCoordinator {
             cancelScan()
             clearPendingArrival()
         }
+        // A connection boundary: a gateway-IP key may now name a different
+        // network, so nothing remembered about the old one applies.
+        sessionArrivalStates.removeAll()
         if sample == nil {
             lastNetworkID = nil
         }

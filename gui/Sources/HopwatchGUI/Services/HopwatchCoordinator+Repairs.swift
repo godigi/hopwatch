@@ -145,7 +145,7 @@ extension HopwatchCoordinator {
         if liveSample?.publicInfo.captivePortal == false || monitor.latest?.publicInfo.captivePortal == false {
             return false
         }
-        let internetHealthy = (liveSample?.internet.lossPct ?? monitor.latest?.internet.lossPct ?? 100) < 50
+        let internetHealthy = (liveSample?.internet.rttAvgMs ?? monitor.latest?.internet.rttAvgMs) != nil
             || liveSample?.publicInfo.ip != nil || monitor.latest?.publicInfo.ip != nil
             || liveSample?.tcp.anyOk == true || monitor.latest?.tcp.anyOk == true
         if internetHealthy && (liveSample?.internet.rttAvgMs != nil || monitor.latest?.internet.rttAvgMs != nil || liveSample?.tcp.anyOk == true) {

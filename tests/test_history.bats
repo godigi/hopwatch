@@ -946,3 +946,105 @@ for n in d['networks']:
   [ "$status" -eq 0 ]
   [[ "$output" == *"--history"* ]] || return 1
 }
+
+# A bridge target can itself be a weak key that is bridged onward
+# (gw: -> ssid: -> mac:). Both orders of the oldest record used to fail:
+# one with a KeyError (exit 3, the whole store unreadable), the other by
+# leaving a run under a network id that appears in no networks[] row.
+bridge_chain_records() {
+  # $1 = "ssid-first" or "gw-first": which weak record is oldest.
+  local ssid='"interface":{"gateway":"192.168.1.1"},"public":{"isp":"ISP-X"},"wifi":{"ssid":"Casa"}'
+  local ssid2='"interface":{"gateway":"192.168.0.1"},"public":{"isp":"ISP-X"},"wifi":{"ssid":"Casa"}'
+  local gw='"interface":{"gateway":"192.168.0.1"},"public":{"isp":"ISP-X"}'
+  local mac='"interface":{"gateway":"192.168.1.1","gateway_mac":"aa:bb:cc:dd:ee:01"},"public":{"isp":"ISP-X"},"network":{"id":"wifi:mac=aa:bb:cc:dd:ee:01"}'
+  if [ "$1" = "ssid-first" ]; then
+    rec "$LIVE" 2026-01-01T00:00:00Z "$ssid"
+    rec "$LIVE" 2026-01-02T00:00:00Z "$ssid2"
+    rec "$LIVE" 2026-01-03T00:00:00Z "$gw"
+  else
+    rec "$LIVE" 2026-01-01T00:00:00Z "$gw"
+    rec "$LIVE" 2026-01-02T00:00:00Z "$ssid"
+    rec "$LIVE" 2026-01-03T00:00:00Z "$ssid2"
+  fi
+  rec "$LIVE" 2026-01-04T00:00:00Z "$mac"
+}
+
+@test "bridging: a gw: -> ssid: -> mac: chain resolves, oldest record an ssid" {
+  bridge_chain_records ssid-first
+  run hist
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+nets = {n['id']: n for n in d['networks']}
+assert list(nets) == ['mac:aa:bb:cc:dd:ee:01'], list(nets)
+assert nets['mac:aa:bb:cc:dd:ee:01']['run_count'] == 4
+assert set(nets['mac:aa:bb:cc:dd:ee:01']['bridged_from']) == {'ssid:Casa', 'gw:192.168.0.1'}
+"
+}
+
+@test "bridging: a gw: -> ssid: -> mac: chain leaves no run on an unlisted network" {
+  bridge_chain_records gw-first
+  run hist
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ids = {n['id'] for n in d['networks']}
+orphans = [r['network_id'] for r in d['runs'] if r['network_id'] not in ids]
+assert not orphans, orphans
+assert d['networks'][0]['run_count'] == 4
+"
+}
+
+@test "bridging: --show works across a bridge chain" {
+  bridge_chain_records ssid-first
+  run hist --show=2026-01-03T00:00:00Z
+  [ "$status" -eq 0 ]
+}
+
+# --show's comparison judges a VPN run's MTU as its policy band and NTP drift
+# by magnitude, but docs/JSON-SCHEMA.md says value, median, p10, p90 and
+# percentile are computed on the raw reading. The substituted numbers used to
+# leak into the report: a probed 1,500 read "1,400 bytes" and a -120 s drift
+# read "120 s".
+@test "--show reports a tunnel run's measured MTU, not the policy band" {
+  accuracy_records 10 '{"vpn":{"active":true},"mtu":{"effective":1500}}'
+  local newest
+  newest="$(hist | get runs.-1.id | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+  run hget comparison.metrics.mtu_effective.value --show "$newest"
+  [ "$output" = '1500' ]
+  run hget comparison.metrics.mtu_effective.median --show "$newest"
+  [ "$output" = '1500.0' ] || [ "$output" = '1500' ]
+  run hget comparison.metrics.mtu_effective.p10 --show "$newest"
+  [ "$output" = '1500.0' ] || [ "$output" = '1500' ]
+  run hget comparison.metrics.mtu_effective.summary --show "$newest"
+  [[ "$output" == *"1,500"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"1,400"* ]] || { echo "$output"; return 1; }
+}
+
+@test "--show keeps the sign of a clock drift while still judging its magnitude" {
+  accuracy_records 10 '{"ntp":{"drift_seconds":0.5}}'
+  accuracy_records 1 '{"ntp":{"drift_seconds":-120}}'
+  local newest
+  newest="$(hist | get runs.-1.id | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+  run hget comparison.metrics.ntp_drift_s.value --show "$newest"
+  [ "$output" = '-120' ]
+  run hget comparison.metrics.ntp_drift_s.verdict --show "$newest"
+  [ "$output" = '"worst"' ]
+  run hget comparison.metrics.ntp_drift_s.summary --show "$newest"
+  [[ "$output" == *"-120"* ]] || { echo "$output"; return 1; }
+  run hget comparison.metrics.ntp_drift_s.median --show "$newest"
+  [ "$output" = '0.5' ]
+}
+
+@test "--show: a tunnel MTU below the band still reports its real size and judges worse" {
+  accuracy_records 10 '{"vpn":{"active":true},"mtu":{"effective":1500}}'
+  accuracy_records 1 '{"vpn":{"active":true},"mtu":{"effective":1279}}'
+  local newest
+  newest="$(hist | get runs.-1.id | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+  run hget comparison.metrics.mtu_effective.value --show "$newest"
+  [ "$output" = '1279' ]
+  run hget comparison.metrics.mtu_effective.verdict --show "$newest"
+  [ "$output" = '"worst"' ]
+}

@@ -300,7 +300,22 @@ def main() -> int:
             f'version: "{next_version}"',
         )
 
-    # 5. CHANGELOG.md
+    # 5. CITATION.cff
+    citation_cff = os.path.join(repo_root, "CITATION.cff")
+    if os.path.exists(citation_cff):
+        today_iso = datetime.date.today().isoformat()
+        update_file(
+            citation_cff,
+            r'^version:\s*[^\n]+',
+            f'version: {next_version}',
+        )
+        update_file(
+            citation_cff,
+            r'^date-released:\s*[^\n]+',
+            f'date-released: {today_iso}',
+        )
+
+    # 6. CHANGELOG.md
     update_changelog(repo_root, next_version, current_version, commits)
 
     if not args.no_commit:
@@ -315,6 +330,8 @@ def main() -> int:
             files_to_add.append("examples/sample-output.json")
         if os.path.exists(verify_mode):
             files_to_add.append(os.path.relpath(verify_mode, repo_root))
+        if os.path.exists(citation_cff):
+            files_to_add.append("CITATION.cff")
 
         run_cmd(["git", "add"] + files_to_add)
         commit_msg = f"chore(release): bump version to {next_version}"

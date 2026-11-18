@@ -204,9 +204,12 @@ linkstate_media_has_full_duplex() {
 # single line carrying both.
 linkstate_service_for_device() {
   printf '%s\n' "$1" | awk -v want="$2" '
-    /^\([0-9]+\)/ {
+    # A disabled service is listed as "(*) Name", not "(5) Name". Both are
+    # name lines: leaving the starred one out kept the name of the service
+    # before it, and the detail line under it was then attributed to that.
+    /^\(([0-9]+|\*)\)/ {
       name = $0
-      sub(/^\([0-9]+\)[[:space:]]*/, "", name)
+      sub(/^\(([0-9]+|\*)\)[[:space:]]*/, "", name)
       next
     }
     match($0, /Device: [^)]+/) {

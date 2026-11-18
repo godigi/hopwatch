@@ -123,6 +123,12 @@ netid_run() {
     NETWORK_GROUP="ssid:$ssid"
   elif [ -n "$GATEWAY" ]; then
     NETWORK_GROUP="gw:$GATEWAY"
+  elif [ -n "${LINK_DHCP_ROUTER:-}" ]; then
+    # The same last-resort fallback `parts` took above. Without it a routeless
+    # run was filed as `lan:gw=<router>` while this key stayed empty, so the
+    # monitor's sample carried group_id null and could not join the stored
+    # run, which history.py groups as `gw:<router>`.
+    NETWORK_GROUP="gw:$LINK_DHCP_ROUTER"
   else
     NETWORK_GROUP=""
   fi

@@ -569,13 +569,16 @@ private struct LinegraphZonedCanvas: View {
 
     @Environment(\.colorScheme) private var colorScheme
     private static let targetSlots = 26
+    private static let labelGutter: CGFloat = 32
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
             let totalSlots = Self.targetSlots
-            let beatWidth = w / CGFloat(totalSlots)
+            let plotX = min(Self.labelGutter, w * 0.25)
+            let plotWidth = max(1, w - plotX)
+            let beatWidth = plotWidth / CGFloat(totalSlots)
 
             // Zone boundaries in points
             let y150 = h * 0.33 // Red top / White middle boundary (>150ms)
@@ -595,12 +598,12 @@ private struct LinegraphZonedCanvas: View {
                 zoneBackgroundBands(w: w, h: h, y150: y150, y70: y70)
 
                 // 2. Zone Grid Divider Lines & Faint Threshold Labels
-                zoneDividersAndLabels(w: w, h: h, y150: y150, y70: y70)
+                zoneDividersAndLabels(w: w, h: h, plotX: plotX, y150: y150, y70: y70)
 
                 // 3. Red Drop Highlights for MISSes
                 ForEach(0..<paddedBeats.count, id: \.self) { idx in
                     if let beat = paddedBeats[idx], beat.isMiss {
-                        let x = CGFloat(idx) * beatWidth
+                        let x = plotX + CGFloat(idx) * beatWidth
                         Rectangle()
                             .fill(Color.red.opacity(0.16))
                             .frame(width: beatWidth, height: h)
@@ -616,7 +619,7 @@ private struct LinegraphZonedCanvas: View {
                             inSegment = false
                             continue
                         }
-                        let x = CGFloat(idx) * beatWidth + beatWidth / 2
+                        let x = plotX + CGFloat(idx) * beatWidth + beatWidth / 2
                         let y = yForLatency(lat, height: h, y150: y150, y70: y70)
 
                         if !inSegment {
@@ -634,7 +637,7 @@ private struct LinegraphZonedCanvas: View {
 
                 // 5. Individual Ping Points & MISS Markers
                 ForEach(0..<paddedBeats.count, id: \.self) { idx in
-                    let x = CGFloat(idx) * beatWidth + beatWidth / 2
+                    let x = plotX + CGFloat(idx) * beatWidth + beatWidth / 2
                     let isLatest = (idx == paddedBeats.count - 1)
 
                     if let beat = paddedBeats[idx] {
@@ -691,9 +694,9 @@ private struct LinegraphZonedCanvas: View {
                 }
 
                 // 6. Interactive Hover Tooltip & Hairline Guide
-                if let hovered = hoveredBeat, let loc = hoverLocation {
-                    let hoveredIdx = Int(loc.x / beatWidth)
-                    let x = CGFloat(hoveredIdx) * beatWidth + beatWidth / 2
+                if let hovered = hoveredBeat, let loc = hoverLocation,
+                   let hoveredIdx = slotIndex(forX: loc.x, plotX: plotX, beatWidth: beatWidth, count: paddedBeats.count) {
+                    let x = plotX + CGFloat(hoveredIdx) * beatWidth + beatWidth / 2
 
                     // Vertical Hairline Snapping to Point
                     Rectangle()
@@ -710,8 +713,7 @@ private struct LinegraphZonedCanvas: View {
                 switch phase {
                 case .active(let location):
                     hoverLocation = location
-                    let idx = Int(location.x / beatWidth)
-                    if idx >= 0 && idx < paddedBeats.count {
+                    if let idx = slotIndex(forX: location.x, plotX: plotX, beatWidth: beatWidth, count: paddedBeats.count) {
                         hoveredBeat = paddedBeats[idx]
                     } else {
                         hoveredBeat = nil
@@ -723,16 +725,20 @@ private struct LinegraphZonedCanvas: View {
             }
             .onChange(of: beatTick) { _, _ in
                 triggerBeaconPulse()
-                if let location = hoverLocation {
-                    let idx = Int(location.x / beatWidth)
-                    if idx >= 0 && idx < paddedBeats.count {
-                        hoveredBeat = paddedBeats[idx]
-                    } else {
-                        hoveredBeat = nil
-                    }
+                if let location = hoverLocation,
+                   let idx = slotIndex(forX: location.x, plotX: plotX, beatWidth: beatWidth, count: paddedBeats.count) {
+                    hoveredBeat = paddedBeats[idx]
+                } else if hoverLocation != nil {
+                    hoveredBeat = nil
                 }
             }
         }
+    }
+
+    private func slotIndex(forX x: CGFloat, plotX: CGFloat, beatWidth: CGFloat, count: Int) -> Int? {
+        guard x >= plotX, beatWidth > 0 else { return nil }
+        let idx = Int((x - plotX) / beatWidth)
+        return (idx >= 0 && idx < count) ? idx : nil
     }
 
     private func triggerBeaconPulse() {
@@ -777,7 +783,7 @@ private struct LinegraphZonedCanvas: View {
         }
     }
 
-    private func zoneDividersAndLabels(w: CGFloat, h: CGFloat, y150: CGFloat, y70: CGFloat) -> some View {
+    private func zoneDividersAndLabels(w: CGFloat, h: CGFloat, plotX: CGFloat, y150: CGFloat, y70: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             // 150ms dashed separator line
             Path { p in
@@ -793,16 +799,19 @@ private struct LinegraphZonedCanvas: View {
             }
             .stroke(Color.green.opacity(0.30), style: StrokeStyle(lineWidth: 0.5, dash: [4, 4]))
 
-            // Subtle zone watermarks on left
+            // Subtle zone watermarks in the reserved left gutter
+            let gutterLabelWidth = max(0, plotX - 4)
             Text("150ms")
                 .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color.red.opacity(0.6))
-                .position(x: 16, y: y150 - 5)
+                .frame(width: gutterLabelWidth, alignment: .trailing)
+                .position(x: gutterLabelWidth / 2 + 2, y: y150 - 6)
 
             Text("70ms")
                 .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.muted.opacity(0.7))
-                .position(x: 14, y: y70 - 5)
+                .frame(width: gutterLabelWidth, alignment: .trailing)
+                .position(x: gutterLabelWidth / 2 + 2, y: y70 - 6)
         }
     }
 

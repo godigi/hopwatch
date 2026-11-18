@@ -193,7 +193,7 @@ monitor_rules_here() {
 # reach. Everything the monitor cannot measure (NT-1, DI-*, DH-1, BL-1,
 # M1, MT1, V6-1, B1/B2, WS-1, WD-1) is scan-only by design and must not be
 # claimed by the stream.
-MONITOR_VOCABULARY='^(N1|G1|G2|G3|P1|P2|D1|CONN-1|HOG-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1|W4)$'
+MONITOR_VOCABULARY='^(N1|N1c|G1|G2|G3|P1|P2|D1|CONN-1|HOG-1|SOCK-1|TCP-1|VPN-1|L1|L2|ICMP-1|W4)$'
 
 scanner_rules() {
   . "$REPO/lib/diagnosis.sh"
@@ -702,13 +702,38 @@ PY
 
 @test "parity: no default route is N1 on both" {
   # LINK_UP is deliberately left at its zero default: this is the
-  # "nothing joined" case. The joined-but-routeless case is N1c, which is
-  # scan-only — the monitor has no lib/linkstate.sh view — and so is
-  # outside MONITOR_VOCABULARY by design.
+  # "nothing joined" case. The joined-but-routeless case is N1c, checked in
+  # the next test.
   reset_state; MON_LINK_UP=0 GATEWAY=""
   local m; m="$(monitor_rules)"; reset_state; MON_LINK_UP=0 GATEWAY=""
   [ "$m" = "$(scanner_rules)" ]
   [ "$m" = "N1 " ]
+}
+
+@test "parity: joined with an address and no default route is N1c on both, not N1" {
+  # The scanner knows it is joined from lib/linkstate.sh. The monitor knows
+  # it from the address _mon_probe_offline reads off the Wi-Fi device, which
+  # it used to throw away: with no route there is no interface to ask, so the
+  # address stayed empty and the stream said N1, "nothing joined", over a
+  # Mac that was joined and holding a lease.
+  reset_state; MON_LINK_UP=0 MON_OFFLINE_REASON=no-route MON_LOCAL_IP=192.168.1.20 \
+    MON_GATEWAY="" MON_DOWN_SINCE_EPOCH=0
+  GATEWAY="" LINK_UP=1 IS_WIFI=1
+  local m; m="$(monitor_rules)"
+  [ "$m" = "N1c " ] || { echo "monitor: '$m'"; return 1; }
+  [ "$m" = "$(scanner_rules)" ]
+}
+
+@test "_mon_probe_offline keeps the address it read, so a joined but routeless Mac is N1c" {
+  networksetup() { printf 'Wi-Fi Power (en0): On\n'; }
+  ifconfig() { printf 'en0: flags=8863<UP>\n\tinet 192.168.1.20 netmask 0xffffff00\n\tstatus: active\n'; }
+  reset_state; MON_LINK_UP=0 MON_GATEWAY="" MON_LOCAL_IP="" MON_SSID="" MON_DOWN_SINCE_EPOCH=0
+  _mon_probe_offline
+  [ "$MON_OFFLINE_REASON" = "no-route" ]
+  [ "$MON_LOCAL_IP" = "192.168.1.20" ] || { echo "ip='$MON_LOCAL_IP'"; return 1; }
+  local m; m="$(monitor_rules)"
+  [[ "$m" == *"N1c"* ]] || { echo "rules: $m"; return 1; }
+  [[ " $m" != *" N1 "* ]] || { echo "rules: $m"; return 1; }
 }
 
 @test "the monitor claims no rule the scanner cannot also produce" {
@@ -3429,4 +3454,208 @@ assert s['internet']['loss_pct_alt'] == 0.0, s['internet']
 assert s['internet']['last_probe_loss_pct'] == 0.0, s['internet']
 assert s['wifi']['tx_rate'] == 36, s['wifi']
 "
+}
+
+
+# ── A refresh request is acted on, wherever in the cycle it lands ────────
+
+# Real _mon_sleep, deliberately: the bug was in what it did with the flag, so
+# a stub for it cannot see the bug. The flag is raised inside cycle 1's
+# gateway probe, as a SIGALRM or SIGUSR2 mid-cycle would raise it. Before the
+# fix _mon_sleep consumed it, cycle 2 found nothing due, and went out with no
+# probes at all.
+@test "a refresh requested mid-cycle refreshes every tier on the next pass" {
+  local probe
+  for probe in vpn internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_probe_link() { MON_LINK_UP=1 MON_NETWORK_ID=same MON_IFACE_TYPE=wifi; }
+  _mon_probe_gateway() { [ "$MON_SEQ" -ne 0 ] || MON_REFRESH_REQUESTED=1; }
+  _mon_emit() { printf '%s|%s\n' "$MON_SEQ" "$MON_REFRESHED" >> "$BATS_TEST_TMPDIR/cycles"; }
+  _mon_rules() { :; }
+  _mon_snapshot_prev() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=2 MON_REFRESH_REQUESTED=0
+  MONITOR_FAST_INTERVAL=30 MONITOR_DEGRADED_INTERVAL=30
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  local t0=$SECONDS
+  monitor_run
+  [ $((SECONDS - t0)) -lt 10 ] || { echo "slept out the cadence"; return 1; }
+  [ "$(sed -n 1p "$BATS_TEST_TMPDIR/cycles")" = "1|fast medium slow " ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/cycles")" = "2|fast medium slow " ] \
+    || { cat "$BATS_TEST_TMPDIR/cycles"; return 1; }
+}
+
+@test "a cycle that probed nothing does not advance the wedged-gateway streak" {
+  # _mon_auto_reconnect counts consecutive samples. An iteration with no
+  # probe is not a sample: counting it let the streak reach the threshold
+  # on stale readings, and the app would have power-cycled the radio.
+  local probe
+  for probe in vpn internet web dns tcp wifi_signal browser public; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_probe_link() { MON_LINK_UP=1 MON_NETWORK_ID=same MON_IFACE_TYPE=wifi; }
+  _mon_probe_gateway() { MON_GW_LOSS=100; MON_WIFI_RSSI=-50; }
+  _mon_rules() { MON_RULES="G2 "; }
+  _mon_emit() { :; }
+  _mon_snapshot_prev() { :; }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=$((THRESH_AUTORECONNECT_WEDGED_SAMPLES + 2))
+  MON_AR_WEDGED_STREAK=0 MON_AR_WEDGED_FIRED=0 MON_REFRESH_REQUESTED=0
+  MONITOR_FAST_INTERVAL=1000 MONITOR_DEGRADED_INTERVAL=1000
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  monitor_run
+  [ "$MON_AR_WEDGED_STREAK" -eq 1 ] || { echo "streak=$MON_AR_WEDGED_STREAK"; return 1; }
+  [ "$MON_AR_WEDGED_FIRED" -eq 0 ]
+  [ -z "$MON_AR_REASON" ]
+}
+
+# ── A trapped signal mid-probe is not a probe failure ────────────────────
+
+@test "_mon_wait_pid keeps waiting when a trapped signal interrupts the wait" {
+  local me=$BASHPID pid
+  trap 'MON_REFRESH_REQUESTED=1' USR2
+  sleep 1 &
+  pid=$!
+  ( sleep 0.3; kill -USR2 "$me" ) &
+  _mon_wait_pid "$pid"
+  trap - USR2
+  [ "$MON_WAIT_RC" -eq 0 ] || { echo "rc=$MON_WAIT_RC"; return 1; }
+  ! kill -0 "$pid" 2>/dev/null || { echo "probe still running"; return 1; }
+}
+
+@test "_mon_wait_pid returns the probe's own status, including one above 128" {
+  ( exit 3 ) & _mon_wait_pid "$!"
+  [ "$MON_WAIT_RC" -eq 3 ]
+  ( exit 130 ) & _mon_wait_pid "$!"
+  [ "$MON_WAIT_RC" -eq 130 ]
+}
+
+@test "a signal during the TCP probe is not a failed connection" {
+  local me=$BASHPID
+  nc() { sleep 1; return 0; }
+  trap 'MON_REFRESH_REQUESTED=1' USR2
+  MON_LINK_UP=1
+  ( sleep 0.3; kill -USR2 "$me" ) &
+  _mon_probe_tcp
+  trap - USR2
+  [ "$MON_TCP_OK" = "1" ] || { echo "ok='$MON_TCP_OK' lines='$MON_TCP_LINES'"; return 1; }
+  [[ "$MON_TCP_LINES" == "1.1.1.1|443|1|"* ]] || { echo "$MON_TCP_LINES"; return 1; }
+}
+
+@test "a signal during the internet probe keeps the reading and the loss window" {
+  local me=$BASHPID
+  # The primary target answers after the signal and the alternate before it,
+  # so the first wait is the one a signal cuts short while its probe is
+  # still running.
+  ping() {
+    case "$*" in *1.1.1.1*) sleep 1.5 ;; *) sleep 0.5 ;; esac
+    printf -- '--- x ping statistics ---\n%s packets transmitted, %s packets received, 0.0%% packet loss\nround-trip min/avg/max/stddev = 1.0/2.0/3.0/0.5 ms\n' \
+      "$MONITOR_INET_PING_COUNT" "$MONITOR_INET_PING_COUNT"
+  }
+  MONITOR_INET_PING_COUNT=5
+  trap 'MON_REFRESH_REQUESTED=1' USR2
+  MON_LINK_UP=1 MON_INET_HIST="" MON_INET_HIST_ALT=""
+  ( sleep 0.3; kill -USR2 "$me" ) &
+  _mon_probe_internet
+  trap - USR2
+  [ "$MON_INET_LOSS" = "0" ] || { echo "loss='$MON_INET_LOSS'"; return 1; }
+  [ -n "$MON_INET_HIST" ] || { echo "loss window was wiped"; return 1; }
+  [ -n "$MON_INET_HIST_ALT" ]
+}
+
+# ── WJ-1 and the automatic reconnect are about Wi-Fi ─────────────────────
+
+@test "WJ-1 does not fire when the link that dropped was wired" {
+  reset_state
+  MON_LINK_UP=0 MON_OFFLINE_REASON=wifi-not-joined MON_GATEWAY=""
+  MON_DOWN_SINCE_EPOCH=$((EPOCHSECONDS - THRESH_WIFI_REJOIN_GRACE_S - 30))
+  MON_ID_IFACE_TYPE=wifi
+  [[ " $(monitor_rules)" == *" WJ-1 "* ]] || { echo "no WJ-1 on wifi"; return 1; }
+  MON_ID_IFACE_TYPE=wired
+  [[ " $(monitor_rules)" != *" WJ-1 "* ]] || { echo "WJ-1 on wired"; return 1; }
+  [[ " $(monitor_rules)" == *" N1 "* ]]
+  # Held type gone (identity hold expired): the last link-up cycle says.
+  MON_ID_IFACE_TYPE="" MON_LAST_LINK_TYPE=wired
+  [[ " $(monitor_rules)" != *" WJ-1 "* ]] || { echo "WJ-1 after hold expiry"; return 1; }
+  # Unknown stays unknown: nothing was looked at, so nothing is claimed.
+  MON_LAST_LINK_TYPE=""
+  [[ " $(monitor_rules)" == *" WJ-1 "* ]] || { echo "unknown type lost WJ-1"; return 1; }
+}
+
+@test "the automatic Wi-Fi reconnect is not warranted by a wired link drop" {
+  local now=$EPOCHSECONDS
+  reset_state
+  MON_LINK_UP=0 MON_PAUSED=0 MON_OFFLINE_REASON=wifi-not-joined
+  MON_OFFLINE_PRECURSOR=router-unreachable MON_RULES="N1 WJ-1 "
+  MON_AR_WJ_SINCE=$((now - THRESH_WIFI_REJOIN_GRACE_S - 5)) MON_AR_WJ_FIRED=0
+  MON_AR_RADIO_TOUCHED=0 MON_AR_DHCP_TRIES=0 MON_AR_DHCP_LAST=0
+  MON_ID_IFACE_TYPE=wired
+  _mon_auto_reconnect "$now"
+  [ -z "$MON_AR_REASON" ] || { echo "reason=$MON_AR_REASON"; return 1; }
+  [ "$MON_AR_WJ_SINCE" -eq 0 ]
+  # The Wi-Fi path is unchanged.
+  MON_ID_IFACE_TYPE=wifi MON_AR_WJ_SINCE=$((now - THRESH_WIFI_REJOIN_GRACE_S - 5))
+  _mon_auto_reconnect "$now"
+  [ "$MON_AR_REASON" = "wifi-dropped" ] || { echo "reason='$MON_AR_REASON'"; return 1; }
+}
+
+# ── Leaving a network ends what was firing on it ─────────────────────────
+
+@test "monitor_sample: the journal closes the rules of the network that was left, on that network" {
+  local journal="$BATS_TEST_TMPDIR/left.jsonl"
+  run emit NETDIAG_MON_JOURNAL="$journal" NETDIAG_MON_HAVE_PREV=1 \
+           NETDIAG_MON_NETWORK_ID='wifi:mac=bb' NETDIAG_MON_NETWORK_LABEL='Cafe' \
+           NETDIAG_MON_MEASUREMENT_STATE=measured \
+           NETDIAG_MON_RULES='' NETDIAG_MON_PREV_RULES='' \
+           NETDIAG_MON_LEFT_NETWORK='wifi:mac=aa' NETDIAG_MON_LEFT_LABEL='Home' \
+           NETDIAG_MON_LEFT_RULES='P2 N1 '
+  [ "$status" -eq 0 ]
+  python3 - "$journal" "$output" <<'PY'
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+cleared = {e["from"]: e for e in events if e["kind"] == "rule-cleared"}
+assert sorted(cleared) == ["N1", "P2"], events
+for e in cleared.values():
+    assert e["network"] == "wifi:mac=aa" and e["network_label"] == "Home", e
+    assert e["to"] is None, e
+# Only the journal learns of it: the stream's own change list is the diff
+# against the new network, which has nothing to clear.
+sample = json.loads(sys.argv[2])
+assert not [c for c in sample.get("changes", []) if c.get("id") == "rule-cleared"], sample
+PY
+}
+
+@test "monitor_run hands the rules it left behind to the emit, once" {
+  local probe
+  for probe in vpn internet web dns tcp wifi_signal browser public gateway; do
+    eval "_mon_probe_$probe() { :; }"
+  done
+  _mon_probe_link() {
+    MON_LINK_UP=1 MON_IFACE_TYPE=wifi MON_NETWORK_LABEL="net$MON_SEQ"
+    if [ "$MON_SEQ" -lt 1 ]; then MON_NETWORK_ID=net-a; else MON_NETWORK_ID=net-b; fi
+  }
+  _mon_rules() { MON_RULES="P2 "; }
+  _mon_emit() {
+    printf '%s|%s|%s|%s\n' "$MON_SEQ" "$MON_LEFT_NETWORK" "$MON_LEFT_RULES" "$MON_LEFT_LABEL" \
+      >> "$BATS_TEST_TMPDIR/left"
+  }
+  _mon_sleep() { :; }
+  MON_STOP=0 MON_PAUSED=0 MON_SEQ=0 MONITOR_COUNT=3 MON_REFRESH_REQUESTED=0
+  MONITOR_FAST_INTERVAL=0 MONITOR_DEGRADED_INTERVAL=0
+  MONITOR_MEDIUM_INTERVAL=60 MONITOR_SLOW_INTERVAL=300
+  # The real snapshot, so what was firing is carried to the next cycle and
+  # the "once" is the reset it does after each emit.
+  monitor_run
+  [ "$(sed -n 1p "$BATS_TEST_TMPDIR/left")" = "1|||" ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/left")" = "2|net-a|P2 |net0" ] \
+    || { cat "$BATS_TEST_TMPDIR/left"; return 1; }
+  [ "$(sed -n 3p "$BATS_TEST_TMPDIR/left")" = "3|||" ] \
+    || { cat "$BATS_TEST_TMPDIR/left"; return 1; }
+}
+
+# ── The retry after a failed public lookup is a threshold ────────────────
+
+@test "the public-lookup retry interval comes from lib/thresholds.sh" {
+  [ -n "${THRESH_MON_PUBLIC_RETRY_S:-}" ]
+  ! grep -nE 'retry_slow=[0-9]' "$REPO/lib/monitor.sh"
 }

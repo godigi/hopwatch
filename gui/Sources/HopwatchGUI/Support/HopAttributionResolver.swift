@@ -109,19 +109,55 @@ public enum HopAttributionResolver {
 
     // MARK: - Rule Classifications
 
+    // Hop buckets for the rules that implicate one. Severity and category are
+    // the catalog's (helpers/rules_catalog.py); this table only decides which
+    // hop a rule belongs to, and a rule the catalog grades `info` never
+    // escalates a hop's health: it is a note, not a fault. The deliberate
+    // exceptions are W6, whose advisory badge is the point of that rule, and
+    // W3, which is the same kind of advisory for a distant access point.
+    //
     // SOCK-1: this Mac cannot open a UDP socket. The fault is on the Mac, so
     // it must not fall through to blaming the router or the ISP.
     private static let macCriticalRules: Set<String> = ["SOCK-1", "NT-1"]
-    private static let macWarningRules: Set<String> = ["BR-1", "EDNS-1", "HOG-1", "CONN-1"]
+    // EDNS-1 is `info` ("nothing to fix") and is deliberately not here: an
+    // encrypted-DNS profile is not a Mac fault and must never make the
+    // support report blame this computer.
+    private static let macWarningRules: Set<String> = ["BR-1", "HOG-1", "CONN-1"]
 
-    private static let wifiCriticalRules: Set<String> = ["G1", "WD-1", "WF-1", "WJ-1"]
-    private static let wifiWarningRules: Set<String> = ["W1", "W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1"]
+    // WD-1 is `warn` in the catalog, so it lives in the warning set.
+    private static let wifiCriticalRules: Set<String> = ["G1", "WF-1", "WJ-1"]
+    private static let wifiWarningRules: Set<String> = ["W1", "W2", "W3", "WS-1", "W4", "W5", "W6", "AWDL-1", "WD-1"]
 
-    private static let routerCriticalRules: Set<String> = ["G2", "DI-1", "N1c", "DH-3"]
-    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "LAN-1", "DH-1", "DH-2", "ETH-1", "ETH-2"]
+    // DI-2 (duplicate IP on the LAN) and ETH-2 (half duplex) are `critical`
+    // and local. LAN-1 and DH-2 are `info` and are not faults.
+    private static let routerCriticalRules: Set<String> = ["G2", "DI-1", "DI-2", "N1c", "DH-3", "ETH-2"]
+    private static let routerWarningRules: Set<String> = ["G3", "B1", "NAT-1", "DH-1", "ETH-1"]
 
-    private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1b", "L1", "CP-1", "D1"]
-    private static let ispWarningRules: Set<String> = ["L2", "B2", "D2", "D3", "D4", "D5", "DI-2", "M1", "SP-1", "BL-1", "V6-1", "V6-2"]
+    // D1 is `warn`. SP-1 is `info` and names the Wi-Fi, not the provider.
+    // BL-1 says a metric regressed against history, which names no hop.
+    private static let ispCriticalRules: Set<String> = ["P1", "P2", "N1b", "L1", "CP-1"]
+    private static let ispWarningRules: Set<String> = ["L2", "B2", "D1", "D2", "D3", "D4", "D5", "M1", "V6-1", "V6-2"]
+
+    /// The Wi-Fi signal below which the CLI's W1 fires: strictly less than
+    /// `THRESH_WIFI_RSSI_WEAK_DBM` in lib/thresholds.sh. One cutoff for the
+    /// hop health here, the support summary's rating and its isolation
+    /// bullets, so a single report cannot call one signal both "Fair" and
+    /// "Weak".
+    static let weakWifiSignalDBm = -75
+
+    /// Whether the catalog files `ruleID` under the router: the rule's fixer is
+    /// the router, or the rule judges the router measurement. Used to decide
+    /// whether "Open Router Admin Page" is a useful button, so it follows the
+    /// catalog's `fixTarget` and categories rather than guessing from the
+    /// first letter of the id (which sent BR-1 browser findings, BL-1
+    /// baseline regressions and B2 ISP bufferbloat to the router page).
+    /// With no catalog loaded, only the gateway rules G1-G3 are assumed.
+    static func isRouterRule(_ ruleID: String, catalog: RulesCatalog?) -> Bool {
+        guard let rule = catalog?[ruleID] else {
+            return ["G1", "G2", "G3"].contains(ruleID)
+        }
+        return rule.fixTarget == "your_router" || rule.categories.contains("router")
+    }
 
     // MARK: - Resolution
 
@@ -153,7 +189,7 @@ public enum HopAttributionResolver {
             wifiHealth = .healthy // Ethernet wired
         } else if !ruleSet.isDisjoint(with: wifiCriticalRules) {
             wifiHealth = .critical
-        } else if !ruleSet.isDisjoint(with: wifiWarningRules) || (wifiRSSI != nil && wifiRSSI! <= -75) {
+        } else if !ruleSet.isDisjoint(with: wifiWarningRules) || (wifiRSSI != nil && wifiRSSI! < weakWifiSignalDBm) {
             wifiHealth = .warning
         }
 
@@ -256,7 +292,11 @@ public enum HopAttributionResolver {
             culprit = .router
             headline = "Local Router or Gateway Issue"
             badgeTitle = culprit.badgeTitle
-            if ruleSet.contains("B1") {
+            if ruleSet.contains("DI-2") {
+                headline = "Duplicate IP Address on Your Network"
+                badgeTitle = "Culprit: Duplicate IP"
+                reassurance = "Two devices on your network are using the same IP address and will intermittently steal each other's traffic. Give the device with a manually set address a different one, or check the router for a second DHCP server."
+            } else if ruleSet.contains("B1") {
                 badgeTitle = "Culprit: Router Bufferbloat"
                 reassurance = "Your Wi-Fi link is fine, but your router buffers heavily under load. Restarting the router or enabling Smart Queue Management (SQM) helps."
             } else {
@@ -315,14 +355,9 @@ public enum HopAttributionResolver {
                 badgeTitle = "Culprit: Local App Traffic"
                 reassurance = "An application on your Mac is transferring heavy traffic and saturating the connection, adding queue latency."
             } else if ruleSet.contains("CONN-1") {
-                headline = "High Connection Volume"
-                badgeTitle = "Culprit: Connection Flood"
-                reassurance = "Many simultaneous or half-open network connections from your Mac are pressuring the router's connection table."
-            } else if ruleSet.contains("EDNS-1") {
-                headline = "Encrypted DNS Profile Active"
-                badgeTitle = "Notice: Encrypted DNS"
-                badgeTint = .blue
-                reassurance = "An encrypted DNS profile is active on your Mac. If lookups fail, check your installed profile in System Settings."
+                headline = "Some New Connections Are Failing"
+                badgeTitle = "Culprit: Failing Connections"
+                reassurance = "New connections from this Mac are being refused or dropped while pings to your router and the internet come back clean."
             } else {
                 reassurance = "A local application or system configuration on your Mac is affecting network connectivity."
             }

@@ -533,6 +533,16 @@ def bridge_candidates(groups: dict[str, dict]) -> dict[str, str]:
     return bridges
 
 
+def _chain_depth(key: str, bridges: dict[str, str]) -> int:
+    """How many bridge hops lie between `key` and the end of its chain."""
+    depth, seen = 0, {key}
+    while key in bridges and bridges[key] not in seen:
+        key = bridges[key]
+        seen.add(key)
+        depth += 1
+    return depth
+
+
 def label_for(key: str, group: dict) -> str:
     """Human-readable name, preferring what the CLI already called it."""
     for lbl in group["labels"]:
@@ -632,8 +642,21 @@ def summary_for(verdict: str, value_text: str | None,
 
 
 def judge_metric(value: float | None, samples: list[float], unit: str,
-                 direction: str, min_samples: int, tail_pctl: int) -> dict:
-    """One metric's verdict against the whole population of this network."""
+                 direction: str, min_samples: int, tail_pctl: int,
+                 raw_value: float | None = None,
+                 raw_samples: list[float] | None = None) -> dict:
+    """One metric's verdict against the whole population of this network.
+
+    `value`/`samples` are what the verdict is drawn from. For a few metrics
+    that is not the reading itself: a tunnel's MTU is judged as its policy
+    band and clock drift by magnitude (helpers/judgement.py judged_value).
+    `raw_value`/`raw_samples` are the same observations as measured; when
+    given, every figure the document *reports* — value, median, p10, p90,
+    percentile and the prose built from them — states the measurement, so a
+    VPN run that probed 1,500 is not told it measured 1,400 and a clock
+    that ran 120 s behind is not shown as 120 s ahead. Only the verdict
+    reads the judged population. Omitted, both are the same population.
+    """
     ordered = sorted(samples)
     n = len(ordered)
     median = statistics.median(ordered) if ordered else None
@@ -678,20 +701,31 @@ def judge_metric(value: float | None, samples: list[float], unit: str,
         elif verdict == "worse" and value == worst:
             verdict = "worst"
 
+    # What is reported is the measurement, whatever was judged. The judged
+    # and raw populations hold the same runs, so n and the raw ranking
+    # describe the same set the verdict did.
+    shown_value, shown = value, ordered
+    if raw_samples is not None:
+        shown_value = raw_value
+        shown = sorted(raw_samples)
+        if percentile is not None and shown_value is not None:
+            percentile = round(percentile_rank(shown, shown_value))
+    shown_median = statistics.median(shown) if shown else None
+
     # p10/p90 are named for the default tail and follow it: they are the
     # edges of the band the verdict was drawn from, so a UI shading "normal
     # for this network" shades exactly what was judged.
     return {
-        "value": value,
-        "median": median,
-        "p10": quantile(ordered, tail_pctl),
-        "p90": quantile(ordered, upper_pctl),
+        "value": shown_value,
+        "median": shown_median,
+        "p10": quantile(shown, tail_pctl),
+        "p90": quantile(shown, upper_pctl),
         "percentile": percentile,
         "n": n,
         "direction": direction,
         "verdict": verdict,
-        "summary": summary_for(verdict, format_value(value, unit),
-                               format_value(median, unit), n),
+        "summary": summary_for(verdict, format_value(shown_value, unit),
+                               format_value(shown_median, unit), n),
     }
 
 
@@ -804,23 +838,29 @@ def build_comparison(rec: dict, network_runs: list[dict],
     """Every metric in METRICS, this run against every run on its network.
 
     Exactly that table, no second one: it already carries a direction per
-    metric. NTP comparisons use each reading's magnitude; the full stored
-    run and chart measurements retain its sign.
+    metric. The *verdict* is drawn from each reading as policy judges it
+    (NTP by magnitude, a tunnel's MTU as its band); every figure reported
+    beside it — value, median, p10, p90, percentile, summary — is the
+    measurement itself, sign and size intact.
     """
     metrics: dict[str, dict] = {}
     for path, out_key, _label, unit, direction in METRICS:
         samples: list[float] = []
+        raw_samples: list[float] = []
         for other in network_runs:
-            v = metric_value(other, path)
-            if v is not None:
-                v = judged_value(out_key, v, other)
+            raw = metric_value(other, path)
+            v = judged_value(out_key, raw, other) if raw is not None else None
             if v is not None:
                 samples.append(v)
-        value = metric_value(rec, path)
-        if value is not None:
-            value = judged_value(out_key, value, rec)
+                raw_samples.append(raw)
+        raw_value = metric_value(rec, path)
+        value = judged_value(out_key, raw_value, rec) if raw_value is not None else None
+        if value is None:
+            raw_value = None
         metrics[out_key] = judge_metric(value, samples,
-                                        unit, direction, min_samples, tail_pctl)
+                                        unit, direction, min_samples, tail_pctl,
+                                        raw_value=raw_value,
+                                        raw_samples=raw_samples)
     return {"metrics": metrics}
 
 
@@ -968,12 +1008,36 @@ def main() -> None:
     # synthesized=true — the merge is inference, not a recorded fact.
     bridges = bridge_candidates(groups)
     if bridges:
-        for weak_key, mac_key in bridges.items():
+        # A bridge target can itself be a weak key that is bridged onward
+        # (gw: -> ssid: -> mac:). Resolve every key to its final target, so
+        # a merge never reads a group an earlier merge already popped and
+        # no run is left under a key that stops being a network.
+        def final_target(key: str) -> str:
+            seen = {key}
+            while key in bridges:
+                nxt = bridges[key]
+                if nxt in seen:      # a cycle: stop where it closes
+                    break
+                seen.add(nxt)
+                key = nxt
+            return key
+
+        resolved = {wk: final_target(wk) for wk in bridges}
+        # Merge the chain's tail first so a source is complete before it is
+        # folded into its own target.
+        for weak_key, mac_key in sorted(resolved.items(),
+                                        key=lambda kv: -_chain_depth(kv[0], bridges)):
+            if weak_key == mac_key or weak_key not in groups or mac_key not in groups:
+                resolved[weak_key] = mac_key if mac_key in groups else weak_key
+                continue
             src, dst = groups.pop(weak_key), groups[mac_key]
             dst["run_count"] += src["run_count"]
             dst["check_count"] += src["check_count"]
             dst["synthesized"] = True
-            dst.setdefault("bridged_from", []).append(weak_key)
+            bridged = dst.setdefault("bridged_from", [])
+            for b in [weak_key] + src.get("bridged_from", []):
+                if b not in bridged:
+                    bridged.append(b)
             for f in ("gateways", "isps", "channels", "ssids", "labels"):
                 for v in src[f]:
                     if v not in dst[f]:
@@ -981,7 +1045,7 @@ def main() -> None:
             for bound, op in (("first_seen", min), ("last_seen", max)):
                 if src[bound]:
                     dst[bound] = src[bound] if dst[bound] is None else op(dst[bound], src[bound])
-        assigned = [(i, r, bridges.get(k, k)) for i, r, k in assigned]
+        assigned = [(i, r, resolved.get(k, k)) for i, r, k in assigned]
 
     # --show wants one run in full, against the whole population of its
     # network, so it answers here — before --limit, which exists to keep a

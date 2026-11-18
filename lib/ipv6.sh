@@ -23,9 +23,13 @@ ipv6_parse_ping_loss() {
 # loopback ::1 — compared as the whole address. An unanchored /::1/ also
 # matched any address merely *containing* "::1" (2001:db8::1a2b, …::10,
 # …::1f), so a host with such an address read as "v4-only".
+# Unique-local addresses (fc00::/7, the fdxx: prefixes) are skipped too: a
+# router with no IPv6 uplink still hands out a ULA by SLAAC, and counting it
+# as "global" made V6-1 call a correctly configured v4-only network a
+# half-working IPv6 setup (the probe to a public v6 address has no route).
 ipv6_pick_global_addr() {
   printf '%s\n' "$1" \
-    | awk '/inet6 / && !/fe80::/ && $2 != "::1" && !/%/ {print $2; exit}'
+    | awk '/inet6 / && !/fe80::/ && $2 != "::1" && !/%/ && $2 !~ /^[fF][cCdD]/ {print $2; exit}'
 }
 
 ipv6_run() {

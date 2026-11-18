@@ -2871,25 +2871,21 @@ private enum VerifyHarness {
         check(opt.level == .optimal, "55ms latency and 9ms jitter evaluate to .optimal")
         check(opt.tint == .green, "optimal stability has green tint")
 
-        let variable = ConnectionStability.evaluate(rtt: 40.0, jitter: 18.0, loss: 0.0)
-        check(variable.level == .variable, "moderate jitter evaluates to .variable")
-        check(variable.label == "Variable", "moderate jitter label is Variable")
+        let smallLoss = ConnectionStability.evaluate(rtt: 40.0, jitter: 18.0, loss: 5.0)
+        check(smallLoss.level == .optimal, "jitter and loss under the CLI's cutoffs stay .optimal")
 
-        let highJitter = ConnectionStability.evaluate(rtt: 30.0, jitter: 30.0, loss: 0.0)
-        check(highJitter.level == .variable, "high jitter evaluates to .variable")
-        check(highJitter.label == "High Jitter", "jitter > 25ms sets label to High Jitter")
+        let highJitter = ConnectionStability.evaluate(rtt: 30.0, jitter: 35.0, loss: 0.0)
+        check(highJitter.level == .variable, "jitter at the CLI's 30 ms cutoff evaluates to .variable")
+        check(highJitter.label == "High Jitter", "jitter over the cutoff sets label to High Jitter")
 
         let elevatedPing = ConnectionStability.evaluate(rtt: 95.0, jitter: 5.0, loss: 0.0)
-        check(elevatedPing.level == .variable, "rtt > 75ms evaluates to .variable")
-        let minorLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 2.5)
-        check(minorLoss.level == .variable, "loss between 1% and 4% evaluates to .variable")
-        check(minorLoss.label == "Minor Loss", "minor loss label is Minor Loss")
+        check(elevatedPing.level == .optimal, "latency alone is not rated: the CLI has no latency-only rule")
 
-        let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 5.0)
-        check(unstableLoss.level == .unstable, "loss > 4% evaluates to .unstable")
+        let packetLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 10.0)
+        check(packetLoss.level == .variable, "loss at the CLI's warn cutoff evaluates to .variable")
 
-        let unstableJitter = ConnectionStability.evaluate(rtt: 20.0, jitter: 60.0, loss: 0.0)
-        check(unstableJitter.level == .unstable, "jitter > 50ms evaluates to .unstable")
+        let unstableLoss = ConnectionStability.evaluate(rtt: 20.0, jitter: 2.0, loss: 20.0)
+        check(unstableLoss.level == .unstable, "loss at the CLI's critical cutoff evaluates to .unstable")
 
         // Moving jitter RFC 3550 fallback
         // Link up: `movingJitter` now averages only samples that describe a
@@ -4087,7 +4083,12 @@ private enum VerifyHarness {
         sample.publicInfo.countryISO = "BR"
         sample.publicInfo.ip = "177.136.244.18"
         sample.status.severity = "ok"
-        sample.status.measurement = "ok"
+        // The documented closed set is measured / unknown / link-down. "ok" is
+        // none of them, so the dropdown resolved to the "Checking" stage and
+        // the snapshot below was not the all-good state this fixture describes.
+        sample.status.measurement = "measured"
+        check(sample.health == .healthy,
+              "dropdown fixture is a measured, healthy sample (not the Checking stage)")
         coordinator.handleSampleForTesting(sample)
 
         let lightView = DropdownView()

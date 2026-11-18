@@ -246,7 +246,17 @@ enum NetworkHistoryStore {
             }
         }
 
-        // Reliability percentage: fraction of clean checks without critical or warning diagnoses
+        // Reliability percentage: fraction of clean checks without critical or warning diagnoses.
+        //
+        // KNOWN DESIGN DEBT (CLAUDE.md: the GUI holds no diagnostic logic):
+        // the grade bands below (95 / 85 / 70 %), the "Learning" cutoff (10
+        // checks) and the typical-latency deltas in `NetworkComparison`
+        // (-3 / +5 ms, loss > 2 %) are this app's own. `--history` already
+        // returns a per-network `judged` verdict (docs/JSON-SCHEMA.md,
+        // `networks[].judged`) from lib/thresholds.sh, but it carries no
+        // clean-check ratio or per-metric typical band to render in their
+        // place, so moving these needs a CLI field first. Left unchanged
+        // rather than replaced with different invented numbers.
         let isLearning = checks < 10
         var reliabilityPercent: Double? = nil
         var reliabilityGrade = isLearning ? "Learning" : "Good"

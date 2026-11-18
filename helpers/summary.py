@@ -34,7 +34,7 @@ from typing import Any
 # two disagree today (tests/test_history.bats:116, tracker NET.2), and
 # importing the Python side means --summary inherits --history's answer
 # rather than silently picking a winner.
-from history import group_key, clean, is_redacted, metric_value
+from history import group_key, clean, is_redacted, metric_value, canonical
 
 # The shared pair-table --history's judged block reads too — see
 # helpers/judgement.py's module docstring for why there is exactly one of
@@ -85,9 +85,17 @@ def parse_ts(s: str | None) -> datetime | None:
     try:
         if s.endswith("Z"):
             return datetime.fromisoformat(s[:-1] + "+00:00")
-        return datetime.fromisoformat(s)
+        ts = datetime.fromisoformat(s)
     except (ValueError, TypeError):
         return None
+    # The window cutoff is timezone-aware, and comparing an aware datetime
+    # with a naive one raises. bin/hopwatch always writes "Z", but the
+    # store is a plain file a user can hand-edit or import into, and one
+    # zoneless line must not take the whole summary down. The store is UTC
+    # throughout, so a zoneless stamp is read as UTC.
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
 
 
 def fmt_val(v: Any) -> str:
@@ -326,9 +334,32 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--history", required=True, type=Path)
     ap.add_argument("--window", type=int, default=24, help="hours")
+    ap.add_argument("--archive", type=Path, default=None,
+                    help="rolled-over older records; defaults to the "
+                         "`-archive.jsonl` sibling of --history, skipped if "
+                         "absent")
     args = ap.parse_args()
 
-    records = load_jsonl(args.history)
+    # prune_history moves the head of the live file into the archive, so a
+    # window longer than the live file's retention is only whole if the
+    # archive is read too. --history reads both, through the same loader,
+    # so the two commands count the same runs from one store.
+    archive = args.archive
+    if archive is None:
+        stem = str(args.history)
+        archive = Path(stem[:-6] + "-archive.jsonl" if stem.endswith(".jsonl")
+                       else stem + "-archive.jsonl")
+    #
+    # Only a record present in *both* files is dropped. prune_history
+    # appends the head to the archive before truncating the live file, so a
+    # crash between the two leaves byte-identical copies in each. Identical
+    # records within one file are kept: two runs that land in the same
+    # second with the same readings are two measurements, and this view
+    # counts runs.
+    archived = load_jsonl(archive)
+    seen = {canonical(r) for r in archived}
+    records = archived + [r for r in load_jsonl(args.history)
+                          if canonical(r) not in seen]
     if not records:
         print("(no history yet — netdiag --watch will populate it)")
         return

@@ -68,48 +68,35 @@ so `critical` means "a wrapper should page someone".
 ## Releasing
 
 Releases are cut from a tag; `.github/workflows/release.yml` publishes the
-GitHub Release and takes its notes from `CHANGELOG.md`, so the notes and
-the file cannot disagree. Never write release notes by hand in the GitHub
-UI — the workflow overwrites them from the CHANGELOG on the next run.
+GitHub Release (CLI tarball, bundled macOS `.app` ZIP/DMG) and takes its notes
+from `CHANGELOG.md`, so the notes and the file cannot disagree. Never write
+release notes by hand in the GitHub UI — the workflow overwrites them from
+the CHANGELOG on the next run.
 
-This process is written down because the informal version failed silently
-for three months: eleven tags were pushed and only two ever became a
-Release, so the front page advertised v0.2.1 as "Latest" while v0.9.1 was
-what `install.sh` actually installed. Four versions (0.1.0, 0.4.1, 0.5.0,
-0.9.1) were documented in the CHANGELOG with no tag at all.
-
-1. **Pick the version.** SemVer: a new rule, flag, or JSON key is a minor
-   bump; a fix that changes no surface is a patch. Pre-1.0, a breaking
-   change to the CLI surface or JSON schema is still a minor bump — say so
-   loudly in the notes.
-2. **Roll `## [Unreleased]` over** to `## [X.Y.Z] - YYYY-MM-DD` and start
-   a fresh empty `## [Unreleased]` above it.
-3. **Add the link reference** at the foot of the CHANGELOG, and repoint
-   `[Unreleased]` at the new tag:
-
-   ```
-   [Unreleased]: https://github.com/godigi/hopwatch/compare/vX.Y.Z...HEAD
-   [X.Y.Z]: https://github.com/godigi/hopwatch/compare/vPREV...vX.Y.Z
-   ```
-4. **Bump `HOPWATCH_VERSION`** in `bin/hopwatch` (or run `scripts/bump.py X.Y.Z`). It is what `--version` and
-   the GUI's capabilities handshake report; the release workflow refuses a
-   tag that disagrees with it.
-5. **Run the suite.** `bats tests/` — `tests/test_changelog.bats` checks
-   steps 2–4 for you, so a mistake there fails locally rather than at
-   release time.
-6. **Commit** as `chore: vX.Y.Z` — the version bump and the CHANGELOG
-   rollover together, nothing else.
-7. **Tag annotated and push both:**
-
-   ```sh
-   git tag -a vX.Y.Z -m "vX.Y.Z — one line on what changed"
-   git push origin main --follow-tags
-   ```
-8. **Check the release workflow went green.** It verifies the tag, the
-   CLI version and the CHANGELOG agree, then creates the Release. If it
-   fails, fix forward and re-run it from the Actions tab with
-   `workflow_dispatch` — that also repairs the notes on a Release that
-   already exists.
+1. **Automated release helper (`make ship`).** When `## [Unreleased]` is
+   ready to ship on `main`, run `make ship` (or `make ship-all` to run both
+   CLI and GUI test suites). It verifies the tests, runs
+   `python3 scripts/bump.py` (which inspects commits/notes or `--type` to
+   pick the SemVer bump, updates `bin/hopwatch`, `Casks/hopwatch.rb`,
+   `CITATION.cff`, `gui/Sources/HopwatchGUI/VerifyMode.swift`, and
+   `examples/sample-output.json`, rolls `## [Unreleased]` into
+   `## [X.Y.Z] - YYYY-MM-DD`, updates the footer link refs, commits
+   `chore(release): bump version to X.Y.Z`, and creates an annotated tag
+   `vX.Y.Z`), pushes to `origin/main` with tags, and installs the updated app.
+2. **Manual / step-by-step release:**
+   - Run `python3 scripts/bump.py --type patch|minor|major` (or `--version X.Y.Z`),
+     or roll `## [Unreleased]` in `CHANGELOG.md` and bump `HOPWATCH_VERSION` in
+     `bin/hopwatch` cleanly together.
+   - Run `bats tests/` and `make test-gui` — `tests/test_changelog.bats`
+     checks CHANGELOG structure and version consistency.
+   - Tag annotated (`git tag -a vX.Y.Z -m "vX.Y.Z — summary"`) and push
+     `git push origin main --follow-tags`. (`.github/workflows/auto-version.yml`
+     can also auto-bump commits pushed directly to `main`, and `.githooks/pre-push`
+     safeguards local pushes when enabled via `git config core.hooksPath .githooks`.)
+3. **Check the release workflow went green.** `.github/workflows/release.yml`
+   verifies the tag, CLI version, and CHANGELOG agree, then publishes or
+   updates the Release. If it fails, fix forward and re-run it from the
+   Actions tab with `workflow_dispatch`.
 
 Tags are annotated (`-a`), never lightweight: the tag message is the
 one-line summary, and `git describe` depends on it.
